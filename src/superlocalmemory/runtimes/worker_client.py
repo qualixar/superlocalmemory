@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from superlocalmemory.core import ram_lock
 from superlocalmemory.infra import proc_memory
-from superlocalmemory.runtimes import media_models
+from superlocalmemory.runtimes import media_models, worker_log
 from superlocalmemory.runtimes.features import media_enabled, register_media_stop_hook
 from superlocalmemory.runtimes.ports import MediaEmbedderPort
 
@@ -82,6 +82,7 @@ class MediaWorkerClient(MediaEmbedderPort):
         self._timer: threading.Timer | None = None
         self._warming = threading.Event()
         self._halted = False
+        self._drain: threading.Thread | None = None  # carries the worker's stderr into the log
 
     # -- state ----------------------------------------------------------------
     @property
@@ -112,7 +113,7 @@ class MediaWorkerClient(MediaEmbedderPort):
     def _spawn(self) -> None:
         root = Path(self._env.root)
         proc = subprocess.Popen([str(self._env.python()), "-I", str(WORKER_PATH)], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                                 cwd=str(root) if root.is_dir() else None, env=self._worker_env())
         replies: queue.Queue = queue.Queue()
 
@@ -125,6 +126,7 @@ class MediaWorkerClient(MediaEmbedderPort):
             replies.put(None)
 
         threading.Thread(target=pump, daemon=True, name="media-worker-reader").start()
+        self._drain = worker_log.start_drain(proc.stderr)  # type: ignore[arg-type]
         self._proc, self._replies, self._loaded = proc, replies, False
 
     def _kill(self) -> None:
@@ -144,6 +146,8 @@ class MediaWorkerClient(MediaEmbedderPort):
             proc.wait(timeout=5)
         except Exception:  # noqa: BLE001 - nothing more can be done
             pass
+        drain, self._drain = self._drain, None
+        worker_log.stop_drain(drain, proc.stderr)
 
     def _roundtrip(self, payload: dict, timeout_s: float) -> dict:
         proc = self._proc
