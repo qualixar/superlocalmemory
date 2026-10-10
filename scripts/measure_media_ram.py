@@ -45,18 +45,14 @@ _PNG_SNIPPET = (
 
 
 def rss_mb(pid: int) -> float:
-    """Resident size of a process and its children, in MB; 0 when it is gone."""
-    try:
-        proc = psutil.Process(pid)
-        total = proc.memory_info().rss
-        for child in proc.children(recursive=True):
-            try:
-                total += child.memory_info().rss
-            except psutil.Error:
-                continue
-        return total / MB
-    except psutil.Error:
-        return 0.0
+    """Memory of a process and its children, in MB; 0 when it is gone.
+
+    The shared reader: physical footprint on macOS (RSS under-reports there once memory
+    is compressed), RSS elsewhere.
+    """
+    from superlocalmemory.infra.proc_memory import tree_memory_mb
+
+    return tree_memory_mb(pid)
 
 
 class Sampler:
