@@ -521,3 +521,88 @@ def test_other_write_errors_are_not_called_disk_full(links, monkeypatch):
 
     with pytest.raises(OSError):
         links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+
+
+# -- links made before apps were recorded end once, on upgrade ------------------------------
+
+OLD_ROWS = [
+    ("up-open", "open"), ("up-recv", "receiving"), ("up-fin", "finishing"),
+    ("up-done", "done"), ("up-failed", "failed"),
+]
+
+
+def _old_database(tmp_path, with_column=False):
+    path = tmp_path / "media"
+    path.mkdir()
+    db = sqlite3.connect(path / "uploads.db")
+    db.execute(OLD_DDL if not with_column else OLD_DDL[:-1] + ", authorization_id TEXT NOT NULL DEFAULT '')")
+    for i, (name, state) in enumerate(OLD_ROWS):
+        upload_id = f"{i:032x}"
+        db.execute(
+            "INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note,"
+            " max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,'image','',100,?,1000000,1000600)",
+            (upload_id, f"hash-{name}", CONN, "key1", "personal", state))
+    db.commit()
+    db.close()
+    return path / "uploads.db"
+
+
+def _states(db_path):
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    try:
+        return {r["token_hash"]: dict(r) for r in db.execute("SELECT * FROM upload_links")}
+    finally:
+        db.close()
+
+
+def test_unfinished_links_without_an_app_are_ended_on_upgrade_with_a_plain_message(tmp_path, clock):
+    db_path = _old_database(tmp_path)
+    scratch = tmp_path / "media" / "tmp"
+    scratch.mkdir()
+    part = scratch / f"upload-{1:032x}.part"
+    part.write_bytes(b"half a file")
+
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    fresh = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+
+    rows = _states(db_path)
+    for name in ("up-open", "up-recv", "up-fin"):
+        assert rows[f"hash-{name}"]["state"] == "failed", name
+        assert "expired with the update" in rows[f"hash-{name}"]["result_json"]
+        assert "Ask the app for a new one" in rows[f"hash-{name}"]["result_json"]
+    assert rows["hash-up-done"]["state"] == "done"
+    assert rows["hash-up-failed"]["state"] == "failed"
+    assert "expired with the update" not in rows["hash-up-failed"]["result_json"]
+    assert not part.exists(), "the half-sent file of an ended link is removed"
+    assert store.find(fresh.token, CONN).state == "open", "a link made after the upgrade is untouched"
+
+
+def test_the_upgrade_step_runs_once_per_database(tmp_path, clock):
+    db_path = _old_database(tmp_path)
+    ul.UploadLinks(tmp_path, clock=clock).mint(CONN, "key1", "personal", "image", "", authorization_id="a")
+    db = sqlite3.connect(db_path)
+    db.execute("INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note,"
+               " max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,'image','',100,'open',1,2)",
+               ("e" * 32, "hash-later", CONN, "key1", "personal"))
+    db.commit()
+    db.close()
+
+    ul.UploadLinks(tmp_path, clock=clock).get("f" * 32)  # a new process opens the same database
+
+    assert _states(db_path)["hash-later"]["state"] == "open"
+
+
+def test_a_database_that_already_has_the_column_is_cleaned_too(tmp_path, clock):
+    db_path = _old_database(tmp_path, with_column=True)
+
+    ul.UploadLinks(tmp_path, clock=clock).get("f" * 32)
+
+    assert _states(db_path)["hash-up-open"]["state"] == "failed"
+
+
+def test_a_fresh_install_has_nothing_to_end(tmp_path, clock):
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    minted = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+
+    assert store.find(minted.token, CONN).state == "open"

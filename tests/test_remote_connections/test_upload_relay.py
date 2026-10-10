@@ -71,7 +71,7 @@ def setup(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     finisher = Finisher()
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "a note")
+    minted = links.mint(CID, "key1", "personal", "image", "a note", authorization_id="app-a")
     return relay, links, finisher, minted
 
 
@@ -85,7 +85,8 @@ async def call(relay, packet, cid=CID):
 async def test_info_reports_kind_and_limit_without_using_the_link(setup):
     relay, links, _, minted = setup
     out = await call(relay, frame("info", minted.token))
-    assert out == {"ok": True, "kind": "image", "max_bytes": 25 * 1024 * 1024, "expires_at": minted.expires_at}
+    assert out == {"ok": True, "kind": "image", "max_bytes": 25 * 1024 * 1024, "expires_at": minted.expires_at,
+                   "authorization_id": "app-a"}
     assert links.find(minted.token, CID).state == "open"
 
 
@@ -113,7 +114,7 @@ async def test_a_slow_save_answers_working_then_the_result(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     finisher = Finisher(delay=0.4)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=0.05)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     assert (await call(relay, frame("finish", minted.token, 0, len(PNG)))) == {"ok": True, "done": False}
     assert (await call(relay, frame("finish", minted.token, 0, len(PNG)))) == {"ok": True, "done": False}
@@ -134,7 +135,7 @@ async def test_outcomes_map_to_plain_messages(tmp_path):
     for reply, done, text in cases:
         links = UploadLinks(tmp_path / str(len(text)), clock=lambda: NOW)
         relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
-        minted = links.mint(CID, "key1", "personal", "image", "")
+        minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
         await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
         out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
         assert out["ok"] is done and text in out["message"], (reply, out)
@@ -147,7 +148,7 @@ async def test_a_finisher_that_raises_fails_the_link_without_leaking(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(RuntimeError("/Users/x/secret.png")),
                         finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
     assert out["ok"] is False and "secret" not in json.dumps(out) and "/Users" not in json.dumps(out)
@@ -291,7 +292,7 @@ async def test_a_good_link_is_not_counted_and_a_malformed_frame_is_not_either(tm
     clock = Clock()
     links = UploadLinks(tmp_path, clock=clock)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), clock=clock)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     for _ in range(40):
         assert (await call(relay, frame("info", minted.token)))["ok"] is True
     bad = frame("info", "a" * 43)
@@ -312,7 +313,7 @@ async def test_a_refusal_reason_loses_host_paths_and_the_account_name(tmp_path, 
     reply = {"status": "refused",
              "reason": "Cannot read /Users/alice/Pictures/a.png for aliceacct (see https://x.example/a?k=1)"}
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
     text = out["message"]
@@ -335,7 +336,7 @@ async def test_a_warming_save_answers_the_gateways_next_finish_with_the_warming_
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     finisher = Finisher(reply={"status": "warming", "reason": "The picture tools are starting."})
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     body = PNG + b"12345"
     await call(relay, frame("chunk", minted.token, 0, len(body), body))
     first = await call(relay, frame("finish", minted.token, 0, len(body)))
@@ -376,7 +377,7 @@ async def _warm_upload(tmp_path, finisher, clock=None):
     links = UploadLinks(tmp_path, clock=clock or (lambda: NOW))
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
                         retry_interval_s=0.02, clock=clock or (lambda: NOW))
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     body = PNG + b"12345"
     await call(relay, frame("chunk", minted.token, 0, len(body), body))
     first = await call(relay, frame("finish", minted.token, 0, len(body)))
@@ -411,7 +412,7 @@ async def test_a_new_upload_on_the_link_ends_the_background_retry(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
                         retry_interval_s=0.2, clock=lambda: NOW)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     body = PNG + b"12345"
     await call(relay, frame("chunk", minted.token, 0, len(body), body))
     await call(relay, frame("finish", minted.token, 0, len(body)))
@@ -449,3 +450,22 @@ async def test_a_full_disk_reaches_the_page_in_plain_words(setup, monkeypatch):
 
     assert out["ok"] is False and out["code"] == "disk_full"
     assert out["message"] == files.DISK_FULL
+
+
+# -- a link with no app on it is refused on this computer (it used to take "any consenting app") ----
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", ["info", "chunk", "finish"])
+async def test_a_link_with_no_app_is_refused_in_plain_words(tmp_path, op):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    finisher = Finisher()
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "")      # made before apps were recorded
+    body = PNG if op == "chunk" else b""
+
+    out = await call(relay, frame(op, minted.token, 0, len(PNG), body))
+
+    assert out["ok"] is False and out["code"] == "outdated"
+    assert out["message"] == "This upload link expired with the update. Ask the app for a new one."
+    assert "authorization_id" not in out and finisher.calls == []
+    assert links.find(minted.token, CID).received == 0
