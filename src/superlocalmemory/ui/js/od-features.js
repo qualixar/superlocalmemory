@@ -76,6 +76,10 @@
     window.confirmDestructive(opts).then(function (yes) { if (yes) go(); });
   }
 
+  // The welcome card asks for the same turn-on flow as the pane's own button: it opens
+  // the pane, and the pane's next "off" card starts that flow (with its confirmation).
+  var enableRequested = false;
+
   function startEnable(host, opts, msg) {
     confirmThen({
       title: 'Turn on images and documents', target: 'Images and documents',
@@ -98,6 +102,10 @@
     var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg); });
     go.disabled = m.env_state === 'unsupported';
     card.appendChild(go);
+    if (enableRequested && !go.disabled) {
+      enableRequested = false;
+      window.setTimeout(function () { startEnable(host, opts, msg); }, 0);
+    }
     return card;
   }
 
@@ -192,6 +200,7 @@
     host.__odFeatToken = token;
     host.textContent = '';
     host.appendChild(pickCard(host, m, opts));
+    enableRequested = false;
     if (isOn(m)) { if (opts.onReady) opts.onReady(m); }
     else if (opts.onNotReady) opts.onNotReady(m);
     if (m.enabled && m.env_state === 'installing') schedulePoll(host, opts, token);
@@ -212,10 +221,9 @@
 
   // ------------------------------------------------------------- what's new
   var WHATSNEW_KEY = 'slm.whatsnew.4.1.25';
-  var WHATSNEW_LINES = [
-    'Images & documents: off until you turn them on (about 1.5 GB of models). Run: slm media enable',
-    'Bots on the web can message each other through the mesh (remote access is still off).',
-    'See what is on and what you can turn on: slm features',
+  var WHATSNEW_CHIPS = [
+    { chip: 'Now remembers images and documents', go: 'Turn on images & documents', act: 'media' },
+    { chip: 'Your bots can talk to each other', go: 'Set up bot messages', act: 'apps' },
   ];
 
   // Storage can be missing or throw (private windows, blocked site data).
@@ -227,17 +235,31 @@
     try { window.localStorage.setItem(WHATSNEW_KEY, '1'); } catch (e) { /* the card is still hidden this visit */ }
   }
 
+  function goTo(pane) {
+    if (typeof window.slmNavigate === 'function') window.slmNavigate(pane);
+  }
+
+  function whatsNewAction(act) {
+    if (act === 'media') { enableRequested = true; goTo('media-pane'); }
+    else goTo('apps-pane');
+  }
+
   function mountWhatsNew(host) {
     host.textContent = '';
     if (seenWhatsNew()) return;
-    var card = cardShell("What's new in 4.1.25");
-    var ul = el('ul', 'od-media-list');
-    WHATSNEW_LINES.forEach(function (line) { ul.appendChild(el('li', null, line)); });
-    card.appendChild(ul);
-    card.appendChild(button('Dismiss', 'btn sm', function () {
+    var card = cardShell('New in SuperLocalMemory 4.1.25');
+    WHATSNEW_CHIPS.forEach(function (c) {
+      var row = el('div', 'od-whatsnew-row');
+      row.appendChild(el('span', 'badge', c.chip));
+      row.appendChild(button(c.go, 'btn sm primary', function () { whatsNewAction(c.act); }));
+      card.appendChild(row);
+    });
+    var link = button('Dismiss', 'btn sm', function () {
       rememberWhatsNew();
       host.textContent = '';
-    }));
+    });
+    card.appendChild(link);
+    card.appendChild(el('p', 'muted', 'For developers: slm media enable'));
     host.appendChild(card);
   }
 

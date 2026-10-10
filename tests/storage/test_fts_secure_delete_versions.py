@@ -51,15 +51,16 @@ def test_safe_sqlite_enables_it(monkeypatch):
     assert _config_rows(conn) == [(1,)] or _config_rows(conn) == [("1",)]
 
 
-def test_an_index_already_on_is_left_alone_on_broken_sqlite(monkeypatch):
+def test_an_index_already_on_is_turned_off_on_broken_sqlite(monkeypatch):
     if sqlite3.sqlite_version_info < (3, 42, 0):
         pytest.skip("this SQLite has no FTS5 secure-delete at all")
     conn = _fts()
     conn.execute("INSERT INTO atomic_facts_fts(atomic_facts_fts, rank) VALUES('secure-delete', 1)")
     monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 45, 1))
     monkeypatch.setattr(fts_residue, "_old_sqlite_reported", False)
+    assert fts_residue.ensure_secure_delete(conn)["atomic_facts_fts"] == "disabled"
+    assert not fts_residue.secure_delete_on(conn, "atomic_facts_fts")
     assert fts_residue.ensure_secure_delete(conn)["atomic_facts_fts"] == "unsupported"
-    assert len(_config_rows(conn)) == 1
 
 
 @pytest.mark.skipif(

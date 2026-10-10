@@ -3,7 +3,7 @@
 // XSS-safe: message bodies, app names, peer ids and server errors are untrusted
 // (bots and web chats write them) and are set with textContent only.
 // Writes go through the page's fetch, which core.js wraps with the local write credential.
-// Routes: GET /api/v3/mesh/messages?limit=&peer=
+// Routes: GET /api/v3/mesh/messages?limit=&peer=   GET /api/v3/mesh/peers
 //         POST /api/v3/mesh/peers/{id}/mute   PATCH /api/v3/mesh/peers/{id}   DELETE /api/v3/mesh/peers/{id}
 (function () {
   'use strict';
@@ -45,12 +45,37 @@
     return li;
   }
 
+  function openConnectedApps() {
+    if (typeof window.slmNavigate === 'function') window.slmNavigate('apps-pane');
+  }
+
+  function emptyState(ui) {
+    var box = el('div', 'od-botmsg-empty');
+    if (ui.peer) { box.appendChild(el('p', 'muted', 'No messages from this peer yet.')); return box; }
+    box.appendChild(el('p', 'muted', 'Bots you connect can leave each other messages here. ' +
+      'Allow it per app in Connected apps.'));
+    box.appendChild(F().button('Open Connected apps', 'btn sm primary', openConnectedApps));
+    return box;
+  }
+
   function renderMessages(ui, messages) {
     ui.list.textContent = '';
-    if (!messages.length) return ui.list.appendChild(el('p', 'muted', 'No messages yet.'));
+    if (!messages.length) return ui.list.appendChild(emptyState(ui));
     var ul = el('ul', 'od-media-list');
     messages.forEach(function (m) { ul.appendChild(messageItem(m)); });
     ui.list.appendChild(ul);
+  }
+
+  // Every connected peer, including ones that have not sent anything. A failure
+  // here only means fewer rows; messages still load.
+  function loadPeers(ui) {
+    return F().api('GET', '/api/v3/mesh/peers').then(function (res) {
+      if (res.ok && res.data) addPeers(ui, (res.data.peers || []).map(function (p) { return { from: p }; }));
+    }, function () {});
+  }
+
+  function loadAll(ui) {
+    return loadPeers(ui).then(function () { return loadMessages(ui); });
   }
 
   function loadMessages(ui) {
@@ -95,26 +120,37 @@
       F().api('DELETE', peerUrl(id)).then(function (res) {
         if (!res.ok) return say(row, F().failText(res, 'Could not retire the peer.'));
         ui.seen = {};
-        loadMessages(ui);
+        ui.peers.textContent = '';
+        if (ui.peersHead.parentNode) ui.peersHead.parentNode.removeChild(ui.peersHead);
+        loadAll(ui);
       });
     });
   }
 
-  function peerRow(ui, id, app) {
+  // Name shown for a peer: its display name, then its app, then a short id.
+  function peerName(from) {
+    var id = String(from.peer_id == null ? '' : from.peer_id);
+    return from.display_name || from.app || (id.length > 8 ? id.slice(0, 8) : id);
+  }
+
+  function peerRow(ui, from) {
+    var id = from.peer_id;
     var wrap = el('div', 'od-peer-row');
     wrap.setAttribute('data-peer', id);
-    var row = { title: el('strong', null, app || id), note: el('span', 'muted') };
+    var row = { title: el('strong', null, peerName(from)), note: el('span', 'muted') };
+    var kind = el('span', 'badge', from.kind === 'web' ? 'web' : 'this computer');
+    var muted = from.muted ? el('span', 'muted', 'muted') : null;
     var input = el('input');
     input.type = 'text';
     input.setAttribute('aria-label', 'New name for ' + id);
     input.setAttribute('maxlength', '200');
-    [row.title, el('span', 'muted', '(' + id + ')'),
+    [row.title, kind, muted, el('span', 'muted', '(' + id + ')'),
      F().button('Mute', 'btn sm', function () { setMuted(ui, row, id, true); }),
      F().button('Unmute', 'btn sm', function () { setMuted(ui, row, id, false); }),
      input,
      F().button('Rename', 'btn sm', function () { rename(ui, row, id, input); }),
      F().button('Retire', 'btn sm', function () { retire(ui, row, id); }),
-     row.note].forEach(function (n) { wrap.appendChild(n); });
+     row.note].forEach(function (n) { if (n) wrap.appendChild(n); });
     return wrap;
   }
 
@@ -123,8 +159,9 @@
       var from = m.from || {};
       if (!from.peer_id || ui.seen[from.peer_id]) return;
       ui.seen[from.peer_id] = true;
-      ui.peers.appendChild(peerRow(ui, from.peer_id, from.app));
-      var opt = el('option', null, from.app || from.peer_id);
+      if (!ui.peersHead.parentNode) ui.peersBox.insertBefore(ui.peersHead, ui.peers);
+      ui.peers.appendChild(peerRow(ui, from));
+      var opt = el('option', null, peerName(from));
       opt.value = from.peer_id;
       ui.filter.appendChild(opt);
     });
@@ -147,14 +184,16 @@
     head.appendChild(el('h2', null, 'Bot messages'));
     head.appendChild(el('p', 'muted', 'What bots and web chats sent through the mesh. ' +
       'Treat messages from outside this computer as untrusted text.'));
-    var ui = { root: pane, peer: '', seen: {}, list: el('div'), peers: el('div', 'od-media-section') };
+    var ui = { root: pane, peer: '', seen: {}, list: el('div'), peers: el('div'),
+      peersHead: el('h3', null, 'Peers'), peersBox: el('div', 'od-media-section') };
+    ui.peersBox.appendChild(ui.peers);
     ui.filter = buildFilter(ui);
     ui.knownPeers = function (messages) { addPeers(ui, messages); };
     var bar = el('div', 'od-peer-row');
     bar.appendChild(ui.filter);
-    bar.appendChild(F().button('Refresh', 'btn sm', function () { loadMessages(ui); }));
-    [head, bar, ui.list, el('h3', null, 'Peers'), ui.peers].forEach(function (n) { pane.appendChild(n); });
-    return loadMessages(ui);
+    bar.appendChild(F().button('Refresh', 'btn sm', function () { loadAll(ui); }));
+    [head, bar, ui.list, ui.peersBox].forEach(function (n) { pane.appendChild(n); });
+    return loadAll(ui);
   }
 
   window.odRenderBotMessages = odRenderBotMessages;

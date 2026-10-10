@@ -90,9 +90,13 @@ def keyword_index_state(conn: sqlite3.Connection) -> dict[str, Any]:
     from superlocalmemory.storage import fts_residue
 
     state: dict[str, Any] = {}
+    damaged: list[str] = []
     for table in fts_residue.FTS_TABLES:
         if _has(conn, table):
             state[table] = "secure_delete_on" if _secure_delete_on(conn, table) else "secure_delete_off"
+            if fts_residue.keyword_index_damaged(conn, table):
+                damaged.append(table)
+    state["damaged"] = damaged
     purged = _has(conn, "integrity_repair_receipts") and bool(conn.execute(
         "SELECT 1 FROM integrity_repair_receipts WHERE action = 'purge_keyword_index' "
         "LIMIT 1").fetchone())

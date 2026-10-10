@@ -220,3 +220,52 @@ def test_owner_actions_log_counts_not_bodies(client, broker) -> None:
         assert secret_body not in e["payload"]
     retired = [e for e in events if e["event_type"] == "peer_retired"][0]
     assert '"dropped": 1' in retired["payload"]
+
+
+# -- owner peer list ----------------------------------------------------------
+
+
+def test_owner_peers_joins_name_kind_muted(client, broker) -> None:
+    w, b = _web(broker), make_peer(broker, "b", agent="cursor")
+    broker.set_muted(b, True)
+    r = client.get(f"{OWNER}/peers")
+    assert r.status_code == 200
+    by_id = {p["peer_id"]: p for p in r.json()["peers"]}
+    assert set(by_id) == {w, b}
+    assert by_id[w]["display_name"] == "Notes" and by_id[w]["kind"] == "web"
+    assert by_id[w]["app"] == "notes" and by_id[w]["muted"] is False
+    assert by_id[b]["kind"] == "local" and by_id[b]["muted"] is True
+    assert by_id[b]["display_name"] == "" and by_id[b]["app"] == "cursor"
+    assert set(by_id[b]) == {"peer_id", "display_name", "kind", "app", "muted", "last_seen", "status"}
+
+
+def test_owner_peers_exclude_retired_and_other_profiles(client, broker) -> None:
+    w, b = _web(broker), make_peer(broker, "b")
+    broker.register_peer("elsewhere", profile_id="other")
+    broker.retire_peer(w)
+    peers = client.get(f"{OWNER}/peers").json()["peers"]
+    assert [p["peer_id"] for p in peers] == [b]
+
+
+def test_owner_peers_hide_paths_and_hosts(client, broker) -> None:
+    broker.register_peer("p", project_path="/home/secret/proj", host="10.1.2.3")
+    text = client.get(f"{OWNER}/peers").text
+    assert "project_path" not in text and "/home/secret" not in text
+    assert '"host"' not in text and "10.1.2.3" not in text
+
+
+def test_owner_peers_refuse_non_loopback_and_non_loopback_host(broker) -> None:
+    with TestClient(_app(broker), base_url="http://127.0.0.1:9999", client=("192.0.2.20", 5)) as c:
+        assert c.get(f"{OWNER}/peers").status_code == 403
+    with TestClient(_app(broker), base_url="http://example.com", client=("127.0.0.1", 5)) as c:
+        assert c.get(f"{OWNER}/peers").status_code == 403
+
+
+def test_owner_peers_require_manage(client, monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    def deny(request, *, profile=None):
+        raise HTTPException(403, "forbidden")
+
+    monkeypatch.setattr(mesh_owner, "require_manage", deny)
+    assert client.get(f"{OWNER}/peers").status_code == 403

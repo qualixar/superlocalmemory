@@ -41,6 +41,14 @@ class OwnerControlsMixin:
         finally:
             conn.close()
 
+    def list_peer_overview(self, profile_id: str = "default") -> list[dict]:
+        """Every live peer of the profile with its name, kind and mute state."""
+        conn = self._conn()
+        try:
+            return broker_profiles.peer_overview(conn, profile_id)
+        finally:
+            conn.close()
+
     # -- Peer profiles (owner controls) --
 
     def upsert_peer_profile(self, peer_id: str, *, kind: str, app_name: str = "",
