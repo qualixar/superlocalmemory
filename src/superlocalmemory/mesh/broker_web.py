@@ -154,11 +154,13 @@ class WebPeersMixin:
         from superlocalmemory.core.security_primitives import redact_secrets
 
         # Summaries are free text a local agent wrote; web apps see them secret-redacted,
-        # the same as the inbox (``_redact_view``).
+        # the same as the inbox (``_redact_view``). Redact the whole text first and cut after:
+        # cutting first can leave the front of a key that no pattern recognises any more.
+        # Only a very long text is trimmed beforehand, far past the limit, to bound the work.
         return [{
             "peer_id": r["peer_id"], "name": r["display_name"] or r["agent_type"] or "",
             "kind": r["kind"], "app": r["app_name"], "agent_type": r["agent_type"] or "",
-            "summary": redact_secrets((r["summary"] or "")[:SUMMARY_LIMIT], aggression="high"),
+            "summary": redact_secrets((r["summary"] or "")[:SUMMARY_LIMIT * 8], aggression="high")[:SUMMARY_LIMIT],
             "status": r["status"],
         } for r in found]
 
