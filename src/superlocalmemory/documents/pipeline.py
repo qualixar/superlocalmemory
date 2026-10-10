@@ -129,6 +129,9 @@ class JobRunner:
         """Run the job; False when it was put back in the queue to wait."""
         self.doc = self.store.get_document(self.doc_id) or {}
         if not self.doc or self.doc["state"] == "tombstoned" or self.doc["profile_id"] != self.profile_id:
+            if self.doc and self.doc["profile_id"] == self.profile_id:
+                # Removed while the job waited (a Deferred page may have committed meanwhile).
+                self._hide_saved()
             self._finish("cancelled")
             return True
         root = Path(self.store.path).parent

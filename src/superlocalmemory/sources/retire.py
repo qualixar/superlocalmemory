@@ -11,17 +11,19 @@ from typing import Any
 
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
-from superlocalmemory.sources.ingest import facts_of, facts_of_keys
+from superlocalmemory.sources.ingest import facts_of, resolve_keys
 from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 
 logger = logging.getLogger(__name__)
 
 
-def _facts(runtime: Any, entries: list[dict[str, Any]], profile_id: str = "") -> list[str]:
+def _facts(runtime: Any, entries: list[dict[str, Any]], profile_id: str = "") -> tuple[list[str], int]:
+    """The fact ids the entries own, and how many queued saves (by key) have not committed yet."""
     facts = [f for e in entries for f in e.get("f") or []]
     unknown = [e["m"] for e in entries if e.get("m") and not e.get("f")]
     queued = [e["k"] for e in entries if e.get("k") and not e.get("m") and not e.get("f")]
-    return sorted({*facts, *facts_of(runtime, unknown), *facts_of_keys(runtime, profile_id, queued)})
+    keyed = resolve_keys(runtime, profile_id, queued)
+    return sorted({*facts, *facts_of(runtime, unknown), *keyed.facts}), len(keyed.pending)
 
 
 # Local hiding goes through ``archive_fact`` (recall already skips archived facts), the same as
@@ -31,13 +33,16 @@ def hide_entries(host: SourceHost, runtime: Any, source: dict, entries: list[dic
     """Archive the live entries (recall stops showing them) and mark them replaced. Returns failures.
 
     An entry whose facts could not all be archived gets no ``sup`` time and is flagged ``old``,
-    so ``retry_hides`` tries it again on a later pass.
+    so ``retry_hides`` tries it again on a later pass. A queued save known only by its key that has
+    not committed yet counts the same way: it is not hidden, and the retry finds its facts later.
     """
     live = [e for e in memory_entries(entries) if not e.get("sup")]
     failures = 0
     for entry in live:
-        ok = True
-        for fact in _facts(runtime, [entry], source["profile_id"]):
+        facts, pending = _facts(runtime, [entry], source["profile_id"])
+        ok = not pending
+        failures += pending
+        for fact in facts:
             try:
                 runtime.archive_fact(source["profile_id"], fact,
                                      idempotency_key=f"src:{source['source_id'][:12]}:{fact}")
@@ -145,7 +150,9 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
 
 def _erase(host: SourceHost, runtime: Any, source: dict, entries: list[dict[str, Any]],
            subject: str) -> bool:
-    facts = _facts(runtime, entries, source["profile_id"])
+    facts, pending = _facts(runtime, entries, source["profile_id"])
+    if pending:  # a queued save that has not committed cannot be erased yet; retried on the next pass
+        return False
     if not facts:
         return True
     if host.eraser is None:
@@ -168,7 +175,7 @@ def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
 
         try:
             if not remove_document(row["document_id"], source["profile_id"], hard=True,
-                                   eraser=host.eraser, store=store._m):
+                                   eraser=host.eraser, runtime=runtime, store=store._m):
                 return False
         except Exception as exc:  # noqa: BLE001
             logger.warning("a folder document erasure failed (%s)", type(exc).__name__)

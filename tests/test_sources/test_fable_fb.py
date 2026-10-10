@@ -121,3 +121,84 @@ def test_forget_empty_refuses_when_a_memory_could_not_be_hidden_and_keeps_its_st
     writer.heal()
     sources.forget_empty(sid)  # the retry hides what is left
     assert row(env, sid)["state"] == "active" and sorted(env.runtime.archived) == ["f1", "f2"]
+
+
+# -- F-3: a queued save (key only) is never called hidden or erased before it has committed ------
+
+import sqlite3 as _sqlite3  # noqa: E402
+
+from tests.test_sources.conftest import ListDb as _ListDb  # noqa: E402
+
+
+class _Operations:
+    """The writer's ingestion_operations table, with the real column names."""
+
+    def __init__(self, env):
+        self.conn = _sqlite3.connect(":memory:", check_same_thread=False)
+        self.conn.row_factory = _sqlite3.Row
+        self.conn.execute(
+            "CREATE TABLE ingestion_operations (profile_id TEXT, source_type TEXT, idempotency_key TEXT,"
+            " state TEXT, next_retry_at REAL DEFAULT 0, queryable_fact_ids_json TEXT DEFAULT '[]',"
+            " final_fact_ids_json TEXT DEFAULT '[]')")
+        env.runtime._db = _ListDb(self.conn)
+
+    def put(self, key, state, facts=(), source_type="folder"):
+        self.conn.execute(
+            "INSERT INTO ingestion_operations(profile_id, source_type, idempotency_key, state,"
+            " queryable_fact_ids_json) VALUES ('default', ?, ?, ?, ?)", (source_type, key, state, json.dumps(list(facts))))
+
+
+def _queued_folder_file(env, monkeypatch):
+    """One text file whose save stayed queued past the settle budget: the row holds only its key."""
+    from superlocalmemory.memory_core import submit as submit_mod
+
+    monkeypatch.setattr(submit_mod, "SETTLE_WAIT_S", 0.0)
+    ops = _Operations(env)
+    env.runtime.remember = lambda *a, **k: SimpleNamespace(
+        payload={"status": "accepted", "operation_id": None, "fact_ids": []})
+    env.write("a.md", "one")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    [entry] = json.loads(env.files(sid)["a.md"]["memory_ids_json"])
+    assert entry["m"] is None and entry["k"]
+    return sid, entry["k"], ops
+
+
+def test_removing_a_folder_with_a_queued_save_is_incomplete_until_the_save_commits(env, monkeypatch):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    with pytest.raises(SourceRefused) as refused:
+        sources.remove_source(sid)  # no operation row yet: nothing can be hidden
+    assert refused.value.code == "removal_incomplete"
+    entries = json.loads(env.files(sid)["a.md"]["memory_ids_json"])
+    assert entries[0].get("old") and not entries[0].get("sup")
+    ops.put(key, "raw")  # admitted but the facts are not written yet: still not committed
+    with pytest.raises(SourceRefused):
+        sources.remove_source(sid)
+    ops.conn.execute("UPDATE ingestion_operations SET state = 'queryable', queryable_fact_ids_json = '[\"q1\"]'")
+    sources.remove_source(sid)  # the commit landed: the retry hides it
+    assert env.runtime.archived == ["q1"]
+    assert sources.list_sources("default") == []
+
+
+def test_a_purge_of_a_queued_save_is_incomplete_until_the_save_commits(env, monkeypatch):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    with pytest.raises(SourceRefused) as refused:
+        sources.remove_source(sid, purge=True)
+    assert refused.value.code == "erasure_incomplete" and env.erased == []
+    ops.put(key, "complete", ["q1"])
+    sources.remove_source(sid, purge=True)
+    assert env.erased and env.erased[0][1] == ("q1",) and env.files(sid) == {}
+
+
+def test_a_scan_hides_a_queued_save_that_was_replaced_once_it_commits(env, monkeypatch):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    env.write("a.md", "two, different")
+    import os as _os
+    st = _os.stat(env.root / "a.md")
+    _os.utime(env.root / "a.md", ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10**9))
+    env.scan(sid)  # the old queued save is replaced; it cannot be hidden yet and stays flagged
+    old = [e for e in json.loads(env.files(sid)["a.md"]["memory_ids_json"]) if e.get("k") == key]
+    assert old and old[0].get("old") and not old[0].get("sup")
+    ops.put(key, "queryable", ["q1"])
+    env.scan(sid)
+    assert "q1" in env.runtime.archived

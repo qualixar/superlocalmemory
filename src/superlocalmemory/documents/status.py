@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.documents.pagefacts import committed_save_facts
+
 logger = logging.getLogger(__name__)
 
 _DOC_VIEW = ("state", "page_count", "pages_text_layer", "pages_ocr", "pages_empty", "title")
@@ -48,11 +50,15 @@ def job_status(job_id: str, profile_id: str, *, store: Any = None) -> dict[str, 
             store_ref.close()
 
 
-def _memory_facts(store: Any, document: dict[str, Any]) -> list[str]:
+def _memory_facts(store: Any, document: dict[str, Any], runtime: Any = None) -> list[str]:
+    """Every fact the document owns: its recorded pages, and (with a writer) saves that committed
+    under its keys without ever being recorded on a page."""
     facts = list(json.loads(document.get("fact_ids_json") or "[]"))
     for page in store.get_pages(document["document_id"]):
         facts += json.loads(page.get("fact_ids_json") or "[]")
-    return facts
+    if runtime is not None:
+        facts += committed_save_facts(runtime, document["profile_id"], document["document_id"])
+    return list(dict.fromkeys(facts))
 
 
 def remove_document(document_id: str, profile_id: str, *, hard: bool = False, runtime: Any = None,
@@ -78,18 +84,18 @@ def remove_document(document_id: str, profile_id: str, *, hard: bool = False, ru
         if not document or document["profile_id"] != profile_id:
             return False
         if hard:
-            return _erase(store_ref, document, eraser)
+            return _erase(store_ref, document, eraser, runtime)
         if document["state"] == "tombstoned":
             return False
         # Hide first: if any memory cannot be hidden, the document stays listed, so the person
         # can try again (a removed-looking document with recallable pages has no way back).
-        facts = _memory_facts(store_ref, document)
+        facts = _memory_facts(store_ref, document, runtime)
         if _archive(runtime, profile_id, document_id, facts):
             return False
         store_ref.tombstone_document(document_id)
         # Pages a running job saved during the removal; anything later is hidden by the job itself
         # when it sees the tombstone (DocumentJob._hide_saved).
-        late = [f for f in _memory_facts(store_ref, store_ref.get_document(document_id) or document)
+        late = [f for f in _memory_facts(store_ref, store_ref.get_document(document_id) or document, runtime)
                 if f not in set(facts)]
         _archive(runtime, profile_id, document_id, late)
         return True
@@ -98,10 +104,10 @@ def remove_document(document_id: str, profile_id: str, *, hard: bool = False, ru
             store_ref.close()
 
 
-def _erase(store: Any, document: dict[str, Any], eraser: Any) -> bool:
+def _erase(store: Any, document: dict[str, Any], eraser: Any, runtime: Any = None) -> bool:
     from superlocalmemory.media.erasure_documents import erase_document_rows
 
-    facts = sorted({f for f in _memory_facts(store, document) if f})
+    facts = sorted({f for f in _memory_facts(store, document, runtime) if f})
     if facts:
         counts = eraser(document["profile_id"], facts, document["document_id"]) or {}
         if not counts.get("erasure_complete"):
@@ -113,7 +119,8 @@ def _erase(store: Any, document: dict[str, Any], eraser: Any) -> bool:
 
 def archive_document_facts(store: Any, runtime: Any, document: dict[str, Any]) -> int:
     """Hide every memory a document owns; returns how many could not be hidden."""
-    return _archive(runtime, document["profile_id"], document["document_id"], _memory_facts(store, document))
+    return _archive(runtime, document["profile_id"], document["document_id"],
+                    _memory_facts(store, document, runtime))
 
 
 def _archive(runtime: Any, profile_id: str, document_id: str, fact_ids: list[str]) -> int:

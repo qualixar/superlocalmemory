@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Iterator, Sequence
+
+logger = logging.getLogger(__name__)
 
 CHUNK = 400
 
@@ -31,3 +34,25 @@ def fact_ids_by_document(store: Any, document_ids: Sequence[str]) -> dict[str, l
         for doc_id, text in rows.fetchall():
             out[doc_id].extend(json.loads(text or "[]"))
     return out
+
+
+def committed_save_facts(runtime: Any, profile_id: str, document_id: str) -> list[str]:
+    """Fact ids of every page and document memory the writer committed under this document's keys.
+
+    A page whose save was still queued when its job paused (Deferred) was never recorded in
+    ``doc_pages``, yet its memory exists once the commit lands. The writer's own operation rows
+    (keys ``doc:<document_id>:...``) are the only complete list, so removal and erasure read them too.
+    """
+    db = getattr(runtime, "_db", None)
+    if db is None or not document_id:
+        return []
+    like = "doc:" + document_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ":%"
+    try:
+        rows = db.execute(
+            "SELECT queryable_fact_ids_json, final_fact_ids_json FROM ingestion_operations"
+            " WHERE profile_id = ? AND source_type = 'document' AND idempotency_key LIKE ? ESCAPE '\\'",
+            (profile_id, like))
+        return sorted({str(f) for row in rows for column in (row[0], row[1]) for f in json.loads(column or "[]")})
+    except Exception as exc:  # noqa: BLE001 - the recorded pages are still hidden; this only adds to them
+        logger.warning("could not look up a document's committed saves (%s)", type(exc).__name__)
+        return []

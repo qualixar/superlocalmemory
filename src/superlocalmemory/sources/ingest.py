@@ -124,28 +124,52 @@ def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts
     return out
 
 
-def facts_of_keys(runtime: Any, profile_id: str, keys: list[str]) -> list[str]:
-    """Fact ids of folder saves recorded only by their key (they were queued when saved).
+@dataclass(frozen=True)
+class KeyFacts:
+    """What queued saves (known only by key) resolved to: ``facts`` of the committed ones, and the
+    ``pending`` keys that have not committed (or could not be looked up) and so own nothing findable yet."""
 
+    facts: list[str] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+
+
+def resolve_keys(runtime: Any, profile_id: str, keys: list[str]) -> KeyFacts:
+    """Resolve folder saves recorded only by their key through ``ingestion_operations``.
+
+    A key is committed once its operation holds fact ids (or finished with none). A key whose
+    operation row is absent, still ``raw``, or has no facts yet is *pending*: the save may still
+    land, so callers must treat hiding or erasing it as not done, never as "nothing to hide".
     Text parts are written as ``folder`` saves and pictures as ``media`` saves; folder keys
-    (``src:...``) are unique to the folder either way."""
+    (``src:...``) are unique to the folder either way.
+    """
+    if not keys:
+        return KeyFacts()
     db = getattr(runtime, "_db", None)
-    if db is None or not keys:
-        return []
+    if db is None:
+        return KeyFacts(pending=list(keys))
     found: list[str] = []
+    committed: set[str] = set()
     try:
         for i in range(0, len(keys), 400):
             part = keys[i:i + 400]
             rows = db.execute(
-                "SELECT queryable_fact_ids_json, final_fact_ids_json FROM ingestion_operations"
-                " WHERE profile_id = ? AND source_type IN ('folder', 'media') AND idempotency_key IN ("
-                + ",".join("?" * len(part)) + ")", (profile_id, *part))
+                "SELECT idempotency_key, state, queryable_fact_ids_json, final_fact_ids_json FROM"
+                " ingestion_operations WHERE profile_id = ? AND source_type IN ('folder', 'media')"
+                " AND idempotency_key IN (" + ",".join("?" * len(part)) + ")", (profile_id, *part))
             for row in rows:
-                for column in (row[0], row[1]):
-                    found += [str(f) for f in json.loads(column or "[]")]
-    except Exception as exc:  # noqa: BLE001 - what cannot be found cannot be hidden here
+                ids = [str(f) for column in (row[2], row[3]) for f in json.loads(column or "[]")]
+                if ids or row[1] == "complete":
+                    committed.add(str(row[0]))
+                found += ids
+    except Exception as exc:  # noqa: BLE001 - what cannot be looked up is not known to be hidden
         logger.warning("could not look up queued folder saves (%s)", type(exc).__name__)
-    return found
+        return KeyFacts(facts=found, pending=list(keys))
+    return KeyFacts(facts=found, pending=[k for k in keys if k not in committed])
+
+
+def facts_of_keys(runtime: Any, profile_id: str, keys: list[str]) -> list[str]:
+    """Fact ids of the committed folder saves among ``keys`` (see ``resolve_keys`` for the rest)."""
+    return resolve_keys(runtime, profile_id, keys).facts
 
 
 def folder_tag(source_id: str, relpath: str, version: str) -> dict[str, str]:
@@ -260,5 +284,5 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
     return len(rows) > 0
 
 
-__all__ = ["Ingested", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
-           "load_verified", "provenance", "save_parts", "screen", "split_markdown", "split_text"]
+__all__ = ["Ingested", "KeyFacts", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
+           "load_verified", "provenance", "resolve_keys", "save_parts", "screen", "split_markdown", "split_text"]
