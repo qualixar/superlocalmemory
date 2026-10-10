@@ -11,7 +11,7 @@ SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later
 | Capability         | How                                            |
 |--------------------|------------------------------------------------|
 | Agent rules        | `AGENTS.md` — loaded automatically per project |
-| MCP memory tools   | `.codex/config.toml` — the default 56-tool profile (no profile forced) |
+| MCP memory tools   | `.codex/config.toml` — the default 57-tool profile (no profile forced) |
 | Lifecycle hooks    | `hooks/hooks.json` — session start/stop/prompt |
 | Slash skills       | `skills/*/SKILL.md` — the SLM skills via `/skills` |
 | Venv launcher      | `scripts/slm-launch` — optional isolated mode  |
@@ -80,7 +80,7 @@ env = { SLM_AGENT_ID = "codex" }
 ```
 
 This registers the `superlocalmemory` MCP server with only the agent id. No profile is
-forced, so it serves the default 56-tool profile; add `SLM_MCP_PROFILE = "code"` yourself
+forced, so it serves the default 57-tool profile; add `SLM_MCP_PROFILE = "code"` yourself
 for the 38-tool code profile (memory, portable Brain evidence, code graph, profile
 switching, memory-kind management, and bounded loops).
 

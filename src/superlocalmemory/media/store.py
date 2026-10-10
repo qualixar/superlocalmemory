@@ -53,7 +53,21 @@ def vec_table(space_id: str) -> str:
     return f"media_vec_{space_id}"
 
 
+class MediaVectorsUnavailable(sqlite3.NotSupportedError):
+    """This Python's sqlite3 was built without extension loading, so sqlite-vec cannot load."""
+
+
+def extensions_supported() -> bool:
+    return hasattr(sqlite3.Connection, "enable_load_extension")
+
+
+def require_extensions() -> None:
+    if not extensions_supported():
+        raise MediaVectorsUnavailable("this Python cannot load SQLite extensions")
+
+
 def _load_vec(conn: sqlite3.Connection) -> None:
+    require_extensions()
     import sqlite_vec
 
     conn.enable_load_extension(True)
@@ -241,6 +255,23 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                                     [*args, int(limit), int(offset)]).fetchall()
         return [dict(r) for r in rows]
 
+    def list_images(self, profile_id: str, *, limit: int = 60,
+                    after: tuple[str, str] | None = None) -> list[dict[str, Any]]:
+        """One page of saved images, newest first; ``after`` is the (created_at, media_id) of the last one seen.
+
+        Only fields that are safe to show: no file path, no camera data, no hashes, no picture bytes.
+        """
+        sql = ("SELECT media_id, origin, created_at, captured_at, width, height, bytes,"
+               " (thumb_webp IS NOT NULL) AS has_thumb, anchor_memory_id FROM media_items"
+               " WHERE profile_id = ? AND state = 'active' AND kind = 'image'")
+        args: list[Any] = [profile_id]
+        if after is not None:
+            sql += " AND (created_at, media_id) < (?, ?)"
+            args += [after[0], after[1]]
+        rows = self._read().execute(sql + " ORDER BY created_at DESC, media_id DESC LIMIT ?",
+                                    [*args, int(limit)]).fetchall()
+        return [{**dict(r), "has_thumb": bool(r["has_thumb"])} for r in rows]
+
     def set_state(self, media_id: str, state: str) -> None:
         stamp = utc_stamp() if state == "tombstoned" else None
         with self._write() as conn:
@@ -292,6 +323,20 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                 pass
             if found:
                 out[media_id] = found
+        return out
+
+    def page_media_ids(self, pages: Sequence[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        """``{(document_id, page_no): media_id}`` for the active page items, in one query per 300 pages."""
+        wanted = list(dict.fromkeys((str(d), int(n)) for d, n in pages))
+        out: dict[tuple[str, int], str] = {}
+        conn = self._read() if wanted else None
+        for i in range(0, len(wanted), 300):
+            part = wanted[i:i + 300]
+            rows = conn.execute(
+                "SELECT document_id, page_no, media_id FROM media_items WHERE kind = 'page'"
+                " AND state = 'active' AND (document_id, page_no) IN (VALUES "
+                + ",".join(["(?, ?)"] * len(part)) + ")", [x for pair in part for x in pair]).fetchall()
+            out.update({(r[0], r[1]): r[2] for r in rows})
         return out
 
     def knn(self, vector: Sequence[float], profile_id: str, k: int,

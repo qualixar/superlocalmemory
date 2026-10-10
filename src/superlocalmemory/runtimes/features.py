@@ -73,6 +73,12 @@ def read_features(data_root: str | Path | None = None) -> dict[str, Any]:
     return data
 
 
+def media_requested(data_root: str | Path | None = None) -> bool:
+    """True when the installer recorded a request that no one has acted on yet."""
+    media = read_features(data_root)["media"]
+    return bool(media.get("requested")) and not media.get("enabled")
+
+
 def media_enabled(data_root: str | Path | None = None) -> bool:
     return bool(read_features(data_root)["media"].get("enabled"))
 
@@ -138,12 +144,16 @@ def _start_install(managed: ManagedEnv) -> None:
         _install_thread.start()
 
 
+_NO_EXTENSIONS = ("Images and documents need a Python that can load SQLite extensions, and this one "
+                  "can't. Run SLM on a Python built with them (Homebrew, python.org or uv-managed).")
+
+
 def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | None = None,
                  data_root: str | Path | None = None) -> dict[str, Any]:
     """Turn images and documents on: save the choice, create media.db, start the install."""
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    from superlocalmemory.media import open_media_store
+    from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
     try:
         data = read_features(data_root)
@@ -153,6 +163,11 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
         store = open_media_store(create=True, data_root=_root(data_root))
         if store is not None:
             store.close()
+    except MediaVectorsUnavailable as exc:
+        logger.warning("could not turn on images and documents: %s", exc)
+        _roll_back_enable(data_root)
+        return {**media_feature_status(data_root, env=env), "enabled": False,
+                "error": _NO_EXTENSIONS}
     except (OSError, sqlite3.Error, ImportError) as exc:
         logger.warning("could not turn on images and documents: %s", exc)
         _roll_back_enable(data_root)
@@ -186,6 +201,7 @@ def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
     """Turn the feature off. Memories and media.db are kept; model files only if asked."""
     data = read_features(data_root)
     data["media"]["enabled"] = False
+    data["media"].pop("requested", None)  # turning it off also withdraws an unanswered request
     try:
         _write_features(data_root, data)
     except OSError as exc:
@@ -235,3 +251,48 @@ def disable_sources(*, data_root: str | Path | None = None) -> None:
         _write_features(data_root, data)
     except OSError as exc:
         logger.warning("could not save the switch: %s", exc)
+
+
+def apply_requested(*, source: str = "npm", env: ManagedEnv | None = None,
+                    data_root: str | Path | None = None) -> dict[str, Any] | None:
+    """Act once on a request the installer recorded; the install runs in this process.
+
+    Does nothing (and returns ``None``) when nothing was requested, when the
+    feature is already on, or when the file cannot be read. Never raises.
+    """
+    try:
+        if not media_requested(data_root):
+            return None
+        return enable_media(source=source, env=env, data_root=data_root)
+    except Exception:  # noqa: BLE001 - start-up must never fail on an optional feature
+        logger.warning("could not act on the saved request for images and documents", exc_info=True)
+        return None
+
+
+# -- has this process picked the feature up? ----------------------------------
+_media_loaded = threading.Event()
+
+
+def mark_media_loaded() -> None:
+    """The media components started in this process (called by whoever starts them)."""
+    _media_loaded.set()
+
+
+def _reset_media_loaded() -> None:
+    _media_loaded.clear()
+
+
+def note_started(*, env: ManagedEnv | None = None, data_root: str | Path | None = None) -> None:
+    """At daemon start: media on and its environment already ready means the media
+    components load from it in this process, so no restart is needed. Never raises."""
+    try:
+        if media_enabled(data_root) and _env(env, data_root).status().state == "ready":
+            mark_media_loaded()
+    except Exception:  # noqa: BLE001 - start-up must never fail on an optional feature
+        logger.warning("could not check the images and documents environment", exc_info=True)
+
+
+def restart_required(status: dict[str, Any]) -> bool:
+    """On and ready, but this running process has not loaded the media components."""
+    return bool(status.get("enabled")) and (status.get("env") or {}).get("state") == "ready" \
+        and not _media_loaded.is_set()

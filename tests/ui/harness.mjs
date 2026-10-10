@@ -37,7 +37,10 @@ export function buildHarness(containerIds, fetchStub) {
 
     // Provide fetch stub BEFORE core.js eval so the patch captures it.
     let _stub = fetchStub;
-    window.fetch = function mockFetch() {
+    // A function stub is used as the fetch itself (so a test can route by URL
+    // and still get core.js's write-credential patch wrapped around it).
+    const _fn = typeof fetchStub === 'function' ? fetchStub : null;
+    window.fetch = _fn || function mockFetch() {
         return Promise.resolve({
             ok: _stub.ok,
             status: _stub.status,

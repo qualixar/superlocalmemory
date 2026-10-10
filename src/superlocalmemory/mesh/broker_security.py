@@ -323,6 +323,28 @@ CREATE TABLE IF NOT EXISTS mesh_nonces (
     nonce      TEXT PRIMARY KEY,
     expires_at REAL NOT NULL
 )"""
+# Owner-facing profile of each peer, and the envelope of each message that
+# carries one. Created next to the broker tables; no existing table changes.
+_PEER_PROFILES_DDL = """
+CREATE TABLE IF NOT EXISTS mesh_peer_profiles (
+    peer_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('local','web')),
+    app_name TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    authorization_ref TEXT,
+    muted INTEGER NOT NULL DEFAULT 0,
+    retired_at TEXT,
+    updated_at TEXT NOT NULL
+)"""
+_ENVELOPES_DDL = """
+CREATE TABLE IF NOT EXISTS mesh_message_envelopes (
+    message_id INTEGER PRIMARY KEY,
+    from_kind TEXT NOT NULL,
+    from_app TEXT NOT NULL DEFAULT '',
+    hop INTEGER NOT NULL DEFAULT 0 CHECK (hop BETWEEN 0 AND 2),
+    refs_json TEXT NOT NULL DEFAULT '[]',
+    reply_to INTEGER
+)"""
 
 
 def ensure_db_healthy(db_path: str) -> bool:
@@ -366,10 +388,11 @@ def apply_security_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(_SENT_OPS_DDL)
     except sqlite3.OperationalError:
         pass
-    try:
-        conn.executescript(_NONCES_DDL)
-    except sqlite3.OperationalError:
-        pass
+    for ddl in (_NONCES_DDL, _PEER_PROFILES_DDL, _ENVELOPES_DDL):
+        try:
+            conn.executescript(ddl)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 

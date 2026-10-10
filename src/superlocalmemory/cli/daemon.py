@@ -556,6 +556,13 @@ def not_found_from(payload: object, path: str = "") -> DaemonNotFound:
                           error_code=error_code, error_message=error_message)
 
 
+class DaemonRateLimited(RuntimeError):
+    """The daemon answered 429: it is busy and the caller may retry shortly.
+
+    Raised only when the caller passes ``preserve_rate_limited=True``.
+    """
+
+
 class DaemonUnprocessable(RuntimeError):
     """The daemon answered 422: it refused the request itself, before any work.
 
@@ -610,6 +617,7 @@ def daemon_request(
     preserve_not_found: bool = False,
     preserve_unprocessable: bool = False,
     preserve_server_error: bool = False,
+    preserve_rate_limited: bool = False,
     start_wait_seconds: float | None = None,
 ) -> dict | None:
     """Send a request only after validating the owned daemon identity.
@@ -743,6 +751,8 @@ def daemon_request(
             raise not_found_from(payload, path) from exc
         if exc.code == 422 and preserve_unprocessable:
             raise _unprocessable(exc) from exc
+        if exc.code == 429 and preserve_rate_limited:
+            raise DaemonRateLimited("the daemon is busy") from exc
         if exc.code >= 500 and preserve_server_error:
             raise server_error_from(exc) from exc
         return None

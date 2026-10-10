@@ -316,12 +316,18 @@ class Repair:
                     fts_residue.purge_deleted_terms(conn, table)
                     after = conn.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) "  # noqa: S608
                                          f"FROM {table}_data").fetchone()
-                    receipts.receipt(conn, stats.run_id, "purge_keyword_index", table,
-                                     "words of deleted rows were still inside the index",
-                                     {"blocks": before[0], "bytes": before[1]},
-                                     {"blocks": after[0], "bytes": after[1],
-                                      "secure_delete": state}, undoable=False)
-                stats.add("keyword_index.rewritten", 1)
+                    # Before SQLite 3.42 secure-delete never turns on, so every
+                    # run comes back here; only a purge that removed something
+                    # is a repair worth a receipt.
+                    changed = tuple(before) != tuple(after)
+                    if changed:
+                        receipts.receipt(conn, stats.run_id, "purge_keyword_index", table,
+                                         "words of deleted rows were still inside the index",
+                                         {"blocks": before[0], "bytes": before[1]},
+                                         {"blocks": after[0], "bytes": after[1],
+                                          "secure_delete": state}, undoable=False)
+                if changed:
+                    stats.add("keyword_index.rewritten", 1)
         finally:
             conn.close()
 

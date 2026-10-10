@@ -115,7 +115,7 @@ SLM is part of Qualixar's AI Reliability Engineering work: agent memory that is 
 | Editor plugins | Claude Code, Codex, VS Code / Copilot, Antigravity, Hermes. Each ships 15 skills, 4 sub-agents and session hooks; the npm package carries every plugin folder | [Plugins](docs/plugins.md), [IDE setup](docs/ide-setup.md), [Hermes](docs/hermes.md) |
 | Any other agent | The universal agent rules: one file that teaches any agent when to recall, what to save and how to keep memory clean. Paste it into `AGENTS.md`, `CLAUDE.md`, `.cursorrules` or the agent's system prompt | [Universal agent rules](plugin-src/rules/AGENTS.md) |
 | `slm connect <ide>` | Writes the MCP config for 12 IDEs, including Cursor, Windsurf, Zed, JetBrains, Gemini CLI and Claude Desktop | [IDE setup](docs/ide-setup.md) |
-| MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 8 to 103 tools | [MCP tools](docs/mcp-tools.md) |
+| MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 8 to 107 tools | [MCP tools](docs/mcp-tools.md) |
 | Framework adapters | LangGraph, LangChain, LlamaIndex, CrewAI, AutoGen, Semantic Kernel, Microsoft Agent Framework, Google ADK, OpenAI Agents | [Framework adapters](docs/framework-adapters.md) |
 | Python SDK and HTTP API | `MemoryEngine` in your code; the local REST API | [API reference](docs/api-reference.md) |
 | Auto-capture hooks | `slm hooks install` for Claude Code, `--agent codex` for Codex | [Auto-memory](docs/auto-memory.md) |
@@ -133,7 +133,7 @@ plugin works on Grok Bot's shared, memory-constrained computer without any manua
 **Install:** add the `qualixar` marketplace (`.cursor-plugin/marketplace.json` at this repo's
 root) in Grok Bot's Plugins screen, then add `superlocalmemory`. No API key, no sign-in step —
 the server runs locally on the Grok Bot computer, so nothing goes to a memory SaaS.
-If the plugin shows the old "21-tool code profile" description or a `venv/bin/slm: No such file`
+If the plugin's description shows an out-of-date tool count or a `venv/bin/slm: No such file`
 error, Grok Bot's copy of the marketplace is pinned to an old commit: remove the `qualixar`
 marketplace, add it again, and reinstall the plugin. This plugin keeps its own memory on Grok
 Bot's computer; to use the memory on your own computer, add
@@ -157,7 +157,7 @@ should never be stored on a computer shared with other bots (secrets, keys, othe
 personal data).
 
 **Tools:** this plugin sets `SLM_MCP_PROFILE=core` — 18 tools (`remember`, `recall`, `search`,
-session lifecycle, compression/cache, corrections) — deliberately smaller than the 56-tool
+session lifecycle, compression/cache, corrections) — deliberately smaller than the 57-tool
 default profile every other host gets, so a shared computer is not listing tool descriptions
 for tiers it will not use.
 
@@ -300,10 +300,10 @@ Pick how many tools your agent sees with `SLM_MCP_PROFILE`.
 |---|---:|---|
 | `core` | 18 | Remember, recall, sessions, optimize, correction review |
 | `code` | 38 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
-| `mesh` | 8 | SLM-Mesh coordination only |
-| `full` (and unset) | 56 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries |
-| `power` | 68 | Full plus administration, lifecycle and diagnostics |
-| `whole` | 103 | Every registered tool |
+| `mesh` | 9 | SLM-Mesh coordination only |
+| `full` (and unset) | 57 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries |
+| `power` | 69 | Full plus administration, lifecycle and diagnostics |
+| `whole` | 107 | Every registered tool |
 
 ```json
 { "mcpServers": { "superlocalmemory": { "type": "http", "url": "http://127.0.0.1:8765/mcp/" } } }

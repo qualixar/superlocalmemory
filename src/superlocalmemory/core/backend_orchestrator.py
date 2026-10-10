@@ -502,8 +502,7 @@ class BackendOrchestrator:
                 "LanceDB not active. Install: pip install superlocalmemory[lancedb]"
             )
 
-        outbox = projection_outbox.health(self._db)
-        outbox["draining"] = self._drain.running
+        outbox = self.outbox_health()
         result["projection_queue"] = outbox
         if outbox["stalled"]:
             result["warnings"].append(
@@ -527,9 +526,16 @@ class BackendOrchestrator:
         return self._drain.drain_once(limit=limit).as_dict()
 
     def outbox_health(self) -> dict[str, Any]:
-        """Queue depth and stalled count, for the status surfaces."""
+        """Queue depth and stalled count, for the status surfaces.
+
+        ``draining`` is true only while the worker runs AND a projection is
+        open: with none open (Local Core) rows wait as the catch-up record for
+        a later promotion and nothing is being drained.
+        """
         health = projection_outbox.health(self._db)
-        health["draining"] = self._drain.running
+        is_open = self._drain.has_target()
+        health["projection_open"] = is_open
+        health["draining"] = bool(self._drain.running and is_open)
         return health
 
     def stop(self) -> None:
