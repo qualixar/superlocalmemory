@@ -4,7 +4,7 @@ SuperLocalMemory works with any MCP client through `slm connect <ide>`, which
 writes the MCP server into that tool's config. A plugin adds more on top: skills
 that teach the agent when to recall and what to save, sub-agents, session hooks
 and slash commands. Every plugin is built from one source (`plugin-src/`), so
-they all carry the same 15 skills and 4 sub-agents, adapted to each host.
+they all carry the same 16 skills and 4 sub-agents, adapted to each host.
 
 Install SuperLocalMemory first, from npm or PyPI ([getting started](getting-started.md)).
 The npm package also carries every plugin folder, at
@@ -13,7 +13,7 @@ this repository.
 
 | Host | Install | What you get |
 |---|---|---|
-| Claude Code | `claude plugin marketplace add qualixar/superlocalmemory` then `claude plugin install superlocalmemory@qualixar` | MCP server, 15 skills, 4 sub-agents, hooks, `/slm-loop` |
+| Claude Code | `claude plugin marketplace add qualixar/superlocalmemory` then `claude plugin install superlocalmemory@qualixar` | MCP server, 16 skills, 4 sub-agents, hooks, `/slm-loop` |
 | Codex | `slm connect codex` then `slm codex install` | MCP server, skills, sub-agents, lifecycle hooks |
 | VS Code / GitHub Copilot | `slm connect vscode-copilot --here` (from the project root), then copy `copilot-plugin/.github/` add-ons | MCP server, agent rules, 15 prompt files, 4 agents, hooks |
 | Cursor-format hosts (Grok Bot, Cursor) | Add the `qualixar` marketplace in the host's Plugins screen, then `superlocalmemory` | MCP server, a bot-sized skill set, no hooks or dashboard needed |
@@ -34,10 +34,11 @@ this repository.
 | `slm-scope` | Personal, shared and global memory across profiles |
 | `slm-profile` | Memory profiles and switching between them |
 | `slm-graph` | The knowledge graph and entity tools |
-| `slm-mesh` | SLM-Mesh: messages, locks and shared state between agent sessions |
+| `slm-mesh` | SLM-Mesh: messages, `mesh_wait`, locks and shared state between agent sessions and web apps (with `ack` for at-least-once delivery) |
 | `slm-loop` | Bounded loops and their history |
 | `slm-cache`, `slm-compress` | Context optimization: KV cache and reversible compression |
-| `slm-web-access` | Setting up and diagnosing Web access for web apps |
+| `slm-web-access` | Setting up and diagnosing Web access for web apps: the Connected apps switches, upload links, what a web app can call |
+| `slm-media` | Pictures, PDFs and folders: `remember_media`, `remember_document`, `get_media`, `media_status`, `media_upload_link`, `slm media`, `slm sources` |
 | `slm-bot-memory`, `slm-getting-started-bot` | Several bots sharing one computer and one store |
 
 The four sub-agents are the memory advisor, the optimize advisor, the governance

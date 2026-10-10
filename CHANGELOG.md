@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `slm team status` and `slm team policy --require-login on|off`, run on the
   SLM computer, so a company workspace's owner can never be locked out.
 - A **What's new** card on the dashboard that knows what is already on.
+- **Agent skills and instructions teach 4.1.25.** A new `slm-media` skill
+  (pictures, PDFs, folders, upload links, `slm media`, `slm sources`) ships in
+  the Claude Code, Codex, Copilot, Antigravity and Hermes plugins, so each
+  carries 16 skills. `slm-mesh` covers `mesh_wait`, web-app peers and
+  at-least-once delivery (`ack_ids` passed back as `ack`); `slm-web-access`
+  covers the Connected apps switches and upload links; `slm-governance` covers
+  `slm team`, `slm token show` and what remote apps can never see; the bot
+  skills, both advisors, the universal agent rules, the web-agent
+  instructions (full, short and the dashboard's **Copy instructions**), the host
+  guides and the text `slm connect` writes for Cursor, Copilot and Antigravity say
+  the same.
 
 ### Changed
 

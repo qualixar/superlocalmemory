@@ -23,6 +23,7 @@ Do not edit by hand — regenerate instead.
 - `skills/slm-governance/SKILL.md`
 - `skills/slm-graph/SKILL.md`
 - `skills/slm-loop/SKILL.md`
+- `skills/slm-media/SKILL.md`
 - `skills/slm-mesh/SKILL.md`
 - `skills/slm-profile/SKILL.md`
 - `skills/slm-recall/SKILL.md`

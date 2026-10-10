@@ -20,7 +20,7 @@ To pin an exact release, add `--ref` with that release's 40-character commit.
 Hermes asks before it enables the plugin (`--no-enable` installs it disabled);
 the plugin cannot grant itself capabilities or MCP access.
 
-The plugin registers 15 namespaced skills, four on-demand Hermes child-agent
+The plugin ships 16 namespaced skills, four on-demand Hermes child-agent
 roles, `/slm <command>`, and `/slm-<command>` aliases for the public SLM CLI.
 It calls only the configured `superlocalmemory` MCP server. Grant that server
 to this plugin when Hermes asks; no wildcard MCP grant is needed.

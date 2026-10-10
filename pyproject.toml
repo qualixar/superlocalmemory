@@ -213,6 +213,7 @@ superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "r
 "share/superlocalmemory/codex/skills/slm-governance" = ["plugin-src/skills/slm-governance/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-graph" = ["plugin-src/skills/slm-graph/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-loop" = ["plugin-src/skills/slm-loop/SKILL.md"]
+"share/superlocalmemory/codex/skills/slm-media" = ["plugin-src/skills/slm-media/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-mesh" = ["plugin-src/skills/slm-mesh/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-profile" = ["plugin-src/skills/slm-profile/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-recall" = ["plugin-src/skills/slm-recall/SKILL.md"]

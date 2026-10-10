@@ -33,6 +33,10 @@ sessions. One fact per call. Recall before you remember.
 - Security rules ("Rate limit all public endpoints at 100 req/min")
 
 **Do not store:**
+- Pictures or PDFs through `remember`. It stores text. A screenshot, photo or
+  PDF goes through `remember_media` or `remember_document`; see `slm-media`.
+  Add the reason it matters in the text of a normal memory if you also want a
+  fact about it.
 - Transient context that is only relevant within this conversation
 - Large blobs of code or full file contents (those belong in the project, not memory)
 - Facts the project README already captures
@@ -369,6 +373,7 @@ sessions on this machine, so use it only when the user asks to move. See
 - `slm-session` — session lifecycle; session_id is required for attribution
 - `slm-scope` — complete guide to personal / shared / global scopes
 - `slm-profile` — workspace isolation and profile switching
+- `slm-media` — saving pictures and PDFs (`remember_media`, `remember_document`)
 
 ---
 

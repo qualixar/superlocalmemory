@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm"
+when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status"
 allowed-tools: slm_optimize_stats, get_status, get_brain_evidence_status, Bash
 ---
 
@@ -153,6 +153,29 @@ operations and, for an owner or admin, resolves them. The MCP counterpart for
 Living Brain totals is `get_brain_evidence_status(profile_id="")`; it only
 observes and does not change recall, ranking or review.
 
+## Pictures and documents: status and repair
+
+Pictures and documents are an optional feature, off by default. Check them with
+the CLI (the MCP `get_status` does not report them):
+
+```bash
+slm media status [--json]     # off | on, setting up (state, percent) | on | failed, with the step
+slm features [--json]         # what is on and what can be turned on: pictures and documents, folder sources, bot messages
+slm media repair --dry-run    # count pictures that cannot be found by what they show yet (owner or admin)
+slm media repair              # re-embed them; up to four minutes per run, run again if it says some are left
+slm media gc                  # report picture records without a memory, files without a record (removes nothing)
+slm embedder status           # progress of an embedding-model switch or the memory-engine upgrade
+```
+
+If `slm media status` says "set-up failed", run `slm doctor` for the step that
+failed. The five picture tools (`remember_media`, `get_media`,
+`remember_document`, `media_status`, `media_upload_link`) are listed only while
+the feature is on and only in the `full`, `power` and `whole` tool sets; a
+restart (`slm restart`) starts the picture worker. A document's own progress
+is the `media_status` MCP tool, not this command. Details, limits and the
+16 GB requirement: `slm-media`. `slm status` also prints an "Embedding switch" line while a model switch or
+the memory-engine upgrade is pending.
+
 ## Recommended Health Workflow
 
 1. Run `slm doctor --json` at session start to confirm all subsystems are up.
@@ -160,6 +183,7 @@ observes and does not change recall, ranking or review.
 3. Run `slm status --json` when you need DB size or memory counts.
 4. If `ok: false` on any MCP tool — check `note` field, then run `slm doctor` to isolate the failure.
 5. If recall seems to miss memories that were saved, run `slm db integrity` before concluding anything.
+6. If a picture will not come back for a question about what it shows, run `slm media status`, then `slm media repair --dry-run`.
 
 ## Fail-Open
 
@@ -179,6 +203,8 @@ observes and does not change recall, ranking or review.
 - `slm-profile` — workspace isolation and profile switching
 - `slm-cache` — KV cache performance metrics
 - `slm-compress` — reversible context compression
+- `slm-media` — pictures, PDFs and folders
+- `slm-web-access` — the Connected apps page and web-app connection states
 
 ---
 

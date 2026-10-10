@@ -112,7 +112,7 @@ SLM is part of Qualixar's AI Reliability Engineering work: agent memory that is 
 
 | Surface | What you get | Docs |
 |---|---|---|
-| Editor plugins | Claude Code, Codex, VS Code / Copilot, Antigravity, Hermes. Each ships 15 skills, 4 sub-agents and session hooks; the npm package carries every plugin folder | [Plugins](docs/plugins.md), [IDE setup](docs/ide-setup.md), [Hermes](docs/hermes.md) |
+| Editor plugins | Claude Code, Codex, VS Code / Copilot, Antigravity, Hermes. Each ships 16 skills, 4 sub-agents and session hooks; the npm package carries every plugin folder | [Plugins](docs/plugins.md), [IDE setup](docs/ide-setup.md), [Hermes](docs/hermes.md) |
 | Any other agent | The universal agent rules: one file that teaches any agent when to recall, what to save and how to keep memory clean. Paste it into `AGENTS.md`, `CLAUDE.md`, `.cursorrules` or the agent's system prompt | [Universal agent rules](plugin-src/rules/AGENTS.md) |
 | `slm connect <ide>` | Writes the MCP config for 12 IDEs, including Cursor, Windsurf, Zed, JetBrains, Gemini CLI and Claude Desktop | [IDE setup](docs/ide-setup.md) |
 | MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 9 to 109 tools | [MCP tools](docs/mcp-tools.md) |

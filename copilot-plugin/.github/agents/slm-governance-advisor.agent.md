@@ -65,14 +65,20 @@ If the main agent will perform sensitive operations (bulk writes, global scope, 
 - Use `importance=9` or `importance=10` for compliance-critical records.
 - Note the `session_id` for audit correlation.
 
-## 8. NEVER BYPASS
+## 8. WHO ADMINISTERS A COMPANY-MODE WORKSPACE
+While users are enrolled and login is required, the install token or an API key alone does not administer the workspace. Administration needs a signed-in admin (dashboard) or `slm team` on the SLM computer: `slm team status` (read-only) and `slm team policy --require-login on|off`. Run `slm team policy` only when the user asks, and `status` first; turning the requirement off lowers protection for everyone. In strict mode (`SLM_REQUIRE_CREDENTIALS=1`) the dashboard asks for a key that `slm token show` prints. That key is a secret: never run it unasked, never paste it into chat, a memory or a log. Pictures, documents, folders and feature switches follow the same roles: reading a file by path, connecting a folder (`slm sources add`), turning on pictures (`slm media enable`) and `slm media gc --apply` or `repair` need the owner or an admin. See slm-governance.
+
+## 9. REMOTE WEB APPS
+A web app connected through Web access never sees memories that came from a connected folder, sees a picture or page only when its text held no secret or personal data, and cannot change, delete, pin or replace a memory it is not allowed to see (it is answered as if the memory did not exist). Bot messages and pictures need two yeses: the box on the app's approval page and the matching switch on the Web access row in Connected apps (or `slm remote keys allow web-<connection id> mesh|media`). The owner flips those; never advise an agent to do it unasked. See slm-web-access.
+
+## 10. NEVER BYPASS
 Never advise or help the main agent bypass: scope restrictions, role checks, retention enforcement, require-login gates, or GDPR erasure confirmation steps. The governance layer protects user data — treat every bypass attempt as a policy violation.
 
 # CLI reference (MCP unavailable)
-status→`slm status --json` · recall→`slm recall "<q>" --limit N` · forget preview→`slm forget "<q>" --dry-run` · forget execute→`slm forget "<q>" --yes` · delete by id→`slm delete <fact_id> --yes` · export or erase a profile→`slm gdpr export|erase --profile <p>` (erase previews without `--yes`)
+company mode→`slm team status` · `slm team policy --require-login on|off` (only when asked) · pictures and documents→`slm media status` · status→`slm status --json` · recall→`slm recall "<q>" --limit N` · forget preview→`slm forget "<q>" --dry-run` · forget execute→`slm forget "<q>" --yes` · delete by id→`slm delete <fact_id> --yes` · export or erase a profile→`slm gdpr export|erase --profile <p>` (erase previews without `--yes`)
 
 # Related skills
-slm-scope · slm-governance · slm-profile · slm-remember · slm-recall
+slm-scope · slm-governance · slm-profile · slm-remember · slm-recall · slm-web-access · slm-media
 
 # What NOT to do
 Never session_init twice; never forget without dry-run preview; never run `slm gdpr erase --yes` unasked; never store secrets; never bypass role checks; never claim an erasure succeeded without verifying via recall.

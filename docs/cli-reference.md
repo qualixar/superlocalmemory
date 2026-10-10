@@ -513,6 +513,27 @@ sessions.
 
 Rotate the SLM install token. Run `slm restart` afterwards.
 
+### `slm token show`
+
+Prints the SuperLocalMemory key (the install token) that the dashboard asks for
+when `SLM_REQUIRE_CREDENTIALS=1`. It tightens the token file to owner-only first
+and refuses to print a key owned by another account. The key opens write access:
+do not paste it into chat or a log. See [Auth write gate](auth-write-gate.md).
+
+### `slm team status` and `slm team policy`
+
+Company-mode login policy, from the terminal of the computer that runs SLM.
+
+```bash
+slm team status                       # Require login: on|off. Users: N.
+slm team policy --require-login on    # every user signs in
+slm team policy --require-login off   # the machine owner is the user again
+```
+
+Both take `--json`. They use a private capability file only the user running SLM
+can read, so a workspace's owner can never be locked out. See
+[Company mode](company-mode.md).
+
 ### `slm disable [--reason "..."]` and `slm enable`
 
 `slm disable` writes a `.disabled` marker and stops the daemon; commands that
@@ -907,6 +928,9 @@ slm remote tls init --name my-laptop.local --ip 192.168.1.20
 slm remote enable --listen HOST:PORT
 slm remote keys add hermes-laptop --read-only --profile work
 slm remote keys list
+slm remote keys allow web-<connection id> mesh     # let a Web access connection use bot messages
+slm remote keys allow web-<connection id> media    # ...or pictures and documents
+slm remote keys disallow web-<connection id> mesh  # turn either off again
 slm remote keys revoke hermes-laptop
 slm remote check
 slm remote disable
@@ -971,7 +995,21 @@ slm embedder rollback
 
 `switch` also takes `--endpoint` (an OpenAI-compatible URL), `--no-wait`
 (return once queued) and `--json`. `--provider` is `sentence-transformers`,
-`ollama` or `openai`; the default is the current one.
+`ollama`, `openai` or `slm-media`; the default is the current one.
+
+### `slm embedder upgrade` (preview)
+
+```bash
+slm embedder upgrade           # shows the plan and asks; --yes skips the question, --no-wait returns once queued
+slm embedder status            # progress
+slm embedder rollback          # go back to the previous engine
+slm embedder forget-previous   # free the previous engine's vectors (ends rollback)
+```
+
+Moves existing memories onto the same on-device model that reads pictures, in the
+background, with recall working throughout and one-click rollback. It is opt-in
+and never starts on its own; the same action is the **Upgrade memory engine**
+card in Settings. If it cannot run, the command prints the reason.
 
 ### `slm db integrity [--pages] [--json]`
 

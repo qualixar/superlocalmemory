@@ -83,13 +83,14 @@ Run these commands only while the SLM Python virtual environment is active.
 
 ## MCP Tools
 
-All 8 mesh MCP tools work in multi-machine mode with no agent code changes. The mesh tools are in the `full` and `power` tool sets and in the default set.
+All 9 mesh MCP tools work in multi-machine mode with no agent code changes. The mesh tools are in the `full` and `power` tool sets and in the default set.
 
 | Tool | Multi-Machine Behavior |
 |---|---|
 | `mesh_peers` | Returns local + remote peers merged |
 | `mesh_send` | Auto-routes to remote SLM if target is remote |
 | `mesh_inbox` | Shows messages from both local and remote peers |
+| `mesh_wait` | Waits up to 20 seconds on this computer's inbox, like `mesh_inbox` |
 | `mesh_state` | Local state only (no distributed consensus) |
 | `mesh_lock` | Local locks only (per-machine) |
 | `mesh_status` | Shows local broker status |

@@ -128,7 +128,7 @@ def test_npm_artifact_owns_cli_runtime_but_not_repo_clone_installers() -> None:
     }
     assert bundled_codex_skills == {
         "slm-bot-memory", "slm-cache", "slm-compress", "slm-getting-started-bot",
-        "slm-governance", "slm-graph", "slm-loop", "slm-mesh", "slm-profile",
+        "slm-governance", "slm-graph", "slm-loop", "slm-media", "slm-mesh", "slm-profile",
         "slm-recall", "slm-remember", "slm-scope", "slm-session", "slm-status",
         "slm-web-access",
     }

@@ -10,7 +10,7 @@
       "slashCommand": "/slm-remember"
     },
     "slm-recall": {
-      "description": "Search SuperLocalMemory for relevant context",
+      "description": "Search SuperLocalMemory for relevant context (text, and saved pictures and PDF pages when those are on)",
       "prompt": "Search SuperLocalMemory for: {{input}}",
       "mode": "ask",
       "slashCommand": "/slm-recall"

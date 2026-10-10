@@ -90,6 +90,14 @@ pass the attachment to the plugin at all; if ChatGPT says it has no file to
 send, attach the file in ChatGPT on the web instead, or ask ChatGPT for an
 upload link (see "Adding a picture or PDF from a chat" below).
 
+**Bot messages in ChatGPT.** ChatGPT can list your other bots, send one a
+message and wait for the reply (`mesh_peers`, `mesh_send`, `mesh_wait`) after
+you tick **Allow talking to your other bots** and switch on **Let these apps
+message your other bots** in Connected apps (see "Bot messages and the two new
+permissions" below). Because ChatGPT keeps the scopes it saw when the plugin was
+created, a plugin made before 4.1.25 does not list these tools: uninstall it and
+create it again.
+
 ## ChatGPT dots
 
 Dots are ChatGPT's always-on agents. You create them in ChatGPT on the desktop,
@@ -108,7 +116,9 @@ We have not confirmed whether dots can use custom MCP plugins directly. The
 `get_status` test is how you find out on your plan.
 
 A dot uses only the instructions pasted into it. A skill saved anywhere else is
-not read, so paste the full block into the dot yourself.
+not read, so paste the full block into the dot yourself. The full block is also
+what teaches the dot to pass `ack_ids` back as `ack` when it reads bot messages
+and to ask for an upload link instead of trying to send a file.
 
 ## Grok Bot
 
@@ -119,6 +129,12 @@ not read, so paste the full block into the dot yourself.
 
 Grok Bot's server runs on Cursor's backend, so the approval appears as
 **Cursor** in your Connected apps list. That is expected.
+
+To add a picture or PDF from Grok Bot, ask it for an upload link ("add a
+picture to my memory"), open the link and pick the file. This needs **Allow
+images and documents** and **Allow saving memories** on the approval page, and
+the pictures switch in Connected apps (see below). Bot messages need **Allow
+talking to your other bots** and the bots switch.
 
 ### The local plugin is a separate memory
 
@@ -141,6 +157,10 @@ for your agents and bots".
 3. Connect, sign in with GitHub on the approval page and tick **Allow saving
    memories** if wanted.
 
+After 4.1.25 (or after you allow bot messages or pictures), run a manual
+toolkit re-sync in Composio so it lists the new tools (`mesh_*`, `remember_media`,
+`remember_document`, `get_media`, `media_status`, `media_upload_link`).
+
 If Composio later reports `401` after you turned Web access off and on again,
 its approval was removed. Reconnect it:
 
@@ -153,7 +173,20 @@ composio link custom_superlocalmemory
 Muse connects through the private adapter's secure OAuth connector. Enter both
 the **Server URL** and the **OAuth metadata URL**, then sign in with GitHub on
 the approval page and tick **Allow saving memories** if wanted. If Muse was
-connected before, authorize it again.
+connected before, authorize it again. To add a picture or PDF from Muse, ask it
+for an upload link and open it; for that, tick **Allow images and documents**
+too and switch on the pictures switch in Connected apps (see below).
+
+## Claude on the web
+
+Claude on the web connects as an **MCP connector** with OAuth: choose **Claude
+(web)** (or **Other app (MCP)**) under **Add an app** in Connected apps and use
+the two addresses above. The screens inside Claude change often and are not
+walked through here. Once connected, it uses the same tools as the apps above.
+To add a picture or PDF, ask Claude for an upload link; bot messages and
+pictures need the same two yeses (approval-page box and Connected apps switch).
+Paste the [setup prompt](../web-agents/setup-prompt.md) or a Claude project's
+instructions block so it knows when to use them.
 
 ## Bot messages and the two new permissions
 

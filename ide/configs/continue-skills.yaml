@@ -1,5 +1,5 @@
-# Continue.dev Slash Commands for SuperLocalMemory V3
-# These map to the V3 CLI commands
+# Continue.dev Slash Commands for SuperLocalMemory
+# These map to the CLI commands
 # Add this to ~/.continue/config.yaml
 
 slashCommands:
@@ -8,7 +8,7 @@ slashCommands:
     run: "slm remember \"{{input}}\""
 
   - name: "slm-recall"
-    description: "Search SuperLocalMemory"
+    description: "Search SuperLocalMemory (text, and saved pictures and PDF pages when those are on)"
     run: "slm recall \"{{input}}\""
 
   - name: "slm-list"
@@ -19,8 +19,13 @@ slashCommands:
     description: "SuperLocalMemory system status"
     run: "slm status"
 
+  - name: "slm-media"
+    description: "Are pictures and documents on? (off by default; needs 16 GB of memory)"
+    run: "slm media status"
+
 # Usage in Continue.dev:
 #   /slm-remember Use FastAPI for REST APIs
 #   /slm-recall authentication patterns
 #   /slm-list
 #   /slm-status
+#   /slm-media
