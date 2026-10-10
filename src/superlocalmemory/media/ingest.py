@@ -145,20 +145,29 @@ def _check_kind(data: bytes) -> None:
         raise _refuse("That file type is not supported (PNG, JPEG, GIF and WEBP only).")
 
 
+_OFF = "Images are turned off. Turn them on in settings to save images."
+
+
+def _unavailable() -> _Stop:
+    from superlocalmemory.media.readiness import media_refusal
+
+    return _refuse(media_refusal() or _OFF)
+
+
 def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
     if client is None:
         from superlocalmemory.runtimes.worker_client import media_embedder
 
         client = media_embedder()
     if client is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     opened = store is None
     if store is None:
         from superlocalmemory.media import open_media_store
 
         store = open_media_store()
     if store is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     return client, store, opened
 
 
@@ -343,9 +352,9 @@ def remember_media(
     opened = False
     store_ref = store
     try:
-        client, store_ref, opened = _resolve(client, store)
         data = _read_input(inp)
         _check_kind(data)
+        client, store_ref, opened = _resolve(client, store)
         src_sha = hashlib.sha256(data).hexdigest()
         known = store_ref.find_by_sha(profile_id, src_sha)
         if known:
