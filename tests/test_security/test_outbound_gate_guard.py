@@ -67,6 +67,13 @@ REVIEWED: dict[tuple[str, str, str], tuple[int, str]] = {
     # (the gate: no proxy, no redirects). Nothing there opens a connection itself.
     (_S + "llm/ollama_reachability.py", "_probe", "httpx.get"):
         (1, "PROBE: is the configured Ollama answering (GET /api/tags, no body), cached"),
+    (_S + "core/media_fetch.py", "fetch_media", "httpx.Client"):
+        (1, "INBOUND: downloads one picture the caller linked (GET only); sends no memory "
+            "text. The client is built with trust_env=False and follow_redirects=False; the "
+            "host is resolved once and every address must be public, the connection goes to "
+            "that checked address (Host and TLS name stay the link's host), redirects are "
+            "followed by hand (max 3, each re-checked), https only, 25 MB and 10 s caps. "
+            "tests/test_security/test_media_fetch.py pins all of this."),
     (_S + "core/ollama_embedder.py", "OllamaEmbedder._check_availability", "httpx.get"):
         (1, "PROBE: Ollama model list (GET /api/tags)"),
     (_S + "core/ollama_validator.py", "validate_ollama_model", "httpx.post"):

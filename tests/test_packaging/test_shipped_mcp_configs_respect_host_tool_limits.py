@@ -36,8 +36,8 @@ _NO_PROFILE_DEFAULT_COUNT = len(_PROFILE_DEFINITIONS["full"])
 
 # `SLM_MCP_ALL_TOOLS=1` (or `SLM_MCP_PROFILE=whole`) bypasses every profile
 # filter and registers every tool FastMCP knows about. Pinned by the same
-# exposure contract test above (exposure "whole", expected_count 103).
-_ALL_TOOLS_COUNT = 103
+# exposure contract test above (exposure "whole", expected_count 107).
+_ALL_TOOLS_COUNT = 107
 
 # Declared, vendor-reported per-host MCP tool ceilings. Only hosts with an
 # actual reported limit are listed; a host absent here is not asserted.

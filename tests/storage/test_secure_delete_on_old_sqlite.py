@@ -31,6 +31,6 @@ def test_an_old_sqlite_is_reported_unsupported_without_trying_or_warning(monkeyp
 
 
 def test_a_current_sqlite_still_turns_it_on():
-    if sqlite3.sqlite_version_info < (3, 42, 0):
-        return
+    if not fts_residue.secure_delete_supported():
+        return  # too old, or in the range where it corrupts: covered in test_fts_secure_delete_versions
     assert fts_residue.ensure_secure_delete(_store())["atomic_facts_fts"] in {"enabled", "on"}

@@ -104,10 +104,14 @@ def get_features(request: Request) -> dict[str, Any]:
 @router.post("/media/enable")
 async def enable_media_route(request: Request):
     _gate(request)
-    if (await _body(request)).get("yes") is not True:
+    body = await _body(request)
+    if body.get("yes") is not True:
         raise HTTPException(400, detail="Send {\"yes\": true} to turn images and documents on.")
+    source = body.get("source", "dashboard")
+    if source not in tuple(s for s in feat.SOURCES if s != "npm"):
+        raise HTTPException(400, detail="source must be one of: cli, dashboard, api.")
     root = _data_root()
-    status = feat.enable_media(source="dashboard", env=_media_env(), data_root=root)
+    status = feat.enable_media(source=source, env=_media_env(), data_root=root)
     code = 500 if status.get("error") else 202
     return JSONResponse({"media": _media_view(status, root)}, status_code=code)
 
