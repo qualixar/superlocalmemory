@@ -15,12 +15,13 @@ import sys
 from argparse import Namespace
 from typing import Any
 
-from superlocalmemory.cli.daemon import daemon_request
+from superlocalmemory.cli.daemon import DaemonConflict, daemon_request
 from superlocalmemory.cli.features_cmd import (
     EXIT_DAEMON_DOWN, FEATURES_PATH, NOT_RUNNING, die, media_line,
 )
 
 SIZE_TEXT = "about 1.5 GB"
+EXIT_LOW_RAM = 4
 
 
 def _is_tty() -> bool:
@@ -30,8 +31,8 @@ def _is_tty() -> bool:
         return False
 
 
-def _call(args: Namespace, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
-    data = daemon_request(method, path, body)
+def _call(args: Namespace, method: str, path: str, body: dict | None = None, **kwargs: Any) -> dict[str, Any]:
+    data = daemon_request(method, path, body, **kwargs)
     if data is None:
         die(args, NOT_RUNNING, EXIT_DAEMON_DOWN)
     return data
@@ -68,15 +69,19 @@ def _confirmed(args: Namespace) -> bool:
 
 def _enable(args: Namespace) -> None:
     media = _call(args, "GET", FEATURES_PATH)["media"]
+    if media.get("ram_ok") is False:  # refused here: say so plainly, ask nothing
+        die(args, str(media.get("ram_message") or ""), EXIT_LOW_RAM)
     if not getattr(args, "json", False):
         print(f"Images & documents download {SIZE_TEXT} of models.")
         print(_disk_text(media.get("precheck", {})))
-        if media.get("ram_warning"):
-            print(f"Memory check: {media['ram_warning']}")
     if not _confirmed(args):
         print("Nothing changed.")
         return
-    reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True, "source": "cli"})
+    try:
+        reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True, "source": "cli"},
+                      preserve_conflict=True)
+    except DaemonConflict as exc:  # the daemon refused (not enough memory)
+        die(args, str(exc), EXIT_LOW_RAM)
     _emit(args, reply, _enable_text(reply.get("media") or {}))
 
 

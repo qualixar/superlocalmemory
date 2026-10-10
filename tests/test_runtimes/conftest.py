@@ -65,3 +65,11 @@ def image_python(tmp_path_factory):
     except (subprocess.SubprocessError, OSError) as exc:
         pytest.skip(f"could not build an image test environment (no network?): {type(exc).__name__}")
     return py
+
+
+@pytest.fixture(autouse=True)
+def roomy_machine(monkeypatch):
+    """Turning images and documents on is refused below 16 GB; these tests run on any machine."""
+    from superlocalmemory.runtimes import managed_env
+
+    monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 32 * 1024 ** 3)

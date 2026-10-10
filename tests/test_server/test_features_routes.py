@@ -189,16 +189,51 @@ def test_reading_the_ram_block_creates_nothing(ctx, monkeypatch):
     assert list(root.iterdir()) == [] and worker_client._CLIENTS == {}
 
 
-def test_a_small_machine_gets_a_warning_in_the_features_reply(ctx, monkeypatch):
-    client, _root, env, _calls = ctx
+LOW_RAM_MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. "
+                   "Your text memories keep working.")
+
+
+def _machine_with(env, monkeypatch, gib):
+    monkeypatch.delenv("SLM_MEDIA_ALLOW_LOW_RAM", raising=False)
     monkeypatch.setattr(env, "precheck", lambda: {"disk_ok": True, "free_bytes": 10 * 1024 ** 3,
-                                                   "ram_bytes": 4 * 1024 ** 3, "ram_warn": True})
+                                                   "ram_bytes": int(gib * 1024 ** 3)})
+
+
+def test_a_small_machine_reports_not_ok_with_the_message_in_the_features_reply(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    _machine_with(env, monkeypatch, 4)
     media = client.get("/api/v3/features").json()["media"]
-    assert "4.0 GB" in media["ram_warning"] and "8 GB" in media["ram_warning"]
+    assert media["ram_ok"] is False and media["ram_message"] == LOW_RAM_MESSAGE
+    assert "ram_warning" not in media
 
 
-def test_a_big_machine_has_no_warning(ctx, monkeypatch):
+def test_a_big_machine_is_ok_with_no_message(ctx, monkeypatch):
     client, _root, env, _calls = ctx
-    monkeypatch.setattr(env, "precheck", lambda: {"disk_ok": True, "free_bytes": 10 * 1024 ** 3,
-                                                   "ram_bytes": 16 * 1024 ** 3, "ram_warn": False})
-    assert client.get("/api/v3/features").json()["media"].get("ram_warning", "") == ""
+    _machine_with(env, monkeypatch, 16)
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["ram_ok"] is True and media["ram_message"] == ""
+
+
+def test_the_developer_override_makes_a_small_machine_ok(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    _machine_with(env, monkeypatch, 4)
+    monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["ram_ok"] is True and media["ram_message"] == ""
+
+
+def test_a_refused_enable_is_409_with_the_view_carrying_the_reason(ctx, monkeypatch):
+    client, _root, env, calls = ctx
+
+    def refuse(**kw):
+        calls["enable"].append(kw)
+        return {"enabled": False, "env": env.status().to_dict(), "precheck": env.precheck(), "media_db": False,
+                "error": LOW_RAM_MESSAGE, "refused": "low_ram"}
+
+    monkeypatch.setattr(feat, "enable_media", refuse)
+    response = client.post("/api/v3/features/media/enable", json={"yes": True}, headers=AUTH)
+    assert response.status_code == 409
+    media = response.json()["media"]
+    assert media["error"] == LOW_RAM_MESSAGE and media["refused"] == "low_ram" and media["enabled"] is False
+    assert response.json()["detail"] == LOW_RAM_MESSAGE
+

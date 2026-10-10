@@ -209,3 +209,41 @@ def test_enable_refuses_cleanly_when_this_python_cannot_load_extensions(root, mo
     assert features.read_features(root)["media"]["enabled"] is False
     assert not media_db_path(root).exists()
     assert env.installs == 0
+
+
+# -- the 16 GB gate -----------------------------------------------------------------
+
+LOW_RAM_MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 8.0 GB. "
+                   "Your text memories keep working.")
+
+
+@pytest.fixture()
+def small_machine(monkeypatch):
+    from superlocalmemory.runtimes import managed_env
+
+    monkeypatch.delenv("SLM_MEDIA_ALLOW_LOW_RAM", raising=False)
+    monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 8 * 1024 ** 3)
+
+
+def test_enable_is_refused_below_16_gb_before_anything_is_written(root, small_machine):
+    env = FakeEnv()
+    out = features.enable_media(source="cli", env=env, data_root=root)
+    assert out["enabled"] is False and out["refused"] == "low_ram" and out["error"] == LOW_RAM_MESSAGE
+    assert not features.features_path(root).exists() and not media_db_path(root).exists()
+    assert env.installs == 0 and features.media_enabled(root) is False
+
+
+@needs_vec
+def test_the_developer_override_lets_a_small_machine_turn_it_on(root, small_machine, monkeypatch):
+    monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
+    out = features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=root)
+    assert "refused" not in out
+
+
+@needs_vec
+def test_an_unknown_amount_of_memory_does_not_refuse(root, monkeypatch):
+    from superlocalmemory.runtimes import managed_env
+
+    monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 0)
+    out = features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=root)
+    assert "refused" not in out
