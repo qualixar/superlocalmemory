@@ -13,6 +13,9 @@ import pytest
 from superlocalmemory.media import media_db_path
 from superlocalmemory.runtimes import features
 from superlocalmemory.runtimes.managed_env import EnvStatus
+from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
+
+needs_vec = pytest.mark.skipif(not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON)
 
 
 class FakeEnv:
@@ -57,6 +60,7 @@ def test_defaults_and_reads_create_nothing(root):
     assert sorted(os.listdir(root)) == before
 
 
+@needs_vec
 def test_enable_writes_file_creates_db_and_installs_once(root):
     env = FakeEnv()
     out = features.enable_media(source="cli", env=env, data_root=root)
@@ -73,6 +77,7 @@ def test_enable_writes_file_creates_db_and_installs_once(root):
     assert env.installs == 1
 
 
+@needs_vec
 def test_enable_without_install(root):
     env = FakeEnv()
     features.enable_media(source="api", start_install=False, env=env, data_root=root)
@@ -85,6 +90,7 @@ def test_bad_source_raises_and_writes_nothing(root):
     assert not features.features_path(root).exists()
 
 
+@needs_vec
 def test_disable_keeps_media_db_and_calls_stop_hook(root):
     env = FakeEnv("ready")
     features.enable_media(source="dashboard", start_install=False, env=env, data_root=root)
@@ -98,6 +104,7 @@ def test_disable_keeps_media_db_and_calls_stop_hook(root):
     assert media_db_path(root).exists() and env.removed == []
 
 
+@needs_vec
 def test_disable_with_remove_files_removes_env(root):
     env = FakeEnv("ready")
     features.enable_media(source="npm", start_install=False, env=env, data_root=root)
@@ -150,6 +157,7 @@ def test_enable_rolls_back_when_the_store_cannot_be_made(root, monkeypatch):
     assert json.loads(features.features_path(root).read_text())["media"]["enabled"] is False
 
 
+@needs_vec
 def test_disable_cancels_a_running_install_and_remove_waits_for_it(root):
     from superlocalmemory.runtimes.managed_env import EnvSpec, ManagedEnv
 
@@ -188,3 +196,16 @@ def test_disable_cancels_a_running_install_and_remove_waits_for_it(root):
         assert env.status().state == "not_installed"
     finally:
         me.LOCKS_DIR = old
+
+
+def test_enable_refuses_cleanly_when_this_python_cannot_load_extensions(root, monkeypatch):
+    from superlocalmemory.media import store as media_store
+
+    monkeypatch.setattr(media_store, "extensions_supported", lambda: False)
+    env = FakeEnv()
+    out = features.enable_media(source="cli", env=env, data_root=root)
+    assert out["enabled"] is False
+    assert "SQLite extensions" in out["error"]
+    assert features.read_features(root)["media"]["enabled"] is False
+    assert not media_db_path(root).exists()
+    assert env.installs == 0

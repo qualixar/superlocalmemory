@@ -1639,6 +1639,14 @@ def edit_memory(request: Request, fact_id: str):
         if not new_content:
             raise HTTPException(status_code=400, detail="content is required")
         profile = _routed_profile(body.get("profile_id"))
+        # Prepared before anything uses it: the hook preview, the stored
+        # successor, the event and the response all carry the prepared text.
+        from superlocalmemory.memory_core import prepare_user_text
+
+        new_content = prepare_user_text(
+            getattr(getattr(request.app.state, "engine", None), "_config", None),
+            new_content,
+        ).text
         engine, target_profile, hook_context = _authorize_memory_mutation(
             request,
             "update",

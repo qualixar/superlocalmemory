@@ -1196,7 +1196,14 @@ class ObserveBuffer:
         self._engine = engine
 
     def enqueue(self, content: str, *, trusted_actor_id: str = "") -> dict:
+        # The hash is only a duplicate-window and idempotency key; the text
+        # that is previewed, evented and stored is the prepared one.
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        from superlocalmemory.memory_core import prepare_user_text
+
+        content = prepare_user_text(
+            getattr(self._engine, "_config", None), content,
+        ).text
         with self._lock:
             if content_hash in self._seen:
                 return {"captured": False, "reason": "duplicate within debounce window"}
@@ -1230,7 +1237,6 @@ class ObserveBuffer:
             )
             from superlocalmemory.core.ingestion_command import IngestionRequest
             from superlocalmemory.hooks.auto_capture import AutoCapture
-
             decision = AutoCapture().evaluate(content)
             if not decision.capture:
                 _emit_event(
@@ -5181,7 +5187,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
 
                 meta[METADATA_KEY] = declared_kind.value
 
+            from superlocalmemory.memory_core import (
+                pii_redaction_enabled,
+                prepare_key,
+                prepare_metadata,
+                prepare_user_text,
+            )
+
+            prepared = prepare_user_text(engine._config, req.content)
+            redact = pii_redaction_enabled(engine._config)
+            meta, _ = prepare_metadata(meta, pii_redaction=redact)
             store_config = getattr(engine._config, "store", None)
+            # Length limits judge what the caller sent, as before.
             validate_deterministic_admission(
                 req.content,
                 max_verbatim_chars=getattr(
@@ -5203,7 +5220,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 "operation": "store",
                 "agent_id": trusted_actor_id,
                 "profile_id": write_profile,
-                "content_preview": req.content[:100],
+                "content_preview": prepared.text[:100],
             })
 
             # V4 Phase 4: OperationPolicyRegistry evaluation.
@@ -5280,10 +5297,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     )
 
             admission = RememberRequest(
-                content=req.content,
+                content=prepared.text,
                 profile_id=write_profile,
                 source_type="http",
-                idempotency_key=req.idempotency_key or uuid.uuid4().hex,
+                idempotency_key=(
+                    prepare_key(req.idempotency_key, pii_redaction=redact)
+                    if req.idempotency_key else uuid.uuid4().hex
+                ),
                 metadata=meta,
                 scope=scope,
                 shared_with=tuple(shared_with or ()),
@@ -5538,6 +5558,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 ) from exc
             if isinstance(exc, (AdmissionAuthorizationError, PermissionError)):
                 raise HTTPException(403, detail="remember admission is not authorized") from exc
+            # Known limit: a retry of a key saved before redaction was turned on
+            # conflicts here (422) and is not treated as a duplicate, unlike
+            # /ingest and /import. The journal compares the request as sent.
             if isinstance(
                 exc,
                 (AdmissionPayloadError, IdempotencyConflict),
@@ -6572,6 +6595,17 @@ def _materializer_pass_hooks() -> PassHooks:
     )
 
 
+def _live_module():
+    """The module uvicorn imported by name, where the lifespan publishes state.
+
+    The daemon may run as ``__main__``; its own globals are then a different
+    copy from the ones the lifespan sets, so the engine must be read here.
+    """
+    import superlocalmemory.server.unified_daemon as live
+
+    return live
+
+
 def _pending_materializer() -> PendingMaterializer:
     """The process's materializer service, built and registered on first use."""
     global _PENDING_MATERIALIZER
@@ -6579,8 +6613,8 @@ def _pending_materializer() -> PendingMaterializer:
         from superlocalmemory.cli import pending_store
 
         _PENDING_MATERIALIZER = PendingMaterializer(
-            engine_supplier=lambda: _engine,
-            runtime_supplier=lambda: _profile_runtime,
+            engine_supplier=lambda: _live_module()._engine,
+            runtime_supplier=lambda: _live_module()._profile_runtime,
             pending_store=pending_store,
             emit_event=lambda *a, **k: _emit_event(*a, **k),
             actor_id_supplier=lambda: _materializer_actor_id(),
@@ -6923,7 +6957,8 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def _cli_main(argv: list[str]) -> None:
+    """Start the daemon from the command line (``--start [--port=N]``)."""
     # Rotate first, then configure logging, so the first log line lands in a
     # freshly-sized file.
     rotate_oversized_logs()
@@ -6931,10 +6966,20 @@ if __name__ == "__main__":
     # v3.6.9 (#33): honour SLM_DAEMON_PORT env so operators can configure the
     # port without changing the launch command. --port= arg takes precedence.
     port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
-    for arg in sys.argv:
+    for arg in argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
-    if "--start" in sys.argv:
+    if "--start" in argv:
         start_server(port=port)
     else:
         print("Usage: python -m superlocalmemory.server.unified_daemon --start [--port=8765]")
+
+
+if __name__ == "__main__":
+    # ``python -m`` loads this file as ``__main__``, and uvicorn later imports
+    # ``superlocalmemory.server.unified_daemon`` for the app: two copies of the
+    # module, each with its own record descriptor. Run everything through the
+    # importable module so the lifespan and the record guardian share one copy.
+    import importlib
+
+    importlib.import_module("superlocalmemory.server.unified_daemon")._cli_main(sys.argv)
