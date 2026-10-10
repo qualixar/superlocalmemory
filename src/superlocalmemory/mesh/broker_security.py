@@ -334,8 +334,14 @@ CREATE TABLE IF NOT EXISTS mesh_peer_profiles (
     authorization_ref TEXT,
     muted INTEGER NOT NULL DEFAULT 0,
     retired_at TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    connection_ref TEXT
 )"""
+# A web app's profile row remembers which connection it came in on, so that
+# revoking an app on that connection retires exactly its peers.
+_PEER_PROFILES_ALTERS = (
+    "ALTER TABLE mesh_peer_profiles ADD COLUMN connection_ref TEXT",
+)
 _ENVELOPES_DDL = """
 CREATE TABLE IF NOT EXISTS mesh_message_envelopes (
     message_id INTEGER PRIMARY KEY,
@@ -393,6 +399,11 @@ def apply_security_schema(conn: sqlite3.Connection) -> None:
             conn.executescript(ddl)
         except sqlite3.OperationalError:
             pass
+    for sql in _PEER_PROFILES_ALTERS:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
 
 

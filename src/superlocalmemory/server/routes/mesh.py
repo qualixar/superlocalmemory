@@ -163,6 +163,12 @@ def _reject_secret_state(key: str, value: str) -> None:
         )
 
 
+def _refuse_web_peer(broker, peer_id: str) -> None:
+    """A connected web app is served in process only, never as a peer id over HTTP."""
+    if peer_id and broker.is_web_peer(peer_id):
+        raise HTTPException(403, detail="web peers are not reachable over this interface")
+
+
 def _send_error_status(error: str) -> int:
     """HTTP status for a refused send."""
     for needle, status in (("too large", 413), ("muted", 403), ("retired", 403),
@@ -428,6 +434,7 @@ def send(req: SendRequest, request: Request):
     to_target = req.to_peer or req.to  # v3.4.6: accept both field names
     if not to_target:
         raise HTTPException(400, detail="'to' or 'to_peer' required")
+    _refuse_web_peer(broker, req.from_peer)
     _verify_remote_send(request, broker, req, to_target)
     # This sync FastAPI route already runs in the worker thread pool, so the
     # broker's SQLite retries and optional remote HTTP delivery cannot block
@@ -446,6 +453,7 @@ def send(req: SendRequest, request: Request):
 @router.get("/inbox/{peer_id}")
 def inbox(peer_id: str, request: Request, project_path: str = ""):
     broker = _get_broker(request)
+    _refuse_web_peer(broker, peer_id)
     return {"messages": broker.get_inbox(
         peer_id, project_path, profile_id=_active_profile(),
     )}
@@ -456,6 +464,7 @@ def inbox_wait(peer_id: str, request: Request,
                timeout_s: float = Query(20, ge=1, le=20), project_path: str = ""):
     """Wait (bounded) for unread mail. Sync route: the wait holds a worker thread."""
     broker = _get_broker(request)
+    _refuse_web_peer(broker, peer_id)
     try:
         messages, timed_out = broker.wait_inbox(
             peer_id, timeout_s=timeout_s, project_path=project_path,
@@ -469,6 +478,7 @@ def inbox_wait(peer_id: str, request: Request,
 @router.post("/inbox/{peer_id}/read")
 def mark_read(peer_id: str, req: ReadRequest, request: Request):
     broker = _get_broker(request)
+    _refuse_web_peer(broker, peer_id)
     return broker.mark_read(peer_id, req.message_ids,
                             profile_id=_active_profile())
 

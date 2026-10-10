@@ -29,8 +29,9 @@ from .broker_security import (  # noqa: E501
     apply_security_schema, check_cross_profile_sender, ensure_db_healthy, get_or_create_peer_key, reject_secret_state, seed_fencing_counter, _set_nonce_db_path, validate_lock_fence_query,  # noqa: E501
 )
 
-from . import broker_inbox, broker_profiles
+from . import broker_cleanup, broker_inbox, broker_profiles
 from .broker_owner import OwnerControlsMixin
+from .broker_web import WebPeersMixin
 from .envelope import Origin
 
 # Remote sync support (optional, try/except to avoid import issues)
@@ -56,7 +57,7 @@ _WRITE_RETRY_BASE_SECONDS = 0.025
 _WRITE_BUSY_TIMEOUT_MS = 2000
 
 
-class MeshBroker(OwnerControlsMixin):
+class MeshBroker(OwnerControlsMixin, WebPeersMixin):
     """Lightweight mesh broker — peer lifecycle, messaging, state, locks, events."""
 
     def __init__(self, db_path: str | Path):
@@ -331,7 +332,7 @@ class MeshBroker(OwnerControlsMixin):
                      origin: Origin | None = None,
                      refs: Sequence[str] = (),
                      reply_to: int | None = None) -> dict:
-        if len(content) > MAX_MESSAGE_SIZE:
+        if len(content.encode("utf-8")) > MAX_MESSAGE_SIZE:
             return self._too_large(content)
         remote = self._forward_if_remote(from_peer, to_peer, content, msg_type, profile_id)
         if remote is not None:
@@ -351,7 +352,7 @@ class MeshBroker(OwnerControlsMixin):
 
     @staticmethod
     def _too_large(content: str) -> dict:
-        return {"ok": False, "error": f"message too large ({len(content)} bytes, max {MAX_MESSAGE_SIZE}). "
+        return {"ok": False, "error": f"message too large ({len(content.encode('utf-8'))} bytes, max {MAX_MESSAGE_SIZE}). "
                 "Mesh messages are notifications — reference a file path instead."}
 
     def _forward_if_remote(self, from_peer: str, to_peer: str, content: str,
@@ -388,7 +389,7 @@ class MeshBroker(OwnerControlsMixin):
             return content, {"ok": False, "error": "send rate limit", "retry_after_s": retry}
         from superlocalmemory.core.security_primitives import redact_secrets
         content = redact_secrets(content, aggression="high")
-        if len(content) > MAX_MESSAGE_SIZE:
+        if len(content.encode("utf-8")) > MAX_MESSAGE_SIZE:
             self._send_limiter.refund(profile_id, from_peer)
             return content, self._too_large(content)
         return content, None
@@ -418,6 +419,10 @@ class MeshBroker(OwnerControlsMixin):
                        project_path: str, profile_id: str,
                        operation_id: str | None, envelope: tuple) -> dict:
         kind, app, refs, reply_to = envelope
+        if kind == "web":
+            # Take the write lock before counting the recipient's unread mail,
+            # so two senders cannot both pass the last free slot.
+            conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc).isoformat()
         expires_at = self._compute_expires(now)
         replay = self._replay(conn, operation_id)
@@ -433,7 +438,8 @@ class MeshBroker(OwnerControlsMixin):
         )
         if err is not None:
             return err
-        target = broker_inbox.resolve_target(conn, to_peer, project_path, profile_id)
+        target = broker_inbox.resolve_target(
+            conn, to_peer, project_path, profile_id, web_sender=kind == "web")
         if target.get("ok") is False:
             return target
         target_type, _to_peer, _project_path = (
@@ -726,62 +732,4 @@ class MeshBroker(OwnerControlsMixin):
                 logger.debug("Mesh cleanup error: %s", exc)
 
     def _run_cleanup(self) -> None:
-        def _cleanup(conn: sqlite3.Connection) -> None:
-            # Precompute ISO cutoffs in Python and compare the stored ISO strings
-            # directly. ISO-8601 UTC timestamps sort lexicographically, so a bare
-            # `col < ?` is both correct AND sargable — the datetime() wrapper
-            # previously forced a full table scan on every 5-minute cleanup.
-            now = datetime.now(timezone.utc)
-            now_iso = now.isoformat()
-            five_min = (now - timedelta(minutes=5)).isoformat()
-            thirty_min = (now - timedelta(minutes=30)).isoformat()
-            day_ago = (now - timedelta(hours=24)).isoformat()
-            week_ago = (now - timedelta(days=7)).isoformat()
-            # Mark stale peers (no heartbeat for 5 min)
-            conn.execute(
-                "UPDATE mesh_peers SET status='stale' "
-                "WHERE status='active' AND last_heartbeat < ?",
-                (five_min,),
-            )
-            # Delete dead peers (stale > 30 min)
-            conn.execute(
-                "UPDATE mesh_peers SET status='dead' "
-                "WHERE status='stale' AND last_heartbeat < ?",
-                (thirty_min,),
-            )
-            conn.execute("DELETE FROM mesh_peers WHERE status='dead'")
-            # Delete read direct messages > 24hr old
-            conn.execute(
-                "DELETE FROM mesh_messages WHERE target_type='peer' AND read=1 "
-                "AND created_at < ?",
-                (day_ago,),
-            )
-            # v3.4.6: Delete EXPIRED messages (48h TTL for broadcast/project)
-            conn.execute(
-                "DELETE FROM mesh_messages WHERE expires_at IS NOT NULL "
-                "AND expires_at < ?",
-                (now_iso,),
-            )
-            # v3.4.6: Clean up orphaned mesh_reads entries
-            conn.execute(
-                "DELETE FROM mesh_reads WHERE message_id NOT IN "
-                "(SELECT id FROM mesh_messages)",
-            )
-            # Envelope rows go with their message, whichever rule removed it.
-            conn.execute(
-                "DELETE FROM mesh_message_envelopes WHERE message_id NOT IN "
-                "(SELECT id FROM mesh_messages)",
-            )
-            # Delete expired locks (the 9999-… sentinel sorts after any real now)
-            conn.execute(
-                "DELETE FROM mesh_locks WHERE expires_at < ?",
-                (now_iso,),
-            )
-            # v3.4.6: Delete old events (keep last 7 days)
-            conn.execute(
-                "DELETE FROM mesh_events WHERE created_at < ?",
-                (week_ago,),
-            )
-            conn.commit()
-
-        self._write_with_retry(_cleanup)
+        self._write_with_retry(broker_cleanup.run_cleanup)

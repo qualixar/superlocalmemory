@@ -26,8 +26,11 @@ POLL_FALLBACK_S = 0.5  # another process may insert without notifying us
 
 
 def query_inbox(conn: sqlite3.Connection, peer_id: str, project_path: str,
-                profile_id: str) -> list[dict]:
-    """Unread direct + broadcast + project messages for one peer in one tenant."""
+                profile_id: str, *, direct_only: bool = False) -> list[dict]:
+    """Unread direct + broadcast + project messages for one peer in one tenant.
+
+    With ``direct_only`` only the messages addressed to the peer itself.
+    """
     now = datetime.now(timezone.utc).isoformat()
     # v3.6.12 (mesh-3): only UNREAD direct messages; broadcast/project already
     # filter unread via mesh_reads.
@@ -40,6 +43,8 @@ def query_inbox(conn: sqlite3.Connection, peer_id: str, project_path: str,
         "ORDER BY created_at DESC LIMIT 100",
         (profile_id, peer_id, now),
     ).fetchall()
+    if direct_only:
+        return [dict(r) for r in direct]
     shared_select = (
         "SELECT m.id, m.from_peer, m.to_peer, m.msg_type, m.content, "
         "CASE WHEN r.peer_id IS NOT NULL THEN 1 ELSE 0 END AS read, "
@@ -72,15 +77,39 @@ def query_inbox(conn: sqlite3.Connection, peer_id: str, project_path: str,
 
 
 MAX_QUEUED_PER_TARGET = 50  # Max unread messages per broadcast/project target
+MAX_UNREAD_DIRECT = 50      # Max unread direct messages a web app may queue for one peer
+
+
+def _web_target_refusal(conn: sqlite3.Connection, to_peer: str,
+                        profile_id: str) -> dict | None:
+    """Why a web app may not send here, or None.
+
+    A web app addresses one peer by id (never everyone, never a project), and
+    it never evicts: a full inbox refuses the new message instead.
+    """
+    if to_peer == "broadcast" or to_peer.startswith("project:"):
+        return {"ok": False, "error": "web apps can only message one peer by id"}
+    unread = conn.execute(
+        "SELECT COUNT(*) FROM mesh_messages WHERE profile_id=? AND to_peer=? "
+        "AND target_type='peer' AND COALESCE(read, 0)=0",
+        (profile_id, to_peer),
+    ).fetchone()[0]
+    if unread >= MAX_UNREAD_DIRECT:
+        return {"ok": False, "error": "recipient inbox is full"}
+    return None
 
 
 def resolve_target(conn: sqlite3.Connection, to_peer: str, project_path: str,
-                   profile_id: str) -> dict:
+                   profile_id: str, *, web_sender: bool = False) -> dict:
     """Work out where a send goes and make room in a shared queue.
 
     Returns ``{"target_type", "to_peer", "project_path"}`` or an error result.
     Derived fresh on every call: a retry must see the caller's original address.
     """
+    if web_sender:
+        refused = _web_target_refusal(conn, to_peer, profile_id)
+        if refused is not None:
+            return refused
     if to_peer == "broadcast":
         target_type = "broadcast"
     elif to_peer.startswith("project:"):
