@@ -353,8 +353,12 @@ def _known_device(source: dict) -> int | None:
 
 
 def _holders(store: SourceStore, sid: str) -> list[dict[str, Any]]:
-    """Every row, in any state, that holds a memory, a document or a picture."""
-    return [r for r in store.files(sid) if entries_of(r) or r.get("document_id") or r.get("media_id")]
+    """Every row, in any state but tombstoned, that holds a memory, a document or a picture.
+
+    A tombstoned row holds nothing that is still on disk, so it never counts toward the guards.
+    """
+    return [r for r in store.files(sid) if r["state"] != "tombstoned"
+            and (entries_of(r) or r.get("document_id") or r.get("media_id"))]
 
 
 def _device_problem(root: Path, stats: ScanStats, store: SourceStore, sid: str, walked: WalkResult) -> str:

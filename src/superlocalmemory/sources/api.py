@@ -2,11 +2,13 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""The calls behind the public interface: add, preview, confirm, list, remove, rescan, report."""
+"""The calls behind the public interface: add, preview, confirm, list, remove, forget-empty, rescan, report."""
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -17,15 +19,19 @@ from typing import Any, Literal
 from superlocalmemory.sources import host as host_mod
 from superlocalmemory.sources import locks, retire
 from superlocalmemory.sources.host import SourceHost
-from superlocalmemory.sources.ignore import DEFAULT_TYPES
+from superlocalmemory.sources.ignore import DEFAULT_TYPES, IgnoreRules
 from superlocalmemory.sources.preview import SourcePreview, build_preview
 from superlocalmemory.sources.report import SourceReport, build_report
 from superlocalmemory.sources.roots import check_root
 from superlocalmemory.sources.store import SourceStore
+from superlocalmemory.sources.walk import walk_tree
 
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL_S = 3600.0
+_REMOVE_WAIT_S = 60.0  # a scan is told to stop at its next file; this trips only on one very slow file
+_QUICK_WAIT_S = 10.0
+_BUSY_MESSAGE = "The folder is busy with a long file; try again in a minute."
 _pending: dict[str, "_Pending"] = {}
 _pending_lock = threading.Lock()
 REMOTE_MESSAGE = ("Folders cannot be connected while remote access is set up, because remote tools "
@@ -181,8 +187,10 @@ def remove_source(source_id: str, *, purge: bool = False) -> None:
         locks.mark_removing(source_id)
         try:
             store.cancel_scans(source_id)
-            with locks.source_lock(source_id):
+            with locks.held(source_id, _REMOVE_WAIT_S):
                 _clear_source(host, store, runtime, source, purge)
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         finally:
             locks.clear_removing(source_id)
     finally:
@@ -204,6 +212,61 @@ def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: di
         store.set_state(source_id, "removed")
 
 
+def _check_still_empty(host: SourceHost, source: dict[str, Any]) -> int:
+    """Look at the folder again; return its disk number, or refuse if it is not plainly an empty folder."""
+    if host.remote_on():
+        raise SourceRefused("remote_access_on", "Folders are paused while remote access is set up. "
+                                                "Turn remote access off first.")
+    if host.runtime() is None:
+        raise SourceRefused("writer_not_ready", "The memory writer is not ready; try again shortly.")
+    root = check_root(source["root_path"])
+    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):
+        raise SourceRefused("root_moved", "The folder's path now leads somewhere else.")
+    try:
+        walked = walk_tree(root, IgnoreRules(root, tuple(json.loads(source["include_types_json"]))))
+        dev = os.stat(root).st_dev
+    except OSError:
+        raise SourceRefused("unreachable", "The folder cannot be read right now.") from None
+    if walked.entries or walked.capped:
+        raise SourceRefused("folder_not_empty", "The folder has files again; they are read on the next scan.")
+    try:
+        known = json.loads(source.get("last_scan_stats_json") or "{}").get("root_dev")
+    except ValueError:
+        known = None
+    if isinstance(known, int) and known != dev:
+        raise SourceRefused("disk_changed", "Another disk is now at the folder's path.")
+    return dev
+
+
+def forget_empty(source_id: str) -> dict[str, Any]:
+    """The folder really is empty: hide the memories of every file it held (kept, not erased).
+
+    Only for a folder waiting as ``offline`` / ``empty_folder``; checked again under the folder's lock.
+    """
+    from superlocalmemory.sources.reconcile import ScanStats
+
+    media, store, host = _open()
+    try:
+        _source(store, source_id)
+        try:
+            with locks.held(source_id, _QUICK_WAIT_S):
+                source = _source(store, source_id)
+                if source["state"] != "offline" or _offline_reason(source) != "empty_folder":
+                    raise SourceRefused("not_empty_folder", "This folder is not waiting as an empty folder.")
+                dev = _check_still_empty(host, source)
+                runtime = host.runtime()
+                rows = [r for r in store.files(source_id) if r["state"] != "tombstoned"]
+                for row in rows:
+                    retire.hide_file(host, store, runtime, source, row, tombstone=True)
+                store.set_state(source_id, "active", stats=ScanStats(root_dev=dev).summary(), scanned=True)
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
+        return {"source_id": source_id, "forgotten": len(rows), "state": "active"}
+    finally:
+        if media is not None:
+            media.close()
+
+
 def rescan(source_id: str) -> dict[str, Any]:
     media, store, host = _open()
     try:
@@ -216,7 +279,7 @@ def rescan(source_id: str) -> dict[str, Any]:
 
 
 def hint(source_id: str, relpaths: list[str]) -> None:
-    """File-change hints come from the watcher, which is not part of this build."""
+    """There is no outside hint path in this build: the watcher runs in-process and calls the scanner itself."""
     raise HintsNotAvailable("file-change hints are not available")
 
 
@@ -234,10 +297,14 @@ def release_file(source_id: str, relpath: str) -> bool:
     media, store, host = _open()
     try:
         source = _source(store, source_id)
-        row = store.get_file(source_id, relpath)
-        if row is None or row["state"] != "quarantined" or not row["sha256"]:
-            return False
-        store.put_file(source_id, relpath, state="pending", reason=f"released:{row['sha256']}")
+        try:
+            with locks.held(source_id, _QUICK_WAIT_S):
+                row = store.get_file(source_id, relpath)
+                if row is None or row["state"] != "quarantined" or not row["sha256"]:
+                    return False
+                store.put_file(source_id, relpath, state="pending", reason=f"released:{row['sha256']}")
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         store.queue_scan(source["profile_id"], source_id)
     finally:
         media.close()

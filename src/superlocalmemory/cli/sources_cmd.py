@@ -9,10 +9,12 @@
     slm sources report ID
     slm sources rescan ID
     slm sources remove ID [--purge] [--yes]
+    slm sources forget-empty ID [--yes]
 
 Every subcommand is a thin client of ``/api/v3/sources`` (the routes the dashboard uses). Nothing
 here reads the folder. ``add`` shows what would be read and asks first; ``--purge`` erases the
-memories the folder gave and needs the typed word ``erase``. ``--yes`` answers both questions;
+memories the folder gave and needs the typed word ``erase``. ``forget-empty`` is for a folder
+you emptied on purpose (shown offline as ``empty_folder``): it hides the memories of its files. ``--yes`` answers both questions;
 without a terminal and without ``--yes`` the command refuses. ``--json`` gives JSON.
 """
 
@@ -28,6 +30,7 @@ from typing import Any
 from superlocalmemory.cli.daemon import (
     DaemonConflict,
     DaemonNotFound,
+    DaemonServerError,
     DaemonUnprocessable,
     daemon_request,
 )
@@ -37,6 +40,7 @@ _BASE = "/api/v3/sources"
 _NOT_RUNNING = "The SLM daemon is not running (or did not answer). Start it with: slm serve"
 _NEEDS_YES = "There is no terminal to ask on. Run again with --yes to confirm."
 _ERASE_WORD = "erase"
+_EMPTY_HINT = "(if you emptied it on purpose: slm sources forget-empty {})"
 
 
 class _Stop(Exception):
@@ -87,13 +91,15 @@ def _detail_text(raw: Any) -> str:
 def _request(out: _Out, method: str, path: str, body: dict | None = None) -> dict:
     try:
         result = daemon_request(method, path, body, preserve_conflict=True, preserve_not_found=True,
-                                preserve_unprocessable=True)
+                                preserve_unprocessable=True, preserve_server_error=True)
     except DaemonConflict as exc:
         out.fail(_detail_text(getattr(exc, "detail", exc)))
     except DaemonNotFound as exc:
         out.fail(exc.message)
     except DaemonUnprocessable as exc:
         out.fail(exc.message, 2)
+    except DaemonServerError as exc:
+        out.fail(exc.message)
     if result is None:
         out.fail(_NOT_RUNNING)
     return result  # type: ignore[return-value]
@@ -148,19 +154,27 @@ def _add(args: Namespace) -> None:
              f"Connected {preview['root']} as {preview['source_id']}. The first scan has started.")
 
 
+def _reason_text(s: dict) -> str:
+    """The offline reason, with the way out when the reason is an emptied folder."""
+    if not s.get("offline_reason"):
+        return ""
+    hint = "  " + _EMPTY_HINT.format(s["source_id"]) if s["offline_reason"] == "empty_folder" else ""
+    return f"  ({s['offline_reason']})" + hint
+
+
 def _list(args: Namespace) -> None:
     out = _Out(args, "sources list")
     found = _request(out, "GET", _BASE)
     rows = found.get("sources") or []
     lines = [f"{s['source_id']}  {s['state']:<8} {s['kind']:<8} {s['root_path']}  "
              f"files: {sum((s.get('files') or {}).values())}"
-             + (f"  ({s['offline_reason']})" if s.get("offline_reason") else "") for s in rows]
+             + _reason_text(s) for s in rows]
     out.emit(found, "\n".join(lines) if lines else "No folders are connected. Add one with: slm sources add PATH")
 
 
 def _report_text(r: dict) -> str:
     lines = [f"Folder {r['source_id']}: {r['state']}"
-             + (f" ({r['offline_reason']})" if r.get("offline_reason") else "")
+             + _reason_text(r).replace("  ", " ", 1)
              + (f", paused: {r['paused_reason']}" if r.get("paused_reason") else ""),
              "Files: " + (", ".join(f"{k} {v}" for k, v in sorted(r["counts"].items())) or "none"),
              "Left out by rule: " + (", ".join(f"{k} {v}" for k, v in sorted(r["skipped_by_rule"].items())) or "none"),
@@ -199,7 +213,17 @@ def _remove(args: Namespace) -> None:
                                         else " Its memories stay, hidden from the folder's files; add --purge to erase them."))
 
 
-_COMMANDS = {"add": _add, "list": _list, "report": _report, "rescan": _rescan, "remove": _remove}
+def _forget_empty(args: Namespace) -> None:
+    out = _Out(args, "sources forget-empty")
+    sid = _source_id(out, args)
+    if not _confirm(out, args, "Hide the memories of every file this folder held? They are kept, not erased. [y/N] "):
+        out.fail("Nothing was changed.")
+    done = _request(out, "POST", f"{_BASE}/{sid}/forget-empty")
+    out.emit(done, f"Forgot {done.get('forgotten', 0)} file(s) of {sid}; the folder is active again.")
+
+
+_COMMANDS = {"add": _add, "list": _list, "report": _report, "rescan": _rescan, "remove": _remove,
+             "forget-empty": _forget_empty}
 
 
 def cmd_sources(args: Namespace) -> int:
@@ -216,7 +240,7 @@ def _json_flag(parser: Any) -> None:
 
 
 def register_sources_parser(sub: Any) -> None:
-    p = sub.add_parser("sources", help="Connect folders and notes vaults (add/list/report/rescan/remove)")
+    p = sub.add_parser("sources", help="Connect folders and notes vaults (add/list/report/rescan/remove/forget-empty)")
     _json_flag(p)
     cmds = p.add_subparsers(dest="sources_command")
     add = cmds.add_parser("add", help="Check a folder, show what would be read, and connect it")
@@ -233,7 +257,10 @@ def register_sources_parser(sub: Any) -> None:
     rm.add_argument("source_id")
     rm.add_argument("--purge", action="store_true", help="Also erase the memories it gave")
     rm.add_argument("--yes", action="store_true", help="Do not ask")
-    for sp in (add, lst, rm):
+    fe = cmds.add_parser("forget-empty", help="Forget the files of a folder you emptied on purpose")
+    fe.add_argument("source_id")
+    fe.add_argument("--yes", action="store_true", help="Do not ask")
+    for sp in (add, lst, rm, fe):
         _json_flag(sp)
     p.set_defaults(yes=False, purge=False)
 

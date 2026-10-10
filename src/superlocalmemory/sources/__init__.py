@@ -12,6 +12,7 @@ from superlocalmemory.sources.api import (
     SourceRefused,
     add_source,
     confirm_source,
+    forget_empty,
     hint,
     list_sources,
     release_file,
@@ -26,6 +27,6 @@ from superlocalmemory.sources.report import SourceReport
 
 __all__ = [
     "DEFAULT_TYPES", "HintsNotAvailable", "SourceHost", "SourceInfo", "SourcePreview", "SourceRefused",
-    "SourceReport", "add_source", "configure", "confirm_source", "hint", "list_sources",
+    "SourceReport", "add_source", "configure", "confirm_source", "forget_empty", "hint", "list_sources",
     "release_file", "remove_source", "rescan", "source_report",
 ]

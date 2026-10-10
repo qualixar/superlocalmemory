@@ -101,6 +101,13 @@ async def remove(source_id: str, request: Request, purge: bool = False):
     return {"removed": True, "source_id": source_id, "purged": purge}
 
 
+@router.post("/{source_id}/forget-empty")
+async def forget_empty(source_id: str, request: Request):
+    profile, _ = await _context(request, delete=True)  # it hides memories, as remove does
+    await _owned(profile, source_id)
+    return await _call(sources.forget_empty, source_id)
+
+
 @router.post("/{source_id}/rescan")
 async def rescan(source_id: str, request: Request):
     profile, _ = await _context(request, write=True)
