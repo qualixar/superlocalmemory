@@ -131,6 +131,9 @@ class HealthMonitor:
         "superlocalmemory.core.embedding_worker",
         "superlocalmemory.core.reranker_worker",
         "superlocalmemory.core.recall_worker",
+        # Image-and-text worker: counted in the budget, never load-bearing for text
+        # recall, so it is a normal kill candidate and restarts lazily.
+        "multimodal_worker",
     )
     # Workers that are LOAD-BEARING for recall quality — never kill these
     # first; prefer killing the reranker (gracefully degrades) or GC instead.

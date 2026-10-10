@@ -17,6 +17,7 @@ import hashlib
 import logging
 import os
 import time
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from fnmatch import fnmatch
 from pathlib import Path
@@ -492,7 +493,11 @@ class CodeParser:
             config_dict["repo_root"] = str(self._config.repo_root)
 
             workers = min(self._config.parallel_workers, len(tasks))
-            with ProcessPoolExecutor(max_workers=workers) as executor:
+            # spawn, not fork: a forked worker would inherit the daemon's instance-lock fd
+            with ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=multiprocessing.get_context("spawn"),
+            ) as executor:
                 future_map = {}
                 for rel_path, source_bytes, language in tasks:
                     future = executor.submit(

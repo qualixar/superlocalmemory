@@ -176,6 +176,8 @@ dev = [
     # Starlette TestClient's maintained synchronous backend. Test-only: the
     # product runtime continues to use the separately pinned httpx client.
     "httpx2==2.12.0",
+    # Architecture contracts live in .importlinter; CI and tests run lint-imports.
+    "import-linter==2.15",
 ]
 
 [project.urls]
@@ -195,7 +197,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json"]
+superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "runtimes/locks/*.txt"]
 
 [tool.setuptools.data-files]
 "share/superlocalmemory/codex/skills/slm-bot-memory" = ["plugin-src/skills/slm-bot-memory/SKILL.md"]

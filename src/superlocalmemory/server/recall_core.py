@@ -167,11 +167,13 @@ def _envelope(engine: Any, call: RecallCall, response: Any, snapshot: Any) -> di
         ) if memory_ids else {}
     )
     retrieval = getattr(engine._config, "retrieval", None)
+    from superlocalmemory.retrieval.media_channel import memory_sources
     from superlocalmemory.core.kind_query import engine_display_min_confidence
 
     results, no_confident_match = serialize_recall_response(
         response, limit=call.limit,
         memory_map={k: sanitize_json_text(v) for k, v in memory_map.items()},
+        source_map=memory_sources(engine._db, memory_ids),
         per_fact_max=getattr(retrieval, "recall_per_fact_max_chars", 2400),
         total_max=getattr(retrieval, "recall_total_max_chars", 12000),
         # Markers only on session-bearing recalls: a marker can only buy a

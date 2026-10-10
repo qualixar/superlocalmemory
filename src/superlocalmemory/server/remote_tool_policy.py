@@ -83,17 +83,23 @@ HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "apply_refactor", "audit_trail", "backup_status", "build_code_graph", "build_graph",
     "code_entity_history", "code_memory_search", "code_stale_check", "compact_memories",
     "consistency_check", "consolidate_cognitive", "detect_changes", "enrich_blast_radius",
-    "evolve_skill", "find_large_functions", "forget", "get_affected_flows",
+    "evolve_skill", "find_large_functions", "forget", "get_affected_flows", "get_media", "media_status",
     "get_architecture_overview", "get_blast_radius", "get_community", "get_flow",
     "get_review_context", "link_memory_to_code", "list_communities",
     "list_failed_operations", "list_flows", "list_graph_stats", "mesh_events",
     "mesh_lock", "mesh_status",
     "mesh_summary", "observe_bounded_loop_evidence",
     "observe_bounded_loop_execution_learning", "quantize", "query_graph",
-    "reap_processes", "refactor_preview", "resolve_operation", "run_maintenance",
+    "reap_processes", "refactor_preview", "remember_document", "remember_media", "resolve_operation", "run_maintenance",
     "semantic_search_code", "set_mode", "set_retention_policy", "slm_loop_run",
     "switch_profile", "update_code_graph",
 })
+
+#: Image and document tools. They are in :data:`HOST_ONLY_TOOLS` and stay there until the owner decides how a
+#: remote key gets image rights; flipping this switch alone changes nothing.
+MEDIA_TOOLS: frozenset[str] = frozenset({
+    "remember_media", "get_media", "remember_document", "media_status"})
+REMOTE_MEDIA_TOOLS_ENABLED = False
 
 #: MCP methods a remote caller may send. Everything else is refused.
 ALLOWED_METHODS: frozenset[str] = frozenset({
@@ -615,6 +621,8 @@ __all__ = [
     "ALLOWED_METHODS",
     "DENIAL_CODE",
     "HOST_ONLY_TOOLS",
+    "MEDIA_TOOLS",
+    "REMOTE_MEDIA_TOOLS_ENABLED",
     "MAX_BODY_BYTES",
     "MEDIA_TOOLS",
     "MESH_TOOLS",
