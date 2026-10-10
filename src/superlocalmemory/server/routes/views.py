@@ -49,6 +49,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from superlocalmemory.access.rbac import Permission
+from superlocalmemory.retrieval import remote_view
 from superlocalmemory.views import (
     ViewError,
     ViewStore,
@@ -197,7 +198,9 @@ _VIA = Annotated[str, Query(pattern="^(dashboard|cli|mcp)$")]
 
 @router.get("/run")
 async def run_view(request: Request, name: _Name, via: _VIA = "dashboard",
-                   profile_id: Annotated[str, Query(max_length=200)] = ""):
+                   profile_id: Annotated[str, Query(max_length=200)] = "",
+                   # How a remote caller came in (set by the MCP side); it can only hide more.
+                   caller_view: Annotated[str, Query(max_length=32)] = ""):
     """Run a view: the recall ``GET /recall`` runs, with the view's arguments.
 
     The dashboard, ``slm view run`` and the MCP ``run_view`` tool all land here,
@@ -233,14 +236,15 @@ async def run_view(request: Request, name: _Name, via: _VIA = "dashboard",
         request, getattr(request.app.state, "daemon_descriptor", None),
         actor_kind="saved-view")
     try:
-        call = view_recall_call(engine, view, profile, actor=actor, via=via)
+        call = view_recall_call(engine, view, profile, actor=actor, via=via,
+                                caller_view=remote_view.parse_view(caller_view))
         return shape_run(view, await run_recall(engine, call, app_state=request.app.state))
     except Exception:  # noqa: BLE001
         return _internal_error()
 
 
 def view_recall_call(engine: Any, view: model.SavedView, profile: str, *,
-                     actor: str, via: str) -> Any:
+                     actor: str, via: str, caller_view: str = "") -> Any:
     """The ``RecallCall`` for a view: its arguments, resolved as ``/recall`` would.
 
     ``profile_id`` is the profile the view was read from, named explicitly so a
@@ -264,6 +268,7 @@ def view_recall_call(engine: Any, view: model.SavedView, profile: str, *,
         window=args.get("window", ""), as_of=args.get("as_of", ""),
         facets=None if facets.empty else facets,
         origin=f"view-{via}" if via in ("cli", "mcp") else ORIGIN_VIEW_DASHBOARD,
+        caller_view=caller_view,
     )
 
 

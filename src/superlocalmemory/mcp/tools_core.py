@@ -1569,7 +1569,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
             path = f"/api/corrections?limit={limit}"
             if (profile_id or "").strip():
                 path += "&profile_id=" + urllib.parse.quote(profile_id.strip(), safe="")
-            result = await asyncio.to_thread(daemon_request, "GET", path)
+            from superlocalmemory.mcp.remote_visibility import with_view
+
+            result = await asyncio.to_thread(daemon_request, "GET", with_view(path))
             if isinstance(result, dict) and result.get("success"):
                 return result
             return {

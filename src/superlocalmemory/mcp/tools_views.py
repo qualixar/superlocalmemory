@@ -70,9 +70,11 @@ def _run_through_daemon(name: str, profile_id: str = "") -> dict[str, Any]:
     path = f"/api/v3/views/run?name={quote(name, safe='')}&via=mcp"
     if profile_id:
         path += f"&profile_id={quote(profile_id, safe='')}"
+    from superlocalmemory.mcp.remote_visibility import with_view
+
     try:
         data = daemon_request(
-            "GET", path,
+            "GET", with_view(path),
             timeout_seconds=60.0, preserve_conflict=True, preserve_not_found=True,
             preserve_unprocessable=True)
     except DaemonNotFound as exc:

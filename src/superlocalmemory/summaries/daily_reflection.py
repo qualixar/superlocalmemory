@@ -46,7 +46,9 @@ from .base import (
     GENERATED_BY_EXTRACTIVE,
     GENERATED_BY_LLM_B,
     GENERATED_BY_LLM_C,
+    HiddenOf,
     SummaryResult,
+    without_hidden,
     get_mode_str,
 )
 
@@ -64,6 +66,7 @@ def generate_daily_reflection(
     config: object | None = None,
     *,
     tz_offset_minutes: int = 0,
+    hidden_of: HiddenOf | None = None,
 ) -> SummaryResult:
     """Generate a Daily Reflection for a specific date.
 
@@ -78,6 +81,7 @@ def generate_daily_reflection(
                      ``created_at`` is stored in UTC, so without it the day is
                      the UTC day and, east of UTC, memories saved after local
                      midnight land in the previous day's reflection.
+        hidden_of:   Names the facts the caller may not see; they are left out.
 
     Returns:
         SummaryResult with source_fact_ids for every contributing fact.
@@ -120,6 +124,8 @@ def generate_daily_reflection(
             generated_by=GENERATED_BY_EXTRACTIVE,
             metadata={"date": date_str, "error": str(exc)},
         )
+
+    rows = without_hidden([dict(r) for r in rows], hidden_of)
 
     # ── coverage decision ─────────────────────────────────────────────────────
     if not rows:

@@ -183,7 +183,10 @@ def register_kind_tools(server, get_engine: Callable) -> None:
         qs = f"?limit={int(limit)}"
         if kind:
             qs += f"&kind={urllib.parse.quote(kind)}"
-        return await _kinds_request("GET", _with_profile("/suggestions" + qs, profile_id))
+        from superlocalmemory.mcp.remote_visibility import with_view
+
+        return await _kinds_request(
+            "GET", with_view(_with_profile("/suggestions" + qs, profile_id)))
 
     @server.tool()
     @admits(OperationKind.CORRECT)

@@ -79,6 +79,7 @@ def _error(message: str, **extra: Any) -> dict[str, Any]:
 
 def _community_drill_down(
     engine: Any, profile_id: str, community_id: int, limit: int, offset: int,
+    hidden_of: Any = None,
 ) -> Any | None:
     """Full (paged) membership of one community — the Q9 explicit drill-down.
 
@@ -105,6 +106,10 @@ def _community_drill_down(
         all_ids = json.loads(row.get("fact_ids_json") or "[]")
     except (ValueError, TypeError):
         all_ids = []
+    if hidden_of is not None and hidden_of(all_ids):
+        # The summary text was written from every member: a remote caller that may not
+        # see one of them is told there is no such community.
+        return None
     total = len(all_ids)
     page_limit = limit if isinstance(limit, int) and limit > 0 else _DEFAULT_COMMUNITY_MEMBER_LIMIT
     page_offset = max(0, offset) if isinstance(offset, int) else 0
@@ -187,6 +192,15 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
         else:
             profile_id = getattr(engine, "profile_id", "default")
 
+        # A remote caller's summaries leave out what it may not see (pictures, pages,
+        # folder files). None for a caller on this computer: nothing changes for it.
+        from superlocalmemory.mcp.remote_visibility import current_view, hidden_fact_ids
+
+        hidden_of = None
+        if current_view():
+            def hidden_of(ids, _db=engine._db, _pid=profile_id):  # noqa: F811
+                return hidden_fact_ids(_db, _pid, list(ids))
+
         # "community" reads through the live engine's own db handle (exactly
         # like session_init's community_context), not a path-opened
         # connection — the file-existence check below is for the other three
@@ -196,7 +210,7 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
                 return _error("kind='community' requires target=<community_id>")
             try:
                 result = _community_drill_down(
-                    engine, profile_id, int(target.strip()), limit, offset,
+                    engine, profile_id, int(target.strip()), limit, offset, hidden_of,
                 )
             except Exception as exc:
                 logger.warning("community drill-down failed (%s): %s", target, exc)
@@ -235,7 +249,7 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
                 # "today" is this computer's today, so bucket by its time zone.
                 result = generate_daily_reflection(
                     db_path, day, profile_id, config,
-                    tz_offset_minutes=local_offset_minutes(day))
+                    tz_offset_minutes=local_offset_minutes(day), hidden_of=hidden_of)
 
             elif kind == "project":
                 from superlocalmemory.summaries import generate_project_work_log
@@ -244,6 +258,7 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
                     return _error("kind='project' requires target=<project path>")
                 result = generate_project_work_log(
                     db_path, target.strip(), profile_id, config,
+                    hidden_of=hidden_of,
                 )
 
             elif kind == "session":
@@ -254,10 +269,13 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
                     # them, and a bare refusal is a dead end.
                     from superlocalmemory.summaries.sessions import list_recent_sessions
 
+                    # Its counts include every memory of a session, so a remote caller
+                    # is not shown the list: it names the session it wants.
                     return _error("kind='session' requires target=<session id>",
-                                  recent_sessions=list_recent_sessions(db_path, profile_id))
+                                  recent_sessions=[] if hidden_of is not None
+                                  else list_recent_sessions(db_path, profile_id))
                 result = generate_session_summary(
-                    db_path, target.strip(), profile_id, config,
+                    db_path, target.strip(), profile_id, config, hidden_of=hidden_of,
                 )
         except Exception as exc:
             logger.warning("summary generation failed (%s/%s): %s", kind, target, exc)

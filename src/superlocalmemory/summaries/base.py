@@ -8,7 +8,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Callable, Sequence
+
+#: Names the facts a caller may not see, among the ids it is given.
+HiddenOf = Callable[[Sequence[str]], "set[str]"]
+
+
+def without_hidden(rows: list[dict], hidden_of: HiddenOf | None) -> list[dict]:
+    """``rows`` (each with a ``fact_id``) minus the ones ``hidden_of`` names. The same list without it."""
+    if hidden_of is None or not rows:
+        return rows
+    hidden = hidden_of([r["fact_id"] for r in rows])
+    return [r for r in rows if r["fact_id"] not in hidden]
 
 
 @dataclass

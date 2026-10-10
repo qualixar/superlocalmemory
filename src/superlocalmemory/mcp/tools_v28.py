@@ -139,7 +139,8 @@ def register_v28_tools(server, get_engine: Callable) -> None:
             pid, refused = tool_profile(engine, profile_id)
             if refused:
                 return refused
-            facts = engine._db.get_all_facts(pid)[:limit]
+            from superlocalmemory.mcp.remote_visibility import visible_facts
+            facts = visible_facts(engine._db, pid, engine._db.get_all_facts(pid))[:limit]
             states: dict[str, list[dict]] = {
                 "active": [], "warm": [], "cold": [], "archived": [],
             }

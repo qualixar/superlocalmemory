@@ -23,6 +23,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.retrieval import visibility
 from superlocalmemory.retrieval.visibility import VisibilityContext
 
 logger = logging.getLogger(__name__)
@@ -84,4 +85,14 @@ def context_for(view: str, db: Any, profile_id: str) -> VisibilityContext | None
     return None
 
 
-__all__ = ["REMOTE", "REMOTE_MEDIA", "VIEW_PARAM", "context_for", "parse_view"]
+def hidden_among(view: str, db: Any, profile_id: str, fact_ids: Any) -> set[str]:
+    """Which of ``fact_ids`` the ``view`` hides (none for a local caller; all if the lookup fails)."""
+    ctx = context_for(view, db, profile_id)
+    ids = [i for i in fact_ids if i]
+    if ctx is None or not ids:
+        return set()
+    with visibility.use(ctx):
+        return visibility.hidden_among(db, profile_id, ids)
+
+
+__all__ = ["REMOTE", "REMOTE_MEDIA", "VIEW_PARAM", "context_for", "hidden_among", "parse_view"]

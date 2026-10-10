@@ -29,4 +29,17 @@ def visible_facts(db: Any, profile_id: str, facts: Sequence[Any]) -> list[Any]:
     return [f for f in facts if f.fact_id not in hidden]
 
 
-__all__ = ["current_view", "visible_facts"]
+def hidden_fact_ids(db: Any, profile_id: str, fact_ids: Sequence[str]) -> set[str]:
+    """Which of ``fact_ids`` the current caller may not see (none for a local caller)."""
+    return remote_view.hidden_among(current_view(), db, profile_id, fact_ids)
+
+
+def with_view(path: str) -> str:
+    """``path`` for the daemon, telling it a remote caller asks. Unchanged for a local caller."""
+    view = current_view()
+    if not view:
+        return path
+    return f"{path}{'&' if '?' in path else '?'}{remote_view.VIEW_PARAM}={view}"
+
+
+__all__ = ["current_view", "hidden_fact_ids", "visible_facts", "with_view"]
