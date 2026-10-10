@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -17,11 +19,12 @@ from typing import Any, Literal
 from superlocalmemory.sources import host as host_mod
 from superlocalmemory.sources import locks, retire
 from superlocalmemory.sources.host import SourceHost
-from superlocalmemory.sources.ignore import DEFAULT_TYPES
+from superlocalmemory.sources.ignore import DEFAULT_TYPES, IgnoreRules
 from superlocalmemory.sources.preview import SourcePreview, build_preview
 from superlocalmemory.sources.report import SourceReport, build_report
 from superlocalmemory.sources.roots import check_root
 from superlocalmemory.sources.store import SourceStore
+from superlocalmemory.sources.walk import walk_tree
 
 logger = logging.getLogger(__name__)
 
@@ -206,14 +209,9 @@ def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: di
 
 def _check_still_empty(host: SourceHost, source: dict[str, Any]) -> int:
     """Look at the folder again; return its disk number, or refuse if it is not plainly an empty folder."""
-    import json
-    import os
-
-    from superlocalmemory.sources.ignore import IgnoreRules
-    from superlocalmemory.sources.walk import walk_tree
-
     if host.remote_on():
-        raise SourceRefused("remote_access_on", REMOTE_MESSAGE)
+        raise SourceRefused("remote_access_on", "Folders are paused while remote access is set up. "
+                                                "Turn remote access off first.")
     if host.runtime() is None:
         raise SourceRefused("writer_not_ready", "The memory writer is not ready; try again shortly.")
     root = check_root(source["root_path"])
