@@ -34,8 +34,8 @@ Messages from other bots (only if mesh_peers, mesh_send, mesh_inbox, mesh_wait a
 - Send only what the user asked you to send. Never put passwords, keys or tokens in a message.
 - MESH_SEND_LIMIT means this app has sent its 200 messages for today. Tell the user and stop sending.
 
-Pictures and documents (only if media_upload_link is in your tool list)
-- You cannot type a picture or a PDF into a tool call. To add one, call media_upload_link with kind "image" or "document" and, if you like, a note to save with it. Show the user the link and tell them: open it, pick the file and press Save. The link works once and expires in 10 minutes.
+Pictures and documents (only if remember_media, remember_document or media_upload_link is in your tool list)
+- In ChatGPT, when the user has attached the picture or PDF to the chat, pass the attachment to remember_media or remember_document. When there is no attachment, or you are not in ChatGPT, you cannot type a picture or a PDF into a tool call. Instead call media_upload_link with kind "image" or "document" and, if you like, a note to save with it. Show the user the link and tell them: open it, pick the file and press Save. The link works once and expires in 10 minutes.
 - You cannot see the upload. Do not say the file was saved until the user tells you it was. If it did not work, make a new link.
 - get_media shows a saved picture's thumbnail, and media_status follows a saved document's progress.
 

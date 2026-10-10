@@ -87,7 +87,8 @@ never gets the built-in hosts; it always needs your list.
 
 Pictures can be up to 25 MB and PDFs up to 100 MB. ChatGPT on a phone may not
 pass the attachment to the plugin at all; if ChatGPT says it has no file to
-send, attach the file in ChatGPT on the web instead.
+send, attach the file in ChatGPT on the web instead, or ask ChatGPT for an
+upload link (see "Adding a picture or PDF from a chat" below).
 
 ## ChatGPT dots
 
