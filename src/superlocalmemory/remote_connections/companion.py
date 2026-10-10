@@ -29,7 +29,11 @@ def _dial(endpoint: str, token: str, device_key: str = ""):
     # TLS verification stays on; no proxy inheritance, redirects or compression.
     return NoRedirect(
         endpoint,
-        additional_headers={"Authorization": "Bearer " + token, "DPoP": proof},
+        additional_headers={
+            "Authorization": "Bearer " + token,
+            "DPoP": proof,
+            "x-slm-connector-features": "grant-v1",
+        },
         proxy=None,
         compression=None,
         max_size=MAX_FRAME_BYTES,

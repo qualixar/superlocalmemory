@@ -52,6 +52,12 @@ Three rules hold for every call, read key or write key alike:
    are allowed: the recall runs as the bound profile, so they reach only what
    other profiles chose to share with it or with every profile.
 
+The mesh tools a connected web app may call (``remote_tool_policy.MESH_TOOLS``)
+take no ``profile_id``: the mesh is per profile, and they run in process against
+the key's profile (``mcp/remote_caller.RemoteMeshTarget``), with no lease and no
+active-profile check, so a key bound to one profile reaches only that profile's
+peers, messages and shared state.
+
 Every argument a remote-callable tool takes is classified below.
 ``tests/test_security/test_remote_profile_binding.py`` reads the live tool
 registry and fails when a tool gains an argument that is not classified here,
@@ -94,6 +100,8 @@ ROUTED_TOOLS: frozenset[str] = frozenset({
     "set_memory_kind", "memory_kinds_status", "review_memory_kinds",
     "confirm_memory_kinds", "run_view", "manage_view", "skill_health", "skill_lineage",
     "slm_loop_history", "slm_loop_show", "get_brain_evidence_status",
+    # 4.1.25: images and documents, for a key that opted in (remote_tool_policy.MEDIA_TOOLS).
+    "remember_media", "get_media", "remember_document", "media_status",
     "record_agent_experience", "record_cognitive_turn", "finalize_cognitive_turn",
 })
 
@@ -122,17 +130,28 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     "filters",
     "finalize", "idempotency_key", "importance", "include_history", "include_unknown",
     "input_summary", "items", "key", "kind", "known_as_of", "limit", "max_age_days",
-    "max_results", "memory_ids", "metadata", "min_confidence", "mode", "name", "new_name",
-    "offset", "outcome",
+    "max_results", "memory_ids", "message", "metadata", "min_confidence", "mode", "name",
+    "new_name", "offset", "outcome",
     "output_summary", "pattern_id", "pattern_type", "payload", "prefer_project", "project",
     "project_strict",
-    "project_path", "query", "recall_query_id", "receipt_id", "replaces", "reversible", "run_id",
+    "project_path", "query", "recall_query_id", "receipt_id", "refs", "replaces",
+    "reply_to", "reversible", "run_id",
     "saved_by", "session_date", "session_id", "skill_name", "tags", "tags_match", "target",
-    "tool_name", "ttl_seconds", "valid_at", "value", "window",
+    "timeout_s", "to", "tool_name", "ttl_seconds", "valid_at", "value", "window",
+})
+
+#: Arguments only the image and document tools take. Accepted for those tools alone, so a
+#: later tool with a ``path`` argument is never let through by accident.
+MEDIA_ARGUMENTS: frozenset[str] = frozenset({
+    "base64", "download_url", "file_name", "job_id", "media_id", "path", "variant",
+})
+MEDIA_ARGUMENT_TOOLS: frozenset[str] = frozenset({
+    "remember_media", "get_media", "remember_document", "media_status",
 })
 
 CLASSIFIED_ARGUMENTS: frozenset[str] = (
     PROFILE_ARGUMENTS | READ_SCOPE_ARGUMENTS | WRITE_SCOPE_ARGUMENTS | NEUTRAL_ARGUMENTS
+    | MEDIA_ARGUMENTS
 )
 
 PROFILE_DENIAL = "remote_profile_not_allowed"
@@ -183,6 +202,28 @@ def _profile_refusal(key_name: str, bound: str) -> BindingRefusal:
         "another profile.")
 
 
+def _check_media_argument(tool: str, name: str, value: Any) -> None:
+    """Image and document arguments belong to those tools only, and a remote app can
+    never name a file on this computer."""
+    if name not in MEDIA_ARGUMENTS:
+        return
+    if tool not in MEDIA_ARGUMENT_TOOLS:
+        raise BindingRefusal(
+            ARGUMENT_DENIAL, f"Argument '{name}' is not accepted over remote access.")
+    if name == "path" and value not in (None, ""):
+        raise BindingRefusal(
+            ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
+
+
+def _check_mesh_state(arguments: Mapping[str, Any]) -> None:
+    """A remote caller may only read a shared key, never write or delete one."""
+    key = arguments.get("key")
+    if arguments.get("action", "get") != "get":
+        raise BindingRefusal(ARGUMENT_DENIAL, "Remote access can only read mesh state.")
+    if not isinstance(key, str) or not key.strip() or len(key) > 256:
+        raise BindingRefusal(ARGUMENT_DENIAL, "mesh_state needs a key of 1 to 256 characters.")
+
+
 def bind_arguments(tool: str, arguments: object, *, key_name: str,
                    bound: str) -> dict[str, Any]:
     """The arguments to run ``tool`` with as profile ``bound``.
@@ -193,10 +234,13 @@ def bind_arguments(tool: str, arguments: object, *, key_name: str,
         arguments = {}
     if not isinstance(arguments, Mapping):
         raise BindingRefusal(ARGUMENT_DENIAL, "Tool arguments must be a JSON object.")
+    if tool == "mesh_state":
+        _check_mesh_state(arguments)
     for name, value in arguments.items():
         if name not in CLASSIFIED_ARGUMENTS:
             raise BindingRefusal(
                 ARGUMENT_DENIAL, f"Argument '{name}' is not accepted over remote access.")
+        _check_media_argument(tool, name, value)
         if name in PROFILE_ARGUMENTS and not _names_bound_profile(value, bound):
             raise _profile_refusal(key_name, bound)
         if name == "scope" and value not in (None, "", "personal"):

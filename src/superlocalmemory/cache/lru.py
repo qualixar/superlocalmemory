@@ -265,3 +265,9 @@ class CacheManager:
         finally:
             if self._lock:
                 self._lock.release()
+
+
+#: The name the tiered cache and later callers use.
+LruCache = CacheManager
+
+__all__ = ["CacheEntry", "CacheManager", "LruCache"]

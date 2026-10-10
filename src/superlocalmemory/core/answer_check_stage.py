@@ -33,10 +33,12 @@ from typing import Any
 
 from superlocalmemory.core import answer_check_memo
 from superlocalmemory.core.answer_check_scope import answer_check_skipped
+from superlocalmemory.retrieval import media_rerank
 from superlocalmemory.retrieval.answer_check_status import (
     ANSWER_CHECK_DETAILS,
     ANSWER_CHECK_STATUSES,
     DETAIL_BUDGET,
+    DETAIL_MEDIA_UNJUDGED,
     DETAIL_NONE,
     DETAIL_NO_RESULTS,
     DETAIL_NOT_A_QUESTION,
@@ -83,6 +85,8 @@ def run_answer_check(retrieval_engine: Any, query: str, response: Any, *,
         return JudgeOutcome(None, STATUS_SKIPPED, DETAIL_NOT_A_QUESTION)
     if not response.results:
         return JudgeOutcome(None, STATUS_SKIPPED, DETAIL_NO_RESULTS)
+    if media_rerank.all_unreadable(response.results):
+        return JudgeOutcome(None, STATUS_SKIPPED, DETAIL_MEDIA_UNJUDGED)
     if _would_send_another_profiles_memory(judge, response, profile_id, request):
         logger.debug("Answer check skipped: the online check would read another "
                      "profile's memory")
@@ -175,13 +179,16 @@ def _deadline_or_skip(recall_started: float | None) -> Any:
 
 def _top_documents(judge: Any, response: Any) -> list[Any]:
     """What the plain check reads: the top ``top_k`` memories' text. Never raises."""
-    from superlocalmemory.retrieval.judge_recipe import document_from_fact
+    from superlocalmemory.retrieval.judge_recipe import JudgeDocument, document_from_fact
     from superlocalmemory.retrieval.sufficiency import DEFAULT_TOP_K
 
     top_k = getattr(judge, "top_k", DEFAULT_TOP_K)
     if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1:
         top_k = DEFAULT_TOP_K
-    return [document_from_fact(getattr(r, "fact", None)) for r in response.results[:top_k]]
+    docs = [document_from_fact(getattr(r, "fact", None)) for r in response.results[:top_k]]
+    # Saving labels are not part of what the memory says.
+    return [d if "[" not in d.content else JudgeDocument(content=media_rerank.strip_labels(d.content))
+            for d in docs]
 
 
 def _would_send_another_profiles_memory(judge: Any, response: Any,

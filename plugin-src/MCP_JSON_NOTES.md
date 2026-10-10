@@ -21,7 +21,7 @@ anyway, so nothing is lost either way.
 **`SLM_MCP_PROFILE: code` narrowed the tool set.** `code` (38 tools) drops
 the 8 mesh tools among others. Forcing it overrode a wider profile the user had
 deliberately configured. Omitted, the server falls back to the same no-profile
-default as every other install — the 56-tool `full` surface — which is the
+default as every other install — the 57-tool `full` surface — which is the
 user's decision to narrow or not, not the plugin's.
 
 `SLM_AGENT_ID` stays: it is attribution, not configuration, and it is what lets
