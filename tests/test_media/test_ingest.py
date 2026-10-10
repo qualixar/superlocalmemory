@@ -319,3 +319,43 @@ def test_a_fifo_is_refused_without_blocking(env, tmp_path, monkeypatch):
     finally:
         os.close(fd)
     assert r.status == "refused" and env.client.calls == []
+
+
+# -- off is not the same as not ready ------------------------------------------
+
+def _turn_on(root):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "features.json").write_text('{"schema": 1, "media": {"enabled": true}}', encoding="utf-8")
+
+
+def _fake_env(monkeypatch, state):
+    import importlib
+
+    module = importlib.import_module("superlocalmemory.runtimes.media_env")
+
+    fake = SimpleNamespace(root=Path("."), status=lambda: SimpleNamespace(state=state, step="x"))
+    monkeypatch.setattr(module, "media_env", lambda root=None: fake)
+
+
+def _bare(inp):
+    return remember_media(inp, profile_id="p1", actor_id="a", runtime=Runtime(),
+                          config=SimpleNamespace(pii_redaction=False))
+
+
+@pytest.mark.parametrize("state,words", [("unsupported", "can't be set up"), ("installing", "still being set up"),
+                                         ("not_installed", "still being set up"), ("failed", "did not finish")])
+def test_on_but_not_ready_says_so_not_turned_off(root, monkeypatch, state, words):
+    _turn_on(root)
+    _fake_env(monkeypatch, state)
+    r = _bare(MediaInput(base64=base64.b64encode(png()).decode()))
+    assert r.status == "refused" and words in r.reason and "turned off" not in r.reason
+
+
+def test_off_still_says_turned_off(root):
+    r = _bare(MediaInput(base64=base64.b64encode(png()).decode()))
+    assert "turned off" in r.reason
+
+
+def test_bad_input_is_reported_as_bad_input_while_off(root, tmp_path):
+    assert "could not be found" in _bare(MediaInput(path=tmp_path / "nope.png")).reason
+    assert "not supported" in _bare(MediaInput(base64=base64.b64encode(b"%PDF-1.4" + b"x" * 30).decode())).reason
