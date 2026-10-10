@@ -521,3 +521,20 @@ def test_clean_text_past_the_cut_is_still_remote_ok(env):
     env.client.ocr = ("rapidocr", f"{CUT_FILLER}the end")
     r = save(env, png("e6"))
     assert env.store.get_item(r.media_id)["remote_ok"] == 1
+
+
+def test_picture_text_longer_than_the_scan_cap_is_not_shareable(env):
+    from superlocalmemory.memory_core import save_path
+
+    assert save_path.MAX_SCAN_CHARS == 1_000_000
+    env.client.ocr = ("rapidocr", "menu item " * 110_000)       # 1.1 million characters, nothing sensitive
+    r = save(env, png("e7"))
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    assert len(env.runtime.requests[-1].content) < 10_000        # what is stored is still the cut text
+
+
+def test_picture_text_at_the_scan_cap_is_still_scanned(env):
+    env.client.ocr = ("rapidocr", "x " * 500_000)                 # exactly 1,000,000 characters
+    r = save(env, png("e8"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 1

@@ -80,7 +80,7 @@ def _digest(text: str) -> str:
 
 #: The longest text ``scan_sensitive`` will read. Past it the scan refuses, and
 #: the caller treats the text as not scanned (never as clean).
-MAX_SCAN_CHARS = 8_000_000
+MAX_SCAN_CHARS = 1_000_000
 
 
 @dataclass(frozen=True)

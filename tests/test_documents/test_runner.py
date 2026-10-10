@@ -255,3 +255,10 @@ def test_a_clean_page_is_still_remote_ok(store, tmp_path):
     service, _, _ = run(store, tmp_path, ["a perfectly clean page of text"])
     service.process_next()
     assert _page_remote_ok(store, receipt) == 1
+
+
+def test_a_page_longer_than_the_scan_cap_is_not_shareable(store, tmp_path):
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, _ = run(store, tmp_path, ["menu item " * 110_000])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 0
