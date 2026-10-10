@@ -50,6 +50,17 @@ MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
 })
 
 
+#: Seconds to embed one memory with the managed model on a CPU. PROVISIONAL: the cloud RAM check
+#: measured ~0.5 s per text (p50, mixed short and long); BENCH calibrates it on the Mac.
+PROVISIONAL_SECONDS_PER_MEMORY = 0.5
+
+#: First run only: new users get the managed model for text and pictures. Off until the Mac
+#: memory check passes; flipping it is the release decision. Existing users never switch by themselves.
+ONE_MODEL_DEFAULT_ENABLED = False
+#: Smallest machine (GB of memory) the first-run default is picked for (owner decision: 16, not 8).
+ONE_MODEL_MIN_RAM_GB = 16
+
+
 def profile_for(model: str) -> ModelProfile | None:
     """The profile for a model repo id, or None (fake models, unknown models)."""
     return MODEL_PROFILES.get(model)
@@ -99,5 +110,5 @@ def watchdog_limit_mb(default: int) -> int:
     return max(wanted, 0)
 
 
-__all__ = ["DEFAULT_LOAD_MB", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
+__all__ = ["DEFAULT_LOAD_MB", "ONE_MODEL_DEFAULT_ENABLED", "ONE_MODEL_MIN_RAM_GB", "PROVISIONAL_SECONDS_PER_MEMORY", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
            "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "text_min_semantic_for", "watchdog_limit_mb"]

@@ -3403,6 +3403,10 @@ async def lifespan(application: FastAPI):
         from superlocalmemory.runtimes import features as _features
         _features.apply_requested(source="npm")
         _features.note_started()
+        # "Upgrade memory engine" recorded by the installer: queued once the media
+        # environment is ready, otherwise left for the next start. Never raises.
+        from superlocalmemory.core import engine_upgrade as _engine_upgrade
+        _engine_upgrade.apply_on_start(application.state, config)
         # Saved PDFs are read page by page in the background; idle while images and documents are off.
         try:
             from superlocalmemory.documents import start_document_jobs

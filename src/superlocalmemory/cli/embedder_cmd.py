@@ -9,6 +9,7 @@
     slm embedder rollback
     slm embedder cancel
     slm embedder forget-previous
+    slm embedder upgrade [--yes]
 
 A switch re-indexes every memory in the background inside the running daemon:
 recall and remember keep working on the current model until the new one is
@@ -128,6 +129,74 @@ def _wait_for_start(job: dict, seconds: float = 20.0) -> dict:
     return job
 
 
+def _is_tty() -> bool:
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _size_text(mb: int) -> str:
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
+
+
+def _plan_text(plan: dict) -> str:
+    old, new = plan["from"], plan["to"]
+    return "\n".join([
+        "Upgrade memory engine",
+        f"  Now:       {old['model']}",
+        f"  Upgrade to: {new['model']} (the model that also reads pictures and documents)",
+        f"  Memories:  {plan['memories']}",
+        f"  Memory (RAM) while it works: {_size_text(plan['ram_mb'])}",
+        f"  Disk: about {_size_text(plan['disk_mb'])} extra, because the previous engine's notes "
+        "are kept until you free them",
+        f"  Time: {plan['minutes_label']}",
+        "",
+        plan["explain"],
+        "Undo with: slm embedder rollback",
+    ])
+
+
+def _confirm_upgrade(args: Namespace) -> bool:
+    """--yes, or a yes at a terminal. Off a terminal (or with --json) it never starts unasked."""
+    if getattr(args, "yes", False):
+        return True
+    if getattr(args, "json", False) or not _is_tty():
+        return False
+    try:
+        answer = input("Upgrade now? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _upgrade(args: Namespace) -> None:
+    plan = _request(args, "upgrade", "GET", "/upgrade")
+    if not plan.get("available"):
+        if plan.get("already"):
+            _out(args, "upgrade", {"plan": plan, "started": False}, plan["reason"])
+            return
+        _fail(args, "upgrade", plan.get("reason") or "The upgrade is not available right now.",
+              "NOT_AVAILABLE")
+    if not getattr(args, "json", False):
+        print(_plan_text(plan))
+    if not _confirm_upgrade(args):
+        hint = "" if _is_tty() and not getattr(args, "json", False) else "Run again with --yes to start it."
+        if getattr(args, "json", False):
+            _out(args, "upgrade", {"plan": plan, "started": False}, "")
+        else:
+            print(f"{hint}\nNothing changed.".strip())
+        return
+    data = _request(args, "upgrade", "POST", "/upgrade", {})
+    job = data["job"]
+    if not getattr(args, "json", False) and not getattr(args, "no_wait", False):
+        job = _wait_for_start(job)
+    _out(args, "upgrade", {"plan": plan, "started": True, **data, "job": job},
+         f"{data.get('detail', '')}\n{describe(job)}")
+    if job.get("state") == "failed":
+        sys.exit(1)
+
+
 def _status(args: Namespace) -> None:
     data = _request(args, "status", "GET")
     _out(args, "status", data, _status_text(data))
@@ -145,7 +214,7 @@ def _simple(command: str, path: str, timeout: float = 60.0):
     return handler
 
 
-_HANDLERS = {"switch": _switch, "status": _status,
+_HANDLERS = {"switch": _switch, "upgrade": _upgrade, "status": _status,
              "rollback": _simple("rollback", "/rollback", timeout=_ROLLBACK_TIMEOUT_S),
              "cancel": _simple("cancel", "/cancel"),
              "forget-previous": _simple("forget-previous", "/forget-previous")}
@@ -197,6 +266,10 @@ def register_embedder_parser(sub: Any) -> None:
     s.add_argument("--endpoint", default="", help="OpenAI-compatible endpoint URL")
     s.add_argument("--no-wait", action="store_true", help="return as soon as it is queued")
     _json_flag(s)
+    u = esub.add_parser("upgrade", help="move your memories to the newer memory engine (rolls back)")
+    u.add_argument("--yes", "-y", action="store_true", help="do not ask")
+    u.add_argument("--no-wait", action="store_true", help="return as soon as it is queued")
+    _json_flag(u)
     for name, text in (("status", "progress of the current or last switch"),
                        ("rollback", "go back to the previous model (re-indexes)"),
                        ("cancel", "stop a running switch; the current model stays"),

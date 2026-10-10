@@ -66,6 +66,8 @@ def read_features(data_root: str | Path | None = None) -> dict[str, Any]:
             for key in ("media", "sources"):
                 if isinstance(raw.get(key), dict):
                     data[key].update(raw[key])
+            if isinstance(raw.get("engine_upgrade"), dict):  # only present once someone asked
+                data["engine_upgrade"] = dict(raw["engine_upgrade"])
     except FileNotFoundError:
         pass
     except (OSError, ValueError):
@@ -77,6 +79,40 @@ def media_requested(data_root: str | Path | None = None) -> bool:
     """True when the installer recorded a request that no one has acted on yet."""
     media = read_features(data_root)["media"]
     return bool(media.get("requested")) and not media.get("enabled")
+
+
+def engine_upgrade_requested(data_root: str | Path | None = None) -> bool:
+    """True when the installer recorded "upgrade the memory engine" and nobody has acted on it yet."""
+    return bool(read_features(data_root).get("engine_upgrade", {}).get("requested"))
+
+
+def clear_engine_upgrade_request(data_root: str | Path | None = None) -> None:
+    """Forget a recorded upgrade request. Writes nothing when there is none."""
+    if not engine_upgrade_requested(data_root):
+        return
+    data = read_features(data_root)
+    data.pop("engine_upgrade", None)
+    try:
+        _write_features(data_root, data)
+    except OSError as exc:
+        logger.warning("could not clear the upgrade request: %s", exc)
+
+
+def record_media_request(*, source: str = "api", data_root: str | Path | None = None) -> bool:
+    """Record "turn images and documents on at the next daemon start"; False when it could not be saved."""
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {SOURCES}")
+    data = read_features(data_root)
+    if data["media"].get("enabled"):
+        return True
+    data["media"] = {**data["media"], "requested": True, "choice_source": source,
+                     "requested_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        _write_features(data_root, data)
+    except OSError as exc:
+        logger.warning("could not record the request for images and documents: %s", exc)
+        return False
+    return True
 
 
 def media_enabled(data_root: str | Path | None = None) -> bool:
