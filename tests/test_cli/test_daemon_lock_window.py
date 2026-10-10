@@ -22,7 +22,6 @@ a faithful in-process stand-in for "another process holds the lock."
 
 from __future__ import annotations
 
-import fcntl
 import sys
 import time
 from contextlib import contextmanager
@@ -32,6 +31,13 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="flock-based lock simulation is POSIX-only",
+)
+
+# Imported after the skip mark: Windows has no fcntl, and a module-level import
+# failed collection there, which stopped every Windows test shard before a
+# single test ran.
+fcntl = pytest.importorskip(
+    "fcntl", reason="flock-based lock simulation is POSIX-only",
 )
 
 
