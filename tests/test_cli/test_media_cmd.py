@@ -243,3 +243,33 @@ def test_enable_prints_no_memory_line_on_a_big_machine(daemon, monkeypatch, caps
     _tty(monkeypatch, False)
     media_cmd.cmd_media(_args(media_command="enable", yes=True))
     assert "memory" not in capsys.readouterr().out.lower().replace("memories", "")
+
+
+GC_REPORT = {"dry_run": True, "rows_without_memory": ["m1", "m2"], "files_without_row": ["f1"],
+             "memories_without_row": [], "files_skipped_young": 3, "rows_removed": 0, "files_removed": 0}
+
+
+def test_gc_reports_by_default_and_removes_nothing(daemon, capsys):
+    seen, state = daemon
+    state["reply"] = GC_REPORT
+    media_cmd.cmd_media(_args(media_command="gc", apply=False))
+    assert ("POST", "/api/v3/media/gc", {"dry_run": True}) in seen
+    out = capsys.readouterr().out
+    assert "2 picture records" in out and "1 file" in out and "slm media gc --apply" in out
+
+
+def test_gc_apply_removes_and_says_what_went(daemon, capsys):
+    seen, state = daemon
+    state["reply"] = {**GC_REPORT, "dry_run": False, "rows_removed": 2, "files_removed": 1}
+    media_cmd.cmd_media(_args(media_command="gc", apply=True))
+    assert ("POST", "/api/v3/media/gc", {"dry_run": False}) in seen
+    assert "Removed 2 picture records and 1 file" in capsys.readouterr().out
+
+
+def test_gc_parser_is_wired():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    media_cmd.register_media_parser(parser.add_subparsers(dest="command"))
+    assert parser.parse_args(["media", "gc"]).apply is False
+    assert parser.parse_args(["media", "gc", "--apply"]).apply is True

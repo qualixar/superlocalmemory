@@ -107,10 +107,32 @@ def _status(args: Namespace) -> None:
     _emit(args, data, "Images & documents: " + media_line(data["media"]))
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _gc_text(report: dict[str, Any]) -> str:
+    if not report.get("dry_run", True):
+        return (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
+                f"{_plural(int(report.get('files_removed', 0)), 'file')}. Your memories are untouched.")
+    rows = len(report.get("rows_without_memory") or [])
+    files = len(report.get("files_without_row") or [])
+    if not rows and not files:
+        return "Nothing to clean up."
+    return (f"Found {_plural(rows, 'picture record')} without a memory and {_plural(files, 'file')} "
+            "without a record. Nothing was removed; to remove them run: slm media gc --apply")
+
+
+def _gc(args: Namespace) -> None:
+    """Report leftovers (default) or remove them with --apply (needs the owner or an admin)."""
+    report = _call(args, "POST", "/api/v3/media/gc", {"dry_run": not getattr(args, "apply", False)})
+    _emit(args, report, _gc_text(report))
+
+
 def cmd_media(args: Namespace) -> None:
     sub = getattr(args, "media_command", None) or "status"
     args.media_command = sub
-    {"enable": _enable, "disable": _disable, "status": _status}[sub](args)
+    {"enable": _enable, "disable": _disable, "status": _status, "gc": _gc}[sub](args)
 
 
 def register_media_parser(sub: Any) -> None:
@@ -126,3 +148,6 @@ def register_media_parser(sub: Any) -> None:
     d.add_argument("--json", **flag)
     s = msub.add_parser("status", help="what is on and how set-up is going")
     s.add_argument("--json", **flag)
+    g = msub.add_parser("gc", help="find picture leftovers (records without a memory, stray files)")
+    g.add_argument("--apply", action="store_true", help="remove them (owner or admin)")
+    g.add_argument("--json", **flag)
