@@ -16,7 +16,7 @@ on:
       - "tests/test_ci_guards/test_*installer*"
       - ".github/workflows/installer-matrix.yml"
   push:
-    branches: [main]
+    branches: [main, "release/**"]
     paths:
       - "bin/slm-npm"
       - "scripts/install.sh"
@@ -34,6 +34,12 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # A newer commit on the same PR or branch supersedes the older run; without
+  # this, superseded runs and duplicate push runs queued for hours.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   clone-installers:
