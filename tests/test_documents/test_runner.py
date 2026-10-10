@@ -170,3 +170,22 @@ def test_real_pdf_end_to_end(store, tmp_path, pdf_python):
     assert doc["state"] == "ready" and doc["page_count"] == 2 and doc["title"] == "Real"
     assert any("quick brown fox" in r.content for r in runtime.requests)
     assert (doc["pages_text_layer"], doc["pages_empty"]) == (1, 1)
+
+
+def _admitting(request):
+    from superlocalmemory.core.engine_ingestion import content_passes_admission
+
+    if not content_passes_admission(request.content):
+        raise AssertionError("ingestion produced no queryable facts")
+
+
+def test_a_one_word_title_still_saves_its_document_memory(store, tmp_path):
+    submit(store, pdf_input(("x",), file_name="report.pdf"))
+    service, _, runtime = run(store, tmp_path, ["a" * 40], runtime=Runtime(on_remember=_admitting))
+    service.process_next()
+    anchors = [r for r in runtime.requests if "page" not in r.metadata["_slm_source"]]
+    assert len(anchors) == 1 and anchors[0].content.startswith("report")
+    from superlocalmemory.media.labels import DOCUMENT
+    from superlocalmemory.retrieval.media_rerank import strip_labels
+
+    assert DOCUMENT in anchors[0].content and strip_labels(anchors[0].content) == "report"

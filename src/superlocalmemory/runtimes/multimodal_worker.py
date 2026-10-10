@@ -12,7 +12,7 @@ Every request may carry an ``"id"``; the reply echoes it.
 
   {"cmd": "ping"}   -> {"ok": true, "loaded": bool, "model": "...", "device": "cpu|mps"}
   {"cmd": "load", "model": "<repo | folder | fake:768>", "revision": "...",
-   "hf_home": "...", "device": "auto|cpu", "role": "|image"}
+   "hf_home": "...", "device": "auto|cpu", "role": "|image|text", "max_pixels": 0}
                     -> {"ok": true, "dim": 768} | {"ok": false, "error": "..."}
   {"cmd": "embed_text", "texts": [str, ...<=64], "prompt": "SearchQuery|Document"}
                     -> {"ok": true, "vectors": [[...], ...]}
@@ -25,7 +25,9 @@ Every request may carry an ``"id"``; the reply echoes it.
                     -> {"ok": true, "engine": "apple_vision|rapidocr|none|fake", "text": "..."}
   {"cmd": "quit"}
 
-Role ``image`` loads a vision-only model: it embeds images, never text. A fake model
+Role ``image`` loads a vision-only model: it embeds images, never text. Role ``text`` loads
+only the text tower of a text+image model: it embeds text, never images. ``max_pixels`` (> 0)
+shrinks larger pictures before they are embedded. A fake model
 does both whatever the role.
 
 Fake mode (``SLM_MEDIA_WORKER_FAKE=1`` or a model id ``fake:<dim>``) answers with
@@ -93,7 +95,7 @@ def _pick_device(wanted: str) -> str:
         return "cpu"
 
 
-def _load_real(model: str, revision: str, hf_home: str, device: str) -> int:
+def _load_real(model: str, revision: str, hf_home: str, device: str, role: str = "", max_pixels: int = 0) -> int:
     if hf_home:
         os.environ["HF_HOME"] = hf_home
         if os.path.isdir(hf_home) and os.listdir(hf_home):
@@ -104,10 +106,13 @@ def _load_real(model: str, revision: str, hf_home: str, device: str) -> int:
 
     chosen = _pick_device(device)
     kwargs = {"revision": revision} if revision and not os.path.isdir(model) else {}
+    # The sound tower is never loaded; the text-only loadout drops the picture tower as well.
+    towers = {"vision_config": None, "audio_config": None} if role == "text" else {"audio_config": None}
     # CPU with sdpa attention and fp32 is mandatory: default kwargs were ~40x slower.
-    loaded = SentenceTransformer(model, device=chosen, **kwargs,
+    loaded = SentenceTransformer(model, device=chosen, **kwargs, config_kwargs=towers,
                                  model_kwargs={"attn_implementation": "sdpa", "dtype": torch.float32})
-    _STATE.update(model=loaded, device=chosen, dim=int(loaded.get_sentence_embedding_dimension() or 0))
+    _STATE.update(model=loaded, device=chosen, text_only=role == "text", max_pixels=max_pixels,
+                  dim=int(loaded.get_sentence_embedding_dimension() or 0))
     return _STATE["dim"]
 
 
@@ -163,6 +168,15 @@ def _normalise(rows) -> list[list[float]]:
     return out
 
 
+def _shrunk(img, max_pixels: int):
+    """``img`` scaled down (aspect kept) to at most ``max_pixels``; unchanged when 0 or already small."""
+    width, height = img.size
+    if max_pixels <= 0 or width * height <= max_pixels:
+        return img
+    scale = math.sqrt(max_pixels / (width * height))
+    return img.resize((max(1, int(width * scale)), max(1, int(height * scale))))
+
+
 def _encode_images(paths: list[str]) -> list[list[float]]:
     from PIL import Image
 
@@ -171,7 +185,7 @@ def _encode_images(paths: list[str]) -> list[list[float]]:
     try:
         for path in paths:
             with Image.open(path) as img:
-                images.append(img.convert("RGB"))
+                images.append(_shrunk(img.convert("RGB"), int(_STATE.get("max_pixels") or 0)))
         return _normalise(_STATE["model"].encode(images, normalize_embeddings=True, show_progress_bar=False))
     finally:
         for img in images:
@@ -189,15 +203,20 @@ def _cmd_ping(_: dict) -> dict:
     return {"loaded": bool(_STATE["name"]), "model": _STATE["name"], "device": _STATE["device"]}
 
 
+def _pixel_cap(req: dict) -> int:
+    value = req.get("max_pixels")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 def _cmd_load(req: dict) -> dict:
     model = req.get("model")
     if not isinstance(model, str) or not model:
         raise _Invalid("model is required")
     role = req.get("role") or ""
-    if role not in ("", "image"):
+    if role not in ("", "image", "text"):
         raise _Invalid("unknown role")
     fake = model.startswith("fake:") or os.environ.get("SLM_MEDIA_WORKER_FAKE") == "1"
-    _STATE["vision"] = False
+    _STATE.update(vision=False, text_only=False)
     if fake:
         try:
             dim = int(model.split(":", 1)[1]) if model.startswith("fake:") else FAKE_DIM
@@ -211,7 +230,7 @@ def _cmd_load(req: dict) -> dict:
                                      str(req.get("device") or "auto"))
     else:
         _STATE["dim"] = _load_real(model, str(req.get("revision") or ""), str(req.get("hf_home") or ""),
-                                   str(req.get("device") or "auto"))
+                                   str(req.get("device") or "auto"), role, _pixel_cap(req))
     _STATE.update(name=model, fake=fake)
     return {"dim": _STATE["dim"]}
 
@@ -251,6 +270,8 @@ def _cmd_embed_image(req: dict) -> dict:
             with open(path, "rb") as fh:
                 vectors.append(_fake_vector(fh.read(), _STATE["dim"]))
         return {"vectors": vectors}
+    if _STATE.get("text_only"):
+        raise _Invalid("this model embeds text only")
     return {"vectors": _encode_vision(paths) if _STATE.get("vision") else _encode_images(paths)}
 
 
