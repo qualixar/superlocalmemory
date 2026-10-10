@@ -394,6 +394,14 @@ class GDPRCompliance:
             if code_graph_data is not None:
                 data["code_graph"] = code_graph_data
 
+            # Pictures, documents, connected folders and jobs live in media.db,
+            # another file the table sweep never reached. Records only.
+            from superlocalmemory.compliance.gdpr_media_export import export_media
+
+            media_data = export_media(export_root, profile_id, self._db)
+            if media_data is not None:
+                data["media"] = media_data
+
             # What the system learned about how this person works: which
             # questions they asked, which answers they found useful, and the
             # weights derived from that. It was erased on request and could not
