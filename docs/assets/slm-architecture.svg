@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1640" width="1600" height="1640" role="img" aria-labelledby="t d">
-  <title id="t">SuperLocalMemory architecture</title>
-  <desc id="d">Agents on your computer and, optionally, web apps and bots use one governed memory engine on your machine. The engine has three pillars: governed memory, recall you can trust, and the answer check by Laya or Jev. Below it sit the modes, canonical storage with parity-gated projections, multi-agent coordination and operations. Web apps reach the same engine through an authenticated gateway and an outbound connector; the memory database stays on the laptop.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1974" width="1600" height="1974" role="img" aria-labelledby="t d">
+  <title id="t">SuperLocalMemory architecture, with pictures, documents and bot-to-bot messaging</title>
+  <desc id="d">Agents on your computer and, optionally, web apps and bots use one governed memory engine on your machine. The engine has three pillars: governed memory, recall you can trust, and the answer check by Laya or Jev. Below it sit the modes, canonical storage with parity-gated projections, multi-agent coordination and operations, plus optional, off-by-default pictures and documents (screenshots, photos and PDFs found by description, kept in their own media database). Web apps and bots can also join the mesh for bot-to-bot messaging, with your permission. Web apps reach the same engine through an authenticated gateway and an outbound connector; the memory database stays on the laptop.</desc>
   <defs>
     <style>
       .bg{fill:#0b1120}
@@ -19,13 +19,13 @@
     <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
     <marker id="ahv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker>
   </defs>
-  <rect class="bg" width="1600" height="1640"/>
+  <rect class="bg" width="1600" height="1974"/>
 
   <text class="h1" x="800" y="64" text-anchor="middle">SuperLocalMemory</text>
   <text class="sub" x="800" y="100" text-anchor="middle">Governed memory for every AI agent: local-first, checked before it is used, reachable from the web when you choose.</text>
 
   <!-- Row 1: who uses it -->
-  <rect x="40" y="132" width="900" height="214" rx="16" fill="#0f1b33" stroke="#60a5fa" stroke-width="2"/>
+  <rect x="40" y="132" width="900" height="240" rx="16" fill="#0f1b33" stroke="#60a5fa" stroke-width="2"/>
   <text class="cap" x="70" y="166" fill="#60a5fa">AGENTS ON YOUR COMPUTER</text>
   <g class="chip">
     <rect x="70" y="184" width="150" height="40" rx="10" fill="#172554"/><text x="145" y="210" text-anchor="middle">Claude Code</text>
@@ -40,7 +40,7 @@
   </g>
   <text class="t" x="70" y="312">MCP (stdio or local HTTP) · CLI · Python SDK · REST API · hooks and skills · many agents share one store</text>
 
-  <rect x="980" y="132" width="580" height="214" rx="16" fill="#1a1433" stroke="#a78bfa" stroke-width="2"/>
+  <rect x="980" y="132" width="580" height="240" rx="16" fill="#1a1433" stroke="#a78bfa" stroke-width="2"/>
   <text class="cap" x="1010" y="166" fill="#a78bfa">WEB APPS AND BOTS · OPTIONAL WEB ACCESS</text>
   <g class="chip">
     <rect x="1010" y="184" width="120" height="40" rx="10" fill="#2e1065"/><text x="1070" y="210" text-anchor="middle">ChatGPT</text>
@@ -51,12 +51,14 @@
   </g>
   <text class="t" x="1010" y="304">Sign in once · you choose read or save per app</text>
   <text class="t" x="1010" y="328">Connected apps: remove any app at once</text>
+  <text class="t" x="1010" y="352">Optional: talk to your other bots (slm:mesh) · pictures (slm:media)</text>
 
   <!-- arrows into engine -->
-  <path class="arrow" d="M490 346 L490 392"/>
-  <text class="ts" x="502" y="376">local, no internet needed</text>
-  <path class="web" d="M1270 346 L1270 392"/>
+  <path class="arrow" d="M490 372 L490 418"/>
+  <text class="ts" x="502" y="402">local, no internet needed</text>
+  <path class="web" d="M1270 372 L1270 418"/>
 
+  <g transform="translate(0,26)">
   <!-- Row 2: the engine -->
   <rect x="40" y="398" width="1520" height="560" rx="18" fill="#0d1526" stroke="#334155" stroke-width="2"/>
   <text class="cap" x="70" y="434" fill="#e2e8f0">THE MEMORY ENGINE · ON YOUR MACHINE</text>
@@ -119,7 +121,7 @@
   <text class="ts" x="800" y="920" text-anchor="middle">Every save gets a receipt: raw → queryable → enriched → complete. A failed step keeps the evidence and retries.</text>
 
   <!-- Row 3: foundations -->
-  <rect x="40" y="992" width="364" height="238" rx="16" fill="#0f1b33" stroke="#60a5fa" stroke-width="2"/>
+  <rect x="40" y="992" width="364" height="294" rx="16" fill="#0f1b33" stroke="#60a5fa" stroke-width="2"/>
   <text class="cap" x="66" y="1026" fill="#60a5fa">MODES</text>
   <text class="h3" x="66" y="1062">A · No model calls</text>
   <text class="ts" x="66" y="1084">remember and recall stay on the machine</text>
@@ -128,7 +130,7 @@
   <text class="h3" x="66" y="1178">C · Your endpoint or cloud</text>
   <text class="ts" x="66" y="1200">what leaves is documented per data type</text>
 
-  <rect x="424" y="992" width="364" height="238" rx="16" fill="#0f1b2a" stroke="#4ade80" stroke-width="2"/>
+  <rect x="424" y="992" width="364" height="294" rx="16" fill="#0f1b2a" stroke="#4ade80" stroke-width="2"/>
   <text class="cap" x="450" y="1026" fill="#4ade80">STORAGE</text>
   <text class="h3" x="450" y="1062">SQLite + sqlite-vec</text>
   <text class="ts" x="450" y="1084">canonical, with restore points</text>
@@ -137,7 +139,7 @@
   <text class="ts" x="450" y="1162">match SQLite (prepare, verify, promote)</text>
   <text class="h3" x="450" y="1198">Store health check and repair</text>
 
-  <rect x="808" y="992" width="364" height="238" rx="16" fill="#1c1708" stroke="#fbbf24" stroke-width="2"/>
+  <rect x="808" y="992" width="364" height="294" rx="16" fill="#1c1708" stroke="#fbbf24" stroke-width="2"/>
   <text class="cap" x="834" y="1026" fill="#fbbf24">MANY AGENTS</text>
   <text class="h3" x="834" y="1062">SLM-Mesh</text>
   <text class="ts" x="834" y="1084">messages, locks, shared state, peers</text>
@@ -145,8 +147,10 @@
   <text class="ts" x="834" y="1142">done only when an independent gate</text>
   <text class="ts" x="834" y="1162">passes; every lap stored as memory</text>
   <text class="h3" x="834" y="1198">Per-agent attribution</text>
+  <text class="ts" x="834" y="1234">Web apps and bots join the mesh: peers,</text>
+  <text class="ts" x="834" y="1254">messages, inbox (with your permission)</text>
 
-  <rect x="1192" y="992" width="368" height="238" rx="16" fill="#151a2e" stroke="#94a3b8" stroke-width="2"/>
+  <rect x="1192" y="992" width="368" height="294" rx="16" fill="#151a2e" stroke="#94a3b8" stroke-width="2"/>
   <text class="cap" x="1218" y="1026" fill="#cbd5e1">CONTEXT AND OPERATIONS</text>
   <text class="h3" x="1218" y="1062">Exact cache · reversible compression</text>
   <text class="ts" x="1218" y="1084">long sessions stay inside the window</text>
@@ -155,31 +159,44 @@
   <text class="h3" x="1218" y="1178">Doctor · encrypted backup</text>
   <text class="ts" x="1218" y="1200">GitHub or Google Drive, encrypted first</text>
 
+  <!-- Row 3b: pictures and documents -->
+  <rect x="40" y="1320" width="1520" height="190" rx="16" fill="#1f1020" stroke="#f472b6" stroke-width="2"/>
+  <text class="cap" x="70" y="1356" fill="#f472b6">PICTURES AND DOCUMENTS · OPTIONAL, OFF BY DEFAULT</text>
+  <text class="t" x="70" y="1394">Save screenshots, photos and PDFs; find them by describing them</text>
+  <text class="t" x="70" y="1424">Picture model on this machine (EmbeddingGemma 2) · no generative model looks at your files</text>
+  <text class="t" x="70" y="1454">Text in pictures read by OCR · each PDF page indexed by picture and by text</text>
+  <text class="t" x="70" y="1484">Thumbnails · source record on every memory · erasing a memory erases its picture</text>
+  <text class="t" x="860" y="1394">Own database (media.db): existing memories and embeddings are never changed</text>
+  <text class="t" x="860" y="1424">One click to turn on: installer, dashboard or slm media enable · needs 16 GB RAM</text>
+  <text class="t" x="860" y="1454">Folders and Obsidian vaults as read-only sources (slm sources)</text>
+
   <!-- Row 4: web access path -->
-  <rect x="40" y="1264" width="1520" height="300" rx="18" fill="#140f29" stroke="#a78bfa" stroke-width="2"/>
-  <text class="cap" x="70" y="1300" fill="#a78bfa">HOW WEB ACCESS REACHES THE SAME ENGINE</text>
+  <rect x="40" y="1544" width="1520" height="328" rx="18" fill="#140f29" stroke="#a78bfa" stroke-width="2"/>
+  <text class="cap" x="70" y="1580" fill="#a78bfa">HOW WEB ACCESS REACHES THE SAME ENGINE</text>
 
-  <rect x="70" y="1322" width="400" height="160" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
-  <text class="h3" x="96" y="1358">Web app or bot</text>
-  <text class="t" x="96" y="1390">Signs in with OAuth and your consent</text>
-  <text class="t" x="96" y="1418">Gets only the tools you granted</text>
-  <text class="t" x="96" y="1446">Free daily allowance per connection</text>
+  <rect x="70" y="1602" width="400" height="188" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
+  <text class="h3" x="96" y="1638">Web app or bot</text>
+  <text class="t" x="96" y="1670">Signs in with OAuth and your consent</text>
+  <text class="t" x="96" y="1698">Gets only the tools you granted</text>
+  <text class="t" x="96" y="1726">Free daily allowance per connection</text>
+  <text class="t" x="96" y="1754">Bot messages and pictures only with two yeses</text>
 
-  <rect x="600" y="1322" width="400" height="160" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
-  <text class="h3" x="626" y="1358">Connection gateway</text>
-  <text class="t" x="626" y="1390">Checks owner, app, profile and tool</text>
-  <text class="t" x="626" y="1418">Relays calls to your laptop</text>
-  <text class="t" x="626" y="1446">Reports a sleeping laptop at once</text>
+  <rect x="600" y="1602" width="400" height="188" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
+  <text class="h3" x="626" y="1638">Connection gateway</text>
+  <text class="t" x="626" y="1670">Checks owner, app, profile and tool</text>
+  <text class="t" x="626" y="1698">Relays calls to your laptop</text>
+  <text class="t" x="626" y="1726">Reports a sleeping laptop at once</text>
 
-  <rect x="1130" y="1322" width="400" height="160" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
-  <text class="h3" x="1156" y="1358">Connector on your laptop</text>
-  <text class="t" x="1156" y="1390">Outbound only: no ports, no tunnel setup</text>
-  <text class="t" x="1156" y="1418">Turned on from the dashboard</text>
-  <text class="t" x="1156" y="1446">Renews its access automatically</text>
+  <rect x="1130" y="1602" width="400" height="188" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="1"/>
+  <text class="h3" x="1156" y="1638">Connector on your laptop</text>
+  <text class="t" x="1156" y="1670">Outbound only: no ports, no tunnel setup</text>
+  <text class="t" x="1156" y="1698">Turned on from the dashboard</text>
+  <text class="t" x="1156" y="1726">Renews its access automatically</text>
 
-  <path class="web" d="M470 1402 L596 1402"/>
-  <path class="web" d="M1126 1402 L1004 1402"/>
-  <text class="t" x="800" y="1524" text-anchor="middle">The memory database stays on your laptop. Tool requests and results pass through the gateway and the app you connected; the laptop must be online.</text>
+  <path class="web" d="M470 1682 L596 1682"/>
+  <path class="web" d="M1126 1682 L1004 1682"/>
+  <text class="t" x="800" y="1832" text-anchor="middle">The memory database stays on your laptop. Tool requests and results pass through the gateway and the app you connected; the laptop must be online.</text>
 
-  <text class="foot" x="800" y="1600" text-anchor="middle">Research: arXiv 2603.02240 · 2603.14588 · 2604.04514 · 2608.08253 (governed memory) · Part of Qualixar's AI Reliability Engineering work · superlocalmemory.com</text>
+  <text class="foot" x="800" y="1908" text-anchor="middle">Research: arXiv 2603.02240 · 2603.14588 · 2604.04514 · 2608.08253 (governed memory) · Part of Qualixar's AI Reliability Engineering work · superlocalmemory.com</text>
+</g>
 </svg>
