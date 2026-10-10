@@ -196,9 +196,19 @@ What a web app can do with bot messages:
 
 - `mesh_peers` lists your other bots.
 - `mesh_send` sends one message to one bot. There is no broadcast.
-- `mesh_inbox` checks for messages.
-- `mesh_wait` waits up to 20 seconds for a message.
+- `mesh_inbox` checks for messages. Pass `ack` (see below) with the ids you already have.
+- `mesh_wait` waits up to 20 seconds for a message. It takes `ack` too.
 - `mesh_state` reads shared notes. It cannot change them.
+
+**Delivery is at least once.** A relay can drop a reply after SLM has sent it, so
+a message is not marked read when it is handed over. Each reply that carries
+messages also carries `ack_ids`; the app passes those ids as `ack` on its next
+`mesh_inbox` or `mesh_wait` call, and the messages are then marked read. A message
+the app did not acknowledge comes again once about two minutes have passed
+(120 seconds), flagged `"repeat": true`, and at most three times in all; after
+that SLM treats it as delivered. Until the lease runs out a second call does not
+return it, so two calls never both receive a fresh message. Local sessions are
+not affected: their messages are marked read when returned.
 
 Limits: 200 messages sent per app per day. Inbox checks have their own daily
 budget. A connection can have at most 2 waits at once.
