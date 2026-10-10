@@ -3654,8 +3654,9 @@ def cmd_doctor(args: Namespace) -> None:
             elif depth:
                 _check(
                     "Projection queue", "PASS",
-                    f"{depth} memory/memories queued — the worker drains these "
-                    "in the background",
+                    f"{depth} memory/memories queued for the graph/vector "
+                    "projections — drained in the background once one is open "
+                    "(until then they are the catch-up record for a promotion)",
                 )
             else:
                 _check("Projection queue", "PASS", "empty (graph is up to date)")
