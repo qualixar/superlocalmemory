@@ -26,7 +26,7 @@ _ROOT_COMMANDS = (
     "session", "observe", "decay", "quantize", "consolidate", "soft-prompts",
     "reap", "adapters", "ingest", "config", "evolve", "disable", "enable",
     "clear-cache", "reconfigure", "benchmark", "evidence", "diagnostics",
-    "rotate-token", "optimize", "cache", "compress", "proxy", "help-optimize",
+    "rotate-token", "token", "optimize", "cache", "compress", "proxy", "help-optimize",
 )
 
 _SRC = str(Path(__file__).resolve().parents[2] / "src")
