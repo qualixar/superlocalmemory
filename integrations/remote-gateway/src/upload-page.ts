@@ -48,7 +48,7 @@ export function uploadPage(kind: string, maxBytes: number): Response {
   const noun = document ? "PDF" : "picture";
   const hint = document ? `Pick a PDF, up to ${mb} MB.` : `Pick a PNG, JPEG or WebP picture, up to ${mb} MB.`;
   const csp = `default-src 'none'; script-src 'nonce-${token}'; style-src 'nonce-${token}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`;
-  const body = `<h1>Add a ${noun} to your memory</h1><p>${hint} This link works once.</p>` +
+  const body = `<h1>Add a ${noun} to your memory</h1><p>${hint}</p><p>This link works once, expires in 10 minutes, and is only for you. Do not share it with anyone.</p>` +
     `<input id="file" type="file" accept="${document ? DOC_ACCEPT : IMAGE_ACCEPT}"><button id="save" type="button" disabled>Save</button><p id="status" role="status"></p>` +
     `<script nonce="${token}">${script(mb, bytes)}</script>`;
   return html(200, body, csp, token);

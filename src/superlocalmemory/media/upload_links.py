@@ -11,7 +11,8 @@ laptop's half: it mints the token, keeps only its hash, accepts the chunks in
 order into a private scratch file, and decides when a link is spent.
 
 The token is the only capability. It is 32 random bytes, bound to one
-connection, one key and one profile, valid for ten minutes (twenty once the
+connection, one key, one profile and the authorization (the web app) that asked
+for it, valid for ten minutes (twenty once the
 upload has started) and usable for one saved file. Everything the gateway says
 about size or type is ignored: limits and the file's first bytes are checked
 here. Nothing in this module logs content, tokens or paths.
@@ -70,7 +71,10 @@ _DDL = """CREATE TABLE IF NOT EXISTS upload_links (
   total INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0,
   next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
-  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""
+  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER,
+  authorization_id TEXT NOT NULL DEFAULT '')"""
+#: Added after the first release of the table: databases made before it get the column on first use.
+_ADD_AUTHORIZATION = "ALTER TABLE upload_links ADD COLUMN authorization_id TEXT NOT NULL DEFAULT ''"
 
 _MESSAGES = {
     "invalid_kind": "An upload link is for an image or a document.",
@@ -143,6 +147,8 @@ class UploadRow:
     result_json: str
     nonce: str | None
     touched_at: int | None
+    #: The web app (authorization) that asked for the link; empty for a link made before apps were recorded.
+    authorization_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -185,6 +191,7 @@ class UploadLinks:
         self._clock = clock
         self._lock = threading.RLock()
         self._ready = False
+        self._columns_ok = False
         self._last_clean: int | None = None
 
     # -- storage ------------------------------------------------------------
@@ -214,6 +221,7 @@ class UploadLinks:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute(_DDL)
+                self._ensure_columns(conn)
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     yield conn
@@ -223,6 +231,15 @@ class UploadLinks:
                     raise
             finally:
                 conn.close()
+
+    def _ensure_columns(self, conn: sqlite3.Connection) -> None:
+        if self._columns_ok:
+            return
+        names = {row[1] for row in conn.execute("PRAGMA table_info(upload_links)")}
+        if "authorization_id" not in names:
+            with contextlib.suppress(sqlite3.OperationalError):  # another process added it first
+                conn.execute(_ADD_AUTHORIZATION)
+        self._columns_ok = True
 
     @staticmethod
     def _row(found: sqlite3.Row | None) -> UploadRow | None:
@@ -245,7 +262,8 @@ class UploadLinks:
 
     # -- minting ------------------------------------------------------------
 
-    def mint(self, connection_id: str, key_id: str, profile_id: str, kind: str, note: str) -> MintedLink:
+    def mint(self, connection_id: str, key_id: str, profile_id: str, kind: str, note: str,
+             authorization_id: str = "") -> MintedLink:
         if kind not in KINDS:
             raise UploadError("invalid_kind")
         if len(note or "") > MAX_NOTE_CHARS:
@@ -263,9 +281,9 @@ class UploadLinks:
             limit = max_bytes_for(kind)
             conn.execute(
                 "INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note, "
-                "max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,?,?,?,'open',?,?)",
+                "max_bytes, state, created_at, expires_at, authorization_id) VALUES (?,?,?,?,?,?,?,?,'open',?,?,?)",
                 (upload_id, _hash(token), connection_id, key_id, profile_id, kind, note or "", limit,
-                 now, now + LINK_TTL_S))
+                 now, now + LINK_TTL_S, authorization_id or ""))
         return MintedLink(token, upload_id, now + LINK_TTL_S, limit)
 
     # -- reading ------------------------------------------------------------
@@ -424,15 +442,39 @@ class UploadLinks:
             conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=? "
                          "WHERE upload_id=? AND state='finishing'", (self._now(), upload_id))
 
-    def fail_open_links(self, connection_id: str) -> int:
-        """End every unfinished link of a connection (its consent or grant key was revoked or replaced)."""
+    def fail_open_links(self, connection_id: str, authorization_id: str | None = None) -> int:
+        """End every unfinished link of a connection (its consent or grant key was revoked or replaced).
+
+        With ``authorization_id`` only the links that app asked for end, plus links made before apps
+        were recorded (their owner is unknown); the other apps' links stay open.
+        """
+        if authorization_id is None:
+            return self._fail_where(connection_id, "", ())
+        return self._fail_where(connection_id, "AND (authorization_id = ? OR authorization_id = '')",
+                                (authorization_id,))
+
+    def fail_unlisted_authorizations(self, connection_id: str, listed: set[str] | frozenset[str]) -> int:
+        """End the unfinished links of apps the gateway no longer lists for this connection.
+
+        ``listed`` must be the whole list: the caller never passes a partial one.
+        """
+        if not (self._root / "media" / DB_NAME).exists():
+            return 0
+        with self._tx() as conn:
+            owners = {row[0] for row in conn.execute(
+                "SELECT DISTINCT authorization_id FROM upload_links WHERE connection_id = ? "
+                "AND state IN ('open','receiving','finishing') AND authorization_id != ''",
+                (connection_id,)).fetchall()}
+        return sum(self.fail_open_links(connection_id, gone) for gone in sorted(owners - set(listed)))
+
+    def _fail_where(self, connection_id: str, extra: str, params: tuple) -> int:
         if not (self._root / "media" / DB_NAME).exists():
             return 0
         result = json.dumps({"ok": False, "code": "revoked", "message": _MESSAGES["revoked"]})
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT upload_id FROM upload_links WHERE connection_id = ? "
-                "AND state IN ('open','receiving','finishing')", (connection_id,)).fetchall()
+                f"AND state IN ('open','receiving','finishing') {extra}", (connection_id, *params)).fetchall()
             for found in rows:
                 conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
                              (result, found[0]))

@@ -517,13 +517,13 @@ class NativeConnectionRuntime:
         except Exception:
             logger.debug("grant key unavailable for %s", row.connection_id[:6])
 
-    async def _end_upload_links(self, connection_id: str) -> None:
+    async def _end_upload_links(self, connection_id: str, authorization_id: str | None = None) -> None:
         """Consent, grant key or connection changed: no unfinished upload link of it may complete.
-        Never fails the change that called it."""
+        With ``authorization_id`` only that app's links end. Never fails the change that called it."""
         try:
             from superlocalmemory.media.upload_links import default_links
 
-            await asyncio.to_thread(default_links().fail_open_links, connection_id)
+            await asyncio.to_thread(default_links().fail_open_links, connection_id, authorization_id)
         except Exception:
             logger.warning("upload links of %s were not closed", connection_id[:6])
 
@@ -570,7 +570,7 @@ class NativeConnectionRuntime:
         value = await self.provider.revoke_app(latest, authorization_id, expected_version)
         if not isinstance(value, dict) or value.get("revoked") is not True:
             raise ValueError("apps_unavailable")
-        await self._end_upload_links(connection_id)
+        await self._end_upload_links(connection_id, authorization_id)
         return {"revoked": True}
 
     async def resume(self, owner: str, profile: str) -> None:

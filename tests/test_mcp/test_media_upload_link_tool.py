@@ -149,3 +149,20 @@ def test_the_link_survives_the_remote_redaction(world, monkeypatch):
         out = call(server, {"kind": "image"})
     redacted = remote_redaction.redact_value(out)
     assert redacted["url"] == out["url"] and out["url"] in redacted["message"]
+
+
+def test_the_link_is_bound_to_the_authorization_that_asked_for_it(world):
+    server, _, links, key = world
+    with Remote(key.key_id):
+        out = call(server, {"kind": "image"})
+    assert links.find(out["url"].rsplit("/", 1)[1], CID).authorization_id == "auth-1"
+
+
+def test_the_reply_says_plainly_once_ten_minutes_and_do_not_share(world):
+    server, _, _, key = world
+    with Remote(key.key_id):
+        out = call(server, {"kind": "image"})
+    message = out["message"].lower()
+    assert "once" in message and "10 minutes" in message
+    assert "do not share" in message or "don't share" in message
+    assert "anyone" in message

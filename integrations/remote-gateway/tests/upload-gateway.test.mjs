@@ -15,11 +15,11 @@ function laptop(script,{consent=()=>true}={}){
     if(out instanceof Response)return out;
     return Response.json(out,{status:200});
   }};
-  const names=[],limits=[],checks=[];
+  const names=[],limits=[],checks=[],asked=[];
   const env={RELAYS:{getByName(name){names.push(name);return relay;}},
-    REGISTRIES:{getByName(name){return {async uploadsAllowed(){checks.push(name);const v=consent();if(v instanceof Error)throw v;return v;}};}},
+    REGISTRIES:{getByName(name){return {async uploadsAllowed(aid){checks.push(name);asked.push(aid);const v=consent(aid);if(v instanceof Error)throw v;return v;}};}},
     UPLOAD_IP:{async limit(){return {success:true};}},UPLOAD_CONN:{async limit({key}){limits.push(key);return {success:true};}}};
-  return {env,frames,names,limits,checks};
+  return {env,frames,names,limits,checks,asked};
 }
 const live=(extra={})=>laptop(({op,body})=>{
   if(op==='info')return {ok:true,kind:'image',max_bytes:MAX,expires_at:1};
@@ -257,4 +257,48 @@ test('a laptop whose connector cannot take uploads gets a plain "update" message
   const l=laptop(()=>Response.json({error:'upload_unsupported'},{status:503}));
   const page=await api.handleUpload(req(),l.env);
   assert.equal(page.status,503);assert.match(await page.text(),/update/i);
+});
+
+// -- an upload link belongs to the app that asked for it (audit F6) ---------------------------------------------
+
+const bound=(aid,extra={})=>({op})=>op==='info'?{ok:true,kind:'image',max_bytes:MAX,expires_at:1,authorization_id:aid}:okReply(op);
+
+test('the picker checks the consent of the app that issued the link, not any app',async()=>{
+  assert.ok(api);
+  const l=laptop(bound('app-a'),{consent:aid=>aid!=='app-a'});   // app A revoked, app B still consented
+  const r=await api.handleUpload(req(),l.env);
+  assert.equal(r.status,410);assert.match(await r.text(),/no longer works/i);
+  assert.ok(l.asked.includes('app-a'));
+});
+
+test('an upload on a revoked app\'s link is refused before any chunk is sent',async()=>{
+  assert.ok(api);
+  const l=laptop(bound('app-a'),{consent:aid=>aid!=='app-a'});
+  const r=await api.handleUpload(post(png(100)),l.env);
+  assert.equal(r.status,410);assert.match((await r.json()).message,/no longer works/i);
+  assert.ok(!l.frames.some(f=>/^(chunk|finish)/.test(f.headers[1][1])));
+});
+
+test('a link of a still-consented app works end to end and is checked for that app at the finish',async()=>{
+  assert.ok(api);
+  const l=laptop(({op,body})=>op==='info'?{ok:true,kind:'image',max_bytes:MAX,expires_at:1,authorization_id:'app-b'}:okReply(op),{consent:()=>true});
+  const r=await api.handleUpload(post(png(100)),l.env);
+  assert.equal(r.status,200);assert.equal((await r.json()).done,true);
+  assert.deepEqual(l.asked,[undefined,'app-b','app-b']);
+});
+
+test('revoking only the issuing app mid-upload stops its save while another app stays consented',async()=>{
+  assert.ok(api);
+  let appARevoked=false;
+  const l=laptop(({op})=>{if(op==='chunk')appARevoked=true;return bound('app-a')({op});},{consent:aid=>!(appARevoked&&aid==='app-a')});
+  const r=await api.handleUpload(post(png(100)),l.env);
+  assert.equal(r.status,410);
+  assert.ok(!l.frames.some(f=>f.headers[1][1].startsWith('finish')));
+});
+
+test('a laptop that names no app gets the old any-app check (older SuperLocalMemory)',async()=>{
+  assert.ok(api);
+  const l=live();
+  await api.handleUpload(post(png(100)),l.env);
+  assert.ok(l.asked.length>=2&&l.asked.every(a=>a===undefined));
 });

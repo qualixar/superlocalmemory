@@ -319,3 +319,12 @@ async def test_a_refusal_reason_loses_host_paths_and_the_account_name(tmp_path, 
     assert "/Users" not in text and "varunacct" not in text and "Pictures" not in text and "k=1" not in text
     stored = links.find(minted.token, CID).result_json
     assert "/Users" not in stored and "varunacct" not in stored
+
+
+@pytest.mark.asyncio
+async def test_info_names_the_authorization_that_issued_the_link(tmp_path):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
+    out = await call(relay, frame("info", minted.token))
+    assert out["ok"] is True and out["authorization_id"] == "app-a"

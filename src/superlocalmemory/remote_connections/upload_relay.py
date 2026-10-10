@@ -153,7 +153,10 @@ class UploadRelay:
         await asyncio.to_thread(self._authorize, credential, row)
         if op == "info":
             info = await asyncio.to_thread(links.info, token, credential.connection_id)
-            return {"ok": True, "kind": info.kind, "max_bytes": info.max_bytes, "expires_at": info.expires_at}
+            answer = {"ok": True, "kind": info.kind, "max_bytes": info.max_bytes, "expires_at": info.expires_at}
+            if row.authorization_id:  # the gateway checks THAT app's consent, not any app's
+                answer["authorization_id"] = row.authorization_id
+            return answer
         if op == "chunk":
             held = await asyncio.to_thread(links.accept_chunk, token, credential.connection_id,
                                            index, total, body, nonce)

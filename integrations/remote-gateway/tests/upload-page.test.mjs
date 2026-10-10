@@ -149,3 +149,9 @@ test('a dropped connection says so and lets the person press Save again',async()
   assert.match(m.document.getElementById('status').textContent,/interrupted/);
   assert.equal(m.document.getElementById('save').disabled,false);
 });
+
+test('the picker says plainly: works once, expires in 10 minutes, do not share it',async()=>{
+  assert.ok(api);
+  const {html}=await page('image');
+  assert.match(html,/works once/i);assert.match(html,/10 minutes/i);assert.match(html,/not share it with anyone/i);
+});

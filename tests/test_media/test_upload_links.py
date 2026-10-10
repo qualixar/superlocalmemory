@@ -342,3 +342,63 @@ def test_failing_every_open_link_of_a_connection_leaves_other_connections_alone(
     assert not links.temp_path(links.find(b.token, CONN).upload_id).exists()
     assert links.accept_chunk(c.token, OTHER, 0, len(PNG), PNG, NONCE) == len(PNG)
     assert links.fail_open_links(CONN) == 0
+
+
+# -- a link belongs to the app that asked for it (audit F6) -------------------------
+
+def test_a_link_remembers_the_authorization_that_issued_it(links):
+    minted = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    assert links.find(minted.token, CONN).authorization_id == "app-a"
+    assert mint(links).token and links.find(mint(links).token, CONN).authorization_id == ""
+
+
+def test_failing_one_apps_links_leaves_the_other_apps_links_open(links):
+    a = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    a2 = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    b = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-b")
+    links.accept_chunk(a2.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert links.fail_open_links(CONN, authorization_id="app-a") == 2
+    for gone in (a, a2):
+        refused("used", links.accept_chunk, gone.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert not links.temp_path(links.find(a2.token, CONN).upload_id).exists()
+    assert links.accept_chunk(b.token, CONN, 0, len(PNG), PNG, NONCE) == len(PNG)
+
+
+def test_failing_one_apps_links_also_ends_links_made_before_apps_were_recorded(links):
+    legacy = mint(links)
+    assert links.fail_open_links(CONN, authorization_id="app-a") == 1
+    refused("used", links.accept_chunk, legacy.token, CONN, 0, len(PNG), PNG, NONCE)
+
+
+def test_links_of_apps_that_are_no_longer_listed_are_failed(links):
+    a = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    b = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-b")
+    other = links.mint(OTHER, "key1", "personal", "image", "", authorization_id="app-c")
+    assert links.fail_unlisted_authorizations(CONN, {"app-b"}) == 1
+    refused("used", links.accept_chunk, a.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert links.accept_chunk(b.token, CONN, 0, len(PNG), PNG, NONCE) == len(PNG)
+    assert links.info(other.token, OTHER).kind == "image"
+
+
+def test_an_uploads_database_from_before_this_column_is_upgraded(tmp_path, clock):
+    path = tmp_path / "media"
+    path.mkdir()
+    old = sqlite3.connect(path / "uploads.db")
+    old.execute(OLD_DDL)
+    old.commit()
+    old.close()
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    minted = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    assert store.find(minted.token, CONN).authorization_id == "app-a"
+
+
+OLD_DDL = """CREATE TABLE upload_links (
+  upload_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
+  connection_id TEXT NOT NULL, key_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','document')), note TEXT NOT NULL,
+  max_bytes INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('open','receiving','finishing','done','failed')),
+  total INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0,
+  next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
+  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""

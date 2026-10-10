@@ -14,7 +14,8 @@ export const FINISH_TRIES=8;
 const STILL_SAVING='Your computer is still saving this file. You can close this page; it will appear in your memory shortly.';
 
 type Hop={kind:'reply';reply:UploadReply}|{kind:'problem';status:number;message:string};
-type Link={connection:string;token:string;nonce:string};
+/** `authorization` is the app the laptop says asked for the link; known after the first `info` answer. */
+type Link={connection:string;token:string;nonce:string;authorization?:string};
 const REVOKED='This upload link no longer works. Ask the app for a new one.';
 
 async function hop(env:UploadEnv,link:Link,op:'info'|'chunk'|'finish',index:number,total:number,body:Uint8Array=new Uint8Array()):Promise<Hop> {
@@ -32,9 +33,16 @@ async function hop(env:UploadEnv,link:Link,op:'info'|'chunk'|'finish',index:numb
   catch{return {kind:'reply',reply:cleanReply(null)};}
 }
 
-/** The app's consent for this connection is still on record (not revoked, access not ended, saving pictures allowed). Anything unclear counts as no. */
-async function consentActive(env:UploadEnv,connection:string):Promise<boolean> {
-  try{return (await env.REGISTRIES.getByName(connection).uploadsAllowed())===true;}catch{return false;}
+/** The consent is still on record (not revoked, access not ended, saving pictures allowed): the issuing app's once the laptop has named it, else any app's. Anything unclear counts as no. */
+async function consentActive(env:UploadEnv,connection:string,authorization?:string):Promise<boolean> {
+  try{return (await env.REGISTRIES.getByName(connection).uploadsAllowed(authorization))===true;}catch{return false;}
+}
+
+/** Remembers which app the laptop says issued the link, and checks that app's consent. Without a name (an older laptop) the earlier any-app check stands. */
+async function issuerConsent(env:UploadEnv,link:Link,reply:UploadReply):Promise<boolean> {
+  if(reply.authorizationId===undefined)return true;
+  link.authorization=reply.authorizationId;
+  return consentActive(env,link.connection,link.authorization);
 }
 
 /** Per address and per link (connection plus a hash of the token); a missing or broken limiter refuses rather than lets everything through. */
@@ -61,6 +69,7 @@ async function showPicker(env:UploadEnv,link:Link):Promise<Response> {
   if(answer.kind==='problem')return messagePage(answer.status,answer.message);
   const {reply}=answer;
   if(!reply.ok)return messagePage(statusFor(reply.code??'error'),reply.message??'This upload link cannot be used.');
+  if(!(await issuerConsent(env,link,reply)))return messagePage(410,REVOKED);
   if(!reply.kind||reply.maxBytes===undefined)return messagePage(502,'Your computer sent an answer this page could not use.');
   return uploadPage(reply.kind,reply.maxBytes);
 }
@@ -93,8 +102,8 @@ async function sendChunks(env:UploadEnv,link:Link,body:ReadableStream<Uint8Array
 }
 
 async function finish(env:UploadEnv,link:Link,declared:number):Promise<Response> {
-  if(!(await consentActive(env,link.connection)))return refusal(false,410,'revoked',REVOKED);
   for(let attempt=0;attempt<FINISH_TRIES;attempt++){
+    if(!(await consentActive(env,link.connection,link.authorization)))return refusal(false,410,'revoked',REVOKED);
     const answer=await hop(env,link,'finish',0,declared);
     if(answer.kind==='problem')return refusal(false,answer.status,'unreachable',answer.message);
     const {reply}=answer;
@@ -114,6 +123,7 @@ async function receive(request:Request,env:UploadEnv,link:Link):Promise<Response
   const info=await hop(env,link,'info',0,0);
   if(info.kind==='problem')return refusal(false,info.status,'unreachable',info.message);
   if(!info.reply.ok)return refusal(false,statusFor(info.reply.code??'error'),info.reply.code??'error',info.reply.message??'This upload link cannot be used.');
+  if(!(await issuerConsent(env,link,info.reply)))return refusal(false,410,'revoked',REVOKED);
   const limit=info.reply.maxBytes;
   if(limit===undefined)return refusal(false,502,'error','Your computer sent an answer this page could not use.');
   if(length.length>limit)return refusal(false,413,'too_large',`That file is too large. The limit is ${Math.max(1,Math.floor(limit/(1024*1024)))} MB.`);
