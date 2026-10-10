@@ -224,12 +224,18 @@ def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool,
     return store.find_document_by_sha(profile_id, sha, exclude_origin=None if folder else "folder")
 
 
-def _repeat(store: Any, row: dict) -> DocumentReceipt | None:
-    """A receipt when the repeat needs no new work (still running or done)."""
+def _repeat(store: Any, row: dict, *, from_folder: bool = False) -> DocumentReceipt | None:
+    """A receipt when the repeat needs no new work.
+
+    A document still being read answers ``processing`` with its job, so a person who drops it
+    again follows the job it already has; only a finished one is a ``duplicate``. A folder source
+    always gets ``duplicate``: that answer means "someone else's document, borrowed, never owned".
+    """
     if row["state"] not in _HOLD_STATES:
         return None
     job = store.job_for_document(row["document_id"])
-    return DocumentReceipt("duplicate", document_id=row["document_id"], job_id=job["job_id"] if job else None)
+    status = "processing" if row["state"] == "processing" and not from_folder else "duplicate"
+    return DocumentReceipt(status, document_id=row["document_id"], job_id=job["job_id"] if job else None)
 
 
 def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) -> str:
@@ -272,7 +278,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
         row = _existing(store, profile_id, doc_id, sha, bool(key), "folder" in payload)
         if row:
             tmp.unlink(missing_ok=True)
-            return _repeat(store, row) or _retry(store, row, payload)
+            return _repeat(store, row, from_folder="folder" in payload) or _retry(store, row, payload)
         _, used = store.count_and_bytes(profile_id)
         if used + store.document_bytes(profile_id) + size > QUOTA_BYTES:
             raise _refuse("The library is full (2 GB limit). Remove some items first.")
