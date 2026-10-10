@@ -241,10 +241,6 @@ async def remove(document_id: str, request: Request, profile_id: str = "", hard:
         if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
             raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
         return {"removed": True, "document_id": document_id, "erased": True}
-    if hard:
-        if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
-            raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
-        return {"removed": True, "document_id": document_id, "erased": True}
     runtime = getattr(request.app.state, "canonical_remember_runtime", None)
     if runtime is None or not getattr(runtime, "ready", False):
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")
