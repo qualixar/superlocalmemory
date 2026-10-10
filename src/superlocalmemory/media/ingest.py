@@ -56,6 +56,8 @@ class MediaInput:
     file_name: str = ""
     #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
     data: bytes | None = None
+    download_url: str | None = None
+    remote: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,11 +113,22 @@ def _cold_wait_s() -> float:
 
 # -- reading the input ---------------------------------------------------------
 
+def _download(inp: MediaInput) -> bytes:
+    from superlocalmemory.core.media_fetch import MediaFetchRefused, fetch_media
+
+    try:
+        return fetch_media(inp.download_url or "", remote=inp.remote, max_bytes=MAX_FILE_BYTES).data
+    except MediaFetchRefused as refused:
+        raise _refuse(refused.reason) from None
+
+
 def _read_input(inp: MediaInput) -> bytes:
     if inp.data is not None:
         if len(inp.data) > MAX_FILE_BYTES:
             raise _refuse("That image is too large (25 MB limit).")
         return inp.data
+    if inp.download_url:
+        return _download(inp)
     if inp.base64 is not None:
         if len(inp.base64) * 3 // 4 > MAX_BASE64_BYTES + 3:
             raise _refuse("That image is too large (8 MB limit for pasted images).")
@@ -152,20 +165,29 @@ def _check_kind(data: bytes) -> None:
         raise _refuse("That file type is not supported (PNG, JPEG, GIF and WEBP only).")
 
 
+_OFF = "Images are turned off. Turn them on in settings to save images."
+
+
+def _unavailable() -> _Stop:
+    from superlocalmemory.media.readiness import media_refusal
+
+    return _refuse(media_refusal() or _OFF)
+
+
 def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
     if client is None:
         from superlocalmemory.runtimes.worker_client import media_embedder
 
         client = media_embedder()
     if client is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     opened = store is None
     if store is None:
         from superlocalmemory.media import open_media_store
 
         store = open_media_store()
     if store is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     return client, store, opened
 
 
@@ -352,9 +374,9 @@ def remember_media(
     opened = False
     store_ref = store
     try:
-        client, store_ref, opened = _resolve(client, store)
         data = _read_input(inp)
         _check_kind(data)
+        client, store_ref, opened = _resolve(client, store)
         src_sha = hashlib.sha256(data).hexdigest()
         known = store_ref.find_by_sha(profile_id, src_sha, exclude_origin=None if folder else "folder")
         if known:
