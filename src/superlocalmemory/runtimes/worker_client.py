@@ -34,7 +34,6 @@ DEFAULT_IDLE_S = 1800.0
 DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0
-_LOAD_RAM_MB = 1500
 
 
 class MediaWorkerError(RuntimeError):
@@ -176,7 +175,7 @@ class MediaWorkerClient(MediaEmbedderPort):
         if self.pid is not None and self._loaded:
             return
         self._kill()
-        need = 0 if self.model_id.startswith("fake:") else _LOAD_RAM_MB
+        need = 0 if self.model_id.startswith("fake:") else media_models.load_mb_for(self.model_id)
         try:
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
