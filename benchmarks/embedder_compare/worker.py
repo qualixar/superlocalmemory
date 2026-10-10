@@ -35,11 +35,14 @@ def _timed(fn, items: list, batch: int) -> tuple[np.ndarray, dict]:
 
 def run_stage(emb, stage: dict, idx: int, out_dir: Path) -> dict:
     jobs = (("queries", emb.embed_queries, 1), ("docs", emb.embed_docs, DOC_BATCH),
-            ("images", emb.embed_images, 1))
+            ("images", emb.embed_images, 1),
+            ("media_queries", getattr(emb, "embed_media_queries", None), 1))
     info: dict = {"embedder": emb.name}
     for kind, fn, batch in jobs:
         items = stage.get(kind) or []
         if items:
+            if fn is None:
+                raise SystemExit(f"{emb.name} cannot embed {kind}")
             fn(items[:1])  # warm-up: first call pays one-off setup costs, not timed
             vecs, timing = _timed(fn, items, batch)
             np.save(out_dir / f"{idx}_{kind}.npy", vecs)

@@ -4,8 +4,9 @@ Systems: bm25 (model-free smoke), s1 (nomic as SLM ships it, no task prefixes;
 media via OCR text), s1p (nomic with task prefixes, reference only), s2
 (EmbeddingGemma 2 one-model: text-only loadout for text, full model for images
 and pages), s3 (nomic text plus EmbeddingGemma 2 media channel, weighted
-reciprocal-rank fusion, k=60, media weight tuned on dev). Every model loadout
-runs in its own process.
+reciprocal-rank fusion, k=60, media weight tuned on dev); model-decision
+candidates c1/c2/c3 (merged) and c1f/c2f/c3f (fused), see candidates.py. Every
+model loadout runs in its own process.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+import candidates
 import fusion
 import ocr
 import ranking
@@ -214,6 +216,11 @@ def run_system(name: str, corpus, queries, args, ds: Path, dev_qrels: dict):
     if name == "s3":
         return system_s3(corpus, queries, _need(args.python_slm, "slm"),
                          _need(args.python_eg2, "eg2"), ds, dev_qrels)
+    if name in candidates.SYSTEMS:
+        label = "slm" if name.startswith("c1") else "eg2"
+        python = _need(args.python_slm if label == "slm" else args.python_eg2, label)
+        return candidates.run(name, corpus, queries, {label: python}, ds, dev_qrels,
+                              sys.modules[__name__])
     raise RuntimeError(f"unknown system {name!r}")
 
 
@@ -222,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--home", type=Path, default=bench_home())
     ap.add_argument("--systems", default=",".join(ALL_SYSTEMS))
     ap.add_argument("--python-slm", help="python of the venv with SLM's pinned sentence-transformers")
-    ap.add_argument("--python-eg2", help="python of the venv for EmbeddingGemma 2")
+    ap.add_argument("--python-eg2", help="python of the venv for EmbeddingGemma 2 and Qwen3-VL-Embedding")
     args = ap.parse_args(argv)
     ds, runs = args.home / "dataset", args.home / "runs"
     runs.mkdir(parents=True, exist_ok=True)

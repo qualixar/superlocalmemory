@@ -136,9 +136,71 @@ def _norm(text: str) -> str:
     return " ".join(text.lower().split())
 
 
-def _media_corpus(ds: Path) -> tuple[list[dict], dict[str, str]]:
-    """Copy screenshots, generate synthetic images and PDFs, render PDF pages."""
+ARXIV_IDS = ("2603.14588", "2603.02601", "2604.04514")
+
+
+def arxiv_pdfs(arxiv_dir: Path | None) -> list[Path]:
+    """The author's public arXiv PDFs, only when every one of them was downloaded."""
+    if arxiv_dir is None:
+        return []
+    paths = [Path(arxiv_dir) / f"{i}.pdf" for i in ARXIV_IDS]
+    return paths if all(p.is_file() and p.stat().st_size > 0 for p in paths) else []
+
+
+def _pdf_pages(pdf_path: Path, pdf_name: str, ds: Path, corpus: list, page_text: dict) -> None:
     import ocr
+    import pypdfium2 as pdfium
+    import synth_pdfs
+
+    n_pages = len(pdfium.PdfDocument(str(pdf_path)))
+    for p in range(1, n_pages + 1):
+        doc_id = f"pdf:{pdf_name}#p{p}"
+        png = f"media/pdf/{pdf_name}_p{p}.png"
+        ocr.render_page(pdf_path, p - 1, ds / png)
+        corpus.append({"doc_id": doc_id, "kind": "pdf_page", "path": png,
+                       "meta": {"pdf": f"media/pdf/{pdf_name}.pdf", "page": p}})
+        if pdf_name == synth_pdfs.IMAGE_ONLY_NAME:
+            page_text[doc_id] = _norm(" ".join(synth_pdfs.IMAGE_ONLY_PAGES[p - 1]))
+        else:
+            page_text[doc_id] = _norm(ocr.pdf_text_layer(pdf_path, p - 1))
+
+
+def coco_files(coco_dir: Path | None) -> tuple[Path, Path] | None:
+    """(captions csv, images zip) when both were downloaded."""
+    if coco_dir is None:
+        return None
+    csv_path, zip_path = Path(coco_dir) / "test_5k.csv", Path(coco_dir) / "images.zip"
+    return (csv_path, zip_path) if csv_path.is_file() and zip_path.is_file() else None
+
+
+def _coco(ds: Path, files: tuple[Path, Path], selection: list[dict]) -> tuple[list, list, dict]:
+    """Real photos; a query is the photo's first human caption, verbatim (stratum 'photo')."""
+    import ast
+    import csv
+    import zipfile
+
+    rows = {int(r["cocoid"]): r for r in csv.DictReader(files[0].open(encoding="utf-8"))}
+    out = ds / "media" / "coco"
+    out.mkdir(parents=True, exist_ok=True)
+    corpus, queries, qrels = [], [], {}
+    with zipfile.ZipFile(files[1]) as zf:
+        names = {Path(n).name: n for n in zf.namelist() if not n.startswith("__MACOSX")}
+        for sel in selection:
+            doc_id = f"img:coco_{sel['cocoid']}"
+            (out / sel["filename"]).write_bytes(zf.read(names[sel["filename"]]))
+            corpus.append({"doc_id": doc_id, "kind": "image", "path": f"media/coco/{sel['filename']}",
+                           "meta": {"source": "coco2014-test"}})
+            if sel["query"]:
+                qid = f"coco:{sel['cocoid']}"
+                caption = ast.literal_eval(rows[sel["cocoid"]]["raw"])[sel["caption_index"]]
+                queries.append({"id": qid, "text": " ".join(caption.split()), "stratum": "photo",
+                                "answerable": True, "provisional": True})
+                qrels[qid] = {doc_id: 1}
+    return corpus, queries, qrels
+
+
+def _media_corpus(ds: Path, arxiv: list[Path] = ()) -> tuple[list[dict], dict[str, str]]:
+    """Copy screenshots, generate synthetic images and PDFs, render PDF pages."""
     import synth_images
     import synth_pdfs
 
@@ -153,21 +215,12 @@ def _media_corpus(ds: Path) -> tuple[list[dict], dict[str, str]]:
     for name in synth_images.generate(media / "syn"):
         corpus.append({"doc_id": f"img:syn_{name}", "kind": "image", "path": f"media/syn/{name}.png",
                        "meta": {"source": "synthetic"}})
-    import pypdfium2 as pdfium
-
     for pdf_name in synth_pdfs.generate(media / "pdf", REPO_ROOT):
-        pdf_path = media / "pdf" / f"{pdf_name}.pdf"
-        n_pages = len(pdfium.PdfDocument(str(pdf_path)))
-        for p in range(1, n_pages + 1):
-            doc_id = f"pdf:{pdf_name}#p{p}"
-            png = f"media/pdf/{pdf_name}_p{p}.png"
-            ocr.render_page(pdf_path, p - 1, ds / png)
-            corpus.append({"doc_id": doc_id, "kind": "pdf_page", "path": png,
-                           "meta": {"pdf": f"media/pdf/{pdf_name}.pdf", "page": p}})
-            if pdf_name == synth_pdfs.IMAGE_ONLY_NAME:
-                page_text[doc_id] = _norm(" ".join(synth_pdfs.IMAGE_ONLY_PAGES[p - 1]))
-            else:
-                page_text[doc_id] = _norm(ocr.pdf_text_layer(pdf_path, p - 1))
+        _pdf_pages(media / "pdf" / f"{pdf_name}.pdf", pdf_name, ds, corpus, page_text)
+    for src in arxiv:
+        name = f"arxiv-{src.stem}"
+        shutil.copyfile(src, media / "pdf" / f"{name}.pdf")
+        _pdf_pages(media / "pdf" / f"{name}.pdf", name, ds, corpus, page_text)
     return corpus, page_text
 
 
@@ -230,13 +283,15 @@ def check_frozen(digest: str, frozen_path: Path | None, refreeze: bool) -> None:
 
 def build(locomo_path: Path, selection_path: Path, out_dir: Path, media: bool = True,
           media_queries_path: Path | None = None, frozen_path: Path | None = None,
-          refreeze: bool = False) -> dict:
+          refreeze: bool = False, arxiv_dir: Path | None = None,
+          coco_dir: Path | None = None) -> dict:
     """Build into a scratch dir, check the frozen test hash, then replace out_dir."""
     out_dir = Path(out_dir)
     scratch = out_dir.with_name(out_dir.name + ".building")
     if scratch.exists():
         shutil.rmtree(scratch)
-    summary = _build_into(locomo_path, selection_path, scratch, media, media_queries_path)
+    summary = _build_into(locomo_path, selection_path, scratch, media, media_queries_path,
+                          arxiv_pdfs(arxiv_dir), coco_files(coco_dir))
     digest = manifest_hash(scratch / "queries" / "test.jsonl", scratch / "qrels" / "test.json")
     try:
         check_frozen(digest, frozen_path, refreeze)
@@ -250,7 +305,8 @@ def build(locomo_path: Path, selection_path: Path, out_dir: Path, media: bool = 
 
 
 def _build_into(locomo_path: Path, selection_path: Path, out_dir: Path, media: bool,
-                media_queries_path: Path | None) -> dict:
+                media_queries_path: Path | None, arxiv: list[Path] = (),
+                coco: tuple[Path, Path] | None = None) -> dict:
     """Write corpus, split queries/qrels and manifest.lock; return per-stratum counts."""
     data = json.loads(Path(locomo_path).read_text())
     selection = json.loads(Path(selection_path).read_text())
@@ -261,7 +317,7 @@ def _build_into(locomo_path: Path, selection_path: Path, out_dir: Path, media: b
     corpus = _locomo_corpus(samples)
     page_text: dict[str, str] = {}
     if media:
-        extra, page_text = _media_corpus(out_dir)
+        extra, page_text = _media_corpus(out_dir, arxiv)
         corpus += extra
     doc_ids = {d["doc_id"] for d in corpus}
     queries, qrels = _locomo_queries(selection, samples, doc_ids)
@@ -269,6 +325,13 @@ def _build_into(locomo_path: Path, selection_path: Path, out_dir: Path, media: b
         mq, mqr = _media_queries(media_queries_path or HERE / "golden" / "media_queries.jsonl",
                                  doc_ids, page_text)
         queries, qrels = queries + mq, {**qrels, **mqr}
+        if arxiv:
+            aq, aqr = _media_queries(HERE / "golden" / "arxiv_queries.jsonl", doc_ids, page_text)
+            queries, qrels = queries + aq, {**qrels, **aqr}
+        if coco:
+            selection_c = json.loads((HERE / "golden" / "coco_selection.json").read_text())
+            cc, cq, cqr = _coco(out_dir, coco, selection_c)
+            corpus, queries, qrels = corpus + cc, queries + cq, {**qrels, **cqr}
     dev, test = stats.stratified_split(queries)
     _dump_jsonl(out_dir / "corpus.jsonl", corpus)
     for name, part in (("dev", dev), ("test", test)):
@@ -300,7 +363,8 @@ def main(argv: list[str] | None = None) -> int:
         args.selection.write_text(json.dumps(sel, indent=0) + "\n")
     try:
         summary = build(locomo, args.selection, args.home / "dataset", media=not args.no_media,
-                        frozen_path=HERE / "golden" / "test_manifest.sha256", refreeze=args.refreeze)
+                        frozen_path=HERE / "golden" / "test_manifest.sha256", refreeze=args.refreeze,
+                        arxiv_dir=args.home / "arxiv", coco_dir=args.home / "coco")
     except ValueError as exc:
         print(f"refusing to build: {exc}", file=sys.stderr)
         return 2

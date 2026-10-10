@@ -10,9 +10,11 @@ const msg = (id, peer, kind, content, extra = {}) => ({
     id, from: { peer_id: peer, app: 'app-' + peer, kind }, to: 'owner', sent_at: '2026-10-09T10:00:00Z',
     expires_at: null, hop: 0, trust: kind === 'web' ? 'untrusted-peer' : 'local-peer', content, refs: [], ...extra });
 
-function setup({ messages, routes = [] } = {}) {
+function setup({ messages, peers, routes = [] } = {}) {
     const state = { messages: messages || [msg(3, 'p-web', 'web', 'hello from web'), msg(2, 'p-loc', 'local', 'hi local')] };
-    const base = [['GET', '/api/v3/mesh/messages', () => ({ json: { messages: state.messages } })]];
+    state.peers = peers || [];
+    const base = [['GET', '/api/v3/mesh/messages', () => ({ json: { messages: state.messages } })],
+        ['GET', '/api/v3/mesh/peers', () => ({ json: { peers: state.peers } })]];
     const h = makeEnv([...routes, ...base], { modules: ['od-features.js', 'od-botmessages.js'] });
     h.state = state;
     h.pane = h.document.getElementById('pane');
@@ -136,6 +138,86 @@ describe('Bot messages pane', () => {
     it('an empty list says so', async () => {
         const h = setup({ messages: [] });
         await h.open();
-        assert.match(h.pane.textContent, /No messages yet/);
+        assert.match(h.pane.textContent, /Bots you connect can leave each other messages here/);
+    });
+
+    it('with no messages: one helpful line, an Open Connected apps button, and no Peers heading', async () => {
+        const h = setup({ messages: [] });
+        const seen = [];
+        h.window.slmNavigate = p => seen.push(p);
+        await h.open();
+        assert.match(h.pane.textContent, /Bots you connect can leave each other messages here\. Allow it per app in Connected apps\./);
+        assert.ok(![...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        h.btn('Open Connected apps').click();
+        assert.deepEqual(seen, ['apps-pane']);
+    });
+
+    it('peers show display name, then app, then a short id, with a kind chip; heading appears with peers', async () => {
+        const a = msg(3, 'p-web', 'web', 'x'); a.from.display_name = 'Kitchen bot';
+        const b = msg(2, 'p-loc', 'local', 'y');
+        const c = msg(1, '0123456789abcdef', 'local', 'z'); delete c.from.app;
+        const h = setup({ messages: [a, b, c] });
+        await h.open();
+        assert.ok([...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        assert.match(h.row('p-web').textContent, /Kitchen bot/);
+        assert.match(h.row('p-web').textContent, /web/);
+        assert.match(h.row('p-loc').textContent, /app-p-loc/);
+        assert.match(h.row('p-loc').textContent, /this computer/);
+        assert.match(h.row('0123456789abcdef').querySelector('strong').textContent, /^01234567$/);
+    });
+
+    it('a hostile peer display name is text, never markup', async () => {
+        const m = msg(1, 'p-x', 'web', 'hi'); m.from.display_name = XSS;
+        const h = setup({ messages: [m] });
+        await h.open();
+        assert.equal(h.pane.querySelectorAll('img').length, 0);
+        assert.ok(h.row('p-x').textContent.includes(XSS));
+        assert.equal(h.window.__pwn, undefined);
+    });
+
+    const peer = (id, extra = {}) => ({ peer_id: id, display_name: '', kind: 'local', app: '', muted: false,
+        last_seen: '2026-10-09T10:00:00Z', status: 'active', ...extra });
+
+    it('lists a connected peer that has sent nothing, with its name, kind chip and muted mark', async () => {
+        const h = setup({ messages: [], peers: [
+            peer('p-quiet', { display_name: 'Quiet bot', kind: 'web', muted: true }), peer('p-two', { app: 'cursor' })] });
+        await h.open();
+        assert.ok(h.calls.some(c => c.url === '/api/v3/mesh/peers'));
+        assert.ok([...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        assert.match(h.row('p-quiet').textContent, /Quiet bot/);
+        assert.match(h.row('p-quiet').textContent, /web/);
+        assert.match(h.row('p-quiet').textContent, /muted/);
+        assert.match(h.row('p-two').textContent, /cursor/);
+        assert.match(h.row('p-two').textContent, /this computer/);
+        assert.ok(!/muted/.test(h.row('p-two').textContent.replace(/Unmute|Mute/g, '')));
+    });
+
+    it('peer names fall back from display name to app to the first 8 characters of the id', async () => {
+        const h = setup({ messages: [], peers: [peer('aaaaaaaa-1111', { display_name: 'Named', app: 'x' }),
+            peer('bbbbbbbb-2222', { app: 'AppOnly' }), peer('cccccccc-3333')] });
+        await h.open();
+        const name = id => h.row(id).querySelector('strong').textContent;
+        assert.equal(name('aaaaaaaa-1111'), 'Named');
+        assert.equal(name('bbbbbbbb-2222'), 'AppOnly');
+        assert.equal(name('cccccccc-3333'), 'cccccccc');
+    });
+
+    it('a peer in both lists is shown once, and a hostile peer name is text', async () => {
+        const h = setup({ messages: [msg(1, 'p-web', 'web', 'hi')], peers: [peer('p-web', { display_name: XSS, kind: 'web' })] });
+        await h.open();
+        assert.equal(h.pane.querySelectorAll('[data-peer="p-web"]').length, 1);
+        assert.equal(h.pane.querySelectorAll('img').length, 0);
+        assert.ok(h.row('p-web').textContent.includes(XSS));
+        assert.equal(h.window.__pwn, undefined);
+    });
+
+    it('no peers and no messages keeps the empty state; a failed peer list does not break messages', async () => {
+        const h = setup({ messages: [] });
+        await h.open();
+        assert.match(h.pane.textContent, /Bots you connect can leave each other messages here/);
+        assert.ok(![...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        const g = setup({ routes: [['GET', '/api/v3/mesh/peers', () => ({ status: 500, json: { detail: 'boom' } })]] });
+        await g.open();
+        assert.equal(g.pane.querySelectorAll('.od-msg').length, 2);
     });
 });

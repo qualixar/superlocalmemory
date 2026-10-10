@@ -172,6 +172,29 @@ def retire(conn: sqlite3.Connection, peer_id: str, profile_id: str) -> dict:
     return {"ok": True, "dropped": len(ids)}
 
 
+def peer_overview(conn: sqlite3.Connection, profile_id: str) -> list[dict]:
+    """Live peers of a profile joined with their owner profile; retired ones left out.
+
+    Only what the owner's list needs: no message text, no host, no project path.
+    """
+    rows = conn.execute(
+        "SELECT p.peer_id, p.agent_type, p.status, p.last_heartbeat, "
+        "q.display_name, q.kind, q.app_name, q.muted "
+        "FROM mesh_peers p LEFT JOIN mesh_peer_profiles q ON q.peer_id = p.peer_id "
+        "WHERE p.profile_id=? AND q.retired_at IS NULL "
+        "ORDER BY p.last_heartbeat DESC", (profile_id,),
+    ).fetchall()
+    return [{
+        "peer_id": r["peer_id"],
+        "display_name": r["display_name"] or "",
+        "kind": r["kind"] or "local",
+        "app": r["app_name"] or r["agent_type"] or "",
+        "muted": bool(r["muted"]),
+        "last_seen": r["last_heartbeat"],
+        "status": r["status"],
+    } for r in rows]
+
+
 def is_retired_ref(conn: sqlite3.Connection, ref: str) -> bool:
     """Has the owner retired the peer that registered under this reference?"""
     return conn.execute(
