@@ -1,12 +1,12 @@
 # Hermes native integration
 
-SuperLocalMemory 4.1.24 ships a native Hermes plugin. It is a companion to,
+SuperLocalMemory 4.1.25 ships a native Hermes plugin. It is a companion to,
 not a replacement for, Hermes's built-in memory provider and configuration.
 
 Install the owning runtime first:
 
 ```bash
-python -m pip install --upgrade superlocalmemory==4.1.24
+python -m pip install --upgrade superlocalmemory==4.1.25
 slm doctor
 ```
 

@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "4.1.24",
+  "version": "4.1.25",
   "description": "Local-first agent memory with auditable hybrid retrieval. Remember decisions and recall them by asking, entirely on your machine.",
   "author": {
     "name": "Qualixar",

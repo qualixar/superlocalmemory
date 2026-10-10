@@ -64,7 +64,7 @@ ROLES = {
 }
 _MAX_TEXT = 8_000
 # Stamped by scripts/build-hermes-plugin.mjs from pyproject.toml at build time.
-_RELEASE_SLM_VERSION = (4, 1, 24)
+_RELEASE_SLM_VERSION = (4, 1, 25)
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),

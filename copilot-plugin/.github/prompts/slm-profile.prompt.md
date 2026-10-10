@@ -1,7 +1,7 @@
 ---
 name: slm-profile
 description: Memory profiles (separate namespaces inside one SuperLocalMemory store) and MCP tool sets (which tools your host sees). Use switch_profile or slm profile switch to change the active memory profile, the profile_id argument to read or write another profile for one call, and SLM_MCP_PROFILE to choose a tool set. Required when working across multiple projects, clients, or tenants.
-version: "4.1.24"
+version: "4.1.25"
 agent: agent
 tools:
   - switch_profile
@@ -152,4 +152,4 @@ anything but `core` or `mesh`.
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

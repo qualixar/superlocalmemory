@@ -8,7 +8,7 @@ description: >
 tools: session_init, recall, search, remember, update_memory, forget, list_recent, Read
 model: inherit
 target: vscode
-version: "4.1.24"
+version: "4.1.25"
 ---
 
 # Role
@@ -49,4 +49,4 @@ slm-recall · slm-remember · slm-session · slm-scope · slm-profile · slm-gov
 # What NOT to do
 Never session_init twice; never forget dry_run=False without reporting preview; never switch the active profile unasked; never dump a whole file into remember; never invent a memory; never claim "saved" without success:true / clean CLI exit; never bypass scope or governance restrictions.
 
-SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later

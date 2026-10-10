@@ -1,4 +1,4 @@
-# SuperLocalMemory — GitHub Copilot plugin (v4.1.24)
+# SuperLocalMemory — GitHub Copilot plugin (v4.1.25)
 
 Empowers GitHub Copilot (VS Code, Visual Studio, JetBrains, Eclipse, CLI) with SuperLocalMemory as its long-term brain — at parity with the Claude and Codex plugins.
 
@@ -23,4 +23,4 @@ Then copy the add-ons from this folder's `.github/` into your project's `.github
 
 MCP works on every Copilot IDE at GA. Prompts, agents, and hooks are additive and degrade gracefully where an IDE does not yet support them (hooks are VS Code Preview as of 2026). SLM lifecycle also has an instruction-level fallback in `copilot-instructions.md`, so memory works even without hooks.
 
-SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later

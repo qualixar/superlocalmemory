@@ -367,4 +367,4 @@ sessions on this machine, so use it only when the user asks to move. See
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

@@ -1,7 +1,7 @@
 ---
 name: slm-web-access
 description: Set up and troubleshoot SuperLocalMemory Web access, the optional link that lets web apps (ChatGPT, Claude on the web, Muse, Composio, other remote MCP clients) use the memory on this computer. Covers turning it on from the dashboard, adding and removing apps, read/save/session permissions, renewal, the connection states, the errors a web app can see, and the copy-paste instructions for web agents.
-version: "4.1.24"
+version: "4.1.25"
 agent: agent
 tools:
   - get_status

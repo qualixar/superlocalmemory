@@ -1,7 +1,7 @@
 ---
 name: slm-recall
 description: Search and retrieve facts, decisions, and past context from SuperLocalMemory. Use when the user asks to recall, find, search, or "what did we decide/say about X". Triggers multi-channel semantic retrieval with reranking; always call before storing anything new.
-version: "4.1.24"
+version: "4.1.25"
 agent: agent
 tools:
   - recall
@@ -431,4 +431,4 @@ See `slm-profile`.
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

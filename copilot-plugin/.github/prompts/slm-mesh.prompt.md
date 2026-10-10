@@ -1,7 +1,7 @@
 ---
 name: slm-mesh
 description: Cross-session peer coordination via the SLM mesh network. Lets multiple AI agent sessions on the same machine discover each other, send messages, share lightweight state, and lock files to avoid conflicts. Available in the default tool set and in the full, power and mesh MCP profiles. Only `slm mesh status` and `slm mesh peers` exist on the command line; the other tools are MCP-only.
-version: "4.1.24"
+version: "4.1.25"
 agent: agent
 tools:
   - mesh_summary
@@ -287,4 +287,4 @@ mesh availability.
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*
