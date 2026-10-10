@@ -1365,9 +1365,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
             named = requested_profile(profile_id)
             if await asyncio.to_thread(is_daemon_running):
+                from superlocalmemory.mcp.remote_visibility import with_view
+
                 path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
                 if named:
                     path += "?profile_id=" + urllib.parse.quote(named, safe="")
+                # A remote app is marked, so the daemon deletes only what that app may see.
+                path = with_view(path)
                 result = await asyncio.to_thread(_routed_daemon_call, "DELETE", path)
                 if isinstance(result, dict) and result.get("code"):
                     return result

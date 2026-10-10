@@ -1511,12 +1511,18 @@ def _code_links_for_fact(fact_id: str) -> list[dict]:
 
 
 @router.delete("/api/memories/{fact_id}")
-def delete_memory(request: Request, fact_id: str, profile_id: str = ""):
+def delete_memory(request: Request, fact_id: str, profile_id: str = "",
+                  caller_view: str = ""):
     """Delete a specific memory (atomic fact) by ID.
 
     ``profile_id`` names the profile the memory belongs to, authorized like a
     routed remember (role and policy on THAT profile, before its existence is
     revealed); without it, the active profile.
+
+    ``caller_view`` is set when a remote app asks (see ``retrieval/remote_view``).
+    It may delete only what it may see: a memory its recall would hide (a
+    connected-folder file, a picture or page not cleared for remote apps) is
+    answered exactly like an id that does not exist.
     """
     profile = _routed_profile(profile_id)
     try:
@@ -1525,6 +1531,9 @@ def delete_memory(request: Request, fact_id: str, profile_id: str = ""):
         )
     except _UnknownRoutedProfile as exc:
         return _unknown_profile_response(exc.profile_id)
+    view = remote_view.parse_view(caller_view)
+    if view and fact_id in remote_view.hidden_among(view, engine._db, target_profile, [fact_id]):
+        raise HTTPException(status_code=404, detail="Memory not found")
     try:
         from superlocalmemory.core.mutations import delete_fact_authorized
 
