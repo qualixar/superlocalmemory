@@ -173,3 +173,48 @@ def test_parser_wires_the_command():
     assert (ns.sources_command, ns.source_id, ns.purge, ns.yes, ns.json) == ("remove", "abc", True, True, True)
     ns = p.parse_args(["sources", "add", "/n"])
     assert ns.path == "/n" and ns.yes is False
+
+
+def test_forget_empty_needs_a_yes_and_posts_nothing_without_one(monkeypatch, capsys):
+    d = FakeDaemon({("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}})
+    assert run(monkeypatch, d, tty=False, sources_command="forget-empty", source_id="s1") == 2
+    assert d.calls == []
+    assert run(monkeypatch, d, typed="n", sources_command="forget-empty", source_id="s1") == 1
+    assert d.calls == []
+    assert run(monkeypatch, d, typed="y", sources_command="forget-empty", source_id="s1") == 0
+    assert d.calls == [("POST", "/api/v3/sources/s1/forget-empty", None)]
+    assert "Forgot 2 file(s) of s1; the folder is active again." in capsys.readouterr().out
+
+
+def test_forget_empty_yes_and_json(monkeypatch, capsys):
+    d = FakeDaemon({("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}})
+    assert run(monkeypatch, d, tty=False, yes=True, json=True, sources_command="forget-empty", source_id="s1") == 0
+    assert json.loads(capsys.readouterr().out)["data"] == {"source_id": "s1", "forgotten": 2, "state": "active"}
+
+
+def test_forget_empty_refusal_is_shown(monkeypatch, capsys):
+    err = DaemonConflict("{'code': 'folder_not_empty', 'message': 'The folder has files again.'}")
+    d = FakeDaemon({("POST", "/api/v3/sources/s1/forget-empty"): err})
+    assert run(monkeypatch, d, yes=True, sources_command="forget-empty", source_id="s1") == 1
+    assert "files again" in capsys.readouterr().out
+
+
+def test_list_and_report_hint_at_forget_empty(monkeypatch, capsys):
+    row = {"source_id": "src1", "kind": "folder", "root_path": "/v", "state": "offline", "files": {"indexed": 4},
+           "offline_reason": "empty_folder"}
+    run(monkeypatch, FakeDaemon({("GET", "/api/v3/sources"): {"sources": [row]}}), sources_command="list")
+    assert "slm sources forget-empty src1" in capsys.readouterr().out
+    rep = {"source_id": "src1", "state": "offline", "counts": {}, "skipped_by_rule": {}, "quarantined": [],
+           "cloud_only": [], "errors": [], "last_scan_at": None, "paused_reason": None, "capped": False,
+           "offline_reason": "empty_folder", "watch": 0}
+    run(monkeypatch, FakeDaemon({("GET", "/api/v3/sources/src1/report"): rep}), sources_command="report", source_id="src1")
+    assert "slm sources forget-empty src1" in capsys.readouterr().out
+
+
+def test_forget_empty_parses():
+    import argparse
+
+    p = argparse.ArgumentParser()
+    sources_cmd.register_sources_parser(p.add_subparsers(dest="command"))
+    ns = p.parse_args(["sources", "forget-empty", "abc", "--yes", "--json"])
+    assert (ns.sources_command, ns.source_id, ns.yes, ns.json) == ("forget-empty", "abc", True, True)

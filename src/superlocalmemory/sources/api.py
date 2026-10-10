@@ -2,7 +2,7 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""The calls behind the public interface: add, preview, confirm, list, remove, rescan, report."""
+"""The calls behind the public interface: add, preview, confirm, list, remove, forget-empty, rescan, report."""
 
 from __future__ import annotations
 
@@ -204,6 +204,63 @@ def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: di
         store.set_state(source_id, "removed")
 
 
+def _check_still_empty(host: SourceHost, source: dict[str, Any]) -> int:
+    """Look at the folder again; return its disk number, or refuse if it is not plainly an empty folder."""
+    import json
+    import os
+
+    from superlocalmemory.sources.ignore import IgnoreRules
+    from superlocalmemory.sources.walk import walk_tree
+
+    if host.remote_on():
+        raise SourceRefused("remote_access_on", REMOTE_MESSAGE)
+    if host.runtime() is None:
+        raise SourceRefused("writer_not_ready", "The memory writer is not ready; try again shortly.")
+    root = check_root(source["root_path"])
+    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):
+        raise SourceRefused("root_moved", "The folder's path now leads somewhere else.")
+    try:
+        walked = walk_tree(root, IgnoreRules(root, tuple(json.loads(source["include_types_json"]))))
+        dev = os.stat(root).st_dev
+    except OSError:
+        raise SourceRefused("unreachable", "The folder cannot be read right now.") from None
+    if walked.entries or walked.capped:
+        raise SourceRefused("folder_not_empty", "The folder has files again; they are read on the next scan.")
+    try:
+        known = json.loads(source.get("last_scan_stats_json") or "{}").get("root_dev")
+    except ValueError:
+        known = None
+    if isinstance(known, int) and known != dev:
+        raise SourceRefused("disk_changed", "Another disk is now at the folder's path.")
+    return dev
+
+
+def forget_empty(source_id: str) -> dict[str, Any]:
+    """The folder really is empty: hide the memories of every file it held (kept, not erased).
+
+    Only for a folder waiting as ``offline`` / ``empty_folder``; checked again under the folder's lock.
+    """
+    from superlocalmemory.sources.reconcile import ScanStats
+
+    media, store, host = _open()
+    try:
+        _source(store, source_id)
+        with locks.source_lock(source_id):
+            source = _source(store, source_id)
+            if source["state"] != "offline" or _offline_reason(source) != "empty_folder":
+                raise SourceRefused("not_empty_folder", "This folder is not waiting as an empty folder.")
+            dev = _check_still_empty(host, source)
+            runtime = host.runtime()
+            rows = [r for r in store.files(source_id) if r["state"] != "tombstoned"]
+            for row in rows:
+                retire.hide_file(host, store, runtime, source, row, tombstone=True)
+            store.set_state(source_id, "active", stats=ScanStats(root_dev=dev).summary(), scanned=True)
+        return {"source_id": source_id, "forgotten": len(rows), "state": "active"}
+    finally:
+        if media is not None:
+            media.close()
+
+
 def rescan(source_id: str) -> dict[str, Any]:
     media, store, host = _open()
     try:
@@ -216,7 +273,7 @@ def rescan(source_id: str) -> dict[str, Any]:
 
 
 def hint(source_id: str, relpaths: list[str]) -> None:
-    """File-change hints come from the watcher, which is not part of this build."""
+    """There is no outside hint path in this build: the watcher runs in-process and calls the scanner itself."""
     raise HintsNotAvailable("file-change hints are not available")
 
 
