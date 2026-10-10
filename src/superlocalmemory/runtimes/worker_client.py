@@ -402,13 +402,13 @@ def text_embedder(*, env: Any, data_root: str | Path | None, model_id: str,
     """The shared client that makes text vectors, or None unless the environment is ready.
 
     Not gated on the pictures switch: the text provider is chosen in the embedding settings. The
-    text-only loadout is used when pictures are off and registers no stop hook (turning pictures
-    off has nothing of its own to stop). Starts nothing.
+    text-only loadout is used when pictures are off. It never registers the stop hook: the picture
+    channel owns that single slot. Starts nothing.
     """
     if env.status().state != "ready":
         return None
     role = text_loadout_role(data_root)
-    return _shared_client(env, model_id, revision, role, stop_hook=role == "")
+    return _shared_client(env, model_id, revision, role, stop_hook=False)
 
 
 __all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder",
