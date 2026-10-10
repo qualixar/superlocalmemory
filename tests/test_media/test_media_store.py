@@ -409,7 +409,7 @@ def _make_old_style_store(root, store):
 
 def test_pictures_marked_clean_by_an_older_build_are_held_back_once(root, store):
     _make_old_style_store(root, store)
-    assert _remote_flags(root) == [0, 0]           # opening upgraded them; the text is not kept to re-vet
+    assert _remote_flags(root) == [0, 0]           # opening upgraded them; media/revet.py looks at them again from their memory text
 
 
 def test_the_upgrade_runs_once_and_never_clears_a_later_vetted_picture(root, store):
