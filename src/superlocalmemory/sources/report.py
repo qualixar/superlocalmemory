@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from superlocalmemory.sources.store import SourceStore
+from superlocalmemory.sources.folder_watch import is_watching
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class SourceReport:
     paused_reason: str | None = None
     capped: bool = False
     offline_reason: str | None = None
+    #: 1 while file changes are noticed at once, 0 when only the 15-minute scan looks.
+    watch: int = 0
 
 
 def build_report(store: SourceStore, source: dict[str, Any]) -> SourceReport:
@@ -44,4 +47,5 @@ def build_report(store: SourceStore, source: dict[str, Any]) -> SourceReport:
         errors=[{"relpath": r["relpath"], "reason": r["reason"] or ""} for r in pick("error")],
         last_scan_at=source.get("last_scan_at"), paused_reason=stats.get("paused_reason"),
         capped=bool(stats.get("capped")),
-        offline_reason=(stats.get("offline_reason") or None) if source["state"] == "offline" else None)
+        offline_reason=(stats.get("offline_reason") or None) if source["state"] == "offline" else None,
+        watch=1 if is_watching(sid) else 0)

@@ -104,6 +104,7 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     fields: dict[str, Any] = {"entries": entries}
     if tombstone:
         fields.update(state="tombstoned", tombstoned_at=utc_stamp())
+        store.delete_links(source["source_id"], row["relpath"])
     store.put_file(source["source_id"], row["relpath"], **fields)
     return failures
 

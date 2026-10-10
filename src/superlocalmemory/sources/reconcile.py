@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.media.store_jobs import utc_stamp
-from superlocalmemory.sources import borrows, ingest, locks, retire
+from superlocalmemory.sources import borrows, ingest, links, locks, obsidian, retire
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
@@ -74,6 +74,8 @@ class _Pass:
     stats: ScanStats
     rows: dict[str, dict[str, Any]]
     vanished: dict[str, list[str]] = field(default_factory=dict)
+    names: links.NameIndex | None = None  # Obsidian sources: where embeds can point
+    only: frozenset[str] | None = None  # a targeted pass looks at these paths and nothing else
 
     @property
     def sid(self) -> str:
@@ -144,9 +146,15 @@ def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
 def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: list) -> None:
     kinds = ",".join(sorted({h.kind for h in hits}))
     entries = _supersede(p, row)
+    p.store.delete_links(p.sid, e.relpath)
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="quarantined", reason=f"credential:{kinds}",
                      entries=entries, document_id=None, media_id=None, **_stat_fields(e))
     p.stats.quarantined += 1
+
+
+def _is_note(p: _Pass, relpath: str) -> bool:
+    """Markdown and canvas files of an Obsidian vault get properties and links; nothing else does."""
+    return p.source["kind"] == "obsidian" and relpath.lower().endswith((".md", ".markdown", ".canvas"))
 
 
 def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested:
@@ -157,6 +165,8 @@ def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested
         if data is None:  # edited since the hash: look again next pass
             return ingest.Ingested(retry=True)
     n = p.store.next_save_n(p.sid, e.relpath)
+    if kind == "text" and _is_note(p, e.relpath):
+        return obsidian.ingest_note(p.host, p.runtime, p.source, e.relpath, data or b"", version, n, p.names)
     if kind == "text":
         return ingest.ingest_text(p.host, p.runtime, p.source, e.relpath, data or b"", version, n)
     if kind == "pdf":
@@ -180,13 +190,20 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
     if out.skip_reason:
         p.store.put_file(p.sid, e.relpath, sha256=sha, state="skipped", reason=out.skip_reason,
                          entries=_supersede(p, row), **_stat_fields(e))
+        _record_links(p, e, out)
         return
     old = _supersede(p, row)
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
                      entries=memory_entries(old) + out.entries, document_id=out.document_id,
                      media_id=out.media_id, **_stat_fields(e))
+    _record_links(p, e, out)
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
     p.stats.new += 0 if row and row["state"] != "tombstoned" else 1
+
+
+def _record_links(p: _Pass, e: Entry, out: ingest.Ingested) -> None:
+    if out.links is not None:
+        p.store.replace_links(p.sid, e.relpath, out.links)
 
 
 def _move(p: _Pass, e: Entry, sha: str) -> bool:
@@ -213,7 +230,7 @@ def _process(p: _Pass, e: Entry, sha: str) -> None:
         return
     if row is None and _move(p, e, sha):
         return
-    if e.relpath.lower().endswith(".canvas"):  # canvas files are recorded, not read
+    if e.relpath.lower().endswith(".canvas") and p.source["kind"] != "obsidian":  # plain folders: recorded, not read
         p.store.put_file(p.sid, e.relpath, sha256=sha, state="skipped", reason="canvas_not_supported",
                          **_stat_fields(e))
         return
@@ -274,12 +291,24 @@ def _pause(store: SourceStore, source: dict, stats: ScanStats) -> ScanStats:
     return stats
 
 
+def _narrow(p: _Pass, walked: WalkResult) -> list[Entry]:
+    """The entries this pass looks at; a targeted pass also keeps only the matching rows."""
+    if p.only is None:
+        return walked.entries
+    p.rows = {r: row for r, row in p.rows.items() if r in p.only}
+    return [e for e in walked.entries if e.relpath in p.only]
+
+
 def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | None) -> None:
     p.stats.errors += retire.retry_hides(p.host, p.store, p.runtime, p.source)
     borrows.reset_dead_borrows(p.store, p.runtime, p.sid)
     p.rows = {r["relpath"]: r for r in p.store.files(p.sid)}
+    if p.source["kind"] == "obsidian":
+        p.names = links.NameIndex([e.relpath for e in walked.entries]
+                                  + [r for r, row in p.rows.items() if row["state"] == "indexed"])
     candidates: list[Entry] = []
-    for e in walked.entries:
+    entries = _narrow(p, walked)
+    for e in entries:
         row = p.rows.get(e.relpath)
         if e.placeholder:
             _placeholder(p, e, row)
@@ -287,7 +316,7 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
             p.stats.unchanged += 1
         else:
             candidates.append(e)
-    seen = {e.relpath for e in walked.entries}
+    seen = {e.relpath for e in entries}
     _index_vanished(p, seen, walked)
     hashed = _hash_all(p, _stable(p, candidates))
     for i, (e, sha) in enumerate(hashed):
@@ -353,8 +382,13 @@ def _offline(store: SourceStore, source: dict, stats: ScanStats, reason: str) ->
 
 
 def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
-                progress: Callable[[int, int], None] | None = None) -> ScanStats:
-    """Reconcile one source with its folder; returns what happened."""
+                progress: Callable[[int, int], None] | None = None,
+                only: frozenset[str] | None = None) -> ScanStats:
+    """Reconcile one source with its folder; returns what happened.
+
+    ``only`` names the relpaths a watcher saw change. The tree is still walked, so every rule
+    (ignore, credential screen, links, remote access) applies; only those paths are read or hidden.
+    """
     stats = ScanStats(root_dev=_known_device(source))
     if host.remote_on():
         return _pause(store, source, stats)
@@ -377,13 +411,16 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     if device or (not walked.entries and not walked.capped and _holders(store, source["source_id"])):
         return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
-    p = _Pass(host, store, source, runtime, root, stats, {})
+    p = _Pass(host, store, source, runtime, root, stats, {}, only=only)
     with background_work():
         _work(p, walked, progress)
     if stats.removed:
         return stats
     if stats.paused:
         return _pause(store, source, stats)
+    if only is not None:  # a partial look must not move the full-scan clock or its numbers
+        store.set_state(source["source_id"], "active")
+        return stats
     store.set_state(source["source_id"], "active", stats=stats.summary(), scanned=True)
     return stats
 

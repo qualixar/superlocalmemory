@@ -11,13 +11,14 @@ import logging
 import os
 import threading
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import locks
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.reconcile import scan_source
 from superlocalmemory.sources.store import SourceStore
+from superlocalmemory.sources.folder_watch import DEBOUNCE_S, SourceWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,11 @@ class SourceScanService:
     name = SERVICE_NAME
 
     def __init__(self, host: SourceHost, *, poll_s: float = 2.0,
-                 interval_s: float = RESCAN_INTERVAL_S) -> None:
+                 interval_s: float = RESCAN_INTERVAL_S, watch_debounce_s: float = DEBOUNCE_S,
+                 observer_factory: Callable[[], Any] | None = None) -> None:
         self._host = host
+        self._watch_args = (watch_debounce_s, observer_factory)
+        self._watcher: SourceWatcher | None = None
         self._poll_s = poll_s
         self._interval_s = interval_s
         self._stop = threading.Event()
@@ -47,6 +51,8 @@ class SourceScanService:
     # -- registry protocol -----------------------------------------------------------
     def start(self) -> None:
         self._closed = False
+        self._watcher = SourceWatcher(self._host, self._changed, debounce_s=self._watch_args[0],
+                                      observer_factory=self._watch_args[1])
         self._ensure_thread()
 
     def wake(self) -> None:
@@ -58,11 +64,12 @@ class SourceScanService:
         self._closed = True
         self._stop.set()
         self._wake.set()
+        watcher_done = self._watcher.stop(timeout_s) if self._watcher is not None else True
         thread = self._thread
         if thread is not None:
             thread.join(timeout=max(0.0, timeout_s))
-            return not thread.is_alive()
-        return True
+            return watcher_done and not thread.is_alive()
+        return watcher_done
 
     def health(self) -> dict:
         thread = self._thread
@@ -101,6 +108,7 @@ class SourceScanService:
 
     def _pass(self) -> bool:
         if not self._enabled():
+            self._sync_watch([])
             self._stop.wait(self._poll_s)
             return False
         from superlocalmemory.media import open_media_store
@@ -111,8 +119,36 @@ class SourceScanService:
         try:
             store = SourceStore(media)
             self._queue_due(store)
+            self._sync_watch([] if self._host.remote_on() else store.list_sources(states=("active",)))
             job = media.claim_job(self._owner, _LEASE_S, kinds=("source_scan",))
             return self._run_job(store, media, job) if job else False
+        finally:
+            media.close()
+
+    def _sync_watch(self, active: list[dict[str, Any]]) -> None:
+        if self._watcher is not None and not self._stop.is_set():
+            self._watcher.sync(active)
+
+    def _changed(self, source_id: str, relpaths: list[str] | None) -> None:
+        """The watcher saw these files change: read just them, under the source's lock."""
+        from superlocalmemory.media import open_media_store
+
+        media = open_media_store(data_root=self._host.data_root)
+        if media is None:
+            return
+        try:
+            store = SourceStore(media)
+            source = store.get_source(source_id)
+            if source is None or source["state"] != "active":
+                return
+            if relpaths is None:  # too many changes at once: a full scan is cheaper than a long list
+                store.queue_scan(source["profile_id"], source_id)
+                self._wake.set()
+                return
+            with locks.source_lock(source_id):
+                source = store.get_source(source_id)
+                if source is not None and source["state"] == "active":
+                    scan_source(self._host, store, source, only=frozenset(relpaths))
         finally:
             media.close()
 

@@ -40,6 +40,7 @@ class Ingested:
     shared: bool = False
     skip_reason: str = ""
     retry: bool = False
+    links: list | None = None  # Obsidian notes only: the links to record (None leaves them alone)
 
 
 def screen(data: bytes) -> list[SecretHit]:
@@ -87,12 +88,19 @@ def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data
     parts = split_text(relpath, data.decode("utf-8", errors="replace"))
     if not parts:
         return Ingested(skip_reason="empty")
+    return save_parts(host, runtime, source, relpath, parts, version, n)
+
+
+def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts: list[str], version: str,
+               n: int, *, tags: str = "", session_date: str = "",
+               extra: dict[str, Any] | None = None) -> Ingested:
+    """One memory per part; ``extra`` is server-prepared metadata added beside the provenance."""
     out = Ingested()
     for number, part in enumerate(parts, 1):
         request = SaveRequest(
             segments=((part, ContentOrigin.DERIVED_TEXT),), profile_id=source["profile_id"],
-            source_type="folder", trusted_actor_id=host.actor_id(),
-            trusted_metadata={"_slm_source": provenance(source["source_id"], relpath, version)},
+            source_type="folder", trusted_actor_id=host.actor_id(), tags=tags, session_date=session_date,
+            trusted_metadata={**(extra or {}), "_slm_source": provenance(source["source_id"], relpath, version)},
             idempotency_key=_key(source["source_id"], relpath, n, number))
         saved = submit_memory(runtime, request, config=host.config())
         out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version})
@@ -187,4 +195,4 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
 
 
 __all__ = ["Ingested", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
-           "load_verified", "provenance", "screen", "split_markdown", "split_text"]
+           "load_verified", "provenance", "save_parts", "screen", "split_markdown", "split_text"]
