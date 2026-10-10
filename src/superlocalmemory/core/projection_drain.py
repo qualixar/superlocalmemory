@@ -232,6 +232,14 @@ class ProjectionDrain:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def has_target(self) -> bool:
+        """Whether a graph or vector projection is open to drain into.
+
+        When neither is (Local Core, the default) a pass touches no row, so a
+        running worker is not the same as a queue that is being drained.
+        """
+        return self._graph() is not None or self._vector() is not None
+
     def notify(self) -> None:
         """Tell the worker there is something to do.
 
