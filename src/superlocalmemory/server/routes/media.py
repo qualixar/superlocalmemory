@@ -219,6 +219,17 @@ async def list_images(request: Request, profile_id: str = "", cursor: str = Quer
     return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
 
+def _anchor_visible(engine, anchor_id: str | None, profile: str) -> bool:
+    """Whether the picture's memory is visible to ``profile`` under the rules typed text is shown by."""
+    if not anchor_id:
+        return False
+    from superlocalmemory.server.routes.memories import _scope_where_clause
+
+    where, params = _scope_where_clause("all", profile)
+    return bool(engine._db.execute(f"SELECT 1 AS one FROM memories WHERE memory_id = ? AND {where}",
+                                   (anchor_id, *params)))
+
+
 @router.get("/media/{media_id}/thumb")
 async def thumbnail(media_id: str, request: Request, profile_id: str = "", format: str = ""):
     from superlocalmemory.access.rbac import Permission
@@ -237,7 +248,9 @@ async def thumbnail(media_id: str, request: Request, profile_id: str = "", forma
         row = store.get_item(media_id)
     finally:
         store.close()
-    if not row or row["profile_id"] != profile or row["state"] != "active" or not row["thumb_webp"]:
+    if not row or row["state"] != "active" or not row["thumb_webp"]:
+        raise HTTPException(404, detail="Not found.")
+    if row["profile_id"] != profile and not _anchor_visible(engine, row["anchor_memory_id"], profile):
         raise HTTPException(404, detail="Not found.")
     if format == "json":
         thumb = bytes(row["thumb_webp"])
