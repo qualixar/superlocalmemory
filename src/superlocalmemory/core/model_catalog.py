@@ -31,7 +31,7 @@ CATALOG_VERSION = "2026-10-08"
 class ModelEntry:
     id: str
     role: str  # "llm" | "embedder"
-    provider: str  # "ollama" | "sentence-transformers" | "openrouter"
+    provider: str  # "ollama" | "sentence-transformers" | "openrouter" | "slm-media"
     label: str
     advice: str  # one line a person reads: what it is good for, what to expect
     size_gb: float | None = None  # download size (local models)
@@ -86,6 +86,15 @@ LOCAL_EMBEDDERS: tuple[ModelEntry, ...] = (
        advice="The same model served by Ollama; same vectors, no re-index."),
 )
 
+#: Models the managed environment serves. Known to ``find`` (so a store built on one is
+#: recognised) but not listed in ``catalog()``: they are offered by their own flow.
+MANAGED_EMBEDDERS: tuple[ModelEntry, ...] = (
+    _e(id="google/embeddinggemma-2", role="embedder", provider="slm-media",
+       label="EmbeddingGemma 2 (managed)", size_gb=1.5, min_ram_gb=8, dimension=768,
+       advice="One model for text and pictures, run by SLM's media environment. "
+              "Switching to it re-indexes every memory."),
+)
+
 HOSTED_LLMS: tuple[ModelEntry, ...] = (
     _e(id="openai/gpt-6-luna", role="llm", provider="openrouter", label="GPT-6 Luna",
        price="$0.10 / $0.50", recommended=True, damaged=0, tested=102,
@@ -120,7 +129,7 @@ def _base(model_id: str) -> str:
 
 def find(model_id: str) -> ModelEntry | None:
     wanted = _base(model_id)
-    for entry in (*LOCAL_LLMS, *LOCAL_EMBEDDERS, *HOSTED_LLMS, *HOSTED_EMBEDDERS):
+    for entry in (*LOCAL_LLMS, *LOCAL_EMBEDDERS, *MANAGED_EMBEDDERS, *HOSTED_LLMS, *HOSTED_EMBEDDERS):
         if entry.id == wanted:
             return entry
     return None
@@ -217,6 +226,6 @@ def catalog() -> dict:
 
 __all__ = [
     "CATALOG_VERSION", "DEFAULT_HOSTED_LLM", "DEFAULT_LOCAL_LLM", "HOSTED_EMBEDDERS",
-    "HOSTED_LLMS", "LOCAL_EMBEDDERS", "LOCAL_LLMS", "ModelEntry", "Recommendation",
+    "HOSTED_LLMS", "LOCAL_EMBEDDERS", "LOCAL_LLMS", "MANAGED_EMBEDDERS", "ModelEntry", "Recommendation",
     "best_local_llm", "catalog", "find", "recommend_local_llms",
 ]

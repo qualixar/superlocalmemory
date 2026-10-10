@@ -931,13 +931,18 @@ async def test_embedding_endpoint(request: Request):
 
 
 @router.get("/embed/ping")
-async def embed_ping():
+async def embed_ping(request: Request):
     """V3.5.9: Liveness probe for McpEmbedderProxy. Returns 200 when daemon
-    embedder is ready so the proxy knows the daemon is reachable."""
+    embedder is ready so the proxy knows the daemon is reachable.
+
+    ``embedder`` says which model the daemon embeds with (never builds the engine),
+    so another process can refuse a daemon that is not on its own embedding space.
+    """
     try:
-        from .helpers import get_engine_lazy
-        # We just need to confirm the route is alive — engine check is optional
-        return {"ok": True}
+        from superlocalmemory.core.daemon_text_embedder import describe_embedder
+
+        engine = getattr(request.app.state, "engine", None)
+        return {"ok": True, "embedder": describe_embedder(getattr(engine, "_embedder", None))}
     except Exception:
         logger.exception("embedder liveness probe failed")
         return JSONResponse({"ok": False, "error": "Internal server error"}, status_code=503)
@@ -955,6 +960,9 @@ async def embed_texts(request: Request):
     try:
         body = await request.json()
         texts = body.get("texts", [])
+        prompt = body.get("prompt", "document")
+        if prompt not in ("document", "query"):
+            return JSONResponse({"error": "prompt must be 'document' or 'query'"}, status_code=400)
         if not texts:
             return {"embeddings": []}
 
@@ -967,9 +975,11 @@ async def embed_texts(request: Request):
             )
 
         loop = asyncio.get_event_loop()
+        from superlocalmemory.core.daemon_text_embedder import embed_with_prompt
+
         embeddings = await loop.run_in_executor(
             None,
-            lambda: engine._embedder.embed_batch(texts),
+            lambda: embed_with_prompt(engine._embedder, texts, prompt),
         )
         return {"embeddings": embeddings}
     except Exception as e:

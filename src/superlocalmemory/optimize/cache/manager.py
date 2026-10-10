@@ -93,7 +93,13 @@ class _LazySemanticEmbedder:
                     from superlocalmemory.core.config import SLMConfig
                     from superlocalmemory.core.embeddings import EmbeddingService
 
-                    self._service = EmbeddingService(SLMConfig.load().embedding)
+                    config = SLMConfig.load()
+                    if config.embedding.provider == "slm-media":  # the managed model: not a built-in service
+                        from superlocalmemory.core.engine_wiring import init_embedder
+
+                        self._service = init_embedder(config)
+                    else:
+                        self._service = EmbeddingService(config.embedding)
         return self._service.embed(text)
 
     @property

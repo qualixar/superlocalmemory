@@ -39,6 +39,7 @@ as the model is up.
 from __future__ import annotations
 
 import concurrent.futures
+import inspect
 import logging
 import threading
 from typing import Any, Callable
@@ -47,7 +48,19 @@ from superlocalmemory.retrieval import channel_status as chstat
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["QueryEmbedder"]
+__all__ = ["QueryEmbedder", "embed_as_query"]
+
+
+def embed_as_query(embedder: Any, text: str) -> list[float] | None:
+    """Embed a question: with the embedder's question prompt when it has one, else as ``embed`` does.
+
+    Models that take different prompts for questions and memories (the managed text
+    model) define ``embed_query``; every other embedder is called exactly as before.
+    Looked up statically so a duck-typed stand-in does not pretend to have it.
+    """
+    if inspect.getattr_static(embedder, "embed_query", None) is not None:
+        return embedder.embed_query(text)
+    return embedder.embed(text)
 
 
 class QueryEmbedder:
@@ -87,7 +100,7 @@ class QueryEmbedder:
             self._cache[query] = vector
 
     def _compute(self, query: str) -> list[float] | None:
-        vector = self._provider().embed(query)
+        vector = embed_as_query(self._provider(), query)
         self._remember(query, vector)
         return vector
 

@@ -177,7 +177,7 @@ def init_embedder(config: SLMConfig) -> Any | None:
     """Initialize the best available embedding provider.
 
     Priority order:
-    1. Explicit provider in config (ollama / cloud / sentence-transformers)
+    1. Explicit provider in config (ollama / cloud / sentence-transformers / slm-media)
     2. Auto-detect: Ollama first (lightweight), then sentence-transformers
        subprocess (NEVER in-process for Mode A/B)
     3. If nothing works -> None (BM25-only mode)
@@ -191,6 +191,12 @@ def init_embedder(config: SLMConfig) -> Any | None:
 
     emb_cfg = config.embedding
     provider = emb_cfg.provider
+
+    # The managed model (daemon: the worker; other processes: the daemon).
+    if provider == "slm-media":
+        from superlocalmemory.core.text_provider import init_slm_media_embedder
+
+        return init_slm_media_embedder(config)
 
     # v3.4.55: When provider is ollama, use Ollama's embedding API as
     # PRIMARY. The stored vectors were created by Ollama's nomic-embed-text;

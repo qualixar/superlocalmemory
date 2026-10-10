@@ -71,6 +71,10 @@ def target_config(live: Any, body: dict) -> Any:
     from dataclasses import replace
 
     provider = str(body.get("provider", live.provider) or "")
+    if provider != live.provider:
+        from superlocalmemory.core.embedding_providers import validate_embedding_provider
+
+        validate_embedding_provider(provider)
     model = str(body.get("model_name") or body.get("model") or live.model_name).strip()
     dim = int(body.get("dimension") or 0) or (live.dimension if model == live.model_name else 0)
     if not model:

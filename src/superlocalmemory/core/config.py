@@ -94,7 +94,8 @@ class EmbeddingConfig:
     model_name: str = "nomic-ai/nomic-embed-text-v1.5"
     dimension: int = 768
     # Provider: "" = auto-detect, "sentence-transformers", "ollama", "cloud",
-    # "openai" (V3.4.24: any OpenAI-compatible /v1/embeddings endpoint)
+    # "openai" (V3.4.24: any OpenAI-compatible /v1/embeddings endpoint),
+    # "slm-media" (the managed model environment's worker; see core/text_provider.py)
     provider: str = ""
     # Ollama settings (used when provider="ollama" or auto-detected)
     ollama_model: str = "nomic-embed-text"

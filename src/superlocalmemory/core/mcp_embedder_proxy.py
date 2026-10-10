@@ -77,13 +77,25 @@ class McpEmbedderProxy:
         results = self.embed_batch([text])
         return results[0] if results else None
 
-    def embed_batch(self, texts: list[str]) -> list[list[float] | None]:
-        """Embed a batch of texts via the owned daemon's /api/v3/embed."""
+    def embed_query(self, text: str) -> list[float] | None:
+        """Embed a question (the model's query prompt) via the owned daemon."""
+        results = self.embed_batch([text], prompt="query")
+        return results[0] if results else None
+
+    def embed_batch(
+        self, texts: list[str], prompt: str | None = None,
+    ) -> list[list[float] | None]:
+        """Embed a batch of texts via the owned daemon's /api/v3/embed.
+
+        ``prompt`` is sent only when given ("query"); without it the request is
+        the one every daemon has always understood.
+        """
         if not texts:
             return []
-        data = _owned_daemon_request(
-            "POST", "/api/v3/embed", {"texts": list(texts)}, self._timeout,
-        )
+        body: dict = {"texts": list(texts)}
+        if prompt is not None:
+            body["prompt"] = prompt
+        data = _owned_daemon_request("POST", "/api/v3/embed", body, self._timeout)
         embeddings = data.get("embeddings") if isinstance(data, dict) else None
         if not isinstance(embeddings, list):
             return [None] * len(texts)

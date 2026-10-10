@@ -55,6 +55,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, field_validator
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.core.process_role import clear_daemon_process, mark_daemon_process
 from superlocalmemory.daemon.materializer import (
     PassHooks,
     PendingMaterializer,
@@ -6900,6 +6901,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         _stop_record_guardian()
         _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
         instance_lock.release()
+        clear_daemon_process()
 
 
 def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
@@ -6907,6 +6909,9 @@ def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
     global _start_time
     import uvicorn
 
+    # From here this process is the daemon: it alone runs the managed text model
+    # (core/process_role.py), and it says so before any engine is built.
+    mark_daemon_process()
     _start_time = time.monotonic()
 
     try:

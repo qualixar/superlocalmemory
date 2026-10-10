@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from superlocalmemory.retrieval.query_embedding import embed_as_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,7 +126,7 @@ class ChannelRegistry:
                 continue
             try:
                 if name in self._embedding_channels and embedder is not None:
-                    q_emb = embedder.embed(query)
+                    q_emb = embed_as_query(embedder, query)
                     results = channel.search(q_emb, profile_id, top_k)
                 else:
                     results = channel.search(query, profile_id, top_k)

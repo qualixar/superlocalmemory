@@ -98,7 +98,12 @@ def _switch(args: Namespace) -> None:
     if args.dimension:
         body["dimension"] = args.dimension
     if args.provider:
-        body["provider"] = args.provider
+        from superlocalmemory.core.embedding_providers import validate_embedding_provider
+
+        try:
+            body["provider"] = validate_embedding_provider(args.provider)
+        except ValueError as exc:
+            _fail(args, "switch", str(exc), "INVALID")
     if args.endpoint:
         body["api_endpoint"] = args.endpoint
     data = _request(args, "switch", "POST", "", body)
@@ -166,6 +171,15 @@ def status_line() -> str:
     return ""
 
 
+def text_provider_note(config: Any) -> str:
+    """One line for ``slm status`` when the daemon is down and text vectors come from it."""
+    if getattr(getattr(config, "embedding", None), "provider", "") != "slm-media":
+        return ""
+    from superlocalmemory.core.daemon_text_embedder import NEEDS_SERVICE
+
+    return f"  {NEEDS_SERVICE}\n"
+
+
 def _json_flag(parser: Any) -> None:
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                         help="machine-readable output")
@@ -179,7 +193,7 @@ def register_embedder_parser(sub: Any) -> None:
     s.add_argument("model", help="model name, e.g. nomic-ai/nomic-embed-text-v1.5")
     s.add_argument("--dimension", type=int, default=0, help="the model's vector size")
     s.add_argument("--provider", default="",
-                   help="sentence-transformers | ollama | openai (default: current)")
+                   help="sentence-transformers | ollama | openai | slm-media (default: current)")
     s.add_argument("--endpoint", default="", help="OpenAI-compatible endpoint URL")
     s.add_argument("--no-wait", action="store_true", help="return as soon as it is queued")
     _json_flag(s)
@@ -190,4 +204,4 @@ def register_embedder_parser(sub: Any) -> None:
         _json_flag(esub.add_parser(name, help=text))
 
 
-__all__ = ["cmd_embedder", "describe", "register_embedder_parser", "status_line"]
+__all__ = ["cmd_embedder", "describe", "register_embedder_parser", "status_line", "text_provider_note"]
