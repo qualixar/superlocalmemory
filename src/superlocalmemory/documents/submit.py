@@ -144,6 +144,26 @@ def _stage_path(inp: MediaInput, out: Any) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+def _copy_checked(source: Any, out: Any) -> tuple[str, int]:
+    """Copy a binary source into ``out`` in 1 MB chunks: PDF header, size limit and hash on the way."""
+    limit, digest, size = _max_bytes(), hashlib.sha256(), 0
+    for chunk in iter(lambda: source.read(1 << 20), b""):
+        if size == 0:
+            _check_head(chunk[:8])
+        size += len(chunk)
+        if size > limit:
+            raise _refuse("That document is too large.")
+        digest.update(chunk)
+        out.write(chunk)
+    if size == 0:
+        raise _refuse("That document is empty.")
+    return digest.hexdigest(), size
+
+
+def _stage_stream(inp: MediaInput, out: Any) -> tuple[str, int]:
+    return _copy_checked(inp.stream, out)
+
+
 def _stage_data(inp: MediaInput, out: Any) -> tuple[str, int]:
     data = inp.data or b""
     if len(data) > _max_bytes():
@@ -182,7 +202,7 @@ def _stage_link(inp: MediaInput, out: Any) -> tuple[str, int]:
 
 def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
     given = sum(x is not None for x in (inp.base64, inp.path, inp.download_url or None))
-    if inp.data is None and given != 1:
+    if inp.data is None and inp.stream is None and given != 1:
         raise _refuse("Give a document file or document data.")
     try:
         tmp, out = _new_tmp(files.tmp_dir(root))
@@ -192,6 +212,8 @@ def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
         with out:
             if inp.data is not None:
                 sha, size = _stage_data(inp, out)
+            elif inp.stream is not None:
+                sha, size = _stage_stream(inp, out)
             elif inp.download_url:
                 sha, size = _stage_link(inp, out)
             else:

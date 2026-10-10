@@ -305,3 +305,35 @@ def test_a_full_disk_is_named_plainly_never_a_crash_or_a_wrong_reason(store, roo
         inp = MediaInput(path=str(src))
     r = go(store, inp)
     assert r.status == "refused" and r.reason == files.DISK_FULL
+
+
+def test_an_opened_file_is_streamed_in_chunks_never_read_whole(store, root, tmp_path):
+    """Audit round 2 (MU-M6): the upload finish hands over its checked scratch file, not its bytes."""
+    import io
+
+    data = make_pdf(["streamed"])
+
+    class Chunked(io.BytesIO):
+        reads: list = []
+
+        def read(self, n=-1):
+            assert n is not None and 0 < n <= 1 << 20, "never read the whole file at once"
+            self.reads.append(n)
+            return super().read(n)
+
+    stream = Chunked(data)
+    r = go(store, MediaInput(stream=stream, file_name="s.pdf"))
+    assert r.status == "processing"
+    doc = store.get_document(r.document_id)
+    assert (root / "media" / doc["source_relpath"]).read_bytes() == data
+    assert doc["sha256"] == hashlib.sha256(data).hexdigest() and doc["bytes"] == len(data)
+    assert stream.reads
+
+
+def test_a_stream_that_is_not_a_pdf_or_too_large_is_refused(store, monkeypatch):
+    import io
+
+    assert go(store, MediaInput(stream=io.BytesIO(b"not a pdf at all"), file_name="x.pdf")).status == "refused"
+    monkeypatch.setenv("SLM_DOC_MAX_MB", "0.0001")
+    big = io.BytesIO(make_pdf(["x" * 400]))
+    assert go(store, MediaInput(stream=big, file_name="x.pdf")).status == "refused"

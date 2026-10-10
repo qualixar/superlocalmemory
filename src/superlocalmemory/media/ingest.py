@@ -59,6 +59,9 @@ class MediaInput:
     file_name: str = ""
     #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
     data: bytes | None = None
+    #: Internal only: a binary file the caller already opened and checked (the upload-link
+    #: finish). Documents stream from it in 1 MB chunks, so a 100 MB PDF is never all in memory.
+    stream: Any = None
     download_url: str | None = None
     remote: bool = False
     #: The link came inside a ``file`` object (a chat app's attachment), so the app's own
