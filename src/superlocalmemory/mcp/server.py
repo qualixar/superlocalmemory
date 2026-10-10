@@ -156,6 +156,19 @@ if _mesh_tools_enabled:
         "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
     })
 
+# Image and document tools: listed by default only while images are on. Read
+# once at start (like mesh); any error means off. Mirrors ``full`` in profiles.py.
+try:
+    from superlocalmemory.runtimes import features as _features
+    _media_tools_enabled = bool(_features.media_enabled())
+except Exception:
+    _media_tools_enabled = False
+
+if _media_tools_enabled:
+    _ESSENTIAL_TOOLS.update({
+        "remember_media", "get_media", "remember_document", "media_status",
+    })
+
 _ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
 
 _all_tools = _os_reg.environ.get("SLM_MCP_ALL_TOOLS") == "1"
