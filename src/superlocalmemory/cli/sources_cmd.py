@@ -30,6 +30,7 @@ from typing import Any
 from superlocalmemory.cli.daemon import (
     DaemonConflict,
     DaemonNotFound,
+    DaemonServerError,
     DaemonUnprocessable,
     daemon_request,
 )
@@ -90,13 +91,15 @@ def _detail_text(raw: Any) -> str:
 def _request(out: _Out, method: str, path: str, body: dict | None = None) -> dict:
     try:
         result = daemon_request(method, path, body, preserve_conflict=True, preserve_not_found=True,
-                                preserve_unprocessable=True)
+                                preserve_unprocessable=True, preserve_server_error=True)
     except DaemonConflict as exc:
         out.fail(_detail_text(getattr(exc, "detail", exc)))
     except DaemonNotFound as exc:
         out.fail(exc.message)
     except DaemonUnprocessable as exc:
         out.fail(exc.message, 2)
+    except DaemonServerError as exc:
+        out.fail(exc.message)
     if result is None:
         out.fail(_NOT_RUNNING)
     return result  # type: ignore[return-value]

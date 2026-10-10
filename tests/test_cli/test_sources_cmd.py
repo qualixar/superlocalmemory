@@ -218,3 +218,28 @@ def test_forget_empty_parses():
     sources_cmd.register_sources_parser(p.add_subparsers(dest="command"))
     ns = p.parse_args(["sources", "forget-empty", "abc", "--yes", "--json"])
     assert (ns.sources_command, ns.source_id, ns.yes, ns.json) == ("forget-empty", "abc", True, True)
+
+
+# --- a daemon that answered with an error is not a daemon that is down -------
+
+def test_a_daemon_server_error_prints_its_message_not_the_not_running_text(monkeypatch, capsys):
+    from superlocalmemory.cli.daemon import DaemonServerError
+
+    seen = {}
+
+    def daemon(method, path, body=None, **kw):
+        seen.update(kw)
+        raise DaemonServerError(503, "writer_not_ready", "The memory writer is not ready; try again shortly.")
+
+    rc = run(monkeypatch, daemon, sources_command="list")
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert seen["preserve_server_error"] is True
+    assert "The memory writer is not ready; try again shortly." in out
+    assert "not running" not in out
+
+
+def test_a_none_result_still_means_not_running(monkeypatch, capsys):
+    rc = run(monkeypatch, FakeDaemon(down=True), sources_command="list")
+    assert rc == 1
+    assert "daemon is not running" in capsys.readouterr().out

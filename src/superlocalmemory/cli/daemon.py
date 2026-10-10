@@ -29,6 +29,7 @@ import sys
 import time
 
 from superlocalmemory.cli import daemon_startup as _startup
+from superlocalmemory.cli.daemon_errors import DaemonServerError, server_error_from  # noqa: F401 - re-exported
 from superlocalmemory.infra.daemon_identity import (
     build_descriptor,
     descriptor_matches_health,
@@ -608,6 +609,7 @@ def daemon_request(
     preserve_conflict: bool = False,
     preserve_not_found: bool = False,
     preserve_unprocessable: bool = False,
+    preserve_server_error: bool = False,
     start_wait_seconds: float | None = None,
 ) -> dict | None:
     """Send a request only after validating the owned daemon identity.
@@ -741,6 +743,8 @@ def daemon_request(
             raise not_found_from(payload, path) from exc
         if exc.code == 422 and preserve_unprocessable:
             raise _unprocessable(exc) from exc
+        if exc.code >= 500 and preserve_server_error:
+            raise server_error_from(exc) from exc
         return None
     except Exception:
         return None
