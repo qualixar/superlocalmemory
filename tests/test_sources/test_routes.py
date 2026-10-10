@@ -152,3 +152,18 @@ def test_forget_empty_route_refusals(env):
     r = c.post(f"/api/v3/sources/{sid}/forget-empty")
     assert r.status_code == 409 and r.json()["detail"]["code"] == "folder_not_empty"
     assert client(env, peer=REMOTE).post(f"/api/v3/sources/{sid}/forget-empty").status_code == 403
+
+
+def test_a_busy_folder_answers_409_source_busy(env, monkeypatch):
+    from superlocalmemory.sources import api, locks
+
+    monkeypatch.setattr(api, "_QUICK_WAIT_S", 0.1)
+    sid = _emptied(env)
+    c = client(env)
+    lock = locks.source_lock(sid)
+    lock.acquire()
+    try:
+        r = c.post(f"/api/v3/sources/{sid}/forget-empty")
+    finally:
+        lock.release()
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "source_busy"

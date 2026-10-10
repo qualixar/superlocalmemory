@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 _guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
@@ -17,6 +19,22 @@ def source_lock(source_id: str) -> threading.Lock:
     """The lock a scan holds while it works on the source, and a removal holds while it clears it."""
     with _guard:
         return _locks.setdefault(source_id, threading.Lock())
+
+
+class SourceBusy(RuntimeError):
+    """The folder's lock stayed taken for the whole wait."""
+
+
+@contextmanager
+def held(source_id: str, timeout_s: float) -> Iterator[None]:
+    """Hold the source's lock for the block, or raise ``SourceBusy`` after ``timeout_s`` seconds."""
+    lock = source_lock(source_id)
+    if not lock.acquire(timeout=timeout_s):
+        raise SourceBusy(source_id)
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def mark_removing(source_id: str) -> None:
@@ -35,4 +53,4 @@ def is_removing(source_id: str) -> bool:
         return source_id in _removing
 
 
-__all__ = ["clear_removing", "is_removing", "mark_removing", "source_lock"]
+__all__ = ["SourceBusy", "clear_removing", "held", "is_removing", "mark_removing", "source_lock"]

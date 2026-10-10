@@ -29,6 +29,9 @@ from superlocalmemory.sources.walk import walk_tree
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL_S = 3600.0
+_REMOVE_WAIT_S = 60.0  # a scan is told to stop at its next file; this trips only on one very slow file
+_QUICK_WAIT_S = 10.0
+_BUSY_MESSAGE = "The folder is busy with a long file; try again in a minute."
 _pending: dict[str, "_Pending"] = {}
 _pending_lock = threading.Lock()
 REMOTE_MESSAGE = ("Folders cannot be connected while remote access is set up, because remote tools "
@@ -184,8 +187,10 @@ def remove_source(source_id: str, *, purge: bool = False) -> None:
         locks.mark_removing(source_id)
         try:
             store.cancel_scans(source_id)
-            with locks.source_lock(source_id):
+            with locks.held(source_id, _REMOVE_WAIT_S):
                 _clear_source(host, store, runtime, source, purge)
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         finally:
             locks.clear_removing(source_id)
     finally:
@@ -243,16 +248,19 @@ def forget_empty(source_id: str) -> dict[str, Any]:
     media, store, host = _open()
     try:
         _source(store, source_id)
-        with locks.source_lock(source_id):
-            source = _source(store, source_id)
-            if source["state"] != "offline" or _offline_reason(source) != "empty_folder":
-                raise SourceRefused("not_empty_folder", "This folder is not waiting as an empty folder.")
-            dev = _check_still_empty(host, source)
-            runtime = host.runtime()
-            rows = [r for r in store.files(source_id) if r["state"] != "tombstoned"]
-            for row in rows:
-                retire.hide_file(host, store, runtime, source, row, tombstone=True)
-            store.set_state(source_id, "active", stats=ScanStats(root_dev=dev).summary(), scanned=True)
+        try:
+            with locks.held(source_id, _QUICK_WAIT_S):
+                source = _source(store, source_id)
+                if source["state"] != "offline" or _offline_reason(source) != "empty_folder":
+                    raise SourceRefused("not_empty_folder", "This folder is not waiting as an empty folder.")
+                dev = _check_still_empty(host, source)
+                runtime = host.runtime()
+                rows = [r for r in store.files(source_id) if r["state"] != "tombstoned"]
+                for row in rows:
+                    retire.hide_file(host, store, runtime, source, row, tombstone=True)
+                store.set_state(source_id, "active", stats=ScanStats(root_dev=dev).summary(), scanned=True)
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         return {"source_id": source_id, "forgotten": len(rows), "state": "active"}
     finally:
         if media is not None:
@@ -289,10 +297,14 @@ def release_file(source_id: str, relpath: str) -> bool:
     media, store, host = _open()
     try:
         source = _source(store, source_id)
-        row = store.get_file(source_id, relpath)
-        if row is None or row["state"] != "quarantined" or not row["sha256"]:
-            return False
-        store.put_file(source_id, relpath, state="pending", reason=f"released:{row['sha256']}")
+        try:
+            with locks.held(source_id, _QUICK_WAIT_S):
+                row = store.get_file(source_id, relpath)
+                if row is None or row["state"] != "quarantined" or not row["sha256"]:
+                    return False
+                store.put_file(source_id, relpath, state="pending", reason=f"released:{row['sha256']}")
+        except locks.SourceBusy:
+            raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         store.queue_scan(source["profile_id"], source_id)
     finally:
         media.close()
