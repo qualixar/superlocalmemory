@@ -19,4 +19,26 @@ def validate_embedding_provider(name: str) -> str:
                      "(leave it empty for automatic)")
 
 
-__all__ = ["EMBEDDING_PROVIDERS", "validate_embedding_provider"]
+def resolve_embedding_provider(explicit: str | None, model: str, inherited: str = "") -> str:
+    """The provider a switch to ``model`` runs under, or a ValueError when the pair is wrong.
+
+    ``explicit`` is what the request names (empty: none), ``inherited`` the live one.
+    The managed model runs only under ``slm-media`` (chosen for it when none is named),
+    and ``slm-media`` serves only the managed models: anything else would be embedded
+    by another provider's model under a name that says otherwise.
+    """
+    from superlocalmemory.core.model_catalog import MANAGED_EMBEDDERS
+
+    managed = [entry.id for entry in MANAGED_EMBEDDERS]
+    named = validate_embedding_provider(explicit or "")
+    if model in managed:
+        if named not in ("", "slm-media"):
+            raise ValueError(f"{model} runs only with the slm-media provider, not {named}")
+        return "slm-media"
+    provider = named or inherited
+    if provider == "slm-media":
+        raise ValueError(f"slm-media serves only: {', '.join(managed)}")
+    return provider
+
+
+__all__ = ["EMBEDDING_PROVIDERS", "resolve_embedding_provider", "validate_embedding_provider"]

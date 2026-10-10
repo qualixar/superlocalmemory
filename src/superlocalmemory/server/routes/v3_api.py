@@ -555,8 +555,10 @@ async def set_full_config(request: Request):
                        "embedding_model", "embedding_dimension")
         if any(k in body for k in _emb_fields):
             _old_emb = config.embedding
-            _new_provider = body.get("embedding_provider", "")
             _new_model = body.get("embedding_model", "")
+            from superlocalmemory.core.embedding_providers import resolve_embedding_provider
+            _new_provider = resolve_embedding_provider(  # ValueError -> 400 below
+                body.get("embedding_provider", ""), _new_model)
             _new_dim = int(body.get("embedding_dimension", 0) or 0)
             # The same range the other save route enforces. Without it a
             # dashboard save with no dimension field stored a width of zero.
@@ -762,8 +764,13 @@ async def set_embedding_config(request: Request):
         from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
         config = getattr(request.app.state, "config", None) or SLMConfig.load()
 
-        new_provider = body.get("provider", config.embedding.provider)
         new_model = body.get("model_name", config.embedding.model_name)
+        from superlocalmemory.core.embedding_providers import resolve_embedding_provider
+        try:
+            new_provider = resolve_embedding_provider(
+                body.get("provider", ""), new_model, config.embedding.provider)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         new_dim = int(body.get("dimension", config.embedding.dimension) or 768)
         if not (64 <= new_dim <= 8192):
             return JSONResponse({"error": f"Dimension must be 64-8192, got {new_dim}"}, status_code=400)
