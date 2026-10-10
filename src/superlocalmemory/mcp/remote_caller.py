@@ -22,6 +22,10 @@ import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the grant type lives with the connection code; no runtime import
+    from superlocalmemory.remote_connections.grant import RemoteGrant
 
 _current_remote_key_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "slm_remote_key_id", default=None,
@@ -49,9 +53,9 @@ def remote_caller(key_id: str) -> Iterator[None]:
 class RemotePeer:
     """A web app calling through a remote connection, as the mesh sees it.
 
-    Nothing sets this in the shipped daemon yet. The mesh tools refuse a caller
-    for whom it is set (they cannot serve a web app over the daemon's HTTP
-    interface); a later change will serve it in process.
+    Set around a mesh tool call that arrives with a verified grant. The mesh
+    tools still refuse a caller for whom it is set (they cannot serve a web app
+    over the daemon's HTTP interface); a later change will serve it in process.
 
     ``peer_ref`` is a stable, opaque reference for the app (never a secret);
     ``app`` is its short name and ``display_name`` what the owner sees.
@@ -82,7 +86,31 @@ def remote_peer(peer: RemotePeer | None) -> Iterator[None]:
         _current_remote_peer.reset(token)
 
 
+_current_remote_grant: contextvars.ContextVar["RemoteGrant | None"] = contextvars.ContextVar(
+    "slm_remote_grant", default=None,
+)
+
+
+def current_remote_grant() -> "RemoteGrant | None":
+    """The verified grant for this request, or ``None``.
+
+    Only :class:`remote_connections.origin.CanonicalMcpOrigin` sets it, after
+    checking the gateway's signature; a local client cannot present one.
+    """
+    return _current_remote_grant.get()
+
+
+@contextmanager
+def remote_grant(grant: "RemoteGrant | None") -> Iterator[None]:
+    """Run everything inside with the given verified grant."""
+    token = _current_remote_grant.set(grant)
+    try:
+        yield
+    finally:
+        _current_remote_grant.reset(token)
+
+
 __all__ = [
-    "RemotePeer", "current_remote_key_id", "current_remote_peer",
-    "remote_caller", "remote_peer",
+    "RemotePeer", "current_remote_grant", "current_remote_key_id", "current_remote_peer",
+    "remote_caller", "remote_grant", "remote_peer",
 ]

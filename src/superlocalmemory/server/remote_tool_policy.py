@@ -62,9 +62,21 @@ WRITE_ONLY_TOOLS: frozenset[str] = frozenset({
 
 WRITE_TOOLS: frozenset[str] = READ_TOOLS | WRITE_ONLY_TOOLS
 
-# Mesh tools stay denied to remote callers until a verified per-app identity
-# exists; flipping this alone does not expose them.
-REMOTE_MESH_TOOLS_ENABLED = False
+#: Tools that talk to the owner's other bots. Remote use needs the gateway's
+#: signed grant to carry the mesh scope AND the key to be opted in
+#: (``slm remote keys allow <name> mesh``). ``mesh_lock``, ``mesh_events``,
+#: ``mesh_status`` and ``mesh_summary`` stay host-only.
+MESH_TOOLS: frozenset[str] = frozenset({
+    "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait", "mesh_state",
+})
+
+#: Images and documents. Same double opt-in with the media scope. The saving
+#: tools also need a write key and the grant's write scope. A name that no
+#: tool is registered under is simply never listed or called.
+MEDIA_TOOLS: frozenset[str] = frozenset({
+    "remember_media", "get_media", "remember_document", "media_status",
+})
+_MEDIA_SAVE_TOOLS: frozenset[str] = frozenset({"remember_media", "remember_document"})
 
 HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "apply_refactor", "audit_trail", "backup_status", "build_code_graph", "build_graph",
@@ -74,8 +86,8 @@ HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "get_architecture_overview", "get_blast_radius", "get_community", "get_flow",
     "get_review_context", "link_memory_to_code", "list_communities",
     "list_failed_operations", "list_flows", "list_graph_stats", "mesh_events",
-    "mesh_inbox", "mesh_lock", "mesh_peers", "mesh_send", "mesh_state", "mesh_status",
-    "mesh_summary", "mesh_wait", "observe_bounded_loop_evidence",
+    "mesh_lock", "mesh_status",
+    "mesh_summary", "observe_bounded_loop_evidence",
     "observe_bounded_loop_execution_learning", "quantize", "query_graph",
     "reap_processes", "refactor_preview", "resolve_operation", "run_maintenance",
     "semantic_search_code", "set_mode", "set_retention_policy", "slm_loop_run",
@@ -91,10 +103,31 @@ ALLOWED_METHODS: frozenset[str] = frozenset({
 DENIAL_CODE = "remote_tool_not_allowed"
 
 
-def tool_allowed(scope: str, name: object) -> bool:
-    """Exact-name membership; anything unexpected is a no."""
+def _grant_allows(scope: str, name: str, grant: Any, extras: frozenset[str]) -> bool:
+    """Mesh and media tools: the signed grant AND the key's opt-in must both say yes."""
+    if grant is None or scope not in ("read", "write"):
+        return False
+    granted = grant.scopes
+    if name in MESH_TOOLS:
+        return "slm:mesh" in granted and "mesh" in extras
+    if "slm:media" not in granted or "media" not in extras:
+        return False
+    if name in _MEDIA_SAVE_TOOLS:
+        return scope == "write" and "slm:write" in granted
+    return True
+
+
+def tool_allowed(scope: str, name: object, grant: Any = None,
+                 extras: frozenset[str] = frozenset()) -> bool:
+    """Exact-name membership; anything unexpected is a no.
+
+    ``grant`` is the verified grant of this request (or ``None``) and ``extras``
+    the opt-ins of the remote key; only mesh and media tools look at them.
+    """
     if not isinstance(name, str):
         return False
+    if name in MESH_TOOLS or name in MEDIA_TOOLS:
+        return _grant_allows(scope, name, grant, extras)
     if scope == "read":
         return name in READ_TOOLS
     if scope == "write":
@@ -163,6 +196,12 @@ def denial_message(tool: str, key_name: str, scope: str) -> str:
         return (f"'{tool}' changes memory, and remote key '{key_name}' is read-only. "
                 f"Use a write key (slm remote keys add <name>) to save from this tool. "
                 f"{READ_ONLY_TAG}")
+    if tool in MESH_TOOLS or tool in MEDIA_TOOLS:
+        what, extra = (("to talk to your other bots", "mesh") if tool in MESH_TOOLS
+                       else ("to use images and documents", "media"))
+        return (f"'{tool}' needs the app to be allowed {what} and the remote key "
+                f"'{key_name}' to allow it: slm remote keys allow {key_name} {extra}. "
+                f"[{DENIAL_CODE}]")
     return f"'{tool}' is not available to remote key '{key_name}'. [{DENIAL_CODE}]"
 
 
@@ -220,7 +259,8 @@ def _replay(body: bytes, receive: Callable[[], Awaitable[dict[str, Any]]]):
     return _receive
 
 
-def _filter_tools_list(body: bytes, scope: str) -> bytes:
+def _filter_tools_list(body: bytes, scope: str, grant: Any = None,
+                       extras: frozenset[str] = frozenset()) -> bytes:
     try:
         payload = json.loads(body.decode("utf-8"))
         tools = payload["result"]["tools"]
@@ -228,7 +268,8 @@ def _filter_tools_list(body: bytes, scope: str) -> bytes:
         return body
     if not isinstance(tools, list):
         return body
-    kept = [t for t in tools if isinstance(t, dict) and tool_allowed(scope, t.get("name"))]
+    kept = [t for t in tools if isinstance(t, dict)
+            and tool_allowed(scope, t.get("name"), grant, extras)]
     result = dict(payload["result"], tools=kept)
     return json.dumps(dict(payload, result=result)).encode("utf-8")
 
@@ -319,7 +360,8 @@ class _JsonAnswerFilter:
         await self._send({"type": "http.response.body", "body": body})
 
 
-def _audit(principal: Any, scope: dict[str, Any], tool: str, decision: str) -> None:
+def _audit(principal: Any, scope: dict[str, Any], tool: str, decision: str,
+           app: str = "-") -> None:
     from superlocalmemory.mcp.agent_context import sanitize_agent_id
 
     root = scope.get("root_path", "") or ""
@@ -327,9 +369,9 @@ def _audit(principal: Any, scope: dict[str, Any], tool: str, decision: str) -> N
     agent = path[len(root):].lstrip("/").split("/")[0] if path.startswith(root) else ""
     audit_logger.info(
         "remote tools/call key_id=%s key_name=%s scope=%s profile=%s agent=%s tool=%s "
-        "decision=%s",
+        "decision=%s app=%s",
         principal.key_id, principal.name, principal.scope, principal.profile or "(active)",
-        sanitize_agent_id(agent) or "-", sanitize_agent_id(tool), decision,
+        sanitize_agent_id(agent) or "-", sanitize_agent_id(tool), decision, app,
     )
 
 
@@ -353,6 +395,41 @@ def _method_error(message: dict[str, Any], method: str) -> dict[str, Any]:
                       "message": f"'{method}' is not available over remote access."}}
 
 
+def _downstream(send: Any, message: dict[str, Any], tool: str | None, scope: str,
+                grant: Any, extras: frozenset[str]) -> Any:
+    """``send`` wrapped so the answer is filtered the way this request needs."""
+    if message["method"] == "tools/list":
+        return _JsonAnswerFilter(send, lambda raw: _filter_tools_list(raw, scope, grant, extras))
+    if message["method"] == "server/discover":
+        return _JsonAnswerFilter(send, _filter_discovery)
+    if tool is not None:
+        # Host details (paths, home, account, environment) never leave
+        # this computer in a tool answer (server/remote_redaction).
+        return _JsonAnswerFilter(send, _redact_call_answer)
+    return send
+
+
+def _peer_ref(grant: Any, tool: str | None) -> str:
+    if grant is None or tool not in MESH_TOOLS:
+        return "-"
+    from superlocalmemory.remote_connections.grant import peer_ref
+
+    return peer_ref(grant.connection_id, grant.authorization_id)
+
+
+def _peer_for(grant: Any, tool: str | None) -> Any:
+    """The web app a mesh tool call is made for, or ``None``."""
+    if grant is None or tool not in MESH_TOOLS:
+        return None
+    from superlocalmemory.mcp.remote_caller import RemotePeer
+    from superlocalmemory.remote_connections import peer_names
+
+    ref = _peer_ref(grant, tool)
+    return RemotePeer(peer_ref=ref, app=grant.app,
+                      display_name=peer_names.display_name(
+                          grant.connection_id, grant.authorization_id, ref))
+
+
 class RemoteToolScopeASGI:
     """Wraps the MCP app. Local callers pass straight through.
 
@@ -361,14 +438,37 @@ class RemoteToolScopeASGI:
     refused - there would be no way to hold it to its key's profile.
     """
 
-    def __init__(self, app: Any, runtime_for: Callable[[dict[str, Any]], Any] | None = None
-                 ) -> None:
+    def __init__(self, app: Any, runtime_for: Callable[[dict[str, Any]], Any] | None = None,
+                 key_store: Any = None) -> None:
         self.app = app
+        self._key_store = key_store
         if runtime_for is None:
             from superlocalmemory.server.remote_profile_binding import runtime_from_scope
 
             runtime_for = runtime_from_scope
         self._runtime_for = runtime_for
+
+    def _grant_and_extras(self, principal: Any) -> tuple[Any, frozenset[str]]:
+        """The verified grant for this request when it belongs to this key's
+        connection, with the key's opt-ins. A grant for another connection, or
+        on a key that is not a connection key, is ignored."""
+        from superlocalmemory.mcp.remote_caller import current_remote_grant
+
+        grant = current_remote_grant()
+        if grant is None:
+            return None, frozenset()
+        if principal.name != "web-" + grant.connection_id:
+            audit_logger.info("remote grant ignored key_id=%s reason=grant_mismatch",
+                              principal.key_id)
+            return None, frozenset()
+        store = self._key_store
+        if store is None:
+            from superlocalmemory.server.remote_keys import default_store
+
+            store = default_store()
+        extras = next((k.extras for k in store.list() if k.key_id == principal.key_id),
+                      frozenset())
+        return grant, frozenset(extras)
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -407,29 +507,21 @@ class RemoteToolScopeASGI:
             await _send_json(send, violation.status,
                              {"error": violation.code, "message": str(violation)})
             return
+        grant, extras = self._grant_and_extras(principal)
         if tool is not None:
-            allowed = tool_allowed(principal.scope, tool)
-            _audit(principal, scope, tool, "allow" if allowed else "deny")
+            allowed = tool_allowed(principal.scope, tool, grant, extras)
+            _audit(principal, scope, tool, "allow" if allowed else "deny",
+                   _peer_ref(grant, tool))
             if not allowed:
                 await _send_json(send, 200, _tool_error(
                     message, denial_message(tool, principal.name, principal.scope)))
                 return
-        if message["method"] == "tools/list":
-            downstream_send = _JsonAnswerFilter(
-                send, lambda raw: _filter_tools_list(raw, principal.scope))
-        elif message["method"] == "server/discover":
-            downstream_send = _JsonAnswerFilter(send, _filter_discovery)
-        elif tool is not None:
-            # Host details (paths, home, account, environment) never leave
-            # this computer in a tool answer (server/remote_redaction).
-            downstream_send = _JsonAnswerFilter(send, _redact_call_answer)
-        else:
-            downstream_send = send
-        from superlocalmemory.mcp.remote_caller import remote_caller
+        downstream_send = _downstream(send, message, tool, principal.scope, grant, extras)
+        from superlocalmemory.mcp.remote_caller import remote_caller, remote_peer
 
         # Per-agent stores (cache, reversible compression) are keyed by this
         # key as well as by the caller-chosen /mcp/<agent> segment.
-        with remote_caller(principal.key_id):
+        with remote_caller(principal.key_id), remote_peer(_peer_for(grant, tool)):
             if tool is None:
                 await self.app(scope, _replay(body, receive), downstream_send)
             else:
@@ -492,6 +584,8 @@ __all__ = [
     "DENIAL_CODE",
     "HOST_ONLY_TOOLS",
     "MAX_BODY_BYTES",
+    "MEDIA_TOOLS",
+    "MESH_TOOLS",
     "METHOD_NOT_ALLOWED",
     "PolicyViolation",
     "READ_ONLY_TAG",

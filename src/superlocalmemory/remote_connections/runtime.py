@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from dataclasses import replace
 from typing import Callable
@@ -12,7 +13,9 @@ from typing import Callable
 from superlocalmemory.remote_connections.async_state import finish_on_cancel, mutate
 from superlocalmemory.remote_connections.companion import Companion
 from superlocalmemory.remote_connections.credentials import ConnectorCredential, CredentialVault
+from superlocalmemory.remote_connections import peer_names
 from superlocalmemory.remote_connections.gateway_provider import CloudGatewayProvider
+from superlocalmemory.remote_connections.grant_keys import GrantKeyStore
 from superlocalmemory.remote_connections.journal import EnrollmentJournal, JournalConflict
 from superlocalmemory.remote_connections.native_enrollment import (
     NativeEnrollmentStore,
@@ -29,6 +32,7 @@ from superlocalmemory.remote_connections.renewal import (
 from superlocalmemory.remote_connections.service import RemoteConnectionService
 from superlocalmemory.server.remote_keys import RemoteKeyStore
 
+logger = logging.getLogger(__name__)
 MCP_URL = "https://mcp.superlocalmemory.com/mcp"
 __all__ = ["NativeConnectionRuntime", "RENEWAL_CHECK_S", "RENEWAL_WINDOW_MS", "renewal_delay_s"]
 
@@ -64,6 +68,21 @@ def _connected_app(value: object) -> bool:
     )
 
 
+def _connected_app_v2(value: object) -> bool:
+    """A row of the version-2 list: the same row, plus mesh and media consent."""
+    if not isinstance(value, dict) or not isinstance(value.get("permissions"), dict):
+        return False
+    permissions = value["permissions"]
+    if set(permissions) != {"read", "save", "session", "mesh", "media"}:
+        return False
+    v1 = dict(value, permissions={k: permissions[k] for k in ("read", "save", "session")})
+    return _connected_app(v1) and all(type(flag) is bool for flag in permissions.values())
+
+
+#: At most one forced grant-key refresh per connection in this many seconds.
+GRANT_REFRESH_INTERVAL_S = 600.0
+
+
 class NativeConnectionRuntime:
     def __init__(
         self,
@@ -78,7 +97,12 @@ class NativeConnectionRuntime:
         self.journal, self.store = journal, store
         self.provider = CloudGatewayProvider(store, redirect_uri=redirect_uri)
         self.current_profile, self.can_manage = current_profile, can_manage
-        self.origin = CanonicalMcpOrigin(app)
+        self.grant_keys = GrantKeyStore(lambda: self.store.backend)
+        self._grant_now: Callable[[], float] = time.time
+        self._grant_asked: dict[str, float] = {}
+        self._grant_tasks: dict[str, asyncio.Task] = {}
+        self.origin = CanonicalMcpOrigin(
+            app, grant_keys=self.grant_keys.load, on_unknown_kid=self.request_grant_refresh)
         self.keys = RemoteKeyStore()
         self._restore_task: asyncio.Task | None = None
         self._companions: dict[str, Companion] = {}
@@ -234,6 +258,7 @@ class NativeConnectionRuntime:
         self._companions[row.connection_id] = companion
         await companion.start()
         self._schedule_renewal(row)
+        self._schedule_grant_work(row, force=False)
 
     async def renew_credential(self, row: PendingEnrollment, *, recovering: bool = False) -> str:
         """Replace this connection's laptop credential.
@@ -401,6 +426,65 @@ class NativeConnectionRuntime:
         listed = [app for app in rows if _connected_app(app)]
         return {"connection_id": connection_id, "apps": listed}
 
+    async def list_apps_v2(self, owner: str, profile: str, connection_id: str) -> dict:
+        """Connected apps including mesh/media consent; feeds the peer-name cache."""
+        latest = await self._owned_link(owner, profile, connection_id)
+        value = await self.provider.list_apps_v2(latest)
+        apps = value.get("apps") if isinstance(value, dict) else None
+        rows = apps if isinstance(apps, list) else []
+        return {"connection_id": connection_id,
+                "apps": [app for app in rows if _connected_app_v2(app)]}
+
+    async def refresh_peer_names(self, owner: str, profile: str, connection_id: str) -> None:
+        listed = await self.list_apps_v2(owner, profile, connection_id)
+        peer_names.set_names(connection_id, {
+            app["authorization_id"]: app["name"] for app in listed["apps"]})
+
+    async def ensure_grant_key(self, row: PendingEnrollment, *, force: bool = False) -> None:
+        """Fetch a grant key when none is held (or ``force``). Failure is silent:
+        without a key there is simply no grant, which is today's behaviour."""
+        try:
+            if not force and self.grant_keys.load(row.connection_id).current is not None:
+                return
+            latest = await self.provider.exchange(
+                await asyncio.to_thread(self.store.by_connection, row.connection_id) or row, "")
+            fetched = await self.provider.grant_key(latest)
+            await asyncio.to_thread(
+                self.grant_keys.store_new, row.connection_id, fetched["version"], fetched["key"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("grant key unavailable for %s", row.connection_id[:6])
+
+    async def rotate_grant_key(self, owner: str, profile: str, connection_id: str) -> int:
+        """Owner action: replace this connection's grant key. Returns the new version."""
+        latest = await self._owned_link(owner, profile, connection_id)
+        fetched = await self.provider.grant_key(latest)
+        await asyncio.to_thread(
+            self.grant_keys.store_new, connection_id, fetched["version"], fetched["key"])
+        return fetched["version"]
+
+    def request_grant_refresh(self, connection_id: str) -> bool:
+        """Ask for a fresh grant key in the background; at most once per 10 minutes
+        per connection. Returns whether a refresh was started."""
+        now = self._grant_now()
+        asked = self._grant_asked.get(connection_id)
+        if asked is not None and now - asked < GRANT_REFRESH_INTERVAL_S:
+            return False
+        row = self.store.by_connection(connection_id)
+        if row is None or not row.completed:
+            return False
+        self._grant_asked[connection_id] = now
+        self._schedule_grant_work(row, force=True)
+        return True
+
+    def _schedule_grant_work(self, row: PendingEnrollment, *, force: bool) -> None:
+        running = self._grant_tasks.get(row.connection_id)
+        if running is not None and not running.done():
+            return
+        self._grant_tasks[row.connection_id] = asyncio.create_task(
+            self._quietly(self.ensure_grant_key(row, force=force)), name="slm-remote-grant-key")
+
     async def revoke_app(
         self,
         owner: str,
@@ -484,6 +568,8 @@ class NativeConnectionRuntime:
         await asyncio.to_thread(
             self.vault().revoke, row.installation_id, owner, profile, connection
         )
+        await asyncio.to_thread(self.grant_keys.forget, connection)
+        peer_names.set_names(connection, {})
         try:
             if row.access_token:
                 row = await self.provider.exchange(row, "")
@@ -514,12 +600,14 @@ class NativeConnectionRuntime:
             task.cancel()
         await asyncio.gather(*self._verification_tasks.values(), return_exceptions=True)
         self._verification_tasks.clear()
-        background = [*self._renewal_tasks.values(), *self._recovery_tasks.values()]
+        background = [*self._renewal_tasks.values(), *self._recovery_tasks.values(),
+                      *self._grant_tasks.values()]
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
         self._renewal_tasks.clear()
         self._recovery_tasks.clear()
+        self._grant_tasks.clear()
         for companion in self._companions.values():
             await companion.stop()
         self._companions.clear()

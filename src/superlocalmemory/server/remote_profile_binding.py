@@ -183,6 +183,15 @@ def _profile_refusal(key_name: str, bound: str) -> BindingRefusal:
         "another profile.")
 
 
+def _check_mesh_state(arguments: Mapping[str, Any]) -> None:
+    """A remote caller may only read a shared key, never write or delete one."""
+    key = arguments.get("key")
+    if arguments.get("action", "get") != "get":
+        raise BindingRefusal(ARGUMENT_DENIAL, "Remote access can only read mesh state.")
+    if not isinstance(key, str) or not key.strip() or len(key) > 256:
+        raise BindingRefusal(ARGUMENT_DENIAL, "mesh_state needs a key of 1 to 256 characters.")
+
+
 def bind_arguments(tool: str, arguments: object, *, key_name: str,
                    bound: str) -> dict[str, Any]:
     """The arguments to run ``tool`` with as profile ``bound``.
@@ -193,6 +202,8 @@ def bind_arguments(tool: str, arguments: object, *, key_name: str,
         arguments = {}
     if not isinstance(arguments, Mapping):
         raise BindingRefusal(ARGUMENT_DENIAL, "Tool arguments must be a JSON object.")
+    if tool == "mesh_state":
+        _check_mesh_state(arguments)
     for name, value in arguments.items():
         if name not in CLASSIFIED_ARGUMENTS:
             raise BindingRefusal(
