@@ -64,6 +64,15 @@ def wait_for(cond, seconds=5.0):
     return False
 
 
+def _open_scan_jobs(env):
+    media = env.store()
+    try:
+        return [j for j in media.list_jobs("default", states=("queued", "running"))
+                if j.get("kind") == "source_scan"]
+    finally:
+        media.close()
+
+
 def test_event_leads_to_a_rescan_of_only_that_path(env):
     w, calls = make(env)
     w.sync([src(env, "s1")])
@@ -191,6 +200,9 @@ def test_service_rescans_only_the_changed_file(env):
     svc.start()
     try:
         assert wait_for(lambda: FakeObserver.made)
+        # The first scan queued when the folder was confirmed must be done before the edits,
+        # or that full pass (not the watcher) would pick up both files.
+        assert wait_for(lambda: not _open_scan_jobs(env), 30)
         obs = FakeObserver.made[0]
         obs.root = env.root
         env.write("a.md", "one edited")
