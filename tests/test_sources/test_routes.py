@@ -123,3 +123,32 @@ def test_hint_is_not_found_until_the_watcher_exists(env):
     sid = env.add_and_confirm()
     c = client(env)
     assert c.post(f"/api/v3/sources/{sid}/hint", json={"relpaths": ["a.md"]}).status_code == 404
+
+
+def _emptied(env):
+    env.write("a.md", "x")
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    (env.root / "a.md").unlink()
+    assert env.scan(sid).offline_reason == "empty_folder"
+    return sid
+
+
+def test_forget_empty_route(env):
+    sid = _emptied(env)
+    c = client(env)
+    r = c.post(f"/api/v3/sources/{sid}/forget-empty")
+    assert r.status_code == 200 and r.json() == {"source_id": sid, "forgotten": 1, "state": "active"}
+    again = c.post(f"/api/v3/sources/{sid}/forget-empty")
+    assert again.status_code == 409 and again.json()["detail"]["code"] == "not_empty_folder"
+
+
+def test_forget_empty_route_refusals(env):
+    sid = _emptied(env)
+    c = client(env)
+    assert c.post(f"/api/v3/sources/{sid}/forget-empty", params={"profile_id": "p2"}).status_code == 404
+    assert c.post("/api/v3/sources/deadbeef/forget-empty").status_code == 404
+    env.write("b.md", "back")
+    r = c.post(f"/api/v3/sources/{sid}/forget-empty")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "folder_not_empty"
+    assert client(env, peer=REMOTE).post(f"/api/v3/sources/{sid}/forget-empty").status_code == 403

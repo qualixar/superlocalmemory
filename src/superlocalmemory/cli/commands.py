@@ -3037,7 +3037,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("summary", "Readable summaries: session, day, or project"),
         ("view", "Saved views: named recall queries you can re-run"),
         ("kinds", "Memory kinds: status, settings, classify (undoable)"),
-        ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove"),
+        ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove, forget-empty"),
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
