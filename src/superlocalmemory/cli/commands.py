@@ -1177,16 +1177,12 @@ def cmd_restart(args: Namespace) -> None:
 
     # Step 5: Database integrity check
     try:
-        from superlocalmemory.storage.memory_write import memory_read
+        from superlocalmemory.storage.integrity_diagnosis import restart_report
 
         db_path = slm_dir / "memory.db"
         if db_path.exists():
-            with memory_read(db_path) as conn:
-                integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-                fact_count = conn.execute("SELECT COUNT(*) FROM atomic_facts").fetchone()[0]
-                entity_count = conn.execute("SELECT COUNT(*) FROM canonical_entities").fetchone()[0]
-            _log(5, "Database integrity", "ok" if integrity == "ok" else "fail",
-                 f"integrity={integrity}, {fact_count} facts, {entity_count} entities")
+            status, detail = restart_report(db_path, slm_dir)
+            _log(5, "Database integrity", status, detail)
         else:
             _log(5, "Database check", "warn", "no database yet — will create on first use")
     except Exception as exc:
@@ -3656,17 +3652,20 @@ def cmd_doctor(args: Namespace) -> None:
             # check ran, and --deep runs the exhaustive one.
             deep = bool(getattr(args, "deep", False))
             pragma = "integrity_check" if deep else "quick_check"
+            from superlocalmemory.storage.integrity_diagnosis import check_database
+
+            # The finding's own text, never the sqlite3.Row it arrives in
+            # (GitHub #204); a damaged keyword index points at its own rebuild.
             with memory_read(db_path) as conn:
-                result = conn.execute(f"PRAGMA {pragma}").fetchone()
-            if result and result[0] == "ok":
+                result = check_database(conn, deep=deep, root=slm_home)
+            if result.ok:
                 size_mb = db_path.stat().st_size / (1024 * 1024)
                 detail = f"OK ({size_mb:.2f} MB, {pragma})"
                 if not deep:
                     detail += " — run `slm doctor --deep` for a full page scan"
                 _check("Database", "PASS", detail)
             else:
-                _check("Database", "FAIL", f"{pragma}: {result}",
-                       "Backup and recreate database")
+                _check("Database", "FAIL", f"{pragma}: {result.summary()}", result.fix)
         except Exception as exc:
             _check("Database", "FAIL", str(exc))
     else:

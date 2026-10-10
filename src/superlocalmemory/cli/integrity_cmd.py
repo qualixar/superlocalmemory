@@ -48,13 +48,34 @@ def _root() -> Path:
     return canonical_data_root().resolve()
 
 
-def _emit(command: str, data: dict, use_json: bool, render) -> None:
+def _emit(command: str, data: dict, use_json: bool, render,
+          next_actions: list[dict] | None = None) -> None:
     if use_json:
         from superlocalmemory.cli.json_output import json_print
 
-        json_print(command, data=data)
+        json_print(command, data=data, **({"next_actions": next_actions} if next_actions else {}))
     else:
         render(data)
+
+
+def _damaged_indexes(keyword_index: dict | None, quick_check: Any = None) -> list[str]:
+    """Keyword indexes the health data or SQLite's own check says are damaged."""
+    from superlocalmemory.storage.integrity_diagnosis import damaged_indexes_in
+
+    named = list((keyword_index or {}).get("damaged") or [])
+    found = damaged_indexes_in(quick_check if isinstance(quick_check, list) else [])
+    return named + [t for t in found if t not in named]
+
+
+def _repair_step(damaged: list[str]) -> str:
+    return (f"slm db repair --apply --root {_root()}  (rebuilds {', '.join(damaged)} from your "
+            "stored memories and turns off the SQLite setting that damaged it; nothing is lost)")
+
+
+def _hint_actions(damaged: list[str]) -> list[dict]:
+    return ([{"command": _repair_step(damaged).split("  (")[0],
+              "description": "Rebuild the damaged keyword index from your memories"}]
+            if damaged else [])
 
 
 def _fail(command: str, code: str, message: str, use_json: bool) -> int:
@@ -88,6 +109,8 @@ def _render_plan(data: dict) -> None:
               f"longest write {s['max_lock_hold_ms']} ms")
         print(f"  done: {json.dumps(s['done'], sort_keys=True)}")
         print(f"  undo with: slm db repair --undo {s['run_id']} --root {data['root']}")
+    elif _damaged_indexes(data["plan"]["keyword_index"]):
+        print(f"Next step: {_repair_step(_damaged_indexes(data['plan']['keyword_index']))}")
 
 
 def cmd_db_integrity(args: Namespace) -> int:
@@ -96,7 +119,16 @@ def cmd_db_integrity(args: Namespace) -> int:
     db_path = _root() / "memory.db"
     if not db_path.exists():
         return _fail("db integrity", "NO_STORE", f"no store at {db_path}", args.json)
-    _emit("db integrity", health(db_path, pages=bool(args.pages)), args.json, _render_health)
+    data = health(db_path, pages=bool(args.pages))
+    damaged = _damaged_indexes((data.get("relational_integrity") or {}).get("keyword_index"),
+                               (data.get("page_integrity") or {}).get("quick_check"))
+
+    def render(d: dict) -> None:
+        _render_health(d)
+        if damaged:
+            print(f"Next step: {_repair_step(damaged)}")
+
+    _emit("db integrity", data, args.json, render, _hint_actions(damaged))
     return 0
 
 
@@ -157,7 +189,21 @@ def cmd_db_repair(args: Namespace) -> int:
         return 0
     data = {"root": str(root), "plan": result["after"], "summary": result, "changed": True}
     _emit("db repair", data, args.json, _render_plan)
+    damaged = _still_damaged(result)
+    if damaged:
+        print(f"The keyword index is still damaged after the repair: {', '.join(damaged)}. "
+              "It was rebuilt and then recreated from your stored memories and SQLite still "
+              "reports it malformed. Your memories are untouched. Run `slm doctor --deep` "
+              "and report this with its output at "
+              "https://github.com/qualixar/superlocalmemory/issues", file=sys.stderr)
+        return 1
     return 0 if result["status"] in ("finished", "stopped") else 1
+
+
+def _still_damaged(result: dict) -> list[str]:
+    """Keyword indexes the repair could not make sound, from its own re-check."""
+    after = (result.get("after") or {}).get("keyword_index") or {}
+    return list(after.get("damaged") or [])
 
 
 __all__ = ["cmd_db_integrity", "cmd_db_repair", "register_db_integrity_parsers"]

@@ -22,7 +22,10 @@ Two fixes, both idempotent:
   An index that already has the option on there (a store made before this was
   known) gets it turned off at the next start and is reported "disabled" once;
   if its index is already malformed a single warning points to
-  ``slm db repair``, which rebuilds it from the stored memories.
+  ``slm db repair``, which turns the setting off first (also when an earlier
+  repair had already purged the index), rebuilds the index from the stored
+  memories, checks it again, and recreates the table if the rebuild was not
+  enough (GitHub #204).
 * ``purge_deleted_terms``: ``optimize`` rewrites the index without the words of
   rows deleted before ``secure-delete`` was on (the existing-store repair).
 """
@@ -30,6 +33,7 @@ Two fixes, both idempotent:
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -85,10 +89,11 @@ def secure_delete_on(target: Any, table: str) -> bool:
     return bool(rows) and str(tuple(rows[0])[0]) == "1"
 
 
-def _switch_off_if_broken(target: Any, table: str) -> str:
+def _switch_off_if_broken(target: Any, table: str, *, warn: bool = True) -> str:
     """Under a SQLite that corrupts the index with the option on: turn it off.
 
     Only the range from 3.42 up can have it on. Never raises: a store must open.
+    ``warn=False`` is for ``slm db repair``, which is about to rebuild the index.
     """
     if sqlite3.sqlite_version_info < SECURE_DELETE_MIN_SQLITE:
         return "unsupported"
@@ -100,7 +105,7 @@ def _switch_off_if_broken(target: Any, table: str) -> str:
         logger.warning("keyword index %s secure delete could not be turned off: %s",
                        table, exc)
         return "unsupported"
-    if keyword_index_damaged(target, table):
+    if warn and keyword_index_damaged(target, table):
         logger.warning("keyword index %s is damaged (a known SQLite %s problem); run "
                        "'slm db repair' to rebuild it from your memories; nothing is lost",
                        table, sqlite3.sqlite_version)
@@ -134,13 +139,73 @@ def _quick_check_names(target: Any, table: str) -> bool:
         rows = _run(target, "PRAGMA quick_check")
     except sqlite3.DatabaseError:
         return False
-    marker = f"fts5 table main.{table}".lower()
-    return any(marker in str(tuple(row)[0]).lower() for row in rows)
+    markers = (f"fts5 table main.{table}".lower(), f'from table "{table}"'.lower())
+    return any(m in str(tuple(row)[0]).lower() for row in rows for m in markers)
 
 
 def rebuild_keyword_index(target: Any, table: str) -> None:
     """Rebuild one index from its content table (``atomic_facts``); no memory is lost."""
     _run(target, f"INSERT INTO {table}({table}) VALUES('rebuild')")  # noqa: S608
+
+
+def disable_where_damaging(target: Any) -> dict[str, str]:
+    """Turn ``secure-delete`` off in every keyword index when this SQLite damages
+    the index with it on (3.44.0 up to, not including, 3.46.1). Nothing else is touched.
+
+    ``slm db repair`` calls this before it rebuilds an index: a rebuild with the
+    setting still on is damaged again by the next edit (GitHub #204). Returns
+    ``{table: "disabled" | "unsupported"}`` for the indexes that exist; empty on a
+    SQLite where the setting is safe.
+    """
+    if secure_delete_supported() or sqlite3.sqlite_version_info < SECURE_DELETE_MIN_SQLITE:
+        return {}
+    return {table: _switch_off_if_broken(target, table, warn=False)
+            for table in FTS_TABLES if _exists(target, table)}
+
+
+def _index_columns(target: Any, table: str) -> list[str]:
+    return [str(row[1]) for row in _run(target, f"PRAGMA table_info({table})")]
+
+
+def _is_external_content(ddl: str) -> bool:
+    """``content='atomic_facts'``: the text lives in another table, not in the index."""
+    return re.search(r"content\s*=\s*['\"][^'\"]+['\"]", ddl, re.IGNORECASE) is not None
+
+
+def recreate_keyword_index(target: Any, table: str) -> None:
+    """Drop one keyword index and create it again from the stored text.
+
+    The fallback for an index that a ``rebuild`` could not repair. An index whose
+    text lives in another table (``atomic_facts_fts``) is refilled from it. A
+    standalone index (``fact_expansion_fts``) is its own text, so its rows are
+    read out before the drop and put back after it. All or nothing: a failure
+    leaves the old table as it was. ``secure-delete`` is off in the new table.
+    """
+    rows = _run(target, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,))
+    if not rows or not rows[0][0]:
+        raise sqlite3.OperationalError(f"no keyword index {table} to recreate")
+    ddl = str(rows[0][0])
+    external = _is_external_content(ddl)
+    _run(target, "SAVEPOINT slm_recreate_keyword_index")
+    try:
+        columns = _index_columns(target, table)
+        kept = [] if external else [tuple(r) for r in _run(
+            target, f"SELECT rowid, {', '.join(columns)} FROM {table}")]  # noqa: S608
+        _run(target, f"DROP TABLE {table}")
+        _run(target, ddl)
+        if external:
+            _run(target, f"INSERT INTO {table}({table}) VALUES('rebuild')")  # noqa: S608
+        else:
+            marks = ", ".join("?" for _ in range(len(columns) + 1))
+            for row in kept:
+                _run(target, f"INSERT INTO {table}(rowid, {', '.join(columns)}) "  # noqa: S608
+                     f"VALUES ({marks})", row)
+    except BaseException:
+        _run(target, "ROLLBACK TO slm_recreate_keyword_index")
+        _run(target, "RELEASE slm_recreate_keyword_index")
+        raise
+    _run(target, "RELEASE slm_recreate_keyword_index")
 
 
 def ensure_secure_delete(target: Any) -> dict[str, str]:
@@ -193,7 +258,8 @@ def purge_deleted_terms(conn: Any, table: str) -> None:
 
 
 __all__ = [
-    "FTS_TABLES", "SECURE_DELETE_BROKEN_SQLITE", "enable_quietly",
+    "FTS_TABLES", "SECURE_DELETE_BROKEN_SQLITE", "disable_where_damaging", "enable_quietly",
     "ensure_secure_delete", "keyword_index_damaged", "purge_deleted_terms",
-    "rebuild_keyword_index", "secure_delete_on", "secure_delete_supported",
+    "rebuild_keyword_index", "recreate_keyword_index", "secure_delete_on",
+    "secure_delete_supported",
 ]
