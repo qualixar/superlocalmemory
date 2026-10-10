@@ -20,6 +20,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from superlocalmemory import sources
+from superlocalmemory.sources import api as sources_api
+from superlocalmemory.sources import picker
 from superlocalmemory.server.routes.media import _profile, _require_local
 from superlocalmemory.sources.roots import RootRefused
 
@@ -87,6 +89,32 @@ async def add(req: AddRequest, request: Request):
     profile, _ = await _context(request, write=True, manage=True, profile_id=req.profile_id)
     preview = await _call(sources.add_source, req.path, profile_id=profile, kind=req.kind)
     return JSONResponse(dataclasses.asdict(preview), headers=_NO_STORE)
+
+
+@router.post("/pick-folder")
+async def pick_folder(request: Request):
+    """Open the computer's own folder dialog; the path still goes through the preview and confirm steps."""
+    await _context(request, write=True, manage=True)
+    await _call(sources_api.refuse_while_remote)
+    try:
+        path = await asyncio.to_thread(picker.pick_folder)
+    except picker.PickerUnavailable:
+        raise HTTPException(501, detail={"code": "picker_unavailable",
+                                         "message": "This computer cannot open a folder dialog. Type the path instead."}) from None
+    except picker.PickerBusy:
+        raise HTTPException(409, detail={"code": "picker_busy",
+                                         "message": "A folder dialog is already open."}) from None
+    body = {"cancelled": True} if path is None else {"path": path}
+    return JSONResponse(body, headers=_NO_STORE)
+
+
+@router.get("/suggestions")
+async def suggestions(request: Request):
+    """Folders worth one click: Obsidian vaults, Documents, Desktop. Folder paths only, never files."""
+    await _context(request, manage=True)
+    await _call(sources_api.refuse_while_remote)
+    found = await asyncio.to_thread(picker.suggestions)
+    return JSONResponse({"suggestions": found}, headers=_NO_STORE)
 
 
 @router.post("/{source_id}/confirm")
