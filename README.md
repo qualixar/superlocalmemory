@@ -133,7 +133,7 @@ plugin works on Grok Bot's shared, memory-constrained computer without any manua
 **Install:** add the `qualixar` marketplace (`.cursor-plugin/marketplace.json` at this repo's
 root) in Grok Bot's Plugins screen, then add `superlocalmemory`. No API key, no sign-in step —
 the server runs locally on the Grok Bot computer, so nothing goes to a memory SaaS.
-If the plugin shows the old "21-tool code profile" description or a `venv/bin/slm: No such file`
+If the plugin's description shows an out-of-date tool count or a `venv/bin/slm: No such file`
 error, Grok Bot's copy of the marketplace is pinned to an old commit: remove the `qualixar`
 marketplace, add it again, and reinstall the plugin. This plugin keeps its own memory on Grok
 Bot's computer; to use the memory on your own computer, add
