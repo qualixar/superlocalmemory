@@ -15,6 +15,7 @@ model, whose vectors would be in the wrong space.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from superlocalmemory.core.process_role import is_daemon_process
@@ -43,6 +44,54 @@ def init_slm_media_embedder(config: Any) -> Any:
     return emb
 
 
+def route_embedder(config: Any, *, try_ollama: Callable[[Any], Any | None],
+                   try_service: Callable[[Any], Any | None]) -> Any | None:
+    """The embedder for ``config.embedding.provider``; None means keyword-only.
+
+    ``try_ollama`` / ``try_service`` build the Ollama and the sentence-transformers /
+    remote-service embedders (None when they are not usable).
+    """
+    emb_cfg = config.embedding
+    provider = emb_cfg.provider
+
+    # The managed model (daemon: the worker; other processes: the daemon).
+    if provider == PROVIDER:
+        return init_slm_media_embedder(config)
+
+    # When the provider is ollama, Ollama's own vectors are primary: the stored vectors
+    # were made by Ollama's nomic-embed-text, and sentence-transformers' nomic-embed-text-v1.5
+    # makes different ones, so mixing them degrades recall. The subprocess is the fallback.
+    if provider == "ollama":
+        result = try_ollama(emb_cfg)
+        if result is not None:
+            logger.info("Using Ollama embeddings (nomic-embed-text, local)")
+            return result
+        st_emb = try_service(emb_cfg)
+        if st_emb is not None:
+            logger.warning("Ollama unavailable; falling back to sentence-transformers subprocess")
+            return st_emb
+        return None
+
+    if provider == "openai" and emb_cfg.is_openai_compatible:
+        logger.info(
+            "Using OpenAI-compatible embedding endpoint: %s (model=%s, dim=%d)",
+            emb_cfg.api_endpoint, emb_cfg.model_name, emb_cfg.dimension,
+        )
+        return try_service(emb_cfg)
+
+    # Explicit cloud / sentence-transformers (subprocess-isolated)
+    if provider in ("cloud", "sentence-transformers") or emb_cfg.is_cloud:
+        return try_service(emb_cfg)
+
+    # Auto-detect: Ollama first (lightweight, <1s), then the subprocess, which never
+    # imports torch in this process.
+    ollama_emb = try_ollama(emb_cfg)
+    if ollama_emb is not None:
+        logger.info("Auto-detected Ollama embeddings (fast path)")
+        return ollama_emb
+    return try_service(emb_cfg)
+
+
 def init_light_mode_embedder(config: Any) -> Any | None:
     """The managed provider's embedder for a light (MCP) engine, else None (the caller's proxy).
 
@@ -56,4 +105,4 @@ def init_light_mode_embedder(config: Any) -> Any | None:
     return DaemonTextEmbedder(config.embedding)
 
 
-__all__ = ["PROVIDER", "init_light_mode_embedder", "init_slm_media_embedder"]
+__all__ = ["PROVIDER", "init_light_mode_embedder", "init_slm_media_embedder", "route_embedder"]
