@@ -25,6 +25,7 @@ from typing import Any, Iterator, Sequence
 from superlocalmemory.media.schema import (
     MEDIA_SCHEMA_VERSION, apply_schema, stored_version,
 )
+from superlocalmemory.media.store_erase import EraseMixin
 from superlocalmemory.media.store_jobs import JobsMixin, utc_stamp
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,11 @@ DEFAULT_DIM = 768
 MAX_K = 200
 _SPACE_ID = re.compile(r"^[0-9a-f]{32}$")
 _ITEM_FIELDS = (
-    "profile_id", "kind", "sha256", "phash", "mime", "bytes", "width", "height",
-    "original_relpath", "exif_json", "captured_at", "anchor_memory_id", "document_id",
+    "media_id", "profile_id", "kind", "source_sha256", "stored_sha256", "phash", "mime", "bytes",
+    "remote_ok", "width", "height", "original_relpath", "exif_json", "captured_at", "anchor_memory_id", "document_id",
     "page_no", "source_id", "origin", "state", "thumb_webp",
 )
-_REQUIRED = ("profile_id", "kind", "sha256", "mime", "bytes", "origin")
+_REQUIRED = ("profile_id", "kind", "source_sha256", "mime", "bytes", "origin")
 
 
 class MediaStoreReadOnly(RuntimeError):
@@ -111,7 +112,7 @@ def _exif_text(raw: Any) -> str:
     return json.dumps(kept, sort_keys=True)
 
 
-class MediaStore(JobsMixin):
+class MediaStore(JobsMixin, EraseMixin):
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._wlock = threading.RLock()
@@ -212,7 +213,9 @@ class MediaStore(JobsMixin):
         if unknown or missing:
             raise ValueError(f"unknown fields {sorted(unknown)}, missing fields {missing}")
         fields["exif_json"] = _exif_text(fields.get("exif_json", {}))
-        media_id = uuid.uuid4().hex
+        media_id = fields.pop("media_id", None) or uuid.uuid4().hex
+        if not _SPACE_ID.fullmatch(media_id):
+            raise ValueError("media_id must be 32 lowercase hex characters")
         cols = ["media_id", "created_at", *fields]
         with self._write() as conn:
             conn.execute(
@@ -224,11 +227,18 @@ class MediaStore(JobsMixin):
         row = self._read().execute("SELECT * FROM media_items WHERE media_id = ?", (media_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_by_sha(self, profile_id: str, sha256: str) -> dict[str, Any] | None:
+    def find_by_sha(self, profile_id: str, source_sha256: str) -> dict[str, Any] | None:
         row = self._read().execute(
-            "SELECT * FROM media_items WHERE profile_id = ? AND sha256 = ? AND state = 'active'"
-            " ORDER BY created_at LIMIT 1", (profile_id, sha256)).fetchone()
+            "SELECT * FROM media_items WHERE profile_id = ? AND source_sha256 = ? AND state = 'active'"
+            " ORDER BY created_at LIMIT 1", (profile_id, source_sha256)).fetchone()
         return dict(row) if row else None
+
+    def phash_candidates(self, profile_id: str) -> list[tuple[str, str]]:
+        """(media_id, phash) of the profile's active items that have a perceptual hash."""
+        rows = self._read().execute(
+            "SELECT media_id, phash FROM media_items WHERE profile_id = ? AND state = 'active'"
+            " AND phash IS NOT NULL ORDER BY created_at, media_id", (profile_id,)).fetchall()
+        return [(r[0], r[1]) for r in rows]
 
     def list_items(self, profile_id: str, *, kind: str | None = None, state: str = "active",
                    limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:

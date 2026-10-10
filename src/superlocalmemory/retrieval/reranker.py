@@ -98,6 +98,10 @@ _RERANK_QUEUE_WAIT_SECONDS = 1.0
 _WARMUP_LOAD_TIMEOUT = int(os.environ.get("SLM_RERANKER_WARMUP_TIMEOUT", "90"))
 _WARMUP_MAX_ATTEMPTS = int(os.environ.get("SLM_RERANKER_WARMUP_ATTEMPTS", "5"))
 _WARMUP_RETRY_BACKOFF_S = float(os.environ.get("SLM_RERANKER_WARMUP_BACKOFF", "3"))
+# A whole failed round (all attempts) is followed by a cooldown that doubles
+# each round; after _WARMUP_MAX_ROUNDS failed rounds automatic retries stop.
+_WARMUP_COOLDOWN_S = float(os.environ.get("SLM_RERANKER_WARMUP_COOLDOWN", "300"))
+_WARMUP_MAX_ROUNDS = int(os.environ.get("SLM_RERANKER_WARMUP_ROUNDS", "4"))
 
 
 # Substrings that mark a load failure as a configuration problem rather than a
@@ -143,6 +147,10 @@ class CrossEncoderReranker:
         self._worker_loading = False  # True while background warmup in progress
         self._lock = threading.Lock()
         self._shutdown_event = threading.Event()
+        # Warm-up backoff: see _warmup_round_failed.
+        self._warmup_rounds_failed = 0
+        self._warmup_not_before = 0.0  # time.monotonic()
+        self._warmup_stopped = False
         self._warmup_thread: threading.Thread | None = None
         self._idle_timer: threading.Timer | None = None
         self._request_count: int = 0
@@ -180,8 +188,52 @@ class CrossEncoderReranker:
     # Background warmup (non-blocking model load)
     # ------------------------------------------------------------------
 
-    def _start_background_warmup(self) -> None:
+    def _warmup_reset(self) -> None:
+        """Forget earlier failed rounds (success, or an explicit retry)."""
+        self._warmup_rounds_failed = 0
+        self._warmup_not_before = 0.0
+        self._warmup_stopped = False
+
+    def _warmup_round_failed(self, permanent: bool = False) -> None:
+        """Account for a failed warm-up round: free the worker, back off.
+
+        A worker that holds no model is ~800 MB of nothing, so it is killed
+        under the lock. The next round may not start before a cooldown that
+        doubles each round; after ``_WARMUP_MAX_ROUNDS`` rounds (or a
+        permanent error) automatic retries stop.
+        """
+        with self._lock:
+            self._kill_worker()
+        rounds = getattr(self, "_warmup_rounds_failed", 0) + 1
+        self._warmup_rounds_failed = rounds
+        wait = _WARMUP_COOLDOWN_S * 2 ** (rounds - 1)
+        self._warmup_not_before = time.monotonic() + wait
+        if permanent or rounds >= _WARMUP_MAX_ROUNDS:
+            self._warmup_stopped = True
+            if not permanent:
+                logger.warning(
+                    "Reranker warmup failed %d rounds; automatic retries "
+                    "stopped until the daemon restarts or 'slm warmup' runs; "
+                    "recall continues with fusion scores.", rounds,
+                )
+            return
+        logger.warning(
+            "Reranker warmup round %d/%d failed; the next round may start "
+            "in %.0fs (after a recall). Run 'slm doctor' for diagnostics.",
+            rounds, _WARMUP_MAX_ROUNDS, wait,
+        )
+
+    def _warmup_gate_open(self) -> bool:
+        """True when the backoff allows a new automatic round now."""
+        if getattr(self, "_warmup_stopped", False):
+            return False
+        return time.monotonic() >= getattr(self, "_warmup_not_before", 0.0)
+
+    def _start_background_warmup(self, force: bool = False) -> bool:
         """Start worker and load model in background thread.
+
+        Returns whether a warm-up was started. Without ``force`` it refuses
+        while stopped or inside the cooldown (see ``_warmup_round_failed``).
 
         V3.3.16: Uses _send_request (lock-protected) instead of raw
         stdin/stdout access. Previous code wrote to stdin without the
@@ -192,7 +244,9 @@ class CrossEncoderReranker:
         with guard:
             if (self._shutdown_event.is_set() or self._worker_loading
                     or self._model_loaded):
-                return
+                return False
+            if not force and not self._warmup_gate_open():
+                return False
             self._worker_loading = True
 
         def _warmup() -> None:
@@ -247,6 +301,7 @@ class CrossEncoderReranker:
                             )
                         if resp and resp.get("ok"):
                             self._model_loaded = True
+                            self._warmup_reset()
                             logger.info(
                                 "Reranker worker warm (attempt %d/%d, "
                                 "backend=%s, warmup_inference=%s)",
@@ -286,6 +341,7 @@ class CrossEncoderReranker:
                                     "continues with fusion scores.",
                                     load_error,
                                 )
+                                self._warmup_round_failed(permanent=True)
                                 return
                             logger.warning(
                                 "Reranker warmup attempt %d/%d failed: %s; "
@@ -302,10 +358,9 @@ class CrossEncoderReranker:
                 if not self._model_loaded:
                     logger.warning(
                         "Reranker warmup exhausted %d attempts; recall uses "
-                        "fallback scoring until the next rerank triggers a "
-                        "fresh load. Run 'slm doctor' for diagnostics.",
-                        _WARMUP_MAX_ATTEMPTS,
+                        "fallback scoring.", _WARMUP_MAX_ATTEMPTS,
                     )
+                    self._warmup_round_failed()
             except Exception as exc:
                 logger.debug("Background reranker warmup failed: %s", exc)
             finally:
@@ -313,6 +368,7 @@ class CrossEncoderReranker:
 
         self._warmup_thread = threading.Thread(target=_warmup, daemon=True, name="ce-warmup")
         self._warmup_thread.start()
+        return True
 
     def warmup_sync(self, timeout: float = 120.0) -> bool:
         """Block until reranker model is loaded. Returns True if ready.
@@ -327,7 +383,8 @@ class CrossEncoderReranker:
             and not self._worker_loading
             and not self._model_loaded
         ):
-            self._start_background_warmup()
+            self._warmup_reset()
+            self._start_background_warmup(force=True)
         t = getattr(self, '_warmup_thread', None)
         if t is not None:
             t.join(timeout=timeout)

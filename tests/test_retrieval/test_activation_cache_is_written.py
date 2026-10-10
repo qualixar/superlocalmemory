@@ -32,8 +32,11 @@ In-process, through the daemon route, the write itself did happen on 4.1.19
 
 from __future__ import annotations
 
+import re
 import threading
+import zlib
 
+import numpy as np
 import pytest
 
 import superlocalmemory.storage.deferred_writes as dw
@@ -54,6 +57,28 @@ FACTS = [
     "Carol joined Acme to work on Phoenix security.",
 ]
 QUESTION = "Who works on the Phoenix project?"
+
+
+def _word_vector(text: str) -> list[float]:
+    """A stable bag-of-words vector: texts that share words have cosine > 0.
+
+    The shared ``mock_embedder`` draws an independent random vector per text
+    (seeded by ``hash(text)``, which differs in every process), so the cosine
+    between the question and any fact is positive only about half the time.
+    Spreading activation drops seeds with cosine <= 0, so in about 1 run in 32
+    all five facts were dropped and the channel legitimately found nothing.
+    """
+    vec = np.zeros(768, dtype=np.float32)
+    for word in re.findall(r"[a-z]+", text.lower()):
+        vec[zlib.crc32(word.encode()) % 768] += 1.0
+    norm = float(np.linalg.norm(vec))
+    return (vec / norm if norm else vec).tolist()
+
+
+@pytest.fixture()
+def word_embedder(mock_embedder):
+    mock_embedder.embed.side_effect = _word_vector
+    return mock_embedder
 
 
 def _drain() -> None:
@@ -87,7 +112,7 @@ class _Spy:
 
 
 def test_daemon_recall_writes_the_cache_and_the_next_identical_recall_reads_it(
-    engine_with_mock_deps, monkeypatch,
+    word_embedder, engine_with_mock_deps, monkeypatch,
 ) -> None:
     engine = force_sync_enrichment(engine_with_mock_deps)
     for fact in FACTS:
