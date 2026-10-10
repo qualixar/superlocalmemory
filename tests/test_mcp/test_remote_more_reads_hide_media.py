@@ -182,7 +182,15 @@ def test_get_memory_summary_day(world, monkeypatch, who, key, media, expect) -> 
 
     engine, ids = world
     monkeypatch.setattr(tools_summaries, "state_path", lambda name: Path(engine._db.db_path))
-    day = engine._db.execute("SELECT created_at FROM atomic_facts LIMIT 1")[0]["created_at"][:10]
+    # "day" is this computer's local calendar day (tools_summaries buckets by local time), so ask
+    # for the local date of the stored UTC time; its UTC date is another day near midnight.
+    from datetime import datetime, timezone
+
+    stamp = engine._db.execute("SELECT created_at FROM atomic_facts LIMIT 1")[0]["created_at"]
+    moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    day = moment.astimezone().date().isoformat()
     server = _Server()
     tools_summaries.register_summary_tools(server, lambda: engine)
     with _as(key, media):
