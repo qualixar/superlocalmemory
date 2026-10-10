@@ -14,7 +14,8 @@ from superlocalmemory.media.store_jobs import utc_stamp
 
 
 def entries_of(row: dict[str, Any]) -> list[dict[str, Any]]:
-    """The memories of a file row: ``{"m": memory_id, "f": [fact ids], "v": version, "sup": when}``."""
+    """The entries of a file row: memories ``{"m": memory_id, "f": [fact ids], "v": version, "sup": when}``
+    and pending document hides ``{"hd": document_id}``."""
     try:
         found = json.loads(row.get("memory_ids_json") or "[]")
     except ValueError:
@@ -25,6 +26,16 @@ def entries_of(row: dict[str, Any]) -> list[dict[str, Any]]:
 def memory_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The memories this file owns. ``shared_m`` / ``shared_doc`` entries point at things it does not own."""
     return [e for e in entries if "m" in e]
+
+
+def pending_documents(entries: list[dict[str, Any]]) -> list[str]:
+    """Ids of replaced documents whose hide failed: ``{"hd": document_id}`` entries, retried until done."""
+    return [str(e["hd"]) for e in entries if e.get("hd")]
+
+
+def carried_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What a replaced version leaves on the row: its memories (for the purge) and any pending document hide."""
+    return [e for e in entries if "m" in e or e.get("hd")]
 
 
 class SourceStore:

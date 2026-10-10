@@ -414,3 +414,76 @@ def test_a_journal_entry_that_committed_names_its_facts_in_the_receipt(env, monk
                            {"status": "queryable", "fact_ids": ["r1"], "operation_id": None})
     sources.remove_source(sid)  # the operations table has no row, but the receipt knows the facts
     assert env.runtime.archived == ["r1"]
+
+
+# -- a replaced PDF whose old document could not be hidden stays reachable --------------------------
+
+def _two_documents(env, monkeypatch):
+    """Each submit makes a new real document (own page and memory): d1/pf1, then d2/pf2."""
+    made = []
+
+    def submit(inp, **kw):
+        n = len(made) + 1
+        doc_id = f"{n}" * 32
+        media = env.store()
+        try:
+            media.insert_document(document_id=doc_id, profile_id="default", sha256=f"{n}" * 64, title="T",
+                                  mime="application/pdf", bytes=len(inp.data), source_relpath=None)
+            media.put_page(doc_id, 1, media_id=None, memory_ids=[f"pm{n}"], fact_ids=[f"pf{n}"],
+                           text_origin="text_layer", char_count=5)
+        finally:
+            media.close()
+        made.append(doc_id)
+        return SimpleNamespace(status="processing", document_id=doc_id, job_id="j", reason="")
+
+    monkeypatch.setattr("superlocalmemory.documents.submit_document", submit)
+
+
+def _state_of(env, doc_id):
+    media = env.store()
+    try:
+        return media.get_document(doc_id)["state"]
+    finally:
+        media.close()
+
+
+def test_a_replaced_pdf_whose_old_document_could_not_be_hidden_is_hidden_by_a_later_pass(env, monkeypatch):
+    import os as _os
+
+    _two_documents(env, monkeypatch)
+    path = env.write("paper.pdf", PDF)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    writer = _Archive(env, "pf1")
+    path.write_bytes(PDF + b"B")
+    st = _os.stat(path)
+    _os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10**9))
+    assert env.scan(sid).errors >= 1
+    row = env.files(sid)["paper.pdf"]
+    assert row["document_id"] == "2" * 32 and _state_of(env, "1" * 32) != "tombstoned"
+    assert {"hd": "1" * 32} in json.loads(row["memory_ids_json"])  # the old document stays reachable
+    writer.heal()
+    assert env.scan(sid).errors == 0
+    assert _state_of(env, "1" * 32) == "tombstoned" and "pf1" in env.runtime.archived
+    assert _state_of(env, "2" * 32) != "tombstoned" and "pf2" not in env.runtime.archived
+    assert {"hd": "1" * 32} not in json.loads(env.files(sid)["paper.pdf"]["memory_ids_json"])
+
+
+def test_removing_the_source_finishes_a_pending_old_document_hide(env, monkeypatch):
+    import os as _os
+
+    _two_documents(env, monkeypatch)
+    path = env.write("paper.pdf", PDF)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    writer = _Archive(env, "pf1")
+    path.write_bytes(PDF + b"B")
+    st = _os.stat(path)
+    _os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10**9))
+    env.scan(sid)
+    with pytest.raises(SourceRefused) as refused:
+        sources.remove_source(sid)
+    assert refused.value.code == "removal_incomplete"
+    writer.heal()
+    sources.remove_source(sid)
+    assert _state_of(env, "1" * 32) == "tombstoned" and _state_of(env, "2" * 32) == "tombstoned"

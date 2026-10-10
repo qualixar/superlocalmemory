@@ -12,7 +12,7 @@ from typing import Any
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of, resolve_keys
-from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
+from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries, pending_documents
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +59,22 @@ def hide_entries(host: SourceHost, runtime: Any, source: dict, entries: list[dic
 
 
 def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:
-    """Hide again what an earlier attempt could not hide: memories flagged ``old``, and the PDF of a
-    deleted file whose document is still not removed (the row is tombstoned either way)."""
+    """Hide again what an earlier attempt could not hide: memories flagged ``old``, replaced documents
+    kept as ``hd`` entries, and the PDF of a deleted file whose document is still not removed
+    (the row is tombstoned either way)."""
     failures = 0
     for row in store.files(source["source_id"]):
         entries = entries_of(row)
         stale = [e for e in entries if e.get("old") and not e.get("sup")]
-        if stale:
-            failures += hide_entries(host, runtime, source, stale, row["relpath"])
+        failures_here = hide_entries(host, runtime, source, stale, row["relpath"]) if stale else 0
+        waiting = pending_documents(entries)
+        for document_id in waiting:
+            failed = _hide_document_id(store, runtime, source, document_id)
+            failures_here += failed
+            if not failed:
+                entries = [e for e in entries if e.get("hd") != document_id]
+        failures += failures_here
+        if stale or waiting:
             store.put_file(source["source_id"], row["relpath"], entries=entries)
         if row["state"] == "tombstoned" and _document_visible(store, row):
             failures += hide_document(store, runtime, source, row)
@@ -93,13 +101,17 @@ def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str,
     """
     if not row.get("document_id") or row.get("reason") == "shared":
         return 0
+    return _hide_document_id(store, runtime, source, row["document_id"])
+
+
+def _hide_document_id(store: SourceStore, runtime: Any, source: dict, document_id: str) -> int:
     from superlocalmemory.documents import remove_document
 
     try:
-        remove_document(row["document_id"], source["profile_id"], runtime=runtime, store=store._m)
+        remove_document(document_id, source["profile_id"], runtime=runtime, store=store._m)
     except Exception as exc:  # noqa: BLE001 - counted below
         logger.warning("a folder document could not be hidden (%s)", type(exc).__name__)
-    document = store._m.get_document(row["document_id"])
+    document = store._m.get_document(document_id)
     return int(bool(document) and document["state"] != "tombstoned")
 
 
@@ -180,8 +192,22 @@ def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
         except Exception as exc:  # noqa: BLE001
             logger.warning("a folder document erasure failed (%s)", type(exc).__name__)
             return False
+    for document_id in pending_documents(entries_of(row)):  # replaced documents that were never hidden
+        if not _erase_document(host, store, runtime, source, document_id):
+            return False
     store.delete_file(source["source_id"], row["relpath"])
     return True
+
+
+def _erase_document(host: SourceHost, store: SourceStore, runtime: Any, source: dict, document_id: str) -> bool:
+    from superlocalmemory.documents import remove_document
+
+    try:
+        return bool(remove_document(document_id, source["profile_id"], hard=True, eraser=host.eraser,
+                                    runtime=runtime, store=store._m))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("a folder document erasure failed (%s)", type(exc).__name__)
+        return False
 
 
 def purge_due(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:

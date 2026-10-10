@@ -27,7 +27,7 @@ from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
-from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
+from superlocalmemory.sources.store import SourceStore, carried_entries, entries_of, memory_entries, pending_documents
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
 logger = logging.getLogger(__name__)
@@ -144,7 +144,10 @@ def _supersede(p: _Pass, row: dict[str, Any] | None, resent: frozenset[str] = fr
         return []
     entries = [e for e in entries_of(row) if e.get("k") not in resent]
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
-    p.stats.errors += retire.hide_document(p.store, p.runtime, p.source, row)
+    undone = retire.hide_document(p.store, p.runtime, p.source, row)
+    if undone:  # the row is about to name the new version; the old document stays reachable
+        entries.append({"hd": row["document_id"]})
+    p.stats.errors += undone
     retire.hide_picture(p.store, row)
     retire.release_copies(p.store, p.source, row)
     return entries
@@ -218,7 +221,7 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
         return
     old = _supersede(p, row, frozenset(x["k"] for x in out.entries if x.get("k")))
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
-                     entries=memory_entries(old) + out.entries, document_id=out.document_id,
+                     entries=carried_entries(old) + out.entries, document_id=out.document_id,
                      media_id=out.media_id, **_stat_fields(e))
     _record_links(p, e, out)
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
@@ -294,7 +297,8 @@ def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
     for rel, row in list(p.rows.items()):
         if rel in seen or row["state"] == "tombstoned" or walked.under_unreadable(rel):
             continue
-        if memory_entries(entries_of(row)) or row.get("document_id"):
+        entries = entries_of(row)
+        if memory_entries(entries) or pending_documents(entries) or row.get("document_id"):
             p.stats.errors += retire.hide_file(p.host, p.store, p.runtime, p.source, row, tombstone=True)
             p.stats.tombstoned += 1
         else:
