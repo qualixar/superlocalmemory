@@ -78,6 +78,8 @@ function metadata(request:Request,message:Record<string,unknown>,params:Record<s
 }
 export async function parseMcpRequest(request:Request,options:ParseOptions={}):Promise<ParsedMcpRequest> {
   if(request.method!=='POST')throw new GatewayInputError('METHOD_NOT_ALLOWED',405);
+  // x-slm-* is the relay's own channel to the laptop: a client can never present one.
+  for(const [name] of request.headers)if(name.startsWith('x-slm-'))throw new GatewayInputError('HEADER_MISMATCH',400,-32020);
   if(request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()!=='application/json')throw new GatewayInputError('JSON_REQUIRED',415);
   const bytes=await boundedBody(request);let text:string;try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new GatewayInputError('INVALID_UTF8');}
   const message=strictJson(text);
