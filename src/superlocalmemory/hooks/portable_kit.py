@@ -73,6 +73,31 @@ class IDEDescriptor:
     caveats: str = ""
 
 
+_CLAUDE_DESKTOP_FILE = "claude_desktop_config.json"
+
+
+def global_config_path(desc: "IDEDescriptor", home: Path, *, platform: str | None = None,
+                       environ: "dict[str, str] | os._Environ[str] | None" = None) -> Path:
+    """Where ``desc`` keeps its user-level config.
+
+    Every host is ``home / mcp_path_global`` except Claude Desktop, whose place depends on the
+    platform: ``~/Library/Application Support/Claude`` on macOS, ``%APPDATA%\\Claude`` on Windows,
+    ``~/.config/Claude`` on Linux. ``environ`` is where APPDATA is read from (default: the real
+    environment); pass ``{}`` to keep a given home self-contained.
+    """
+    if desc.ide_id != "claude-desktop":
+        return home / desc.mcp_path_global
+    platform = sys.platform if platform is None else platform
+    env = os.environ if environ is None else environ
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "Claude" / _CLAUDE_DESKTOP_FILE
+    if platform.startswith("win"):
+        appdata = env.get("APPDATA")
+        base = Path(appdata) if appdata else home / "AppData" / "Roaming"
+        return base / "Claude" / _CLAUDE_DESKTOP_FILE
+    return home / ".config" / "Claude" / _CLAUDE_DESKTOP_FILE
+
+
 # ---------------------------------------------------------------------------
 # IDE_MATRIX — server_key + fmt VERIFIED vs ide/configs/* templates
 # Paths are [CN-ONLINE] best-effort; confirmed from public docs where possible.
@@ -171,9 +196,13 @@ IDE_MATRIX: dict[str, IDEDescriptor] = {
     "claude-desktop": IDEDescriptor(
         ide_id="claude-desktop",
         display="Claude Desktop",
+        # Relative to home on macOS and Linux; Windows is resolved by
+        # global_config_path() (APPDATA). This default is what it falls back to.
         mcp_path_global=(
             "Library/Application Support/Claude/claude_desktop_config.json"
             if sys.platform == "darwin"
+            else "AppData/Roaming/Claude/claude_desktop_config.json"
+            if sys.platform.startswith("win")
             else ".config/Claude/claude_desktop_config.json"
         ),
         mcp_path_project=None,
@@ -330,12 +359,12 @@ def connect_ide(
             result["error"] = "--here requires --project (project root path)"
             return result
         scope_root = project
-        rel_path = desc.mcp_path_project or desc.mcp_path_global
+        config_path = project / (desc.mcp_path_project or desc.mcp_path_global)
     else:
         scope_root = effective_home
-        rel_path = desc.mcp_path_global
-
-    config_path = scope_root / rel_path
+        # A home the caller names is self-contained: the real APPDATA is not consulted.
+        config_path = global_config_path(desc, effective_home,
+                                         environ=None if home is None else {})
     result["mcp_path"] = str(config_path)
 
     # Step 3 — load existing config

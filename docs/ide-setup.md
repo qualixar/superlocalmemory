@@ -140,7 +140,7 @@ Claude Desktop uses a separate config file from Claude Code CLI.
 
 **Manual — HTTP (recommended, v3.6.7+):**
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/.config/Claude/claude_desktop_config.json` (Linux):
 
 ```json
 {
