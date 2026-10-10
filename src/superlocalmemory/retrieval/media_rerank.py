@@ -36,6 +36,21 @@ def is_label_only(text: str, labels: Iterable[str] | None = None) -> bool:
     return bool(text and text.strip()) and not strip_labels(text, labels).strip()
 
 
+def is_wordless_picture(text: str) -> bool:
+    """A picture memory whose picture had no readable text (it carries the no-text label)."""
+    from superlocalmemory.media.labels import NO_TEXT
+
+    return bool(text) and any(ln.strip() == NO_TEXT for ln in text.split("\n"))
+
+
+def wordless_picture_evidence(scores: dict[str, float], min_media: float) -> bool:
+    """What counts for a wordless picture: the picture itself, or the words of the person's note.
+
+    Its other text channels matched the saving label or a file name, not what the picture shows.
+    """
+    return scores.get("media", 0.0) >= min_media or scores.get("bm25", 0.0) > 0.0
+
+
 def all_unreadable(results: Sequence[Any]) -> bool:
     """Every result is a picture with no words of its own."""
     return bool(results) and all(

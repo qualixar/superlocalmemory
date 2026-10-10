@@ -798,14 +798,17 @@ class RetrievalEngine:
         spreading_activation and hopfield do NOT count as primary evidence.
         Empty result after filtering is a success (no_confident_match=True).
         """
+        from superlocalmemory.retrieval import media_rerank
+
         kept: list[FusionResult] = []
         for fr in final_top:
-            if has_primary_evidence(fr.channel_scores, min_semantic, min_media):
-                kept.append(fr)
-                continue
-            # Pinned fact bypass — always pass regardless of channel scores
             fact = facts.get(fr.fact_id)
-            if fact is not None and getattr(fact, "pinned", False):
+            if fact is not None and media_rerank.is_wordless_picture(getattr(fact, "content", "") or ""):
+                evident = media_rerank.wordless_picture_evidence(fr.channel_scores or {}, min_media)
+            else:
+                evident = has_primary_evidence(fr.channel_scores, min_semantic, min_media)
+            # Pinned fact bypass — always pass regardless of channel scores
+            if evident or (fact is not None and getattr(fact, "pinned", False)):
                 kept.append(fr)
         return kept
 
