@@ -1989,6 +1989,41 @@ def _stop_deployment_retention(application) -> bool:
     return True
 
 
+_NO_MODEL_WARNING = (
+    "Embedding model not loaded (warm-up returned no vector); recall is "
+    "keyword-only until a model is available. Run 'slm warmup' or 'slm doctor'."
+)
+_NO_VECTOR_REASON = "the embedding model did not load (no vector returned)"
+
+
+def _is_real_vector(vector: object) -> bool:
+    """True when an embed call produced a non-empty vector (list or array)."""
+    if vector is None:
+        return False
+    try:
+        return len(vector) > 0  # type: ignore[arg-type]
+    except TypeError:
+        return False
+
+
+def _warm_embedder_once(engine: object, retrieval_eng: object) -> tuple[bool, str]:
+    """One warm-up attempt for the lifespan retry loop.
+
+    ``(True, "")`` the model produced a vector. ``(False, "")`` there is no
+    embedder object yet, so the caller should retry. ``(False, reason)`` the
+    embedder exists but returned no vector; retrying would only respawn
+    workers, so the caller stops and recall-health owns later attempts.
+    Exceptions from ``embed`` propagate to the caller's handler.
+    """
+    re_ = retrieval_eng or getattr(engine, "_retrieval_engine", None)
+    embedder = getattr(re_, "_embedder", None) if re_ else None
+    if embedder is None or not hasattr(embedder, "embed"):
+        return False, ""
+    if not _is_real_vector(embedder.embed("warmup")):
+        return False, _NO_VECTOR_REASON
+    return True, ""
+
+
 def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     """Load the embedding model in the background. Never blocks startup.
 
@@ -2011,9 +2046,12 @@ def _start_embedder_warmup(engine: object) -> "threading.Thread | None":
     def _warm() -> None:
         started = time.time()
         try:
-            embedder.embed("slm embedder warm-up")
+            vector = embedder.embed("slm embedder warm-up")
         except Exception as exc:  # pragma: no cover — warming is best effort
             logger.debug("embedder warm-up failed (%s) — writes will defer", exc)
+            return
+        if not _is_real_vector(vector):
+            logger.warning(_NO_MODEL_WARNING)
             return
         logger.info(
             "Embedding model warm and ready (%.1fs)", time.time() - started,
@@ -2603,10 +2641,13 @@ async def lifespan(application: FastAPI):
             last_error = ""
             for _attempt in range(240):  # ~120s max at 0.5s steps
                 try:
-                    _re = retrieval_eng or getattr(engine, '_retrieval_engine', None)
-                    embedder = getattr(_re, '_embedder', None) if _re else None
-                    if embedder is not None and hasattr(embedder, 'embed'):
-                        embedder.embed("warmup")
+                    warmed, reason = _warm_embedder_once(engine, retrieval_eng)
+                    if reason:
+                        _embedding_warm = False
+                        _embedding_warmup_error = reason
+                        logger.warning(_NO_MODEL_WARNING)
+                        return
+                    if warmed:
                         _embedding_warm = True
                         _embedding_warmup_error = None
                         logger.info(
@@ -3356,6 +3397,13 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("memory kind runner not started: %s", type(exc).__name__)
 
+        # Saved PDFs are read page by page in the background; idle while images and documents are off.
+        try:
+            from superlocalmemory.documents import start_document_jobs
+            start_document_jobs(application, _SERVICES)
+        except Exception as exc:  # pragma: no cover — optional feature
+            logger.warning("document job service not started: %s", type(exc).__name__)
+
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
         # them only once it cycles, and its reap used to sit behind the
@@ -3648,6 +3696,11 @@ async def lifespan(application: FastAPI):
         kind_runner_stopped = stop_backfill(application)
     except Exception:  # pragma: no cover — defensive
         kind_runner_stopped = True
+    try:
+        from superlocalmemory.documents import stop_document_jobs
+        kind_runner_stopped = stop_document_jobs(_SERVICES) and kind_runner_stopped
+    except Exception:  # pragma: no cover — defensive
+        pass
     materializer_stopped = _stop_pending_materializer() and kind_runner_stopped
     canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None
@@ -6457,6 +6510,21 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
         )
 
 
+def _add_projection_verdict(health: dict) -> None:
+    """Add ``behind`` and ``waiting_for_promotion`` to an outbox report.
+
+    ``behind`` is one boolean an alert can key on without knowing what a
+    healthy depth looks like: rows are queued AND a projection is open to take
+    them, or rows were refused. Queued rows with no projection open are not
+    behind; they wait for a promotion. A report without ``projection_open``
+    (an older orchestrator) is read as open.
+    """
+    depth = int(health.get("depth", 0) or 0)
+    is_open = bool(health.get("projection_open", True))
+    health["behind"] = (depth > 0 and is_open) or bool(health.get("stalled", 0))
+    health["waiting_for_promotion"] = depth > 0 and not is_open
+
+
 def _projection_health() -> dict:
     """Queue depth, stall count, and whether the worker is running.
 
@@ -6479,11 +6547,7 @@ def _projection_health() -> dict:
             return {"available": False}
         health = dict(orchestrator.outbox_health())
         health["available"] = True
-        # One boolean an alert can key on without knowing what a healthy depth
-        # looks like on this store.
-        health["behind"] = bool(health.get("depth", 0)) or bool(
-            health.get("stalled", 0)
-        )
+        _add_projection_verdict(health)
         return health
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "error": str(exc)[:120]}
@@ -6956,7 +7020,8 @@ def rotate_oversized_logs(log_dir: Optional[Path] = None,
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def _cli_main(argv: list[str]) -> None:
+    """Start the daemon from the command line (``--start [--port=N]``)."""
     # Rotate first, then configure logging, so the first log line lands in a
     # freshly-sized file.
     rotate_oversized_logs()
@@ -6964,10 +7029,20 @@ if __name__ == "__main__":
     # v3.6.9 (#33): honour SLM_DAEMON_PORT env so operators can configure the
     # port without changing the launch command. --port= arg takes precedence.
     port = int(os.environ.get("SLM_DAEMON_PORT", "") or _DEFAULT_PORT)
-    for arg in sys.argv:
+    for arg in argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
-    if "--start" in sys.argv:
+    if "--start" in argv:
         start_server(port=port)
     else:
         print("Usage: python -m superlocalmemory.server.unified_daemon --start [--port=8765]")
+
+
+if __name__ == "__main__":
+    # ``python -m`` loads this file as ``__main__``, and uvicorn later imports
+    # ``superlocalmemory.server.unified_daemon`` for the app: two copies of the
+    # module, each with its own record descriptor. Run everything through the
+    # importable module so the lifespan and the record guardian share one copy.
+    import importlib
+
+    importlib.import_module("superlocalmemory.server.unified_daemon")._cli_main(sys.argv)

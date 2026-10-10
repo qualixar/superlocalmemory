@@ -69,13 +69,15 @@ class EraseMixin:
         return removed
 
     def file_in_use(self, stored_sha256: str | None, original_relpath: str | None) -> bool:
-        """Whether any remaining item (any profile, any state) still points at this file."""
+        """Whether any remaining item or document (any profile, any state) still points at this file."""
         conn = self._read()
         if stored_sha256 and conn.execute(
                 "SELECT 1 FROM media_items WHERE stored_sha256 = ? LIMIT 1", (stored_sha256,)).fetchone():
             return True
-        return bool(original_relpath and conn.execute(
-            "SELECT 1 FROM media_items WHERE original_relpath = ? LIMIT 1", (original_relpath,)).fetchone())
+        if original_relpath and conn.execute(
+                "SELECT 1 FROM media_items WHERE original_relpath = ? LIMIT 1", (original_relpath,)).fetchone():
+            return True
+        return self.document_file_in_use(original_relpath)
 
     def known_relpaths(self) -> set[str]:
         rows = self._read().execute(

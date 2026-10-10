@@ -60,9 +60,10 @@ class TestResolveDeploymentFailClosed:
         cfg = tmp_path / "config.toml"
         cfg.write_text("[deployment]\nmode = \"personal\"", encoding="utf-8")
         cfg.chmod(0o000)  # remove all permissions
-        if os.name == "nt":
-            # Windows ignores mode bits (0o000 only sets read-only), so make
-            # the read fail the way an access-denied file does there.
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            # Windows ignores mode bits (0o000 only sets read-only) and root
+            # reads any file whatever its mode, so make the read fail the way
+            # an access-denied file does there.
             real_read_text = Path.read_text
 
             def denied(self, *args, **kwargs):
