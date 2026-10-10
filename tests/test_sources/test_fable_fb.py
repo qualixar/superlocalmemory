@@ -487,3 +487,145 @@ def test_removing_the_source_finishes_a_pending_old_document_hide(env, monkeypat
     writer.heal()
     sources.remove_source(sid)
     assert _state_of(env, "1" * 32) == "tombstoned" and _state_of(env, "2" * 32) == "tombstoned"
+
+
+# -- the purge erases a replaced document once its retention window passes ----------------------
+
+def _replace_pdf(env, path, extra=b"B", seconds=5):
+    import os as _os
+
+    path.write_bytes(PDF + extra)
+    st = _os.stat(path)
+    _os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + seconds * 10**9))
+
+
+def _entries(env, sid, relpath="paper.pdf"):
+    return json.loads(env.files(sid)[relpath]["memory_ids_json"])
+
+
+def _document_exists(env, doc_id):
+    media = env.store()
+    try:
+        return media.get_document(doc_id) is not None
+    finally:
+        media.close()
+
+
+def _replaced_once(env, monkeypatch):
+    _two_documents(env, monkeypatch)
+    path = env.write("paper.pdf", PDF)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    _replace_pdf(env, path)
+    env.scan(sid)
+    return sid, path
+
+
+def test_a_replaced_document_is_recorded_with_the_time_it_was_hidden(env, monkeypatch):
+    sid, _ = _replaced_once(env, monkeypatch)
+    [record] = [e for e in _entries(env, sid) if e.get("rd")]
+    assert record["rd"] == "1" * 32 and record["sup"]
+    assert _state_of(env, "1" * 32) == "tombstoned"
+
+
+def test_the_purge_erases_a_replaced_document_only_after_the_retention_window(env, monkeypatch):
+    sid, _ = _replaced_once(env, monkeypatch)
+    env.scan(sid)  # inside the grace period (7 days): kept
+    assert _document_exists(env, "1" * 32) and env.erased == []
+    env.host.purge_after_s = -1.0
+    stats = env.scan(sid)
+    assert stats.purged >= 1
+    assert env.erased and env.erased[-1][1] == ("pf1",)  # through the eraser, with the document's facts
+    assert not _document_exists(env, "1" * 32) and _document_exists(env, "2" * 32)
+    assert not [e for e in _entries(env, sid) if e.get("rd")]  # the record goes with the document
+    assert all(f != ("pf2",) for _, f, _ in env.erased)
+
+
+def test_an_incomplete_erasure_keeps_the_replaced_document_and_its_record(env, monkeypatch):
+    sid, _ = _replaced_once(env, monkeypatch)
+    env.host.purge_after_s = -1.0
+    real = env.host.eraser
+    env.host.eraser = lambda *a: {"erasure_complete": 0}
+    env.scan(sid)
+    assert _document_exists(env, "1" * 32) and [e for e in _entries(env, sid) if e.get("rd")]
+    env.host.eraser = real
+    env.scan(sid)
+    assert not _document_exists(env, "1" * 32)
+
+
+def test_the_purge_never_erases_a_document_that_is_the_files_current_one(env, monkeypatch):
+    sid, _ = _replaced_once(env, monkeypatch)
+    media = env.store()
+    try:
+        from superlocalmemory.sources.store import SourceStore
+
+        store = SourceStore(media)
+        row = store.get_file(sid, "paper.pdf")
+        entries = json.loads(row["memory_ids_json"]) + [{"rd": "2" * 32, "sup": "2000-01-01T00:00:00Z"}]
+        store.put_file(sid, "paper.pdf", entries=entries)
+    finally:
+        media.close()
+    env.host.purge_after_s = -1.0
+    env.scan(sid)
+    assert _document_exists(env, "2" * 32)
+
+
+def test_the_purge_never_erases_a_document_another_row_borrows(env, monkeypatch):
+    from superlocalmemory.sources import retire
+    from superlocalmemory.sources.store import SourceStore
+
+    sid, _ = _replaced_once(env, monkeypatch)
+    env.host.purge_after_s = -1.0
+    media = env.store()
+    try:
+        store = SourceStore(media)
+        store.put_file(sid, "copy.pdf", state="indexed", reason="shared", sha256="c" * 64,
+                       entries=[{"shared_doc": "1" * 32}])
+        assert retire.purge_due(env.host, store, env.runtime, store.get_source(sid)) == 0
+    finally:
+        media.close()
+    assert _document_exists(env, "1" * 32) and env.erased == []
+    assert [e for e in _entries(env, sid) if e.get("rd")]  # still recorded: erased once nobody borrows it
+
+
+def test_a_removal_with_purge_erases_the_replaced_documents_too(env, monkeypatch):
+    sid, _ = _replaced_once(env, monkeypatch)
+    sources.remove_source(sid, purge=True)
+    assert not _document_exists(env, "1" * 32) and not _document_exists(env, "2" * 32)
+
+
+def test_a_replaced_document_the_edited_back_file_borrows_again_is_not_hidden_or_erased(env, monkeypatch):
+    """A -> B -> A while the hide of A failed: the library still has A, so the new save borrows it."""
+    docs = {}
+
+    def submit(inp, **kw):
+        if inp.data in docs and _state_of(env, docs[inp.data]) != "tombstoned":
+            return SimpleNamespace(status="duplicate", document_id=docs[inp.data], job_id=None, reason="")
+        n = len(docs) + 1
+        doc_id = f"{n}" * 32
+        media = env.store()
+        try:
+            media.insert_document(document_id=doc_id, profile_id="default", sha256=f"{n}" * 64, title="T",
+                                  mime="application/pdf", bytes=len(inp.data), source_relpath=None)
+            media.put_page(doc_id, 1, media_id=None, memory_ids=[f"pm{n}"], fact_ids=[f"pf{n}"],
+                           text_origin="text_layer", char_count=5)
+        finally:
+            media.close()
+        docs[inp.data] = doc_id
+        return SimpleNamespace(status="processing", document_id=doc_id, job_id="j", reason="")
+
+    monkeypatch.setattr("superlocalmemory.documents.submit_document", submit)
+    path = env.write("paper.pdf", PDF)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    writer = _Archive(env, "pf1")
+    _replace_pdf(env, path, b"B", 5)
+    env.scan(sid)  # A is replaced by B, but A could not be hidden
+    _replace_pdf(env, path, b"", 10)
+    env.scan(sid)  # back to A: the library still has document 1, so the file borrows it
+    writer.heal()
+    env.scan(sid)
+    env.host.purge_after_s = -1.0
+    env.scan(sid)
+    assert _state_of(env, "1" * 32) != "tombstoned" and all(f != ("pf1",) for _, f, _ in env.erased)
+    assert [e["rd"] for e in _entries(env, sid) if e.get("rd") or e.get("hd")] == []  # B was erased, A is current

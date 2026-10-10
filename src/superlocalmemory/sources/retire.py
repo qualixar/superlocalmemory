@@ -12,7 +12,9 @@ from typing import Any
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of, resolve_keys
-from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries, pending_documents
+from superlocalmemory.sources.store import (
+    SourceStore, current_documents, entries_of, memory_entries, pending_documents, replaced_documents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +69,17 @@ def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict
         entries = entries_of(row)
         stale = [e for e in entries if e.get("old") and not e.get("sup")]
         failures_here = hide_entries(host, runtime, source, stale, row["relpath"]) if stale else 0
+        in_use = current_documents(row.get("document_id"), entries)
         waiting = pending_documents(entries)
         for document_id in waiting:
+            if document_id in in_use:  # the file uses it again: it is not an old document any more
+                entries = [e for e in entries if e.get("hd") != document_id]
+                continue
             failed = _hide_document_id(store, runtime, source, document_id)
             failures_here += failed
-            if not failed:
-                entries = [e for e in entries if e.get("hd") != document_id]
+            if not failed:  # hidden at last: from now on it is a replaced document, erased by the purge
+                entries = [{"rd": document_id, "sup": utc_stamp()} if e.get("hd") == document_id else e
+                           for e in entries]
         failures += failures_here
         if stale or waiting:
             store.put_file(source["source_id"], row["relpath"], entries=entries)
@@ -192,17 +199,33 @@ def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
         except Exception as exc:  # noqa: BLE001
             logger.warning("a folder document erasure failed (%s)", type(exc).__name__)
             return False
-    for document_id in pending_documents(entries_of(row)):  # replaced documents that were never hidden
-        if not _erase_document(host, store, runtime, source, document_id):
-            return False
+    entries = entries_of(row)
+    own = (source["source_id"], row["relpath"])
+    old_ids = [*pending_documents(entries), *(e["rd"] for e in replaced_documents(entries))]
+    if not _erase_replaced(host, store, runtime, source, old_ids, except_row=own):
+        return False
     store.delete_file(source["source_id"], row["relpath"])
     return True
 
 
+def _erase_replaced(host: SourceHost, store: SourceStore, runtime: Any, source: dict, document_ids: list[str],
+                    *, except_row: tuple[str, str]) -> bool:
+    """Hard-erase replaced documents; one that another row uses (or the file itself still uses) is left."""
+    for document_id in document_ids:
+        if store.document_users(document_id, except_row=except_row):
+            continue
+        if not _erase_document(host, store, runtime, source, document_id):
+            return False
+    return True
+
+
 def _erase_document(host: SourceHost, store: SourceStore, runtime: Any, source: dict, document_id: str) -> bool:
+    """Hard-erase one document; True when it is gone (already gone counts), False if not complete."""
     from superlocalmemory.documents import remove_document
 
     try:
+        if store._m.get_document(document_id) is None:
+            return True
         return bool(remove_document(document_id, source["profile_id"], hard=True, eraser=host.eraser,
                                     runtime=runtime, store=store._m))
     except Exception as exc:  # noqa: BLE001
@@ -211,7 +234,7 @@ def _erase_document(host: SourceHost, store: SourceStore, runtime: Any, source: 
 
 
 def purge_due(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:
-    """Erase tombstoned files and replaced versions that are past the grace period."""
+    """Erase tombstoned files, replaced versions and replaced documents that are past the grace period."""
     cutoff = utc_stamp(-host.purge_after_s)
     purged = 0
     for row in store.files(source["source_id"]):
@@ -219,10 +242,30 @@ def purge_due(host: SourceHost, store: SourceStore, runtime: Any, source: dict) 
             if (row["tombstoned_at"] or "9") <= cutoff and erase_row(host, store, runtime, source, row):
                 purged += 1
             continue
-        entries = entries_of(row)
-        due = [e for e in memory_entries(entries) if e.get("sup") and e["sup"] <= cutoff]
-        if due and _erase(host, runtime, source, due, f"src:{source['source_id'][:12]}"):
-            keep = [e for e in entries if e not in due]
-            store.put_file(source["source_id"], row["relpath"], entries=keep)
-            purged += 1
+        purged += _purge_replaced(host, store, runtime, source, row, cutoff)
     return purged
+
+
+def _purge_replaced(host: SourceHost, store: SourceStore, runtime: Any, source: dict, row: dict[str, Any],
+                    cutoff: str) -> int:
+    """Erase the replaced memories and documents of a live row whose window has passed."""
+    entries = entries_of(row)
+    due = [e for e in memory_entries(entries) if e.get("sup") and e["sup"] <= cutoff]
+    due_docs = [e for e in replaced_documents(entries) if e.get("sup") and e["sup"] <= cutoff]
+    gone: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    if due and _erase(host, runtime, source, due, f"src:{source['source_id'][:12]}"):
+        gone += due
+    own = (source["source_id"], row["relpath"])
+    for record in due_docs:
+        if record["rd"] in current_documents(row.get("document_id"), entries):
+            dropped.append(record)  # the file uses it again: never erased, and not a replaced document
+            continue
+        if store.document_users(record["rd"], except_row=own):
+            continue  # another file borrows it: kept, and recorded until nobody does
+        if _erase_document(host, store, runtime, source, record["rd"]):
+            gone.append(record)
+    if gone or dropped:
+        store.put_file(source["source_id"], row["relpath"],
+                       entries=[e for e in entries if e not in gone and e not in dropped])
+    return len(gone)

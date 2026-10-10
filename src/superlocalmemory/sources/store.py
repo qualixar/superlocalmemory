@@ -33,9 +33,19 @@ def pending_documents(entries: list[dict[str, Any]]) -> list[str]:
     return [str(e["hd"]) for e in entries if e.get("hd")]
 
 
+def replaced_documents(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replaced documents that were hidden: ``{"rd": document_id, "sup": when}``, erased by the purge."""
+    return [e for e in entries if e.get("rd")]
+
+
 def carried_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """What a replaced version leaves on the row: its memories (for the purge) and any pending document hide."""
-    return [e for e in entries if "m" in e or e.get("hd")]
+    """What a replaced version leaves on the row: its memories and the records of its replaced documents."""
+    return [e for e in entries if "m" in e or e.get("hd") or e.get("rd")]
+
+
+def current_documents(document_id: str | None, entries: list[dict[str, Any]]) -> set[str]:
+    """The documents a row uses right now: the one it owns and any it borrows."""
+    return {d for d in (document_id, *(e.get("shared_doc") for e in entries)) if d}
 
 
 class SourceStore:
@@ -148,6 +158,21 @@ class SourceStore:
         row = self._m._read().execute("SELECT n FROM source_save_counters WHERE source_id = ? AND relpath = ?",
                                       (source_id, relpath)).fetchone()
         return int(row[0]) if row else 0
+
+    def document_users(self, document_id: str, *, except_row: tuple[str, str] | None = None) -> int:
+        """How many file rows (of any folder) use this document as their own or a borrowed one.
+
+        Records of a replaced document (``hd`` / ``rd``) are history, not use."""
+        rows = self._m._read().execute(
+            "SELECT source_id, relpath, document_id, memory_ids_json FROM source_files"
+            " WHERE document_id = ? OR memory_ids_json LIKE ?", (document_id, f"%{document_id}%")).fetchall()
+        users = 0
+        for source_id, relpath, owned, raw in rows:
+            if except_row == (source_id, relpath):
+                continue
+            entries = entries_of({"memory_ids_json": raw})
+            users += int(document_id in current_documents(owned, entries))
+        return users
 
     def next_save_n(self, source_id: str, relpath: str) -> int:
         """How many times this path has been saved, counting this one. Never reset, not even by a purge."""
