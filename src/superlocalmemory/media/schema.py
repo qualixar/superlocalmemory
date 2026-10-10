@@ -38,6 +38,7 @@ _DDL = (
       kind TEXT NOT NULL CHECK (kind IN ('image','page')),
       source_sha256 TEXT NOT NULL, stored_sha256 TEXT, phash TEXT, mime TEXT NOT NULL,
       bytes INTEGER NOT NULL, remote_ok INTEGER NOT NULL DEFAULT 0,
+      remote_checked INTEGER NOT NULL DEFAULT 0,
       width INTEGER, height INTEGER, original_relpath TEXT,
       exif_json TEXT NOT NULL DEFAULT '{}',
       captured_at TEXT, anchor_memory_id TEXT,
@@ -104,6 +105,10 @@ _DDL = (
 
 def _upgrade_columns(conn: sqlite3.Connection) -> None:
     """Add columns that older layouts of this version lack (idempotent)."""
+    items = {r[1] for r in conn.execute("PRAGMA table_info(media_items)")}
+    if "remote_checked" not in items:
+        # Progress of the second look at pictures held back by the upgrade (media/revet.py).
+        conn.execute("ALTER TABLE media_items ADD COLUMN remote_checked INTEGER NOT NULL DEFAULT 0")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)")}
     if "origin" not in cols:
         conn.execute("ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'user' "
@@ -112,11 +117,38 @@ def _upgrade_columns(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE documents SET origin = 'folder' WHERE source_id IS NOT NULL")
 
 
+#: Stamp of the remote-vetting rule. Up to 4.1.24 a picture counted as clean when nothing had been
+#: *counted* (personal data was only counted while redaction was on, and credentials only in the
+#: first 8,000 characters). From 4.1.25 the whole text is scanned whatever the setting.
+REMOTE_VETTING_KEY = "remote_vetting"
+REMOTE_VETTING_VERSION = "2"
+
+
+def _revet_remote_once(conn: sqlite3.Connection) -> None:
+    """Hold back, once, every picture or page an older build marked ``remote_ok``.
+
+    The text they were vetted on is not kept in this file, so the hold-back itself cannot re-scan them.
+    ``media/revet.py`` does that afterwards, in the background, from the text still stored in each
+    picture's memory; a picture stays local-only until that scan finds it clean (or it is saved again).
+    Rows written after the stamp are never touched here.
+    """
+    stamped = conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES (?, ?)",
+                           (REMOTE_VETTING_KEY, REMOTE_VETTING_VERSION)).rowcount
+    if stamped:
+        conn.execute("UPDATE media_items SET remote_ok = 0 WHERE remote_ok != 0")
+
+
 def apply_schema(conn: sqlite3.Connection, *, created_by: str) -> None:
     """Create every table (idempotent) and stamp the version once."""
     for statement in _DDL:
         conn.execute(statement)
     _upgrade_columns(conn)
+    fresh = conn.execute("SELECT 1 FROM media_schema WHERE key = 'version'").fetchone() is None
+    if fresh:  # a new file has nothing an older build vetted
+        conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES (?, ?)",
+                     (REMOTE_VETTING_KEY, REMOTE_VETTING_VERSION))
+    else:
+        _revet_remote_once(conn)
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('version', ?)",
                  (str(MEDIA_SCHEMA_VERSION),))
     conn.execute("INSERT OR IGNORE INTO media_schema(key, value) VALUES ('created_by', ?)",

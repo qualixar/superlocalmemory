@@ -31,8 +31,10 @@ from superlocalmemory.documents.heavy import parse_reservation
 from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, ParseSession, ParseStopped
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import DOCUMENT
-from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
-from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.memory_core import (
+    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+)
+from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.worker_client import MediaWorkerError
 
 logger = logging.getLogger(__name__)
@@ -93,12 +95,20 @@ class _Text:
     text: str = ""
     pii: int = 0
     secrets: int = 0
+    #: True only when the whole page text was scanned, whatever the redaction
+    #: setting. Unscanned is never clean.
+    scanned: bool = False
 
 
 def _derived(text: str, redact: bool) -> _Text:
     prepared = prepare_for_save(text[:MAX_PAGE_TEXT], origin=ContentOrigin.DERIVED_TEXT, pii_redaction=redact)
-    return _Text("text_layer" if prepared.text.strip() else "none", prepared.text, prepared.pii_count,
-                 prepared.secret_count)
+    origin = "text_layer" if prepared.text.strip() else "none"
+    try:  # vetting reads ALL of the text; what is stored stays the cut, redacted text
+        found = scan_sensitive(text)
+    except Exception:  # noqa: BLE001 - an unscanned page is simply not cleared for remote use
+        logger.warning("page text could not be scanned; it stays local-only")
+        return _Text(origin, prepared.text, prepared.pii_count, prepared.secret_count)
+    return _Text(origin, prepared.text, found.pii, found.secrets, scanned=True)
 
 
 class JobRunner:
@@ -119,6 +129,9 @@ class JobRunner:
         """Run the job; False when it was put back in the queue to wait."""
         self.doc = self.store.get_document(self.doc_id) or {}
         if not self.doc or self.doc["state"] == "tombstoned" or self.doc["profile_id"] != self.profile_id:
+            if self.doc and self.doc["profile_id"] == self.profile_id:
+                # Removed while the job waited (a Deferred page may have committed meanwhile).
+                self._hide_saved()
             self._finish("cancelled")
             return True
         root = Path(self.store.path).parent
@@ -136,6 +149,7 @@ class JobRunner:
         except LeaseLost:
             logger.info("document job lost its lease; leaving it to its new owner")
         except Cancelled:
+            self._hide_saved()
             self._finish("cancelled")
         except MediaWorkerError:
             self._fail("image_tools")
@@ -150,11 +164,21 @@ class JobRunner:
         total = self._read_pages(root)
         self._document_memory()
         self.store.refresh_document_counts(self.doc_id)
-        self.store.update_document(self.doc_id, state="ready", page_count=total)
+        if not self.store.mark_document_ready(self.doc_id, total):
+            raise Cancelled()  # removed while this job finished; never brought back
         if not self.store.progress_job(self.job["job_id"], self.ctx.owner, len(self.store.page_numbers(self.doc_id)),
                                        total):
             raise LeaseLost()
         self._finish("done")
+
+    def _hide_saved(self) -> None:
+        """Hide every memory the removed document owns, including any this job saved after the
+        removal read its list. Same keys as the removal, so hiding twice is one hide."""
+        from superlocalmemory.documents.status import archive_document_facts
+
+        current = self.store.get_document(self.doc_id)
+        if current and current["state"] == "tombstoned":
+            archive_document_facts(self.store, self.ctx.runtime, current)
 
     def _finish(self, state: str, error: str | None = None) -> None:
         self.store.finish_job(self.job["job_id"], self.ctx.owner, state, error)
@@ -297,7 +321,11 @@ class JobRunner:
             idempotency_key=key, scope=self.payload.get("scope") or None,
             shared_with=tuple(self.payload.get("shared_with") or ()))
         try:
-            return submit_memory(self.ctx.runtime, request, config=self.ctx.config)
+            return submit_memory_settled(self.ctx.runtime, request, config=self.ctx.config)
+        except SavePending:
+            # Durable but not committed yet: record nothing for this page now; the retry re-sends
+            # the same key and gets the committed ids, so removal can always find them.
+            raise Deferred() from None
         except Exception as exc:  # noqa: BLE001 - nothing for this key was stored
             logger.warning("document memory was not saved (%s)", type(exc).__name__)
             raise Failed("save_failed") from None
@@ -328,7 +356,7 @@ class JobRunner:
             phash=phash, mime="image/png", bytes=0, width=event.get("width"), height=event.get("height"),
             anchor_memory_id=memory_ids[0] if memory_ids else None, document_id=self.doc_id, page_no=page_no,
             origin="document", thumb_webp=thumb,
-            remote_ok=int(text.origin != "none" and text.secrets == 0 and text.pii == 0))
+            remote_ok=int(text.origin != "none" and text.scanned and text.secrets == 0 and text.pii == 0))
         try:
             client = self.ctx.client
             space = self.store.ensure_active_space(client.model_id, client.revision, len(vector))

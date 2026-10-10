@@ -465,6 +465,12 @@ def _cmd_escape_rotate_token(args: Namespace) -> None:
     cmd_rotate_token(args)
 
 
+def _cmd_token(args: Namespace) -> None:
+    """`slm token show`: print the key the dashboard asks for in strict mode."""
+    from superlocalmemory.cli.escape_hatch import cmd_token
+    cmd_token(args)
+
+
 # ---- SLM v3.6 Optimize dispatch functions (additive) ----
 
 def _cmd_optimize(args: Namespace) -> None:
@@ -519,6 +525,12 @@ def _cmd_summary_dispatch(args: Namespace) -> None:
     """V4.0.7: readable session/day/project summaries (issue #113)."""
     from superlocalmemory.cli.summary_cmd import cmd_summary
     cmd_summary(args)
+
+
+def _cmd_team_dispatch(args: Namespace) -> None:
+    """4.1.25: workspace login policy through the daemon (cli/team_cmd.py)."""
+    from superlocalmemory.cli.team_cmd import cmd_team
+    cmd_team(args)
 
 
 def _cmd_kinds_dispatch(args: Namespace) -> None:
@@ -684,6 +696,7 @@ def dispatch(args: Namespace) -> None:
         "reconfigure": _cmd_escape_reconfigure,
         "benchmark": _cmd_escape_benchmark,
         "rotate-token": _cmd_escape_rotate_token,
+        "token": _cmd_token,
         "remote": _cmd_remote,
         "evidence": _cmd_evidence,
         "diagnostics": _cmd_diagnostics,
@@ -706,6 +719,7 @@ def dispatch(args: Namespace) -> None:
         "backup": _cmd_backup_dispatch,
         "summary": _cmd_summary_dispatch,
         "kinds": _cmd_kinds_dispatch,
+        "team": _cmd_team_dispatch,
         "sources": _cmd_sources_dispatch,
         "media": _cmd_media_dispatch,
         "features": _cmd_features_dispatch,
@@ -853,7 +867,10 @@ def cmd_serve(args: Namespace) -> None:
         if is_daemon_running():
             from superlocalmemory.cli.daemon import daemon_request
             status = daemon_request("GET", "/status")
-            if status:
+            if status and status.get("details_hidden"):
+                print(f"Daemon: RUNNING (PID {status.get('pid', '?')}). "
+                      "Sign in to see more (set SLM_USER_SESSION).")
+            elif status:
                 print(f"Daemon: RUNNING (PID {status['pid']}, "
                       f"mode={status['mode']}, facts={status['fact_count']}, "
                       f"uptime={status['uptime_s']}s, idle={status['idle_s']}s)")
@@ -1160,16 +1177,12 @@ def cmd_restart(args: Namespace) -> None:
 
     # Step 5: Database integrity check
     try:
-        from superlocalmemory.storage.memory_write import memory_read
+        from superlocalmemory.storage.integrity_diagnosis import restart_report
 
         db_path = slm_dir / "memory.db"
         if db_path.exists():
-            with memory_read(db_path) as conn:
-                integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-                fact_count = conn.execute("SELECT COUNT(*) FROM atomic_facts").fetchone()[0]
-                entity_count = conn.execute("SELECT COUNT(*) FROM canonical_entities").fetchone()[0]
-            _log(5, "Database integrity", "ok" if integrity == "ok" else "fail",
-                 f"integrity={integrity}, {fact_count} facts, {entity_count} entities")
+            status, detail = restart_report(db_path, slm_dir)
+            _log(5, "Database integrity", status, detail)
         else:
             _log(5, "Database check", "warn", "no database yet — will create on first use")
     except Exception as exc:
@@ -3039,6 +3052,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("summary", "Readable summaries: session, day, or project"),
         ("view", "Saved views: named recall queries you can re-run"),
         ("kinds", "Memory kinds: status, settings, classify (undoable)"),
+        ("team", "Workspace login policy: status, require-login on/off (owner's way back in)"),
         ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove, forget-empty"),
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
@@ -3067,6 +3081,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("diagnostics", "Export a local diagnostics bundle"),
         ("evidence", "Build/inspect evidence bundles"),
         ("rotate-token", "Rotate the local dashboard install token"),
+        ("token", "Show the key the dashboard asks for when a key is required (slm token show)"),
     ]),
     ("Configuration", [
         ("config", "View/set configuration (see: slm help config)"),
@@ -3637,17 +3652,20 @@ def cmd_doctor(args: Namespace) -> None:
             # check ran, and --deep runs the exhaustive one.
             deep = bool(getattr(args, "deep", False))
             pragma = "integrity_check" if deep else "quick_check"
+            from superlocalmemory.storage.integrity_diagnosis import check_database
+
+            # The finding's own text, never the sqlite3.Row it arrives in
+            # (GitHub #204); a damaged keyword index points at its own rebuild.
             with memory_read(db_path) as conn:
-                result = conn.execute(f"PRAGMA {pragma}").fetchone()
-            if result and result[0] == "ok":
+                result = check_database(conn, deep=deep, root=slm_home)
+            if result.ok:
                 size_mb = db_path.stat().st_size / (1024 * 1024)
                 detail = f"OK ({size_mb:.2f} MB, {pragma})"
                 if not deep:
                     detail += " — run `slm doctor --deep` for a full page scan"
                 _check("Database", "PASS", detail)
             else:
-                _check("Database", "FAIL", f"{pragma}: {result}",
-                       "Backup and recreate database")
+                _check("Database", "FAIL", f"{pragma}: {result.summary()}", result.fix)
         except Exception as exc:
             _check("Database", "FAIL", str(exc))
     else:

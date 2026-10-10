@@ -25,10 +25,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from superlocalmemory.core.media_fetch import too_large_for_remote
 from superlocalmemory.documents import (
-    document_index, document_lint, job_status, remove_document, submit_document,
+    document_index, document_lint, job_status, remove_document, retry_document, submit_document,
 )
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.media.repair import repair as run_repair
 from superlocalmemory.retrieval.remote_view import parse_view
 from superlocalmemory.server.loopback import is_loopback
 
@@ -180,6 +181,32 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
     return JSONResponse(dataclasses.asdict(report))
 
 
+class MediaRepairRequest(BaseModel):
+    profile_id: str = ""
+    dry_run: bool = False
+
+
+@router.post("/media/repair")
+async def repair_pictures(req: MediaRepairRequest, request: Request):
+    """Give pictures that have no vector one in the current index (rebuilding it when the model changed).
+
+    The picture index belongs to the whole library, so this is a MANAGE act like removing stray files.
+    A dry run only counts and needs no credentials.
+    """
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import require_engine
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    if not req.dry_run:
+        authenticated_request_actor(request, actor_kind="http-media")
+    engine = require_engine(request)
+    profile = _profile(engine, req.profile_id, request, Permission.WRITE)
+    _require_manage_if(request, profile, True)
+    report = await asyncio.to_thread(run_repair, profile, req.dry_run)
+    return JSONResponse(dataclasses.asdict(report))
+
+
 def _decode_cursor(cursor: str) -> tuple[str, str] | None:
     """The (created_at, media_id) a cursor stands for; 400 when it is not one of ours."""
     if not cursor:
@@ -313,6 +340,30 @@ async def submit(req: DocumentSubmitRequest, request: Request):
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
         tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
         scope=scope, shared_with=shared_with)
+    body = dataclasses.asdict(receipt)
+    if receipt.status == "refused":
+        body["detail"] = receipt.reason
+    return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
+
+
+@router.post("/documents/{document_id}/retry")
+async def retry(document_id: str, request: Request, profile_id: str = ""):
+    """Try a failed document again from the original already stored (no file is dropped again)."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import require_engine
+    from superlocalmemory.server.write_governance import enforce_remember_governance
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    actor_id = authenticated_request_actor(request, actor_kind="http-media")
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id, request, Permission.WRITE)
+    if not _ID.fullmatch(document_id):
+        raise HTTPException(404, detail="Not found.")
+    enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview="")
+    receipt = await asyncio.to_thread(retry_document, document_id, profile_id=profile, actor_id=actor_id)
+    if receipt is None:
+        raise HTTPException(404, detail="Not found.")
     body = dataclasses.asdict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason

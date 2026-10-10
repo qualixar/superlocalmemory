@@ -113,6 +113,15 @@ wraps the same data in a `data` envelope):
 }
 ```
 
+A result that came from a saved picture or a PDF page also carries a `media`
+block (`media_id`, `kind` of `image` or `page`, `thumbnail_uri`, `page`,
+`document_id`, `citation` such as `page 12`). Pictures and pages are searched
+by a normal `recall` while pictures and documents are on; nothing changes when
+they are off. From an app on this computer, up to three thumbnails follow the
+JSON as image blocks; `get_media(media_id)` shows any other. Look at a
+thumbnail before saying a picture shows something, and give the page when you
+quote a PDF. See `slm-media`.
+
 Other fields that can appear: `profile` (the namespace that answered),
 `project_scope` (what a `project` filter did), `tag_scope` (what a `tags`
 filter did), `temporal_frame`, `reranker_status`, and `thematic_context`.
@@ -152,6 +161,15 @@ a changed memory.
 **Refine on low confidence.** `recall` returns confidence signals with every result. If `no_confident_match` is `true` (or `answer_confidence` is low / `abstained` is `true`), do NOT invent a memory — rewrite the query into 1–3 more specific sub-queries (split multi-hop questions; try entity names, synonyms, or broader phrasing) and call `recall` again before concluding nothing was found. A confident match → use it directly. SLM answers from this machine, typically in a second or two, with no server-side LLM round — unless the user turned on the online answer check, which adds one request to that service per recall — and lets you, the calling model, drive this refinement.
 
 **`abstained` means the results shown do not answer the question.** If `abstained` is `true`, say you don't have it, or ask — never present the returned memories as the answer anyway. `abstention_reason` distinguishes why: `"judged_insufficient"` means candidates were found and scored, but none of them actually answers this question; `"evidence_floor"` / `"no_candidates"` means nothing was found at all. `answer_confidence` is a measurement, not a guarantee — treat a low number the same way you'd treat `abstained: true`. `calibration_status: "uncalibrated"` means no judge is configured for this recall; in that case `abstained` only ever reflects the older "nothing found" signal.
+
+**Scores rank results; they are not probabilities.** `score` (an alias of
+`relevance_score`) says how relevant a memory is to this query compared with
+the others. It does not say how likely an answer is to be right, so never turn
+it into a percentage, average it, or compare it across releases or
+configurations. `answer_confidence` is `null` unless an answer check ran. When
+the answer check is on and judges that the memories do not answer the
+question, `abstained` is `true` and you say you do not have it. See
+`docs/retrieval-score-contract.md`.
 
 **`abstained: false` does not mean the answer was checked.** `answerability` says
 whether it was: `supported` (the answer check ran and judged the shown memories
@@ -424,7 +442,8 @@ See `slm-profile`.
 - `slm-session` — session lifecycle (must call before first recall)
 - `slm-scope` — multi-scope sharing model (personal / shared / global)
 - `slm-profile` — workspace isolation and profile switching
+- `slm-media` — pictures and PDF pages in results, and how to save them
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

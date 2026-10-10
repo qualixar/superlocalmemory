@@ -107,4 +107,34 @@ describe('global fetch mutation invalidation', function () {
     assert.equal(h.calls[0].input.href, 'https://untrusted.example/mutate');
     h.dom.window.close();
   });
+  it('sends the install token with same-origin RBAC reads (company mode)', async function () {
+    const h = buildCoreHarness();
+
+    await h.window.fetch('/api/rbac/status');
+
+    const rbac = h.calls.find(function (c) { return c.input === '/api/rbac/status'; });
+    assert.ok(rbac, 'the RBAC read must reach the network');
+    assert.equal(rbac.init.headers.get('X-Install-Token'), 'test-install-token');
+    h.dom.window.close();
+  });
+
+  it('does not attach the token to other same-origin reads', async function () {
+    const h = buildCoreHarness();
+
+    await h.window.fetch('/api/version');
+
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].init.headers, undefined);
+    h.dom.window.close();
+  });
+
+  it('never sends the token with an RBAC-looking external read', async function () {
+    const h = buildCoreHarness();
+
+    await h.window.fetch('https://untrusted.example/api/rbac/status');
+
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].init.headers, undefined);
+    h.dom.window.close();
+  });
 });

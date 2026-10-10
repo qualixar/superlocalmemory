@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally. Local data root; optional networked features have separate behavior."
-version: "4.0.0"
+version: "4.1.25"
 author: "Varun Pratap Bhardwaj"
 license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
@@ -15,6 +15,9 @@ triggers:
   - agent memory
   - local memory
   - memory health
+  - save a picture
+  - save a PDF
+  - message another bot
 ---
 
 # SuperLocalMemory
@@ -53,6 +56,35 @@ slm forget "<query>" --json               # Preview matches (add --yes to delete
 slm forget "<query>" --json --yes         # Delete matching memories
 slm delete <fact_id> --json --yes         # Delete specific memory by ID
 slm update <fact_id> "<content>" --json   # Update a memory
+```
+
+### Pictures, documents and folders (4.1.25, optional)
+
+Off by default. Needs a computer with 16 GB of memory and downloads about 1.5 GB.
+Ask the user before turning it on.
+
+```bash
+slm media status --json                   # is it on, and how is set-up going
+slm media enable                          # asks first; --yes skips the question (only with the user's yes)
+slm media disable                         # memories are kept
+slm media repair --dry-run                # count pictures that cannot be found by what they show yet
+slm sources add ~/Notes --kind obsidian   # or --kind folder; read-only; shows what would be read, then asks
+slm sources list --json
+```
+
+When it is on, a normal `slm recall` also returns saved pictures and PDF pages (a
+`media` block per result). The MCP tools are `remember_media`, `remember_document`,
+`get_media`, `media_status` and, for web apps, `media_upload_link`; they are listed
+only in the `full`, `power` and `whole` tool sets. A picture is up to 25 MB, a PDF up
+to 100 MB and 500 pages. Do not save a file that shows a secret. The `slm-media` skill
+has the details.
+
+### Company mode and the dashboard key
+
+```bash
+slm team status --json                    # Require login: on|off, user count
+slm team policy --require-login on|off    # on the SLM computer; only when the user asks
+slm token show                            # the key the dashboard asks for in strict mode; a secret, never paste it into chat
 ```
 
 ### Diagnostics
@@ -141,7 +173,7 @@ Error responses:
 
 SuperLocalMemory works via both MCP and CLI:
 
-- **MCP**: 24 tools (`code` profile) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`
+- **MCP**: 38 tools (`code` profile), 57 (`full`, the default; 62 with pictures and documents on) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`, bot-message tools `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait` (a connected web app passes each reply's `ack_ids` back as `ack`) and `mesh_state`
 - **CLI**: commands with `--json` for scripts, CI/CD, and agent frameworks; includes `slm loop demo/history/show`
 
 ---

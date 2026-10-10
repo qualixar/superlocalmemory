@@ -19,6 +19,7 @@ import dataclasses
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -33,18 +34,33 @@ _ID = re.compile(r"[0-9a-f]{32}")
 _WRONG = "That file is not the kind of file this link was made for."
 
 
-def _read_checked(path: Path, row: UploadRow) -> bytes:
-    """The scratch file's bytes, once it is exactly the file that was sent and still looks like its kind."""
+def _open_checked(path: Path, row: UploadRow) -> Any:
+    """The scratch file, open at its start, once it is exactly the file that was sent and still
+    looks like its kind. The caller closes it. Opened once and checked through that handle, so
+    the file checked is the file saved."""
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        with os.fdopen(fd, "rb") as fh:
-            if os.fstat(fh.fileno()).st_size != row.total:
-                raise HTTPException(422, detail="The file did not arrive whole. Start the upload again.")
-            data = fh.read(row.total + 1)
     except OSError:
         raise HTTPException(422, detail="The file did not arrive whole. Start the upload again.") from None
-    if len(data) != row.total or not looks_like(row.kind, data[:16]):
-        raise HTTPException(422, detail=_WRONG)
+    fh = os.fdopen(fd, "rb")
+    try:
+        if os.fstat(fh.fileno()).st_size != row.total:
+            raise HTTPException(422, detail="The file did not arrive whole. Start the upload again.")
+        if not looks_like(row.kind, fh.read(16)):
+            raise HTTPException(422, detail=_WRONG)
+        fh.seek(0)
+        return fh
+    except BaseException:
+        fh.close()
+        raise
+
+
+def _read_checked(path: Path, row: UploadRow) -> bytes:
+    """A picture's bytes (at most 25 MB; the picture tools need them in memory anyway)."""
+    with _open_checked(path, row) as fh:
+        data = fh.read(row.total + 1)
+    if len(data) != row.total:
+        raise HTTPException(422, detail="The file did not arrive whole. Start the upload again.")
     return data
 
 
@@ -69,14 +85,19 @@ async def finish_upload(upload_id: str, request: Request):
     runtime = getattr(request.app.state, "canonical_remember_runtime", None)
     if row.kind == "image" and runtime is None:
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")
-    data = await asyncio.to_thread(_read_checked, links.temp_path(upload_id), row)
-    inp = MediaInput(data=data, remote=True)
     common = dict(content=row.note, profile_id=profile, actor_id=actor_id, config=engine._config,
                   idempotency_key=f"upload:{upload_id}", scope="personal", shared_with=())
     if row.kind == "image":
-        receipt = await asyncio.to_thread(remember_media, inp, runtime=runtime, **common)
+        data = await asyncio.to_thread(_read_checked, links.temp_path(upload_id), row)
+        receipt = await asyncio.to_thread(remember_media, MediaInput(data=data, remote=True), runtime=runtime,
+                                          can_wait=True, **common)  # finishing runs in the background
     else:
-        receipt = await asyncio.to_thread(submit_document, inp, **common)
+        # A PDF (up to 100 MB) streams from the checked scratch file; it is never all in memory.
+        fh = await asyncio.to_thread(_open_checked, links.temp_path(upload_id), row)
+        try:
+            receipt = await asyncio.to_thread(submit_document, MediaInput(stream=fh, remote=True), **common)
+        finally:
+            fh.close()
     body = dataclasses.asdict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason

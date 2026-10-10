@@ -1,7 +1,7 @@
 ---
 name: slm-governance
-description: Governed-workspace behavior for SuperLocalMemory. Covers roles (admin/member/viewer) and company mode, retention and lifecycle settings, the audit trail, GDPR export and erasure, and how agents must behave when operating under workspace governance. The audit and retention tools need the power MCP profile. Agents must never bypass governance controls.
-version: "4.1.24"
+description: Governed-workspace behavior for SuperLocalMemory. Covers roles (admin/member/viewer) and company mode, who administers a company-mode workspace (a signed-in admin, or `slm team` on the SLM computer), `slm token show` in strict mode, what remote web apps can never see or change, retention and lifecycle settings, the audit trail, GDPR export and erasure, and how agents must behave when operating under workspace governance. The audit and retention tools need the power MCP profile. Agents must never bypass governance controls.
+version: "4.1.25"
 agent: agent
 tools:
   - audit_trail
@@ -51,8 +51,62 @@ a login. Company mode adds named users, each with one role per workspace
 No MCP tool or `slm` command reports your role (only a signed-in dashboard session can ask the daemon, at `GET /api/rbac/whoami`). Do not guess it: attempt
 what the user asked and treat a permission refusal as final. Setting up users,
 roles and "Require login" is done in the dashboard under **Settings → Access**;
-there is no `slm user` or `slm role` command. The machine operator keeps user
-administration in every mode so a mistake cannot lock everyone out.
+there is no `slm user` or `slm role` command. The only company-mode commands
+are `slm team status` and `slm team policy` (next section).
+
+Roles apply to every route that touches data, not only to `remember` and
+`recall`. In 4.1.25 that includes pictures, documents, connected folders and
+turning features on: reading a file by path, connecting a folder
+(`slm sources add`), turning on pictures and documents and cleaning up with
+`slm media gc --apply` or `slm media repair` need the owner or an admin. SLM's
+own data folder can never be named as a path or a source. With login
+required, every page of data (export, compliance records, profiles, learning
+and trust details) needs a signed-in user; a test walks every route so a new
+one cannot slip through.
+
+---
+
+## Who administers a company-mode workspace
+
+While users are enrolled and login is required, the install token or an API
+key alone no longer administers the workspace: any local program can fetch the
+install token, so it would let anyone switch company mode off. Administration
+needs one of these:
+
+- **A signed-in admin** (a user with the `admin` role on that workspace),
+  through the dashboard.
+- **`slm team` on the SLM computer**, which uses a private capability file that
+  only the user running SLM can read, so the owner can never be locked out
+  even if every admin is:
+
+```bash
+slm team status                          # "Require login: on. Users: N."  (read-only, safe)
+slm team policy --require-login on       # every user signs in
+slm team policy --require-login off      # the machine owner is the user again
+```
+
+Run them as the same user that runs SLM, with the daemon running. Otherwise the
+daemon refuses them. Users, roles and sessions are kept when login is turned
+off. Switching the requirement off lowers protection for everyone, so do it
+only when the user asks for it in this conversation; `slm team status` first.
+With no users enrolled yet, the machine owner can still create the first
+administrator.
+
+### Strict mode: `slm token show`
+
+With `SLM_REQUIRE_CREDENTIALS=1`, the dashboard is not handed the SLM key; the
+person pastes it into a one-time box. `slm token show` prints that key. It is a
+secret that opens write access: do not run it on your own, never paste it into
+chat, a memory or a log, and tell the user to run it in their own terminal.
+`slm rotate-token` replaces it (then `slm restart`).
+
+### What remote web apps can never do
+
+A connected web app (see `slm-web-access`) cannot correct, delete, share or
+switch profile, cannot read another profile, and cannot change, delete, pin or
+replace a memory it is not allowed to see: it is answered as if that memory did
+not exist. It never sees memories that came from a connected folder, and sees
+a picture or page only when its text held no secret or personal data.
 
 ---
 
@@ -217,8 +271,9 @@ Before running any destructive or state-changing operation (`forget`,
 - `slm-remember` — fact storage, corrections and deletion
 - `slm-recall` — retrieval reference (includes scope read flags)
 - `slm-mesh` — mesh tools
+- `slm-media` — pictures, documents and folders, and the roles that gate them
 - To use this memory from a web assistant or another computer, see the slm-web-access skill.
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

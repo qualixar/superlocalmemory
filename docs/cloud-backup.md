@@ -28,6 +28,24 @@ on another machine. Backups made by earlier releases still restore. Google
 Drive does not rotate old backups, so delete plain-text backups made before
 encryption was introduced yourself.
 
+## Pictures and PDFs are never uploaded
+
+Cloud backup sends the stores listed below and nothing else. The image and document
+library (`media.db`) and the original picture and PDF files under `media/` never leave
+this computer: they are not in the GitHub release and not in Google Drive. That is a
+deliberate choice, not a gap.
+
+**Local** backups do keep them. Each local backup copies `media.db` into
+`~/.superlocalmemory/backups/` as `media-<timestamp>.db` and keeps one copy of every
+original in `backups/media-originals/` (only new files are copied each time, so the
+extra space is about the size of your library once, and the size is written to the
+log). Restoring `media-<timestamp>.db` puts back any original the `media/` folder is
+missing and never overwrites a file that is there. An original you erase also leaves
+the backup copy at the next backup. A coherent backup set (`BackupCoordinator`) keeps
+and restores them the same way, in the same `media-originals/` folder, so the two kinds of
+local backup share one copy. With images and documents off or never used,
+nothing is added. The copy is not encrypted; keep the data folder on an encrypted disk.
+
 ## GitHub Backup (Recommended)
 
 GitHub backup works out of the box. No additional setup needed beyond a Personal Access Token.

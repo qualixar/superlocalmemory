@@ -2,7 +2,7 @@
 
 Local-first agent memory + reversible context compression for OpenAI Codex CLI.
 
-SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later
 
 ---
 
@@ -109,7 +109,9 @@ To use SLM skills in Codex, type `/skills` in the Codex chat and select the skil
 | slm-scope      | Personal / shared / global memory scoping        |
 | slm-profile    | Memory profiles versus MCP tool sets             |
 | slm-governance | Enterprise roles, retention, audit, GDPR         |
-| slm-mesh       | Cross-session peer coordination                  |
+| slm-mesh       | Cross-session peer coordination, `mesh_wait`, web-app peers |
+| slm-media      | Pictures, PDFs and folders: save, find, limits   |
+| slm-web-access | Connecting web apps: switches, upload links      |
 | slm-loop       | Bounded, gate-verified agent loops               |
 | slm-bot-memory | Sharing one computer with other bots             |
 | slm-getting-started-bot | First session on a headless bot host    |
@@ -202,4 +204,4 @@ root (not inside a subdirectory), then restart Codex.
 
 ---
 
-SuperLocalMemory v4.1.24 · Qualixar · https://github.com/qualixar/superlocalmemory
+SuperLocalMemory v4.1.25 · Qualixar · https://github.com/qualixar/superlocalmemory

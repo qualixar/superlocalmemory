@@ -254,6 +254,11 @@ class BackupCoordinator:
             encoding="utf-8",
         )
 
+        # The picture and PDF originals are files, not rows: they sit in the same mirror
+        # (backup_dir/media-originals) that BackupManager keeps, one copy shared by both.
+        from superlocalmemory.infra import backup_media
+
+        backup_media.sync_originals_quietly(self._base_dir, self._backup_dir)
         return manifest
 
     def restore_from_manifest(self, manifest: BackupSetManifest) -> None:
@@ -426,6 +431,12 @@ class BackupCoordinator:
 
         # Phase C succeeded — remove pre-restore snapshots.
         self._cleanup_pre_restore_snapshots(pre_restore_map, pre_restore_lance)
+
+        # The library database is back: put back the originals its rows point at.
+        if any(entry.store_name == "media.db" for entry in manifest.stores):
+            from superlocalmemory.infra import backup_media
+
+            backup_media.restore_originals_quietly(self._base_dir, self._backup_dir)
 
         # Phase D — GDPR obligation replay (invariant: no restore may resurrect
         # erased personal data).  Must run AFTER live files are in place and
@@ -687,6 +698,7 @@ class BackupManager:
 
             # v3.4.10: Backup ALL .db files in the SLM directory
             self._backup_all_dbs(timestamp, suffix)
+            self._backup_media_originals()
 
             self._enforce_retention()
             return backup_name
@@ -737,6 +749,17 @@ class BackupManager:
                 )
         if backed_up:
             logger.info("Backed up %d companion databases", backed_up)
+
+    def _backup_media_originals(self) -> None:
+        """Keep the picture and PDF originals beside the media.db copy (see ``backup_media``)."""
+        from superlocalmemory.infra import backup_media
+
+        backup_media.sync_originals_quietly(self.db_path.parent, self.backup_dir)
+
+    def _restore_media_originals(self) -> None:
+        from superlocalmemory.infra import backup_media
+
+        backup_media.restore_originals_quietly(self.db_path.parent, self.backup_dir)
 
     def _enforce_retention(self) -> None:
         """Remove old backups exceeding the configured max."""
@@ -841,6 +864,8 @@ class BackupManager:
                     src.close()
 
             logger.info("Restored: %s -> %s", filename, target.name)
+            if target_name == "media.db":
+                self._restore_media_originals()
 
             # GDPR obligation replay — prevent a restore from resurrecting
             # previously erased personal data.  Failure is fatal: return False

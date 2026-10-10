@@ -292,3 +292,9 @@
   .apps-toast { animation: none; }
   .apps-app-card, .apps-tech-summary svg { transition: none; }
 }
+
+/* The second yes on the Web access row (4.1.25): two switches and a one-line note. */
+.apps-abilities { margin-top: 10px; display: grid; gap: 6px; }
+.apps-ability { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); cursor: pointer; }
+.apps-ability input { margin: 0; }
+.apps-abilities .apps-note { margin-top: 2px; }

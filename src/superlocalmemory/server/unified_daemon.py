@@ -486,6 +486,10 @@ from superlocalmemory.server.read_gates import (  # noqa: E402
     is_sensitive_dashboard_read as _is_sensitive_dashboard_read,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
+    _capability_ok,
+    is_cli_status_read,
+)
+from superlocalmemory.server.read_gates import (  # noqa: E402
     mesh_read_gate as _mesh_read_gate,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
@@ -3378,6 +3382,15 @@ async def lifespan(application: FastAPI):
             upload_housekeeping.run(), name="upload-housekeeping"
         )
 
+    # Pictures saved while their memory was queued are linked to it once it commits.
+    _media_hk_task = getattr(application.state, "_media_housekeeping_task", None)
+    if _media_hk_task is None or _media_hk_task.done():
+        from superlocalmemory.server import media_housekeeping
+
+        application.state._media_housekeeping_task = asyncio.create_task(
+            media_housekeeping.run(), name="media-housekeeping"
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3536,6 +3549,13 @@ async def lifespan(application: FastAPI):
         _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
         if _upload_hk is not None and not _upload_hk.done():
             _upload_hk.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _media_hk = getattr(application.state, "_media_housekeeping_task", None)
+        if _media_hk is not None and not _media_hk.done():
+            _media_hk.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 
@@ -3963,6 +3983,8 @@ def create_app() -> FastAPI:
         application.include_router(media_router)
         from superlocalmemory.server.routes.media_upload import router as media_upload_router
         application.include_router(media_upload_router)
+        from superlocalmemory.server.routes.media_dashboard_upload import router as media_dash_upload_router
+        application.include_router(media_dash_upload_router)
     except ImportError:
         pass
 
@@ -4429,7 +4451,13 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             if _is_sensitive_dashboard_read(
                 request.method, request.url.path,
             ):
-                _resp = _rbac_read_gate(request, application.state)
+                _resp = _rbac_read_gate(
+                    request, application.state,
+                    machine_principal=(
+                        is_cli_status_read(request.method, request.url.path)
+                        and _capability_ok(request, application.state)
+                    ),
+                )
                 if _resp is not None:
                     return _resp
             _resp = _mesh_read_gate(request, application.state)
@@ -4574,7 +4602,8 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         from superlocalmemory.remote_connections.runtime import install_runtime
         install_runtime(application)
     except Exception:
-        logger.warning("remote_connections_router unavailable; local services remain enabled")
+        logger.warning("remote_connections_router unavailable; local services remain enabled",
+                       exc_info=True)
 
     # Answer-check settings (4.1.18): on-device Laya, hosted Jev, or off.
     from superlocalmemory.server.routes.answer_check import router as answer_check_router
@@ -5177,6 +5206,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         req: RememberRequest,
         request: Request,
         wait: bool = False,
+        # How a remote caller came in; it can only hide more.
+        caller_view: str = "",
     ):
         """Journal and commit a bounded, immediately-queryable receipt.
 
@@ -5286,6 +5317,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     check_replaceable, engine._db, replaces=req.replaces,
                     profile_id=write_profile, scope=scope,
                 )
+                from superlocalmemory.retrieval.remote_view import hidden_among, parse_view
+
+                view = parse_view(caller_view)
+                if view:
+                    # A remote app replaces only what it may see: a hidden memory is
+                    # refused with the answer for an id that does not exist.
+                    from superlocalmemory.core.remember_replaces import named_facts, not_found
+
+                    named = await asyncio.to_thread(named_facts, engine._db.execute,
+                                                    replaces_id, write_profile)
+                    if hidden_among(view, engine._db, write_profile, [f.fact_id for f in named]):
+                        raise not_found(replaces_id)
             except ReplacesRejected as exc:
                 raise HTTPException(422, detail=exc.as_error()) from exc
 
@@ -5849,8 +5892,23 @@ def _register_daemon_routes(application: FastAPI) -> None:
         return out
 
     @application.get("/status")
-    async def status():
+    async def status(request: Request):
         _update_activity()
+        from superlocalmemory.server.read_gates import status_details_allowed
+
+        if not status_details_allowed(request, application.state):
+            # Company mode, no session: only what finding the daemon needs.
+            from superlocalmemory.server.routes.helpers import SLM_VERSION
+
+            descriptor = application.state.daemon_descriptor
+            return {
+                "status": "running",
+                "version": SLM_VERSION,
+                "port": descriptor.port,
+                "pid": os.getpid(),
+                "instance_id": descriptor.instance_id,
+                "details_hidden": True,
+            }
         # Non-blocking peek — status must never force a re-init.
         engine = getattr(application.state, "engine", None)
         from superlocalmemory.server.profile_runtime import get_profile_runtime

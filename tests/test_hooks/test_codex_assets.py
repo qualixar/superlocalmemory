@@ -10,6 +10,7 @@ EXPECTED_SKILLS = {
     "slm-governance",
     "slm-graph",
     "slm-loop",
+    "slm-media",
     "slm-mesh",
     "slm-profile",
     "slm-recall",

@@ -209,12 +209,19 @@ def remove_source(source_id: str, *, purge: bool = False) -> None:
 def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: dict[str, Any],
                   purge: bool) -> None:
     source_id = source["source_id"]
-    for row in store.files(source_id):
-        if purge:
+    failures = 0
+    if purge:
+        for row in store.files(source_id):
             if not retire.erase_row(host, store, runtime, source, row):
                 raise SourceRefused("erasure_incomplete", "The erasure was not complete; try again.")
-        elif row["state"] != "tombstoned":
-            retire.hide_file(host, store, runtime, source, row, tombstone=True)
+    else:
+        # Memories and documents an earlier attempt could not hide are tried again here too.
+        failures = retire.hide_rows(host, store, runtime, source)
+    if failures:
+        # The source stays listed so the person can try again; a "removed" source is never
+        # scanned again, so nothing would ever hide what is still recallable.
+        raise SourceRefused("removal_incomplete",
+                            "Some memories from this folder could not be hidden yet; try again.")
     if purge:
         store.delete_source_rows(source_id)
     else:
@@ -265,8 +272,11 @@ def forget_empty(source_id: str) -> dict[str, Any]:
                 dev = _check_still_empty(host, source)
                 runtime = host.runtime()
                 rows = [r for r in store.files(source_id) if r["state"] != "tombstoned"]
-                for row in rows:
-                    retire.hide_file(host, store, runtime, source, row, tombstone=True)
+                if retire.hide_rows(host, store, runtime, source):
+                    # Same rule as a removal: the folder stays as it was (waiting, empty) so the
+                    # person can try again; nothing that is still recallable is called forgotten.
+                    raise SourceRefused("removal_incomplete",
+                                        "Some memories from this folder could not be hidden yet; try again.")
                 store.set_state(source_id, "active", stats=ScanStats(root_dev=dev).summary(), scanned=True)
         except locks.SourceBusy:
             raise SourceRefused("source_busy", _BUSY_MESSAGE) from None

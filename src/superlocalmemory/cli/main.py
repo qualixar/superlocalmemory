@@ -80,7 +80,7 @@ _NO_DAEMON_COMMANDS = {
     "config", "evolve", "db",
     # v3.4.22 escape hatches — never auto-start the daemon on these.
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
-    "rotate-token",
+    "rotate-token", "token",
     # 4.1.20: remote access settings, keys and certificates are files only.
     "remote",
     "evidence",
@@ -1042,6 +1042,15 @@ def main() -> None:
         help="Rotate the SLM install token (run `slm restart` afterwards)",
     )
 
+    # `slm token show`: the key the dashboard asks for when a key is required.
+    token_p = sub.add_parser(
+        "token", help="Show the key the dashboard asks for when a key is required",
+    )
+    token_sub = token_p.add_subparsers(dest="token_command", title="token subcommands")
+    token_sub.add_parser(
+        "show", help="Print the SuperLocalMemory key (readable only by you)",
+    )
+
     # 4.1.20: remote access for AI tools on other computers (TLS, named keys).
     from superlocalmemory.cli.remote_commands import add_parser as _add_remote_parser
     _add_remote_parser(sub)
@@ -1162,6 +1171,9 @@ def main() -> None:
     # 4.1.19: memory kinds (status, settings, undoable classification runs).
     from superlocalmemory.cli.kinds_cmd import register_kinds_parser
     register_kinds_parser(sub)
+    # 4.1.25: the workspace login policy from the terminal (the owner's way back in).
+    from superlocalmemory.cli.team_cmd import register_team_parser
+    register_team_parser(sub)
     # 4.1.25: folder sources (add, list, report, rescan, remove) through the daemon.
     from superlocalmemory.cli.sources_cmd import register_sources_parser
     register_sources_parser(sub)

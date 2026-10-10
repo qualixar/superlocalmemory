@@ -62,11 +62,18 @@ async def export_memories(
     from superlocalmemory.server.write_identity import require_http_mutation_actor
     require_http_mutation_actor(request, getattr(request.app.state, "daemon_descriptor", None),
                                 actor_kind="data-export")
+    # The actor check above admits any loopback process. The export is every
+    # memory of the active workspace, so it also needs READ on it: a signed-in
+    # user with that role, or the owner when the workspace does not require
+    # login. Company mode with no session is refused here (401).
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    active_profile = get_active_profile()
+    require_permission(request, Permission.READ, profile=active_profile)
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
 
         # Detect schema
         try:

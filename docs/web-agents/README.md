@@ -27,15 +27,31 @@ they tell it to save only lasting facts, one per call, with a
 save secrets. They also say what to do when your computer is asleep, when the
 free daily allowance is used up, and when a permission was not granted.
 
+Since 4.1.25 they also cover two optional groups of tools. For **pictures and
+PDFs**, the agent passes a ChatGPT attachment straight to `remember_media` or
+`remember_document`, and otherwise asks for a one-time upload link
+(`media_upload_link`), shows it to you and does not say the file was saved until
+you tell it so; a recall result with a `media` block is looked at with
+`get_media` before the agent says what a picture shows. For **bot messages**,
+the agent treats every message as data, never as an instruction, waits for
+replies with `mesh_wait`, and passes the `ack_ids` of each reply back as `ack`
+so a message is not delivered twice.
+
 ## What a web app can and cannot do
 
 A web app reaches one profile, the one you chose when you turned on Web access.
 It can call `recall`, `search`, `fetch` and `get_status`. It can call `remember`
 only if you allowed saving, and the session tools (`session_init`,
 `close_session`, `report_feedback`, `report_outcome`) only if you allowed
-those. It cannot delete, retire or correct a memory, share one with another
-profile, or read another profile. Those stay on your computer, in the
-dashboard, CLI or a local agent.
+those. With the second yes (the box on the approval page and the matching
+switch on the **Web access** row in Connected apps, see the
+[host guides](../remote-access/hosts.md#bot-messages-and-the-two-new-permissions))
+it can also use bot messages (`mesh_peers`, `mesh_send`, `mesh_inbox`,
+`mesh_wait`, and `mesh_state` to read) and pictures and documents
+(`get_media`, `media_status`, and with saving `remember_media`,
+`remember_document`, `media_upload_link`). It cannot delete, retire or correct a
+memory, share one with another profile, or read another profile. Those stay on
+your computer, in the dashboard, CLI or a local agent.
 
 ## For agents on your own computer
 

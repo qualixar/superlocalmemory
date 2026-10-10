@@ -300,7 +300,7 @@ class Repair:
 
         conn = self._connect()
         try:
-            self._rebuild_damaged_indexes(stats, conn)
+            unrepaired = self._rebuild_damaged_indexes(stats, conn)
             done = conn.execute("SELECT COUNT(*) FROM integrity_repair_receipts WHERE action = "
                                 "'purge_keyword_index'").fetchone()[0]
             on = all(fts_residue.secure_delete_on(conn, t) for t in fts_residue.FTS_TABLES
@@ -308,8 +308,8 @@ class Repair:
             if done and on:
                 return  # purged once, and every delete since removed its words at once
             for table in fts_residue.FTS_TABLES:
-                if not census._has(conn, table):
-                    continue
+                if not census._has(conn, table) or table in unrepaired:
+                    continue  # purging an index that cannot be read would only fail
                 with self._held(stats, conn):
                     before = conn.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) "  # noqa: S608
                                           f"FROM {table}_data").fetchone()
@@ -332,24 +332,73 @@ class Repair:
         finally:
             conn.close()
 
-    def _rebuild_damaged_indexes(self, stats: RunStats, conn: sqlite3.Connection) -> None:
-        """A malformed keyword index is derived data: rebuild it from the memories."""
+    def _rebuild_damaged_indexes(self, stats: RunStats, conn: sqlite3.Connection) -> set[str]:
+        """A malformed keyword index is derived data: rebuild it from the memories.
+
+        The setting that damages the index is turned off first (a rebuild with it
+        still on is damaged again by the next edit). Each repair is checked
+        afterwards; an index that is still damaged is counted and reported, never
+        recorded as fixed (GitHub #204).
+        """
         from superlocalmemory.storage import fts_residue
 
+        present = [t for t in fts_residue.FTS_TABLES if census._has(conn, t)]
+        if not fts_residue.secure_delete_supported() and any(
+                fts_residue.secure_delete_on(conn, t) for t in present):
+            with self._held(stats, conn):
+                fts_residue.disable_where_damaging(conn)
+        unrepaired: set[str] = set()
         for table in fts_residue.FTS_TABLES:
-            if not census._has(conn, table) or not fts_residue.keyword_index_damaged(conn, table):
+            if census._has(conn, table) and fts_residue.keyword_index_damaged(conn, table):
+                if not self._repair_index(stats, conn, table):
+                    unrepaired.add(table)
+        return unrepaired
+
+    def _repair_index(self, stats: RunStats, conn: sqlite3.Connection, table: str) -> bool:
+        """Rebuild, then check; if still damaged recreate the table, then check."""
+        from superlocalmemory.storage import fts_residue
+
+        before = self._index_size(conn, table)
+        attempts = (("rebuilt", "rebuild_keyword_index", fts_residue.rebuild_keyword_index),
+                    ("recreated", "recreate_keyword_index", fts_residue.recreate_keyword_index))
+        for word, action, fix in attempts:
+            try:
+                with self._held(stats, conn):
+                    fix(conn, table)
+            except sqlite3.DatabaseError as exc:
+                logger.warning("keyword index %s could not be %s: %s", table, word, exc)
+                continue
+            if self._index_is_damaged(conn, table):
                 continue
             with self._held(stats, conn):
-                before = conn.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) "  # noqa: S608
-                                      f"FROM {table}_data").fetchone()
-                fts_residue.rebuild_keyword_index(conn, table)
-                after = conn.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) "  # noqa: S608
-                                     f"FROM {table}_data").fetchone()
-                receipts.receipt(conn, stats.run_id, "rebuild_keyword_index", table,
-                                 "keyword index was damaged; rebuilt from the stored memories",
+                receipts.receipt(conn, stats.run_id, action, table,
+                                 f"keyword index was damaged; {word} from the stored memories",
                                  {"blocks": before[0], "bytes": before[1]},
-                                 {"blocks": after[0], "bytes": after[1]}, undoable=False)
-            stats.add("keyword_index.rebuilt", 1)
+                                 self._index_size_dict(conn, table), undoable=False)
+            stats.add(f"keyword_index.{word}", 1)
+            return True
+        logger.error("keyword index %s is still damaged after a rebuild and a recreate", table)
+        stats.add("keyword_index.still_damaged", 1)
+        return False
+
+    @staticmethod
+    def _index_size(conn: sqlite3.Connection, table: str) -> tuple[int, int]:
+        row = conn.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) "  # noqa: S608
+                           f"FROM {table}_data").fetchone()
+        return int(row[0]), int(row[1])
+
+    def _index_size_dict(self, conn: sqlite3.Connection, table: str) -> dict[str, int]:
+        blocks, size = self._index_size(conn, table)
+        return {"blocks": blocks, "bytes": size}
+
+    @staticmethod
+    def _index_is_damaged(conn: sqlite3.Connection, table: str) -> bool:
+        """FTS5's own check, then SQLite's quick_check (the one a person runs)."""
+        from superlocalmemory.storage import fts_residue
+        from superlocalmemory.storage.integrity_diagnosis import check_database
+
+        return (fts_residue.keyword_index_damaged(conn, table)
+                or table in check_database(conn).damaged_indexes)
 
     def _obligations(self, stats: RunStats) -> None:
         conn = self._connect()

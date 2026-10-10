@@ -35,7 +35,9 @@ def make(monkeypatch, tmp_path, *, kind="image", data=PNG, state="finishing", ac
         return receipt or MediaReceipt("stored", media_id="m" * 32, memory_id="mem1")
 
     def fake_doc(inp, **kw):
-        calls.append(("document", inp, kw))
+        # The route streams a PDF (audit MU-M6): read it here, while the handle is open.
+        streamed = inp.stream.read() if inp.stream is not None else None
+        calls.append(("document", inp, {**kw, "_streamed": streamed}))
         return receipt or DocumentReceipt("processing", document_id="d" * 32, job_id="j" * 32)
 
     monkeypatch.setattr(routes, "remember_media", fake_media)
@@ -79,7 +81,8 @@ def test_a_finished_document_goes_to_the_document_pipeline(monkeypatch, tmp_path
     r = c.post(url(row))
     assert r.status_code == 202 and r.json()["status"] == "processing"
     kind, inp, kw = calls[0]
-    assert kind == "document" and inp.data == PDF and kw["scope"] == "personal"
+    assert kind == "document" and inp.data is None and kw["_streamed"] == PDF and kw["scope"] == "personal"
+    assert inp.stream.closed, "the route closes the scratch file after the save"
 
 
 def test_a_refusal_is_a_422_with_the_reason(monkeypatch, tmp_path):

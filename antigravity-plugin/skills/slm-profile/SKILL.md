@@ -104,9 +104,13 @@ named differently (for example `superlocalmemory-personal` and
 | `mesh` | 9 tools — mesh coordination only | Lightweight cross-session signalling |
 
 A host that sets no profile gets the 57-tool `full` set (this is what the Claude
-Code and Codex plugins do; the Antigravity plugin sets `power`). Two more
-environment variables widen or narrow it: `SLM_MCP_ALL_TOOLS=1` registers every
-tool (103), and `SLM_MCP_TOOLS=remember,recall,...` registers exactly the names
+Code and Codex plugins do; the Antigravity plugin sets `power`). While pictures
+and documents are on (`slm media status`), `full` lists 62 tools and `power` 74:
+the five picture tools `remember_media`, `get_media`, `remember_document`,
+`media_status` and `media_upload_link` are added to both, and never to `core`,
+`code` or `mesh` (see `slm-media`). The server reads this when it starts. Two
+more environment variables widen or narrow it: `SLM_MCP_ALL_TOOLS=1` registers
+every tool (109), and `SLM_MCP_TOOLS=remember,recall,...` registers exactly the names
 listed. `SLM_MCP_PROFILE=whole` is also every tool. The code-graph tools beyond
 the six in `code` (such as `update_code_graph`, `list_graph_stats`) and tools
 such as `core_memory` and `settle_session_outcomes` exist only with
@@ -140,7 +144,8 @@ set. It is not in `mesh`.
 
 Check the tool set first (`slm status` does not show it; look at the host's MCP
 config for `SLM_MCP_PROFILE`). Mesh tools need `full`, `power`, `mesh` or the
-default. Code-graph tools need `code` or `SLM_MCP_ALL_TOOLS=1`. Audit and
+default. Picture and PDF tools need `full`, `power` or `whole` and the feature
+turned on (`slm media enable`). Code-graph tools need `code` or `SLM_MCP_ALL_TOOLS=1`. Audit and
 retention tools need `power`. `report_outcome` and `report_feedback` need
 anything but `core` or `mesh`.
 
@@ -156,4 +161,4 @@ anything but `core` or `mesh`.
 
 ---
 
-*SuperLocalMemory v4.1.24 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.1.25 · Qualixar · AGPL-3.0-or-later*

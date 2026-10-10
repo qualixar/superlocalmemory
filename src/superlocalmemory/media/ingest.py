@@ -30,8 +30,10 @@ from typing import Any, Literal
 
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
-from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
-from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.memory_core import (
+    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+)
+from superlocalmemory.memory_core.submit import SavePending, SaveReceipt, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
 
@@ -57,6 +59,9 @@ class MediaInput:
     file_name: str = ""
     #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
     data: bytes | None = None
+    #: Internal only: a binary file the caller already opened and checked (the upload-link
+    #: finish). Documents stream from it in 1 MB chunks, so a 100 MB PDF is never all in memory.
+    stream: Any = None
     download_url: str | None = None
     remote: bool = False
     #: The link came inside a ``file`` object (a chat app's attachment), so the app's own
@@ -93,6 +98,9 @@ class _Ocr:
     text: str = ""
     pii: int = 0
     secrets: int = 0
+    #: True only when the whole OCR text was scanned for personal data and
+    #: credentials, whatever the redaction setting. Unscanned is never clean.
+    scanned: bool = False
 
 
 @dataclass
@@ -107,13 +115,21 @@ class _Job:
     work: Path = field(default_factory=Path)
     placed: str = ""
     placed_new: bool = False
+    remote: bool = False
 
 
-def _cold_wait_s() -> float:
+#: Loading the picture model takes about 45 s on a Mac. Someone on this computer waits for it;
+#: a web app's call has a 25 s relay budget, so it gets a "starting up, ask again" answer in time.
+LOCAL_COLD_WAIT_S = 90.0
+REMOTE_COLD_WAIT_S = 20.0
+
+
+def _cold_wait_s(remote: bool = False) -> float:
+    default = REMOTE_COLD_WAIT_S if remote else LOCAL_COLD_WAIT_S
     try:
-        return min(60.0, max(1.0, float(os.environ.get("SLM_MEDIA_COLD_WAIT_S", "20"))))
+        return min(120.0, max(1.0, float(os.environ.get("SLM_MEDIA_COLD_WAIT_S", default))))
     except ValueError:
-        return 20.0
+        return default
 
 
 # -- reading the input ---------------------------------------------------------
@@ -208,11 +224,11 @@ def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
 
 # -- the worker steps ----------------------------------------------------------
 
-def _wait_for_warm(client: Any) -> None:
+def _wait_for_warm(client: Any, remote: bool = False) -> None:
     if client.is_warm():
         return
     client.warm_up()
-    deadline = time.monotonic() + _cold_wait_s()
+    deadline = time.monotonic() + _cold_wait_s(remote)
     while time.monotonic() < deadline:
         if client.is_warm():
             return
@@ -236,10 +252,13 @@ def _file_sha(path: Path) -> str:
 
 
 def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
-    _wait_for_warm(job.client)
-    fd = os.open(job.work / "source.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
+    _wait_for_warm(job.client, job.remote)
+    try:
+        fd = os.open(job.work / "source.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+    except OSError as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The image could not be saved.") from None
     info = dict(job.client.prepare_image(job.work / "source.bin", job.work, wait_cold=False))
     ext = str(info.get("stored_ext") or "").lower().lstrip(".")  # the worker answers ".jpg"
     if info.get("mime") not in _MIMES or not _EXT.fullmatch(ext):
@@ -258,15 +277,16 @@ def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
     try:
         job.placed, job.placed_new = files.place_original_noting_new(
             job.root, info["stored_path"], profile_id, info["stored_ext"])
-    except (OSError, ValueError):
-        raise _refuse("The image could not be saved.") from None
+    except (OSError, ValueError) as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The image could not be saved.") from None
     return job.placed
 
 
 def _ocr_key(stored_sha: str, redact: bool):
     from superlocalmemory.cache.keys import CacheKey, params_hash
 
-    return CacheKey(stored_sha, "ocr.auto", "1", params_hash=params_hash({"redaction": redact, "lang": "auto"}))
+    # "2": the entry carries the full-text scan verdict (older entries do not).
+    return CacheKey(stored_sha, "ocr.auto", "2", params_hash=params_hash({"redaction": redact, "lang": "auto"}))
 
 
 def _ocr(job: _Job, info: dict[str, Any]) -> _Ocr:
@@ -278,9 +298,14 @@ def _ocr(job: _Job, info: dict[str, Any]) -> _Ocr:
     except Exception:  # noqa: BLE001 - a cache fault only costs a recompute
         logger.debug("ocr cache read skipped")
     reply = job.client.ocr_image(info["stored_path"], wait_cold=False)
-    engine, text = str(reply.get("engine") or "none"), str(reply.get("text") or "")[:MAX_OCR_CHARS]
-    prepared = prepare_for_save(text, origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact)
+    engine, full = str(reply.get("engine") or "none"), str(reply.get("text") or "")
+    prepared = prepare_for_save(full[:MAX_OCR_CHARS], origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact)
     out = _Ocr(engine, prepared.text, prepared.pii_count, prepared.secret_count)
+    try:  # vetting reads ALL of the text; what is stored stays the cut, redacted text
+        found = scan_sensitive(full)
+        out = _Ocr(engine, prepared.text, found.pii, found.secrets, scanned=True)
+    except Exception:  # noqa: BLE001 - an unscanned picture is simply not cleared for remote use
+        logger.warning("picture text could not be scanned; it stays local-only")
     if engine != "none" and job.cache is not None:
         try:
             job.cache.put(key, json.dumps(out.__dict__).encode("utf-8"), kind="json")
@@ -329,19 +354,25 @@ def _check_space(job: _Job, dim: int) -> dict[str, Any]:
     """The signature this picture's space must carry; refuses before anything is saved when the index differs."""
     plan = replace(job.plan, image_model=str(job.client.model_id), image_revision=str(job.client.revision), dim=dim)
     if not compatible(plan, job.store.active_signature()):
-        raise _refuse("The picture index was built with a different model; rebuild it from the dashboard.")
+        raise _refuse("The picture index was built with a different model; run: slm media repair")
     return plan.signature()
 
 
+NO_VECTOR_REASON = ("Saved, but this picture can't be found by what it shows yet. "
+                    "To fix that, run: slm media repair")
+
+
 def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str,
-               signature: dict[str, Any]) -> str:
+               signature: dict[str, Any]) -> bool:
+    """Insert the picture's row, then its vector. False when only the vector could not be written."""
     media_id = job.store.insert_item(**fields)
     try:
         space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector), signature)
         job.store.put_vector(media_id, space, profile_id, vector)
     except Exception as exc:  # noqa: BLE001 - the row is kept; only searching by picture is lost
         logger.warning("image %s saved without its vector (%s)", media_id, type(exc).__name__)
-    return media_id
+        return False
+    return True
 
 
 def _cleanup(job: _Job) -> None:
@@ -367,7 +398,13 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         idempotency_key=args["idempotency_key"], scope=args.get("scope"),
         shared_with=tuple(args.get("shared_with") or ()))
     try:
-        saved = submit_memory(args["runtime"], request, config=job.config)
+        saved = submit_memory_settled(args["runtime"], request, config=job.config)
+    except SavePending:
+        # Durable and queued: keep the picture; its anchor stays empty until ``slm media gc``
+        # fills it from the memory that names this media_id.
+        logger.info("image memory is queued; its anchor is filled later")
+        saved = SaveReceipt(status="accepted", memory_id=None, fact_ids=(), operation_id="",
+                            pii_count=0, secret_count=0)
     except Exception as exc:  # noqa: BLE001 - nothing was stored; undo the file
         logger.warning("image memory was not saved (%s)", type(exc).__name__)
         _cleanup(job)
@@ -379,25 +416,30 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         original_relpath=relpath, exif_json=info.get("exif") or {}, captured_at=_captured_at(info.get("exif") or {}),
         anchor_memory_id=saved.memory_id,
         origin="folder" if args.get("folder") else "tool", thumb_webp=info["thumb"],
-        remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
+        remote_ok=int(ocr.engine != "none" and ocr.scanned and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
-        _write_row(job, fields, vector, profile_id, signature)
+        indexed = _write_row(job, fields, vector, profile_id, signature)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
                             reason="The text was saved; the picture could not be indexed.")
     return MediaReceipt("stored", media_id=media_id, memory_id=saved.memory_id,
-                        near_duplicate_of=near, extracted_text_preview=preview)
+                        near_duplicate_of=near, extracted_text_preview=preview,
+                        reason="" if indexed else NO_VECTOR_REASON)
 
 
 def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
     client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
-    scope: str | None = None, shared_with: tuple[str, ...] = (),
+    scope: str | None = None, shared_with: tuple[str, ...] = (), can_wait: bool | None = None,
 ) -> MediaReceipt:
-    """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
+    """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes.
+
+    ``can_wait``: whether the caller can wait out a cold picture model (about 45 s). Default: yes
+    for callers on this computer, no for a web app's live call (its relay answers within 25 s).
+    """
     opened = False
     store_ref = store
     try:
@@ -415,7 +457,7 @@ def remember_media(
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
             session_date=session_date, idempotency_key=idempotency_key, folder=folder,
-            scope=scope, shared_with=tuple(shared_with)))
+            scope=scope, shared_with=tuple(shared_with), remote=not (can_wait if can_wait is not None else not getattr(inp, "remote", False))))
     except _Stop as stop:
         return stop.receipt
     finally:
@@ -437,7 +479,8 @@ def _run(client: Any, store: Any, cache: Any, config: Any, data: bytes, src_sha:
         plan = current_space_plan(root)
     except ValueError:
         raise _refuse("That picture mode is not available in this build.") from None
-    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan)
+    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan,
+               remote=bool(args.get("remote")))
     job.work = Path(tempfile.mkdtemp(dir=files.tmp_dir(root)))
     try:
         return _store_it(job, data, src_sha, args)

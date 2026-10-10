@@ -44,6 +44,8 @@ INVALID_LINK_LIMIT = 30
 INVALID_LINK_WINDOW_S = 600.0
 #: How long one ``finish`` frame waits for the save; the gateway asks again until it ends.
 FINISH_WAIT_S = 15.0
+#: A save that found the picture tools still starting is tried again this often, until the link expires.
+WARM_RETRY_S = 30.0
 _HEADER = re.compile(r"(info|chunk|finish) ([A-Za-z0-9_-]{43}) (\d{1,10}) (\d{1,12}) ([A-Za-z0-9_-]{22})")
 _LINK = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
 _SAVED = {
@@ -96,10 +98,12 @@ def daemon_finisher(upload_id: str) -> dict[str, Any]:
 class UploadRelay:
     def __init__(self, links: Callable[[], UploadLinks] = default_links, *, keys: Any = None,
                  finisher: Callable[[str], dict[str, Any]] = daemon_finisher,
-                 finish_wait_s: float = FINISH_WAIT_S, clock: Callable[[], float] = time.time) -> None:
+                 finish_wait_s: float = FINISH_WAIT_S, clock: Callable[[], float] = time.time,
+                 retry_interval_s: float = WARM_RETRY_S) -> None:
         self._links, self._keys, self._finisher = links, keys, finisher
-        self._wait, self._clock = finish_wait_s, clock
+        self._wait, self._clock, self._retry_s = finish_wait_s, clock, retry_interval_s
         self._running: dict[str, asyncio.Task] = {}
+        self._retrying: dict[str, asyncio.Task] = {}
         self._invalid: dict[str, deque[float]] = {}
 
     def _blocked(self, connection_id: str) -> bool:
@@ -153,7 +157,10 @@ class UploadRelay:
         await asyncio.to_thread(self._authorize, credential, row)
         if op == "info":
             info = await asyncio.to_thread(links.info, token, credential.connection_id)
-            return {"ok": True, "kind": info.kind, "max_bytes": info.max_bytes, "expires_at": info.expires_at}
+            answer = {"ok": True, "kind": info.kind, "max_bytes": info.max_bytes, "expires_at": info.expires_at}
+            if row.authorization_id:  # the gateway checks THAT app's consent, not any app's
+                answer["authorization_id"] = row.authorization_id
+            return answer
         if op == "chunk":
             held = await asyncio.to_thread(links.accept_chunk, token, credential.connection_id,
                                            index, total, body, nonce)
@@ -161,6 +168,11 @@ class UploadRelay:
         return await self._finish(links, token, credential.connection_id, nonce)
 
     def _authorize(self, credential: ConnectorCredential, row: UploadRow) -> None:
+        if not row.authorization_id:
+            # Made before apps were recorded: no app can be held to its own consent, so it is
+            # refused here rather than honoured for "any consenting app". The gateway's own
+            # fallback for an unnamed link stays in place and logs, but never gets this far.
+            raise UploadError("outdated")
         key = self._key_store().verify(credential.origin_key)
         if (key is None or key.name != "web-" + credential.connection_id or key.key_id != row.key_id
                 or key.scope != "write" or "media" not in key.extras or key.profile != row.profile_id):
@@ -184,6 +196,30 @@ class UploadRelay:
             return {"ok": True, "done": False}
 
     async def _save(self, links: UploadLinks, row: UploadRow) -> dict[str, Any]:
+        result = await self._attempt(links, row)
+        if result.get("code") == "warming" and row.upload_id not in self._retrying:
+            # The page may already have been told "it will appear shortly": finish it here, not on the page.
+            task = asyncio.create_task(self._retry_when_warm(links, row), name="slm-upload-warm-retry")
+            self._retrying[row.upload_id] = task
+            task.add_done_callback(lambda _t, key=row.upload_id: self._retrying.pop(key, None))
+        return result
+
+    async def _retry_when_warm(self, links: UploadLinks, row: UploadRow) -> None:
+        """Try the save again every ``retry_interval_s`` until it ends, a new upload begins, or the link expires."""
+        try:
+            while True:
+                await asyncio.sleep(self._retry_s)
+                claimed = await asyncio.to_thread(links.claim_warm_retry, row.upload_id)
+                if claimed is None:
+                    return
+                if (await self._attempt(links, claimed)).get("code") != "warming":
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the link expires and is cleaned up on its own
+            logger.warning("upload retry stopped (%s)", type(exc).__name__)
+
+    async def _attempt(self, links: UploadLinks, row: UploadRow) -> dict[str, Any]:
         try:
             receipt = await asyncio.to_thread(self._finisher, row.upload_id)
         except Exception as exc:  # noqa: BLE001 - the person sees a plain line only
@@ -200,7 +236,7 @@ class UploadRelay:
         result = {"ok": False, "code": "refused", "message": reason or _CANNOT}
         if status == "warming":
             result["code"] = "warming"
-            await asyncio.to_thread(links.finish_retry, row.upload_id)
+            await asyncio.to_thread(links.finish_retry, row.upload_id, result)
         else:
             await asyncio.to_thread(links.finish_failed, row.upload_id, result)
         return result

@@ -214,7 +214,48 @@ def cmd_rotate_token(args: Namespace) -> None:
           "the new token (run: slm restart).")
 
 
+def cmd_token(args: Namespace) -> None:
+    """Print the install token (the key the dashboard asks for in strict mode).
+
+    With SLM_REQUIRE_CREDENTIALS=1 the dashboard is not handed the key, so the
+    person copies it from here. The token file belongs to the owner; the file is
+    tightened to owner-only first and the command refuses to print a key that
+    another account owns.
+    """
+    import os
+    import stat
+    import sys
+
+    if getattr(args, "token_command", None) != "show":
+        print("Usage: slm token show   (prints the key the dashboard asks for)",
+              file=sys.stderr)
+        raise SystemExit(2)
+
+    from superlocalmemory.core.security_primitives import (
+        _install_token_path,
+        ensure_install_token,
+    )
+
+    token = ensure_install_token()
+    path = _install_token_path()
+    if os.name != "nt":
+        try:
+            info = path.stat()
+            if info.st_uid != os.getuid():
+                print("The SuperLocalMemory key file belongs to another account, "
+                      "so it is not shown here.", file=sys.stderr)
+                raise SystemExit(1)
+            if stat.S_IMODE(info.st_mode) & 0o077:
+                path.chmod(0o600)
+        except OSError as exc:
+            print(f"Could not check who can read the key file: {exc}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+    print(token)
+
+
 __all__ = (
+    "cmd_token",
     "cmd_disable",
     "cmd_enable",
     "cmd_clear_cache",

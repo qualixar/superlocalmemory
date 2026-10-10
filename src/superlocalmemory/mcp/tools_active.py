@@ -364,9 +364,17 @@ def _upcoming_scheduled_facts(engine, now: datetime.datetime,
 
 
 def _owns_fact(db, profile_id: str, fact_id: str) -> bool:
-    return bool(db.execute(
-        "SELECT 1 AS one FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
-        (fact_id, profile_id)))
+    """True when ``fact_id`` is a fact of the profile that this caller may act on.
+
+    A remote app is told "not found" for a memory its recall hides, as for one that is not there.
+    """
+    from superlocalmemory.mcp.remote_visibility import unseen_ids
+
+    if not db.execute(
+            "SELECT 1 AS one FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, profile_id)):
+        return False
+    return fact_id not in unseen_ids(db, profile_id, [fact_id])
 
 
 def _soft_prompt_for(engine, profile_id: str) -> str:
@@ -927,6 +935,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
                         "Use relevant/irrelevant/partial"
                     ),
                 }
+
+            # A remote app may rate only a memory it can see; a hidden one is answered
+            # like an id that is not there, and nothing is written.
+            from superlocalmemory.mcp.remote_visibility import unseen_ids
+
+            if fact_id in unseen_ids(engine._db, pid, [fact_id]):
+                return {"success": False, "error": "Memory not found."}
 
             authorization = authorize_mcp_mutation(
                 engine,

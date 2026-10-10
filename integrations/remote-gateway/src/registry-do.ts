@@ -152,12 +152,15 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
     const updated={...mesh,polls:mesh.polls+1};await this.ctx.storage.put('mesh-usage',updated);this.mesh=updated;
     return decision;
   }
-  /** May a one-time upload link still be used? Only while the connection and the owner's access are live and some app
-   * still holds the consent that lets it make one (writing, pictures and the upload tool). Answers no on anything unclear. */
-  async uploadsAllowed():Promise<boolean>{
+  /** May a one-time upload link still be used? Only while the connection and the owner's access are live and the app
+   * that holds the link still has the consent that lets it make one (writing, pictures and the upload tool).
+   * With `authorizationId` that app alone is asked, so revoking app A ends A's links even while app B is consented;
+   * without it (a link from an older laptop that did not record its app) any consenting app is enough.
+   * Answers no on anything unclear. */
+  async uploadsAllowed(authorizationId?:string):Promise<boolean>{
     const {connection,authorizations,entitlement}=this.state;
     if(!connection||connection.revokedAt!==null||entitlement.expiresAt<=Date.now())return false;
-    return authorizations.some(a=>a.revokedAt===null&&a.consentedScopes.includes('slm:write')&&a.consentedScopes.includes('slm:media')&&a.consentedTools.includes('media_upload_link'));
+    return authorizations.some(a=>(authorizationId===undefined||a.authorizationId===authorizationId)&&a.revokedAt===null&&a.consentedScopes.includes('slm:write')&&a.consentedScopes.includes('slm:media')&&a.consentedTools.includes('media_upload_link'));
   }
   /** Active grants for the owner's Connected apps list. No tokens or memory data. */
   async listAuthorizations(owner:string):Promise<ConnectedApp[]>{

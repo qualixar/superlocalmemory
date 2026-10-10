@@ -71,7 +71,7 @@ def setup(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     finisher = Finisher()
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "a note")
+    minted = links.mint(CID, "key1", "personal", "image", "a note", authorization_id="app-a")
     return relay, links, finisher, minted
 
 
@@ -85,7 +85,8 @@ async def call(relay, packet, cid=CID):
 async def test_info_reports_kind_and_limit_without_using_the_link(setup):
     relay, links, _, minted = setup
     out = await call(relay, frame("info", minted.token))
-    assert out == {"ok": True, "kind": "image", "max_bytes": 25 * 1024 * 1024, "expires_at": minted.expires_at}
+    assert out == {"ok": True, "kind": "image", "max_bytes": 25 * 1024 * 1024, "expires_at": minted.expires_at,
+                   "authorization_id": "app-a"}
     assert links.find(minted.token, CID).state == "open"
 
 
@@ -113,7 +114,7 @@ async def test_a_slow_save_answers_working_then_the_result(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     finisher = Finisher(delay=0.4)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=0.05)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     assert (await call(relay, frame("finish", minted.token, 0, len(PNG)))) == {"ok": True, "done": False}
     assert (await call(relay, frame("finish", minted.token, 0, len(PNG)))) == {"ok": True, "done": False}
@@ -134,7 +135,7 @@ async def test_outcomes_map_to_plain_messages(tmp_path):
     for reply, done, text in cases:
         links = UploadLinks(tmp_path / str(len(text)), clock=lambda: NOW)
         relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
-        minted = links.mint(CID, "key1", "personal", "image", "")
+        minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
         await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
         out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
         assert out["ok"] is done and text in out["message"], (reply, out)
@@ -147,7 +148,7 @@ async def test_a_finisher_that_raises_fails_the_link_without_leaking(tmp_path):
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(RuntimeError("/Users/x/secret.png")),
                         finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
     assert out["ok"] is False and "secret" not in json.dumps(out) and "/Users" not in json.dumps(out)
@@ -291,7 +292,7 @@ async def test_a_good_link_is_not_counted_and_a_malformed_frame_is_not_either(tm
     clock = Clock()
     links = UploadLinks(tmp_path, clock=clock)
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), clock=clock)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     for _ in range(40):
         assert (await call(relay, frame("info", minted.token)))["ok"] is True
     bad = frame("info", "a" * 43)
@@ -307,15 +308,164 @@ async def test_a_good_link_is_not_counted_and_a_malformed_frame_is_not_either(tm
 async def test_a_refusal_reason_loses_host_paths_and_the_account_name(tmp_path, monkeypatch):
     from superlocalmemory.server import remote_redaction
 
-    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("/Users/varun", "varunacct"))
+    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("/Users/alice", "aliceacct"))
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     reply = {"status": "refused",
-             "reason": "Cannot read /Users/varun/Pictures/a.png for varunacct (see https://x.example/a?k=1)"}
+             "reason": "Cannot read /Users/alice/Pictures/a.png for aliceacct (see https://x.example/a?k=1)"}
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
-    minted = links.mint(CID, "key1", "personal", "image", "")
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
     text = out["message"]
-    assert "/Users" not in text and "varunacct" not in text and "Pictures" not in text and "k=1" not in text
+    assert "/Users" not in text and "aliceacct" not in text and "Pictures" not in text and "k=1" not in text
     stored = links.find(minted.token, CID).result_json
-    assert "/Users" not in stored and "varunacct" not in stored
+    assert "/Users" not in stored and "aliceacct" not in stored
+
+
+@pytest.mark.asyncio
+async def test_info_names_the_authorization_that_issued_the_link(tmp_path):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
+    out = await call(relay, frame("info", minted.token))
+    assert out["ok"] is True and out["authorization_id"] == "app-a"
+
+
+@pytest.mark.asyncio
+async def test_a_warming_save_answers_the_gateways_next_finish_with_the_warming_message(tmp_path):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    finisher = Finisher(reply={"status": "warming", "reason": "The picture tools are starting."})
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    first = await call(relay, frame("finish", minted.token, 0, len(body)))
+    assert first["ok"] is False and first["code"] == "warming"
+    again = await call(relay, frame("finish", minted.token, 0, len(body)))   # same nonce, as the gateway sends it
+    assert again["code"] == "warming" and "starting" in again["message"]
+    assert len(finisher.calls) == 1
+
+
+# -- a save that hit warming after the gateway said "it will appear shortly" finishes itself ----
+
+class Sequence:
+    """A finisher that answers from a list, then keeps repeating the last answer."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    def __call__(self, upload_id):
+        self.calls.append(upload_id)
+        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+
+WARM = {"status": "warming", "reason": "The picture tools are starting."}
+STORED = {"status": "stored", "media_id": "m" * 32}
+
+
+async def _until(check, seconds=3.0):
+    loop = asyncio.get_running_loop()
+    end = loop.time() + seconds
+    while loop.time() < end:
+        if check():
+            return True
+        await asyncio.sleep(0.01)
+    return check()
+
+
+async def _warm_upload(tmp_path, finisher, clock=None):
+    links = UploadLinks(tmp_path, clock=clock or (lambda: NOW))
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
+                        retry_interval_s=0.02, clock=clock or (lambda: NOW))
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    first = await call(relay, frame("finish", minted.token, 0, len(body)))
+    assert first["code"] == "warming"
+    return relay, links, minted, body
+
+
+@pytest.mark.asyncio
+async def test_a_warming_save_is_finished_by_the_laptop_once_the_tools_are_warm(tmp_path):
+    finisher = Sequence(WARM, WARM, STORED)
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher)
+    upload_id = links.find(minted.token, CID).upload_id
+    assert await _until(lambda: links.get(upload_id).state == "done")
+    assert len(finisher.calls) == 3
+    assert json.loads(links.get(upload_id).result_json)["message"] == "Saved to your memory."
+    assert not links.temp_path(upload_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_background_save_that_is_refused_ends_the_link_as_failed(tmp_path):
+    finisher = Sequence(WARM, {"status": "refused", "reason": "Not an image."})
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher)
+    upload_id = links.find(minted.token, CID).upload_id
+    assert await _until(lambda: links.get(upload_id).state == "failed")
+    assert json.loads(links.get(upload_id).result_json)["message"] == "Not an image."
+
+
+@pytest.mark.asyncio
+async def test_a_new_upload_on_the_link_ends_the_background_retry(tmp_path):
+    finisher = Sequence(WARM)
+    relay = None
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
+                        retry_interval_s=0.2, clock=lambda: NOW)
+    minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    await call(relay, frame("finish", minted.token, 0, len(body)))
+    again = await call(relay, frame("chunk", minted.token, 0, len(body), body, nonce=OTHER_NONCE))
+    assert again["ok"] is True
+    await asyncio.sleep(0.5)
+    assert len(finisher.calls) == 1              # the person's new upload owns the link now
+
+
+@pytest.mark.asyncio
+async def test_the_background_retry_stops_when_the_link_has_expired(tmp_path):
+    now = [NOW]
+    finisher = Sequence(WARM)
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher, clock=lambda: now[0])
+    now[0] += 3600                                # far past the 20-minute life of a started link
+    await asyncio.sleep(0.3)
+    assert len(finisher.calls) == 1
+    assert relay._retrying == {}                  # nothing left running
+
+
+@pytest.mark.asyncio
+async def test_a_full_disk_reaches_the_page_in_plain_words(setup, monkeypatch):
+    import errno
+
+    from superlocalmemory.media import files
+
+    relay, links, _, minted = setup
+
+    def write(path, data, flags):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(UploadLinks, "_write", staticmethod(write))
+
+    out = await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
+
+    assert out["ok"] is False and out["code"] == "disk_full"
+    assert out["message"] == files.DISK_FULL
+
+
+# -- a link with no app on it is refused on this computer (it used to take "any consenting app") ----
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", ["info", "chunk", "finish"])
+async def test_a_link_with_no_app_is_refused_in_plain_words(tmp_path, op):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    finisher = Finisher()
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "")      # made before apps were recorded
+    body = PNG if op == "chunk" else b""
+
+    out = await call(relay, frame(op, minted.token, 0, len(PNG), body))
+
+    assert out["ok"] is False and out["code"] == "outdated"
+    assert out["message"] == "This upload link expired with the update. Ask the app for a new one."
+    assert "authorization_id" not in out and finisher.calls == []
+    assert links.find(minted.token, CID).received == 0

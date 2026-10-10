@@ -384,3 +384,44 @@ def test_memory_ids_of_gives_anchors_and_page_memories(store):
     assert store.memory_ids_of(["2" * 32, "3" * 32, "4" * 32, "5" * 32]) == {
         "2" * 32: ["m-anchor"], "3" * 32: ["p1", "p2"]}
     assert store.memory_ids_of([]) == {}
+
+
+# -- pictures vetted before the full-text scan are not offered to remote apps (audit F2) --
+
+def _remote_flags(root):
+    s = open_media_store(data_root=root)
+    try:
+        return [r["remote_ok"] for r in s.list_items("default")]
+    finally:
+        s.close()
+
+
+def _make_old_style_store(root, store):
+    """A media.db as <=4.1.24 left it: items marked remote_ok, no vetting stamp."""
+    store.insert_item(**item(sha="1" * 64, remote_ok=1))
+    store.insert_item(**item(sha="2" * 64, remote_ok=1, kind="page", document_id="d", page_no=1, origin="document"))
+    store.close()
+    conn = sqlite3.connect(media_db_path(root))
+    conn.execute("DELETE FROM media_schema WHERE key = 'remote_vetting'")
+    conn.commit()
+    conn.close()
+
+
+def test_pictures_marked_clean_by_an_older_build_are_held_back_once(root, store):
+    _make_old_style_store(root, store)
+    assert _remote_flags(root) == [0, 0]           # opening upgraded them; media/revet.py looks at them again from their memory text
+
+
+def test_the_upgrade_runs_once_and_never_clears_a_later_vetted_picture(root, store):
+    _make_old_style_store(root, store)
+    s = open_media_store(data_root=root)
+    s.insert_item(**item(sha="3" * 64, remote_ok=1))   # vetted by the full-text scan
+    s.close()
+    assert sorted(_remote_flags(root)) == [0, 0, 1]
+    assert sorted(_remote_flags(root)) == [0, 0, 1]
+
+
+def test_a_new_store_is_stamped_and_starts_with_nothing_to_upgrade(root, store):
+    store.insert_item(**item(sha="4" * 64, remote_ok=1))
+    store.close()
+    assert _remote_flags(root) == [1]

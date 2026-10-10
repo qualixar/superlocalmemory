@@ -64,7 +64,7 @@ ROLES = {
 }
 _MAX_TEXT = 8_000
 # Stamped by scripts/build-hermes-plugin.mjs from pyproject.toml at build time.
-_RELEASE_SLM_VERSION = (4, 1, 24)
+_RELEASE_SLM_VERSION = (4, 1, 25)
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
@@ -292,6 +292,12 @@ class SlmHermesPlugin:
             handle = self.ctx.subagent_lifecycle.launch(SubagentLaunchRequest(goal=_redact(goal, 8_000), context=_bounded(prompt, 16_000), role="leaf", correlation_id=f"slm-{role}-{uuid.uuid4().hex}"))
             return {"ok": True, "handle": handle.to_dict()}
         except Exception as exc:
+            if "parent session" in str(exc):
+                # Hermes starts an advisor only as a child of a running agent turn; a slash command
+                # typed outside a conversation has none (issue #155). Say what works instead.
+                return {"ok": False, "error": (
+                    "Hermes can start an SLM advisor only during a chat turn. Ask Hermes in a chat, "
+                    f"for example: \"use the slm_agent tool with the {role} advisor to {goal.strip()[:80]}\".")}
             return {"ok": False, "error": _bounded(exc, 500)}
 
     def agent_tool(self, role: str = "", goal: str = "", **_: Any) -> dict[str, Any]:
@@ -399,6 +405,10 @@ def _register_all_skills(ctx: Any) -> None:
     ctx.register_skill("slm-scope", ROOT / "skills" / "slm-scope" / "SKILL.md")
     ctx.register_skill("slm-session", ROOT / "skills" / "slm-session" / "SKILL.md")
     ctx.register_skill("slm-status", ROOT / "skills" / "slm-status" / "SKILL.md")
+    ctx.register_skill("slm-bot-memory", ROOT / "skills" / "slm-bot-memory" / "SKILL.md")
+    ctx.register_skill("slm-getting-started-bot", ROOT / "skills" / "slm-getting-started-bot" / "SKILL.md")
+    ctx.register_skill("slm-media", ROOT / "skills" / "slm-media" / "SKILL.md")
+    ctx.register_skill("slm-web-access", ROOT / "skills" / "slm-web-access" / "SKILL.md")
 
 
 def _register_runtime(ctx: Any, plugin: SlmHermesPlugin) -> None:
@@ -411,7 +421,7 @@ def _register_runtime(ctx: Any, plugin: SlmHermesPlugin) -> None:
     ctx.register_command("slm-agent-status", plugin.slash_agent_status, "Inspect an SLM advisor child", "<handle-json>")
     ctx.register_command("slm-agent-cancel", plugin.slash_agent_cancel, "Cancel an SLM advisor child", "<handle-json>")
     ctx.register_command("slm-agent-result", plugin.slash_agent_result, "Get an SLM advisor child result", "<handle-json>")
-    ctx.register_tool("slm_agent", "slm", {"type": "object", "properties": {"role": {"type": "string", "enum": sorted(ROLES)}, "goal": {"type": "string"}}, "required": ["role", "goal"]}, plugin.agent_tool, "Launch an explicit SLM advisor child agent")
-    ctx.register_tool("slm_agent_status", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_status_tool, "Inspect an SLM advisor child")
-    ctx.register_tool("slm_agent_cancel", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_cancel_tool, "Cancel an SLM advisor child")
-    ctx.register_tool("slm_agent_result", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_result_tool, "Get an SLM advisor child result")
+    ctx.register_tool("slm_agent", "slm", {"type": "object", "properties": {"role": {"type": "string", "enum": sorted(ROLES)}, "goal": {"type": "string"}}, "required": ["role", "goal"]}, plugin.agent_tool, description="Launch an explicit SLM advisor child agent")
+    ctx.register_tool("slm_agent_status", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_status_tool, description="Inspect an SLM advisor child")
+    ctx.register_tool("slm_agent_cancel", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_cancel_tool, description="Cancel an SLM advisor child")
+    ctx.register_tool("slm_agent_result", "slm", {"type": "object", "properties": {"handle": {"type": "object"}}, "required": ["handle"]}, plugin.agent_result_tool, description="Get an SLM advisor child result")

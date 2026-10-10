@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
+const { nodeRunsTranslated } = require('./node-arch.js');
 
 const FEATURES_FILE = 'features.json';
 
@@ -35,6 +36,28 @@ function ramRefusal(totalBytes, env = process.env) {
   if (env && env[LOW_RAM_OVERRIDE_ENV] === '1') return '';
   return 'Images and documents need a computer with at least 16 GB of memory; this one has '
     + (totalBytes / GIB).toFixed(1) + ' GB. Your text memories keep working.';
+}
+
+// Where the managed picture and document environment has a build (the same list as
+// runtimes/locks): Apple Silicon Macs, x86_64 and ARM64 Linux, and x64 Windows. `translated` is a
+// Node that runs as an Intel program on an Apple Silicon Mac.
+const NOT_SUPPORTED = 'Images and documents are not supported on this computer yet. Your text memories keep working.';
+
+function mediaPlatformRefusal({ platform, arch, translated } = {}) {
+  if (platform === 'darwin' && arch === 'x64') {
+    if (translated) {
+      return 'This Node.js runs as an Intel program on an Apple Silicon Mac, so SLM cannot tell that your '
+        + 'Mac can use images and documents. Run Node natively (the Apple Silicon build), then try again.';
+    }
+    return NOT_SUPPORTED;
+  }
+  if (platform === 'linux' && arch !== 'x64' && arch !== 'arm64') return NOT_SUPPORTED;
+  if (platform === 'win32' && arch !== 'x64') return NOT_SUPPORTED;
+  return '';
+}
+
+function currentMachine() {
+  return { platform: process.platform, arch: process.arch, translated: nodeRunsTranslated(process.platform) };
 }
 
 function printWhatsNew(log = console.log) {
@@ -117,8 +140,14 @@ function askYesNo(question) {
  * with less than 16 GB of memory it says so once and neither asks nor records.
  */
 async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesNo, log = console.log,
-  totalMem = os.totalmem() }) {
+  totalMem = os.totalmem(), machine = currentMachine() }) {
   let wanted = mediaRequested(args, env);
+  const unsupported = mediaPlatformRefusal(machine);
+  if ((wanted || interactive) && unsupported) {
+    log('');
+    log('SLM: ' + unsupported);
+    return false;  // not asked, nothing recorded: the daemon would refuse it anyway
+  }
   const refusal = ramRefusal(totalMem, env);
   if ((wanted || interactive) && refusal) {
     log('');
@@ -171,4 +200,4 @@ async function runMediaStep({ argv = [], env = process.env, tty, ask, log = cons
   }
 }
 
-module.exports = { ramRefusal, MIN_RAM_BYTES, runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };
+module.exports = { mediaPlatformRefusal, ramRefusal, MIN_RAM_BYTES, runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };

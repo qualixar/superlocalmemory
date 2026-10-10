@@ -135,7 +135,7 @@
 
   function head() {
     var h = el('div');
-    var badge = el('span', 'badge', 'New');
+    var badge = el('span', 'badge', 'Preview');
     badge.style.marginRight = '8px';
     h.appendChild(badge);
     var t = el('b', null, 'Upgrade memory engine');

@@ -275,3 +275,35 @@ async def test_owner_actions_wait_for_the_connection_lock(tmp_path, broker, call
         assert not task.done()
     await asyncio.gather(task, return_exceptions=True)
     peer_names.set_names(cid, {})
+
+
+# -- an app revoked anywhere loses its open upload links (audit F6) ----------------
+
+@pytest.fixture()
+def upload_store(tmp_path, monkeypatch):
+    from superlocalmemory.media import upload_links
+
+    store = upload_links.UploadLinks(tmp_path / "upload-data")
+    monkeypatch.setattr(upload_links, "default_links", lambda: store)
+    return store
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_apps_open_upload_links_end_with_the_next_list(tmp_path, broker, upload_store):
+    runtime, row, provider = make(tmp_path, broker)
+    cid = row.connection_id
+    gone = upload_store.mint(cid, "key1", "personal", "image", "", authorization_id="auth-2")
+    kept = upload_store.mint(cid, "key1", "personal", "image", "", authorization_id="auth-1")
+    provider.apps = listed("auth-1")
+    await runtime.refresh_peer_names("owner", "profile", cid)
+    assert upload_store.find(gone.token, cid).state == "failed"
+    assert upload_store.find(kept.token, cid).state == "open"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_cannot_be_trusted_ends_no_upload_link(tmp_path, broker, upload_store):
+    runtime, row, provider = make(tmp_path, broker)
+    link = upload_store.mint(row.connection_id, "key1", "personal", "image", "", authorization_id="auth-2")
+    provider.apps = {"apps": [{"bogus": 1}]}
+    await runtime.refresh_peer_names("owner", "profile", row.connection_id)
+    assert upload_store.find(link.token, row.connection_id).state == "open"

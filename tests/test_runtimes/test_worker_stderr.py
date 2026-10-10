@@ -139,6 +139,7 @@ def test_the_worker_starts_with_library_progress_bars_off(monkeypatch):
 
     monkeypatch.delenv("TQDM_DISABLE", raising=False)
     client = worker_client.MediaWorkerClient.__new__(worker_client.MediaWorkerClient)
+    client.rss_limit_mb = 0
     env = worker_client.MediaWorkerClient._worker_env(client)
     assert env["HF_HUB_DISABLE_PROGRESS_BARS"] == "1" and env["TQDM_DISABLE"] == "1"
     assert env["TRANSFORMERS_VERBOSITY"] == "error"

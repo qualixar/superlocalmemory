@@ -19,12 +19,13 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.core import ram_lock
 from superlocalmemory.infra import proc_memory
-from superlocalmemory.runtimes import media_models, worker_log
+from superlocalmemory.runtimes import media_models, worker_limits, worker_log
 from superlocalmemory.runtimes.features import media_enabled, register_media_stop_hook
 from superlocalmemory.runtimes.ports import MediaEmbedderPort
 
@@ -35,6 +36,12 @@ DEFAULT_IDLE_S = 1800.0
 DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0
+#: How often the footprint of a worker that is answering a request is read.
+WATCH_INTERVAL_S = 0.5
+#: While a model loads its footprint legitimately passes the steady-state cap; only a runaway is stopped.
+LOAD_CAP_FACTOR = 1.5
+MEMORY_STOP_MESSAGE = ("The image model needed too much memory for that and was stopped. "
+                       "Try a smaller picture or document.")
 
 
 class MediaWorkerError(RuntimeError):
@@ -47,6 +54,10 @@ class MediaWorkerWarming(MediaWorkerError):
 
 class _Dead(Exception):
     """The worker process ended (internal; leads to one restart)."""
+
+
+class _OverCap(Exception):
+    """The worker passed its memory cap while answering and was stopped (internal; never replayed)."""
 
 
 def _env_number(name: str, default: float) -> float:
@@ -78,6 +89,7 @@ class MediaWorkerClient(MediaEmbedderPort):
                                 else _env_number("SLM_MEDIA_WORKER_RSS_LIMIT_MB",
                                                          media_models.rss_limit_mb_for(model_id)))
         self.request_timeout_s, self.load_timeout_s = request_timeout_s, load_timeout_s
+        self.watch_interval_s = WATCH_INTERVAL_S
         self.dim = 0
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
@@ -120,6 +132,8 @@ class MediaWorkerClient(MediaEmbedderPort):
             env.setdefault(key, value)
         if not _test_mode():
             env.pop("SLM_MEDIA_WORKER_FAKE", None)
+        env.pop(worker_limits.DATA_LIMIT_ENV, None)  # only the value computed here, never one inherited
+        env.update(worker_limits.data_limit_env(self.rss_limit_mb))
         return env
 
     def _spawn(self) -> None:
@@ -161,10 +175,33 @@ class MediaWorkerClient(MediaEmbedderPort):
         drain, self._drain = self._drain, None
         worker_log.stop_drain(drain, proc.stderr)
 
-    def _roundtrip(self, payload: dict, timeout_s: float) -> dict:
+    def _over_cap(self, pid: int, cap_mb: float) -> bool:
+        """True when the worker holds more than ``cap_mb`` right now (an unreadable footprint is not over)."""
+        return cap_mb > 0 and self._rss_mb(pid) > cap_mb
+
+    def _next_reply(self, deadline: float, cap_mb: float, pid: int) -> str | None:
+        """The next line from the worker, watching its footprint every ``watch_interval_s`` while waiting."""
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._kill()
+                raise MediaWorkerError("The image model took too long and was stopped (timed out).")
+            try:
+                return self._replies.get(timeout=min(self.watch_interval_s, remaining) if cap_mb > 0 else remaining)
+            except queue.Empty:
+                pass
+            if self._over_cap(pid, cap_mb):
+                logger.warning("image worker passed its memory limit (%d MB) during a request; stopping it",
+                               int(cap_mb))
+                self._kill()
+                raise _OverCap()
+
+    def _roundtrip(self, payload: dict, timeout_s: float, *, cap_mb: float | None = None) -> dict:
+        """One request and its reply. While waiting, a worker over ``cap_mb`` (default: its cap) is stopped."""
         proc = self._proc
         if proc is None or proc.poll() is not None:
             raise _Dead()
+        cap = float(self.rss_limit_mb if cap_mb is None else cap_mb)
         self._next_id += 1
         want = self._next_id
         try:
@@ -172,20 +209,26 @@ class MediaWorkerClient(MediaEmbedderPort):
             proc.stdin.flush()  # type: ignore[union-attr]
         except (OSError, ValueError):
             raise _Dead() from None
-        while True:
-            try:
-                line = self._replies.get(timeout=timeout_s)
-            except queue.Empty:
-                self._kill()
-                raise MediaWorkerError("The image model took too long and was stopped (timed out).") from None
-            if line is None:
-                raise _Dead()
-            try:
-                reply = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(reply, dict) and reply.get("id") == want:
-                return reply
+        deadline = time.monotonic() + timeout_s
+        try:
+            while True:
+                line = self._next_reply(deadline, cap, proc.pid)
+                if line is None:
+                    raise _Dead()
+                try:
+                    reply = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(reply, dict) and reply.get("id") == want:
+                    return reply
+        except _OverCap:
+            raise MediaWorkerError(MEMORY_STOP_MESSAGE) from None
+
+    def _load_cap_mb(self) -> float:
+        """The footprint at which a loading worker is stopped; 0 when this client has no cap."""
+        if self.rss_limit_mb <= 0:
+            return 0.0
+        return max(self.rss_limit_mb, media_models.load_mb_for(self.model_id)) * LOAD_CAP_FACTOR
 
     def _start_locked(self) -> None:
         """Spawn and load; the RAM reservation covers both so only one heavy start runs at a time."""
@@ -198,7 +241,7 @@ class MediaWorkerClient(MediaEmbedderPort):
                 self._spawn()
                 reply = self._roundtrip({"cmd": "load", "model": self._model_arg(), "revision": self.revision,
                                          "role": self.role, "max_pixels": self._max_pixels(), "hf_home": str(self._env.weights_dir()), "device": "auto"},
-                                        self.load_timeout_s)
+                                        self.load_timeout_s, cap_mb=self._load_cap_mb())
         except RuntimeError as exc:
             if isinstance(exc, MediaWorkerError):
                 raise
@@ -307,13 +350,24 @@ class MediaWorkerClient(MediaEmbedderPort):
 
         threading.Thread(target=run, daemon=True, name="media-worker-warmup").start()
 
+    @staticmethod
+    def _checked(check, *args: Any) -> None:
+        """Run an input check from ``worker_limits``; a refusal becomes the client's own error."""
+        try:
+            check(*args)
+        except worker_limits.InputTooLarge as exc:
+            raise MediaWorkerError(str(exc)) from None
+
     def embed_texts(self, texts: list[str], *, prompt: Literal["SearchQuery", "Document"]) -> list[list[float]]:
+        self._checked(worker_limits.check_texts, texts)
         out: list[list[float]] = []
         for i in range(0, len(texts), MAX_TEXTS):
             out += self._request("embed_text", texts=texts[i:i + MAX_TEXTS], prompt=prompt)["vectors"]
         return out
 
     def embed_images(self, paths: list[Path], *, wait_cold: bool = True) -> list[list[float]]:
+        for path in paths:
+            self._checked(worker_limits.check_image_file, path)
         if not wait_cold and not self.is_warm():
             self.warm_up()
             raise MediaWorkerWarming("The image model is starting. Try again in a moment.")
@@ -323,6 +377,7 @@ class MediaWorkerClient(MediaEmbedderPort):
         return out
 
     def _image_request(self, cmd: str, wait_cold: bool, **fields: Any) -> dict:
+        self._checked(worker_limits.check_image_file, fields["path"])
         if not wait_cold and not self.is_warm():
             self.warm_up()
             raise MediaWorkerWarming("The image model is starting. Try again in a moment.")
@@ -339,6 +394,8 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     def embed_query(self, text: str, *, wait_s: float = 0.3) -> list[float] | None:
         """For recall: a vector only if the worker is already warm and free; otherwise None."""
+        if len(text) > worker_limits.MAX_TEXT_CHARS:
+            return None
         if not self.is_warm():
             self.warm_up()
             return None

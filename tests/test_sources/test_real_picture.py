@@ -9,6 +9,7 @@ import sqlite3
 import pytest
 
 from tests.test_media.test_ingest import FakeClient, png
+from tests.test_sources.conftest import ListDb
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def pics(env, monkeypatch):
     db = sqlite3.connect(":memory:", check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE atomic_facts(fact_id, memory_id, lifecycle DEFAULT 'active', profile_id DEFAULT 'default')")
-    env.runtime._db = db
+    env.runtime._db = ListDb(db)
     remember, archive = env.runtime.remember, env.runtime.archive_fact
 
     def recording(admission, actor, deadline_ms=0, accept_after_ms=0):

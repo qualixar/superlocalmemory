@@ -351,3 +351,28 @@ def test_media_env_is_shared_per_root(tmp_path):
 
     assert media_env(tmp_path / "a") is media_env(tmp_path / "a")
     assert media_env(tmp_path / "a") is not media_env(tmp_path / "b")
+
+
+@pytest.mark.parametrize("system,machine,tag", [
+    ("linux", "aarch64", "linux-aarch64"),
+    ("linux", "arm64", "linux-aarch64"),
+    ("linux", "x86_64", "linux-x86_64"),
+    ("darwin", "arm64", "darwin-arm64"),
+    ("win32", "AMD64", "windows-amd64"),
+])
+def test_platform_tag_names_linux_arm64_as_aarch64(monkeypatch, system, machine, tag):
+    monkeypatch.setattr(me.sys, "platform", system)
+    monkeypatch.setattr(me.platform, "machine", lambda: machine)
+    assert me._platform_tag() == tag
+
+
+def test_linux_arm64_is_supported_with_a_committed_lock(tmp_path, src, monkeypatch):
+    monkeypatch.setattr(me, "_platform_tag", lambda: "linux-aarch64")
+    monkeypatch.setattr(me, "_python_supported", lambda: True)
+    monkeypatch.setattr(me, "_sqlite_vec_ok", lambda: True)
+    env = make(tmp_path, src)
+    py = f"py{sys.version_info[0]}{sys.version_info[1]}"
+    assert env._lock_path().name == f"media-linux-aarch64-{py}.txt"
+    assert env._lock_path().is_file()
+    assert env._unsupported_reason() == ""
+    assert env.status().state == "not_installed"

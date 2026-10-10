@@ -81,6 +81,31 @@ page load. There are no further arguments.
 
 ---
 
+## Strict mode and the dashboard
+
+By default the dashboard asks the daemon for the install token (`GET
+/internal/token`) and the daemon hands it to any program on this computer,
+because any such program could already read the token file.
+
+With `SLM_REQUIRE_CREDENTIALS=1` you have said that even a local program must
+hold a key. Handing the key to whoever asks would defeat that, so in this mode
+`/internal/token` answers 403 with the reason "This computer requires the
+SuperLocalMemory key". The dashboard then shows a one-time box asking you to
+paste the key. Print it in a terminal with:
+
+```bash
+slm token show
+```
+
+The key is the install token. `slm token show` tightens the token file to
+owner-only before printing, and refuses to print a key owned by another
+account. The dashboard keeps the pasted key in memory for that browser tab only;
+it is never written to browser storage, so reloading the page asks again. If you
+choose "Not now", writes from the dashboard stay blocked and the box does not
+reappear for 30 seconds.
+
+---
+
 ## One gate for every write
 
 The mutation-actor gate is the single authoritative write boundary. It accepts
@@ -142,7 +167,8 @@ machine:
 - The install token is still accepted **only** from loopback addresses.
   `::ffff:192.168.1.1` (IPv4-mapped LAN IP) is not loopback and is rejected.
 - `SLM_REQUIRE_CREDENTIALS=1` still forces credentials on all callers,
-  including loopback.
+  including loopback, and stops the dashboard from being handed the token (see
+  "Strict mode and the dashboard").
 - Non-loopback callers must use `X-SLM-API-Key` (the API key is the designed
   credential for container/remote access).
 

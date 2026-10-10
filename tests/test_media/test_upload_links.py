@@ -342,3 +342,267 @@ def test_failing_every_open_link_of_a_connection_leaves_other_connections_alone(
     assert not links.temp_path(links.find(b.token, CONN).upload_id).exists()
     assert links.accept_chunk(c.token, OTHER, 0, len(PNG), PNG, NONCE) == len(PNG)
     assert links.fail_open_links(CONN) == 0
+
+
+# -- a link belongs to the app that asked for it (audit F6) -------------------------
+
+def test_a_link_remembers_the_authorization_that_issued_it(links):
+    minted = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    assert links.find(minted.token, CONN).authorization_id == "app-a"
+    assert mint(links).token and links.find(mint(links).token, CONN).authorization_id == ""
+
+
+def test_failing_one_apps_links_leaves_the_other_apps_links_open(links):
+    a = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    a2 = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    b = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-b")
+    links.accept_chunk(a2.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert links.fail_open_links(CONN, authorization_id="app-a") == 2
+    for gone in (a, a2):
+        refused("used", links.accept_chunk, gone.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert not links.temp_path(links.find(a2.token, CONN).upload_id).exists()
+    assert links.accept_chunk(b.token, CONN, 0, len(PNG), PNG, NONCE) == len(PNG)
+
+
+def test_failing_one_apps_links_also_ends_links_made_before_apps_were_recorded(links):
+    legacy = mint(links)
+    assert links.fail_open_links(CONN, authorization_id="app-a") == 1
+    refused("used", links.accept_chunk, legacy.token, CONN, 0, len(PNG), PNG, NONCE)
+
+
+def test_links_of_apps_that_are_no_longer_listed_are_failed(links):
+    a = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    b = links.mint(CONN, "key1", "personal", "image", "", authorization_id="app-b")
+    other = links.mint(OTHER, "key1", "personal", "image", "", authorization_id="app-c")
+    assert links.fail_unlisted_authorizations(CONN, {"app-b"}) == 1
+    refused("used", links.accept_chunk, a.token, CONN, 0, len(PNG), PNG, NONCE)
+    assert links.accept_chunk(b.token, CONN, 0, len(PNG), PNG, NONCE) == len(PNG)
+    assert links.info(other.token, OTHER).kind == "image"
+
+
+def test_an_uploads_database_from_before_this_column_is_upgraded(tmp_path, clock):
+    path = tmp_path / "media"
+    path.mkdir()
+    old = sqlite3.connect(path / "uploads.db")
+    old.execute(OLD_DDL)
+    old.commit()
+    old.close()
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    minted = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+    assert store.find(minted.token, CONN).authorization_id == "app-a"
+
+
+OLD_DDL = """CREATE TABLE upload_links (
+  upload_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
+  connection_id TEXT NOT NULL, key_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','document')), note TEXT NOT NULL,
+  max_bytes INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('open','receiving','finishing','done','failed')),
+  total INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0,
+  next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
+  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""
+
+
+# -- a warming save answers honestly instead of "another upload is using this link" -
+
+WARMING = {"ok": False, "code": "warming", "message": "The picture tools are starting."}
+
+
+def test_finish_after_a_warming_save_returns_the_warming_result_not_in_progress(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    assert plan.action == "run"
+    links.finish_retry(plan.row.upload_id, WARMING)
+    again = links.begin_finish(link.token, CONN, NONCE)  # the gateway asks again with the same nonce
+    assert again.action == "result" and again.result["code"] == "warming"
+    assert again.result["message"] == WARMING["message"]
+    assert links.temp_path(plan.row.upload_id).exists()
+
+
+def test_a_default_warming_message_is_plain_when_none_is_given(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id)
+    result = links.begin_finish(link.token, CONN, NONCE).result
+    assert result["code"] == "warming" and "again in a minute" in result["message"]
+
+
+def test_a_new_upload_after_a_warming_save_restarts_and_finishes(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id, WARMING)
+    assert links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, OTHER_NONCE) == len(PNG)
+    assert links.get(plan.row.upload_id).result_json == ""
+    assert links.begin_finish(link.token, CONN, OTHER_NONCE).action == "run"
+    links.finish_done(plan.row.upload_id, {"ok": True, "done": True, "message": "Saved to your memory."})
+    assert links.begin_finish(link.token, CONN, OTHER_NONCE).result["done"] is True
+
+
+def test_an_expired_link_still_expires_after_a_warming_save(links, clock):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id, WARMING)
+    clock.now += ul.STARTED_TTL_S + 5
+    refused("expired", links.begin_finish, link.token, CONN, NONCE)
+
+
+# -- the same pictures the saver takes (audit: GIF) -------------------------------
+
+@pytest.mark.parametrize("head", [b"GIF87a" + b"0" * 10, b"GIF89a" + b"0" * 10])
+def test_gif_is_a_picture_the_link_accepts(links, head):
+    assert ul.looks_like("image", head)
+    assert not ul.looks_like("document", head)
+    link = mint(links)
+    gif = head + b"0" * 50
+    assert links.accept_chunk(link.token, CONN, 0, len(gif), gif, NONCE) == len(gif)
+
+
+def test_a_gif_header_that_is_not_one_is_still_refused():
+    assert not ul.looks_like("image", b"GIF99a" + b"0" * 10)
+    assert not ul.looks_like("image", b"GIF")
+
+
+# -- a full disk is said plainly (audit MU-M2) ---------------------------------
+
+def _disk_full(monkeypatch, *, after=0):
+    import errno
+
+    real = ul.UploadLinks._write
+    calls = {"n": 0}
+
+    def write(path, data, flags):
+        calls["n"] += 1
+        if calls["n"] > after:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        real(path, data, flags)
+
+    monkeypatch.setattr(ul.UploadLinks, "_write", staticmethod(write))
+
+
+def test_a_full_disk_on_the_first_chunk_is_a_plain_refusal_and_costs_no_attempt(links, monkeypatch):
+    from superlocalmemory.media import files
+
+    link = mint(links)
+    _disk_full(monkeypatch)
+
+    err = refused("disk_full", links.accept_chunk, link.token, CONN, 0, len(PNG), PNG, NONCE)
+
+    assert err.message == files.DISK_FULL
+    row = links.find(link.token, CONN)
+    assert row.state == "open" and row.attempts == 0
+
+
+def test_a_full_disk_on_a_later_chunk_is_a_plain_refusal_and_keeps_what_arrived(links, monkeypatch):
+    body = PNG + b"x" * 50
+    link = mint(links)
+    _disk_full(monkeypatch, after=1)
+    assert links.accept_chunk(link.token, CONN, 0, len(body), body[:60], NONCE) == 60
+
+    refused("disk_full", links.accept_chunk, link.token, CONN, 1, len(body), body[60:], NONCE)
+
+    row = links.find(link.token, CONN)
+    assert row.received == 60
+    assert links.temp_path(row.upload_id).stat().st_size == 60   # no half chunk left behind
+
+
+def test_other_write_errors_are_not_called_disk_full(links, monkeypatch):
+    import errno
+
+    def write(path, data, flags):
+        raise OSError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(ul.UploadLinks, "_write", staticmethod(write))
+    link = mint(links)
+
+    with pytest.raises(OSError):
+        links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+
+
+# -- links made before apps were recorded end once, on upgrade ------------------------------
+
+OLD_ROWS = [
+    ("up-open", "open"), ("up-recv", "receiving"), ("up-fin", "finishing"),
+    ("up-done", "done"), ("up-failed", "failed"),
+]
+
+
+def _old_database(tmp_path, with_column=False):
+    path = tmp_path / "media"
+    path.mkdir()
+    db = sqlite3.connect(path / "uploads.db")
+    db.execute(OLD_DDL if not with_column else OLD_DDL[:-1] + ", authorization_id TEXT NOT NULL DEFAULT '')")
+    for i, (name, state) in enumerate(OLD_ROWS):
+        upload_id = f"{i:032x}"
+        db.execute(
+            "INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note,"
+            " max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,'image','',100,?,1000000,1000600)",
+            (upload_id, f"hash-{name}", CONN, "key1", "personal", state))
+    db.commit()
+    db.close()
+    return path / "uploads.db"
+
+
+def _states(db_path):
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    try:
+        return {r["token_hash"]: dict(r) for r in db.execute("SELECT * FROM upload_links")}
+    finally:
+        db.close()
+
+
+def test_unfinished_links_without_an_app_are_ended_on_upgrade_with_a_plain_message(tmp_path, clock):
+    db_path = _old_database(tmp_path)
+    scratch = tmp_path / "media" / "tmp"
+    scratch.mkdir()
+    part = scratch / f"upload-{1:032x}.part"
+    part.write_bytes(b"half a file")
+
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    fresh = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+
+    rows = _states(db_path)
+    for name in ("up-open", "up-recv", "up-fin"):
+        assert rows[f"hash-{name}"]["state"] == "failed", name
+        assert "expired with the update" in rows[f"hash-{name}"]["result_json"]
+        assert "Ask the app for a new one" in rows[f"hash-{name}"]["result_json"]
+    assert rows["hash-up-done"]["state"] == "done"
+    assert rows["hash-up-failed"]["state"] == "failed"
+    assert "expired with the update" not in rows["hash-up-failed"]["result_json"]
+    assert not part.exists(), "the half-sent file of an ended link is removed"
+    assert store.find(fresh.token, CONN).state == "open", "a link made after the upgrade is untouched"
+
+
+def test_the_upgrade_step_runs_once_per_database(tmp_path, clock):
+    db_path = _old_database(tmp_path)
+    ul.UploadLinks(tmp_path, clock=clock).mint(CONN, "key1", "personal", "image", "", authorization_id="a")
+    db = sqlite3.connect(db_path)
+    db.execute("INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note,"
+               " max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,'image','',100,'open',1,2)",
+               ("e" * 32, "hash-later", CONN, "key1", "personal"))
+    db.commit()
+    db.close()
+
+    ul.UploadLinks(tmp_path, clock=clock).get("f" * 32)  # a new process opens the same database
+
+    assert _states(db_path)["hash-later"]["state"] == "open"
+
+
+def test_a_database_that_already_has_the_column_is_cleaned_too(tmp_path, clock):
+    db_path = _old_database(tmp_path, with_column=True)
+
+    ul.UploadLinks(tmp_path, clock=clock).get("f" * 32)
+
+    assert _states(db_path)["hash-up-open"]["state"] == "failed"
+
+
+def test_a_fresh_install_has_nothing_to_end(tmp_path, clock):
+    store = ul.UploadLinks(tmp_path, clock=clock)
+    minted = store.mint(CONN, "key1", "personal", "image", "", authorization_id="app-a")
+
+    assert store.find(minted.token, CONN).state == "open"

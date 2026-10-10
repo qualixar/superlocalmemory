@@ -34,6 +34,18 @@ _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS = 10
 _NEVER_RETRY_AT = 9_999_999_999.0
 
 
+def is_terminal_failure(state: str, attempt_count: int, next_retry_at: float) -> bool:
+    """True for an operation that failed and will never be tried again (so it will never gain facts).
+
+    Either the reaper gave up on it (``next_retry_at`` is the never-retry stamp) or the automatic
+    attempts are used up, which also takes it out of ``list_materializable``.
+    """
+    return state == IngestionState.FAILED.value and (
+        float(next_retry_at) >= _NEVER_RETRY_AT
+        or int(attempt_count) >= _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS
+    )
+
+
 def _materialization_lock(operation_id: str) -> threading.RLock:
     bucket = int(hashlib.sha256(operation_id.encode("utf-8")).hexdigest()[:8], 16)
     return _MATERIALIZATION_LOCKS[bucket % len(_MATERIALIZATION_LOCKS)]

@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -137,11 +138,31 @@ def _stage_path(inp: MediaInput, out: Any) -> tuple[str, int]:
                     raise _refuse("That document is too large.")
                 digest.update(chunk)
                 out.write(chunk)
-    except OSError:
-        raise _refuse("That document could not be read.") from None
+    except OSError as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "That document could not be read.") from None
     if size == 0:
         raise _refuse("That document is empty.")
     return digest.hexdigest(), size
+
+
+def _copy_checked(source: Any, out: Any) -> tuple[str, int]:
+    """Copy a binary source into ``out`` in 1 MB chunks: PDF header, size limit and hash on the way."""
+    limit, digest, size = _max_bytes(), hashlib.sha256(), 0
+    for chunk in iter(lambda: source.read(1 << 20), b""):
+        if size == 0:
+            _check_head(chunk[:8])
+        size += len(chunk)
+        if size > limit:
+            raise _refuse("That document is too large.")
+        digest.update(chunk)
+        out.write(chunk)
+    if size == 0:
+        raise _refuse("That document is empty.")
+    return digest.hexdigest(), size
+
+
+def _stage_stream(inp: MediaInput, out: Any) -> tuple[str, int]:
+    return _copy_checked(inp.stream, out)
 
 
 def _stage_data(inp: MediaInput, out: Any) -> tuple[str, int]:
@@ -182,18 +203,28 @@ def _stage_link(inp: MediaInput, out: Any) -> tuple[str, int]:
 
 def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
     given = sum(x is not None for x in (inp.base64, inp.path, inp.download_url or None))
-    if inp.data is None and given != 1:
+    if inp.data is None and inp.stream is None and given != 1:
         raise _refuse("Give a document file or document data.")
-    tmp, out = _new_tmp(files.tmp_dir(root))
+    try:
+        tmp, out = _new_tmp(files.tmp_dir(root))
+    except OSError as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The document could not be saved.") from None
     try:
         with out:
             if inp.data is not None:
                 sha, size = _stage_data(inp, out)
+            elif inp.stream is not None:
+                sha, size = _stage_stream(inp, out)
             elif inp.download_url:
                 sha, size = _stage_link(inp, out)
             else:
                 sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
         return tmp, sha, size
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        if files.is_disk_full(exc):
+            raise _refuse(files.DISK_FULL) from None
+        raise
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -224,12 +255,25 @@ def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool,
     return store.find_document_by_sha(profile_id, sha, exclude_origin=None if folder else "folder")
 
 
-def _repeat(store: Any, row: dict) -> DocumentReceipt | None:
-    """A receipt when the repeat needs no new work (still running or done)."""
+_LIVE_JOB_STATES = ("queued", "running")
+
+
+def _repeat(store: Any, row: dict, *, from_folder: bool = False) -> DocumentReceipt | None:
+    """A receipt when the repeat needs no new work.
+
+    A document still being read answers ``processing`` with its job, so a person who drops it
+    again follows the job it already has; only a finished one is a ``duplicate``. A folder source
+    always gets ``duplicate``: that answer means "someone else's document, borrowed, never owned".
+    A ``processing`` document with no queued or running job is stuck (an older release could
+    leave one behind); it needs work, so None tells the caller to re-queue it.
+    """
     if row["state"] not in _HOLD_STATES:
         return None
     job = store.job_for_document(row["document_id"])
-    return DocumentReceipt("duplicate", document_id=row["document_id"], job_id=job["job_id"] if job else None)
+    if row["state"] == "processing" and (not job or job["state"] not in _LIVE_JOB_STATES):
+        return None
+    status = "processing" if row["state"] == "processing" and not from_folder else "duplicate"
+    return DocumentReceipt(status, document_id=row["document_id"], job_id=job["job_id"] if job else None)
 
 
 def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) -> str:
@@ -239,18 +283,18 @@ def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) ->
 def _place(root: Path, tmp: Path, profile_id: str) -> tuple[str, bool]:
     try:
         return files.place_original_noting_new(root, tmp, profile_id, "pdf")
-    except (OSError, ValueError):
-        raise _refuse("The document could not be saved.") from None
+    except (OSError, ValueError) as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The document could not be saved.") from None
 
 
 def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str, profile_id: str,
             title: str, payload: dict[str, Any]) -> DocumentReceipt:
     relpath, placed_new = _place(root, tmp, profile_id)
     try:
-        store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
-                              mime="application/pdf", bytes=size, source_relpath=relpath,
-                              origin="folder" if "folder" in payload else "user")
-        job_id = _queue(store, doc_id, profile_id, payload)
+        job_id = store.insert_document_with_job(
+            payload, document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
+            mime="application/pdf", bytes=size, source_relpath=relpath,
+            origin="folder" if "folder" in payload else "user")
     except Exception as exc:  # noqa: BLE001 - nothing usable was stored; undo the file
         logger.warning("document was not queued (%s)", type(exc).__name__)
         if placed_new:
@@ -259,10 +303,83 @@ def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str,
     return DocumentReceipt("processing", document_id=doc_id, job_id=job_id)
 
 
+def _restore_original(root: Path, tmp: Path, row: dict) -> None:
+    """Put the PDF back at its address if it went missing (same bytes, same address)."""
+    if not (files.media_root(root) / str(row["source_relpath"])).is_file():
+        _place(root, tmp, row["profile_id"])
+
+
 def _retry(store: Any, row: dict, payload: dict[str, Any]) -> DocumentReceipt:
     store.update_document(row["document_id"], state="processing")
     return DocumentReceipt("processing", document_id=row["document_id"],
                            job_id=_queue(store, row["document_id"], row["profile_id"], payload))
+
+
+_GONE = "The saved copy of this document is missing. Add the document again."
+_RETRY_UNSAVED = "The document could not be queued again right now. Try again."
+
+
+def _job_payload(job: dict | None, document_id: str, actor_id: str) -> dict[str, Any]:
+    """The words, tags and date the document was first saved with (the job's own input)."""
+    try:
+        saved = json.loads((job or {}).get("payload_json") or "{}")
+    except ValueError:
+        saved = {}
+    payload = {k: v for k, v in saved.items() if k != "document_id"} if isinstance(saved, dict) else {}
+    payload.setdefault("user_words", "")
+    payload.setdefault("tags", "")
+    payload.setdefault("session_date", "")
+    payload.setdefault("actor_id", actor_id)
+    return payload
+
+
+def _retry_receipt(store: Any, row: dict, actor_id: str) -> DocumentReceipt:
+    """Re-queue one failed (or stuck) document from its stored original, with its first payload."""
+    doc_id = row["document_id"]
+    job = store.job_for_document(doc_id)
+    if not (files.media_root(Path(store.path).parent) / str(row["source_relpath"])).is_file():
+        return DocumentReceipt("refused", document_id=doc_id, reason=_GONE)
+    if row["state"] == "failed" and not store.claim_failed_document(doc_id):
+        # Another try got there first: follow the job it queued.
+        job = store.job_for_document(doc_id)
+        return DocumentReceipt("processing", document_id=doc_id, job_id=job["job_id"] if job else None)
+    payload = _job_payload(job, doc_id, actor_id)
+    try:
+        return _retry(store, row, payload)
+    except Exception as exc:  # noqa: BLE001 - nothing was queued; the document stays failed so the person can try again
+        logger.warning("document was not queued again (%s)", type(exc).__name__)
+        try:
+            store.update_document(doc_id, state="failed")
+        except Exception as inner:  # noqa: BLE001
+            logger.warning("document state was not restored (%s)", type(inner).__name__)
+        return DocumentReceipt("refused", document_id=doc_id, reason=_RETRY_UNSAVED)
+
+
+def retry_document(document_id: str, *, profile_id: str, actor_id: str, store: Any = None) -> DocumentReceipt | None:
+    """Try a failed document again from the original already stored; the file is never sent twice.
+
+    None when the document is unknown, belongs to another profile or was removed. A document that
+    is still being read answers ``processing`` with its job; a finished one answers ``duplicate``.
+    """
+    opened, store_ref = False, store
+    try:
+        store_ref, opened = _resolve(store)
+        row = store_ref.get_document(document_id)
+        if not row or row["profile_id"] != profile_id or row["state"] == "tombstoned":
+            return None
+        receipt = _repeat(store_ref, row) if row["state"] in _HOLD_STATES else None
+        if receipt is None:
+            receipt = _retry_receipt(store_ref, row, actor_id)
+    except _Stop as stop:
+        return stop.receipt
+    finally:
+        if opened and store_ref is not None:
+            store_ref.close()
+    if receipt.status == "processing":
+        from superlocalmemory.documents.runner import wake_active
+
+        wake_active()
+    return receipt
 
 
 def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: dict, key: str) -> DocumentReceipt:
@@ -271,8 +388,11 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
         doc_id = _document_id(profile_id, key)
         row = _existing(store, profile_id, doc_id, sha, bool(key), "folder" in payload)
         if row:
+            receipt = _repeat(store, row, from_folder="folder" in payload)
+            if receipt is None:
+                _restore_original(root, tmp, row)
             tmp.unlink(missing_ok=True)
-            return _repeat(store, row) or _retry(store, row, payload)
+            return receipt or _retry(store, row, payload)
         _, used = store.count_and_bytes(profile_id)
         if used + store.document_bytes(profile_id) + size > QUOTA_BYTES:
             raise _refuse("The library is full (2 GB limit). Remove some items first.")

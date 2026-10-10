@@ -10,7 +10,8 @@ and, in fake mode, needs only the standard library.
 
 Every request may carry an ``"id"``; the reply echoes it.
 
-  {"cmd": "ping"}   -> {"ok": true, "loaded": bool, "model": "...", "device": "cpu|mps"}
+  {"cmd": "ping"}   -> {"ok": true, "loaded": bool, "model": "...", "device": "cpu|mps",
+                        "data_limit_mb": int}   (0 = no hard memory limit set)
   {"cmd": "load", "model": "<repo | folder | fake:768>", "revision": "...",
    "hf_home": "...", "device": "auto|cpu", "role": "|image|text", "max_pixels": 0}
                     -> {"ok": true, "dim": 768} | {"ok": false, "error": "..."}
@@ -67,7 +68,41 @@ PROMPTS = ("SearchQuery", "Document")
 FAKE_DIM = 768
 _WATCHDOG_S = 2.0
 
-_STATE: dict = {"model": None, "name": "", "device": "cpu", "fake": False, "dim": 0}
+_STATE: dict = {"model": None, "name": "", "device": "cpu", "fake": False, "dim": 0, "data_limit_mb": 0}
+
+#: The daemon names a hard memory limit here (Linux only); same name as runtimes/worker_limits.py.
+DATA_LIMIT_ENV = "SLM_MEDIA_WORKER_DATA_LIMIT_MB"
+_MIB = 1024 * 1024
+
+
+def _apply_memory_limit(env, *, platform: str | None = None, resource_module=None) -> int:
+    """Cap this process's private writable memory (RLIMIT_DATA) at the size the daemon named.
+
+    Done first thing, before any library is imported, so a request that asks for far more than
+    the model needs fails here with a MemoryError instead of taking the machine's memory.
+    Linux only (macOS does not enforce it; there the daemon watches the footprint). A limit
+    already lower than the one asked for is kept. Returns the limit in MB, or 0 when none was set.
+    """
+    if not (sys.platform if platform is None else platform).startswith("linux"):
+        return 0
+    try:
+        wanted = int(str(env.get(DATA_LIMIT_ENV, "")).strip())
+    except ValueError:
+        return 0
+    if wanted <= 0:
+        return 0
+    try:
+        res = resource_module
+        if res is None:
+            import resource as res
+        limit = wanted * _MIB
+        for current in res.getrlimit(res.RLIMIT_DATA):
+            if current != res.RLIM_INFINITY:
+                limit = min(limit, current)
+        res.setrlimit(res.RLIMIT_DATA, (limit, limit))
+    except (ImportError, ValueError, OSError):
+        return 0
+    return limit // _MIB
 
 
 class _Invalid(Exception):
@@ -241,7 +276,8 @@ def _need_loaded() -> None:
 
 
 def _cmd_ping(_: dict) -> dict:
-    return {"loaded": bool(_STATE["name"]), "model": _STATE["name"], "device": _STATE["device"]}
+    return {"loaded": bool(_STATE["name"]), "model": _STATE["name"], "device": _STATE["device"],
+            "data_limit_mb": _STATE["data_limit_mb"]}
 
 
 def _pixel_cap(req: dict) -> int:
@@ -415,6 +451,7 @@ def main() -> int:
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         threading.Thread(target=_watch_parent, daemon=True, name="parent-watchdog").start()
+    _STATE["data_limit_mb"] = _apply_memory_limit(os.environ)
     out = sys.stdout
     sys.stdout = sys.stderr  # stray library prints must not corrupt the protocol
     for line in sys.stdin:

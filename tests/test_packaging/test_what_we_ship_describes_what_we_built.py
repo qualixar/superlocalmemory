@@ -65,7 +65,12 @@ def _real_tool_names() -> set[str]:
                 match = re.match(r"(?:async )?def (\w+)\(", stripped)
                 if match:
                     names.add(match.group(1))
-                pending = False
+                    pending = False
+                elif stripped.startswith(("def ", "async def ", "class ")):
+                    pending = False
+                # Anything else is the second line of a decorator that spans
+                # lines, e.g. `meta=FILE_PARAMS_META)` after
+                # `@server.tool(annotations=...,` in tools_media.py.
     return names
 
 

@@ -404,3 +404,20 @@ async def test_ending_links_never_fails_the_revocation(tmp_path, monkeypatch):
     monkeypatch.setattr(upload_links, "default_links", broken)
     runtime, row, _ = completed_runtime(tmp_path, FakeProvider())
     assert await runtime.rotate_grant_key("owner", "profile", row.connection_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_revoking_one_app_leaves_the_other_apps_links_open(tmp_path, links):
+    provider = FakeProvider()
+
+    async def revoke_app(latest, authorization_id, expected_version):
+        return {"revoked": True, "version": expected_version + 1}
+
+    provider.revoke_app = revoke_app
+    runtime, row, _ = completed_runtime(tmp_path, provider)
+    cid = row.connection_id
+    a = links.mint(cid, "key1", "personal", "image", "", authorization_id="app-1")
+    b = links.mint(cid, "key1", "personal", "image", "", authorization_id="app-2")
+    await runtime.revoke_app("owner", "profile", cid, "app-1", 1)
+    assert links.find(a.token, cid).state == "failed"
+    assert links.find(b.token, cid).state == "open"

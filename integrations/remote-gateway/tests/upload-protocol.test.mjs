@@ -101,3 +101,10 @@ test('a body longer than it said is cut off before the extra byte is passed on',
   await assert.rejects(async()=>{for await(const piece of api.chunksOf(stream,60,150))got.push(piece.length);},{code:'size_mismatch'});
   assert.ok(got.reduce((a,b)=>a+b,0)<=150);
 });
+
+test('cleanReply keeps a well-formed authorization id and drops anything else',()=>{
+  assert.ok(api);
+  assert.equal(api.cleanReply({ok:true,kind:'image',max_bytes:5,authorization_id:'app-a_1.x:y'}).authorizationId,'app-a_1.x:y');
+  for(const bad of ['','a b','<x>','x'.repeat(257),5,null,{}])assert.equal(api.cleanReply({ok:true,authorization_id:bad}).authorizationId,undefined,String(bad));
+  assert.equal('authorizationId' in api.cleanReply({ok:true,kind:'image'}),false);
+});

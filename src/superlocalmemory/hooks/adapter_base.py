@@ -39,8 +39,9 @@ HARD_BYTES_CAP = 4096
 # Soft budget for the managed instruction block. Raised 2048 -> 2560 -> 2816 as
 # the block grew to carry the memory, token-optimization, and (compact)
 # bounded-loop protocols; the 4 KB hard cap still bounds total size (recall
-# content is truncated to stay under it).
-COPILOT_SOFT_BYTES = 2816
+# content is truncated to stay under it). Raised again to 3584 (4.1.25) for the
+# compact pictures, documents and bot-message block.
+COPILOT_SOFT_BYTES = 3584
 TRUNCATION_MARKER = b"\n<!-- truncated -->"
 
 

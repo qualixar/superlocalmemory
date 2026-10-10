@@ -8,6 +8,7 @@ import sqlite3
 from types import SimpleNamespace
 
 from superlocalmemory.sources.store import SourceStore
+from tests.test_sources.conftest import ListDb
 
 PDF = b"%PDF-1.4\n" + b"0" * 100
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
@@ -24,7 +25,7 @@ def user_memory(env):
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE atomic_facts(fact_id, memory_id, lifecycle DEFAULT 'active')")
     db.execute("INSERT INTO atomic_facts(fact_id, memory_id) VALUES ('user-fact', 'user-mem')")
-    env.runtime._db = db
+    env.runtime._db = ListDb(db)
     plain = env.runtime.archive_fact
 
     def archive(profile_id, fact_id, *, idempotency_key=None):

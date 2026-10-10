@@ -209,3 +209,56 @@ def test_a_one_word_title_still_saves_its_document_memory(store, tmp_path):
     from superlocalmemory.retrieval.media_rerank import strip_labels
 
     assert DOCUMENT in anchors[0].content and strip_labels(anchors[0].content) == "report"
+
+
+# -- remote vetting: "not scanned" is never "clean" (audit F2) ----------------------
+
+def _page_remote_ok(store, receipt) -> int:
+    page = store.get_pages(receipt.document_id)[0]
+    return store.get_item(page["media_id"])["remote_ok"]
+
+
+def test_email_on_a_page_blocks_remote_even_with_redaction_off(store, tmp_path):
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, runtime = run(store, tmp_path, ["write to amy@example.org please now"])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 0
+    assert any("amy@example.org" in r.content for r in runtime.requests)   # stored text untouched
+
+
+def test_credential_past_the_page_text_cut_blocks_remote(store, tmp_path, monkeypatch):
+    from superlocalmemory.documents import pipeline
+
+    monkeypatch.setattr(pipeline, "MAX_PAGE_TEXT", 100)
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, runtime = run(store, tmp_path, ["menu item " * 30 + f"key {KEY}"])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 0
+    assert all(KEY not in r.content for r in runtime.requests)
+
+
+def test_a_page_scan_that_cannot_run_is_not_clean(store, tmp_path, monkeypatch):
+    from superlocalmemory.documents import pipeline
+
+    def boom(_text):
+        raise RuntimeError("scanner down")
+
+    monkeypatch.setattr(pipeline, "scan_sensitive", boom)
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, _ = run(store, tmp_path, ["a perfectly clean page of text"])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 0
+
+
+def test_a_clean_page_is_still_remote_ok(store, tmp_path):
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, _ = run(store, tmp_path, ["a perfectly clean page of text"])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 1
+
+
+def test_a_page_longer_than_the_scan_cap_is_not_shareable(store, tmp_path):
+    receipt = submit(store, pdf_input(("x",)))
+    service, _, _ = run(store, tmp_path, ["menu item " * 110_000])
+    service.process_next()
+    assert _page_remote_ok(store, receipt) == 0

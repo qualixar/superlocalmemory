@@ -371,7 +371,7 @@ view removes the saved query only.
 
 What is on and what you can turn on: images and documents, folder sources and bot messages.
 
-### `slm media enable|disable|status|gc`
+### `slm media enable|disable|status|gc|repair`
 
 ```bash
 slm media enable              # shows the download size (about 1.5 GB) and a disk check, then asks; --yes skips the question
@@ -379,9 +379,13 @@ slm media status              # what is on and how set-up is going
 slm media disable             # off again; memories are kept (--remove-files also deletes the downloaded models)
 slm media gc                  # report picture records without a memory and files without a record; removes nothing
 slm media gc --apply          # remove them (owner or admin)
+slm media repair              # give pictures that can't be found by what they show a place in the picture index (owner or admin)
+slm media repair --dry-run    # only count them
 ```
 
 Images and documents need a computer with at least 16 GB of memory. On a smaller computer `enable` refuses with a plain reason and exits with code 4; your text memories keep working. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
+
+`slm media repair` re-reads each kept picture and stores its vector in the current picture index. Use it when a save told you the picture "can't be found by what it shows yet", or after the picture model or mode changed (saving then says the index was built with a different model). It rebuilds the index for the current model first, only once the first picture has embedded, so a failed run never leaves you without an index. One run works for up to four minutes; if it says pictures are left, run it again. Pictures whose file is no longer kept are counted and skipped.
 
 ### `slm sources ...`
 
@@ -508,6 +512,27 @@ sessions.
 ### `slm rotate-token`
 
 Rotate the SLM install token. Run `slm restart` afterwards.
+
+### `slm token show`
+
+Prints the SuperLocalMemory key (the install token) that the dashboard asks for
+when `SLM_REQUIRE_CREDENTIALS=1`. It tightens the token file to owner-only first
+and refuses to print a key owned by another account. The key opens write access:
+do not paste it into chat or a log. See [Auth write gate](auth-write-gate.md).
+
+### `slm team status` and `slm team policy`
+
+Company-mode login policy, from the terminal of the computer that runs SLM.
+
+```bash
+slm team status                       # Require login: on|off. Users: N.
+slm team policy --require-login on    # every user signs in
+slm team policy --require-login off   # the machine owner is the user again
+```
+
+Both take `--json`. They use a private capability file only the user running SLM
+can read, so a workspace's owner can never be locked out. See
+[Company mode](company-mode.md).
 
 ### `slm disable [--reason "..."]` and `slm enable`
 
@@ -903,6 +928,9 @@ slm remote tls init --name my-laptop.local --ip 192.168.1.20
 slm remote enable --listen HOST:PORT
 slm remote keys add hermes-laptop --read-only --profile work
 slm remote keys list
+slm remote keys allow web-<connection id> mesh     # let a Web access connection use bot messages
+slm remote keys allow web-<connection id> media    # ...or pictures and documents
+slm remote keys disallow web-<connection id> mesh  # turn either off again
 slm remote keys revoke hermes-laptop
 slm remote check
 slm remote disable
@@ -967,7 +995,21 @@ slm embedder rollback
 
 `switch` also takes `--endpoint` (an OpenAI-compatible URL), `--no-wait`
 (return once queued) and `--json`. `--provider` is `sentence-transformers`,
-`ollama` or `openai`; the default is the current one.
+`ollama`, `openai` or `slm-media`; the default is the current one.
+
+### `slm embedder upgrade` (preview)
+
+```bash
+slm embedder upgrade           # shows the plan and asks; --yes skips the question, --no-wait returns once queued
+slm embedder status            # progress
+slm embedder rollback          # go back to the previous engine
+slm embedder forget-previous   # free the previous engine's vectors (ends rollback)
+```
+
+Moves existing memories onto the same on-device model that reads pictures, in the
+background, with recall working throughout and one-click rollback. It is opt-in
+and never starts on its own; the same action is the **Upgrade memory engine**
+card in Settings. If it cannot run, the command prints the reason.
 
 ### `slm db integrity [--pages] [--json]`
 

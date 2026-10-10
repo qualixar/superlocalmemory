@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 TARGETS = {
     "darwin-arm64": "aarch64-apple-darwin",
     "linux-x86_64": "x86_64-unknown-linux-gnu",
+    "linux-aarch64": "aarch64-unknown-linux-gnu",
     "windows-amd64": "x86_64-pc-windows-msvc",
 }
 PYTHONS = ("3.12", "3.13", "3.14")

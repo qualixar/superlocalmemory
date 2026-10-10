@@ -18,18 +18,35 @@ everything, including the connection your AI assistant uses.
 Roles are granted per workspace. A role in one workspace grants nothing in
 another — someone with a valid login and no role here has no access here.
 
-The machine operator keeps user administration in every mode. Otherwise enabling
-company mode with a mistake in it would lock everybody out of a machine they have
-shell access to anyway. What company mode removes is the operator's
-*unattributed access to data*.
+While no user is enrolled, the machine operator can still create the first
+administrator. Once users exist and login is required, the install token or an
+API key alone no longer administers the workspace: any program on the computer
+can fetch the install token, so it would let anyone switch company mode off.
+Administration then needs a signed-in admin, or `slm team` run on the SLM
+computer by the user who runs SLM (see below), which cannot be reached over the
+network. What company mode removes is the operator's *unattributed access to
+data*.
 
 ## Setting it up
 
 Use the dashboard: **Settings → Access**. Add users, grant each a role on the
 workspace, then turn on "Require login".
 
-There is currently **no CLI for any of this** — no `slm user`, no `slm role`, no
-`slm company-mode`. The dashboard and the HTTP API below are the only two ways.
+There is no `slm user`, `slm role` or `slm company-mode`. Users and roles are
+managed in the dashboard or over the HTTP API below. The one CLI is `slm team`,
+for the login requirement only:
+
+```bash
+slm team status                       # Require login: on|off. Users: N.
+slm team policy --require-login on    # every user signs in
+slm team policy --require-login off   # the machine owner is the user again
+```
+
+`slm team` talks to the running daemon with a private capability file that only
+the user running SLM can read, so the owner can always switch the requirement
+off, even with every administrator locked out. Run it as that user. If the
+daemon refuses it, it says to run it as the same user, with the daemon running
+from that user's data folder.
 
 The same operations over HTTP, for scripting. Every one of these also needs
 machine authentication — see [auth-write-gate.md](auth-write-gate.md) for the
@@ -83,6 +100,21 @@ cannot prove who is calling must not act as the owner. It is also the defect thi
 behaviour replaced — the setting used to be read by the web interface and not by
 the tool connection, so per-user access applied to one and not the other.
 
+## What login covers
+
+With login required, every page of data needs a signed-in user: recall and
+saving, pictures, documents and connected folders, export, compliance records,
+profiles, learning and trust details. A test walks every route so a new one
+cannot be added without the check. Reading a file by path, connecting a folder
+and turning features on (pictures and documents) need the owner or an admin, and
+SLM's own data folder can never be named. A connected web app cannot change,
+delete, pin or replace a memory it is not allowed to see; it is answered as if
+the memory did not exist.
+
+In strict mode (`SLM_REQUIRE_CREDENTIALS=1`) the dashboard is not handed the SLM
+key; print it with `slm token show` and paste it once. See
+[auth-write-gate.md](auth-write-gate.md).
+
 ## What company mode does not do
 
 - **It is not encryption.** Anyone who can read the database file can read your
@@ -96,5 +128,7 @@ the tool connection, so per-user access applied to one and not the other.
 
 ## Turning it off
 
-Set `require_login` back to false. Users, roles and sessions are kept; reads and
-writes stop requiring a login, and the operator's unattributed access returns.
+Set `require_login` back to false, from the dashboard as an admin or with
+`slm team policy --require-login off` on the SLM computer. Users, roles and
+sessions are kept; reads and writes stop requiring a login, and the operator's
+unattributed access returns.

@@ -10,6 +10,7 @@ const PATH = /^\/u\/([a-f0-9]{32})\/([A-Za-z0-9_-]{43})$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const NONCE = /^[A-Za-z0-9_-]{22}$/;
 const CODE = /^[a-z_]{1,40}$/;
+const AUTHORIZATION = /^[A-Za-z0-9_.:-]{1,256}$/;
 const MESSAGE_CHARS = 300;
 
 export type UploadOp = "info" | "chunk" | "finish";
@@ -21,6 +22,8 @@ export class UploadAbort extends Error {
 export interface UploadReply {
   ok: boolean; kind?: "image" | "document"; maxBytes?: number; received?: number;
   done?: boolean; message?: string; code?: string;
+  /** The app (authorization) the laptop recorded as having asked for this link; absent from an older laptop. */
+  authorizationId?: string;
 }
 
 export function parseUploadPath(pathname: string): { connection: string; token: string } | null {
@@ -59,7 +62,8 @@ export function cleanReply(raw: unknown): UploadReply {
     return { ok: false, code: typeof r.code === "string" && CODE.test(r.code) ? r.code : "error", message: message || "The file could not be saved." };
   }
   const kind = r.kind === "image" || r.kind === "document" ? r.kind : undefined;
-  return { ok: true, kind, maxBytes: natural(r.max_bytes), received: natural(r.received), done: typeof r.done === "boolean" ? r.done : undefined, message };
+  const authorizationId = typeof r.authorization_id === "string" && AUTHORIZATION.test(r.authorization_id) ? r.authorization_id : undefined;
+  return { ok: true, kind, maxBytes: natural(r.max_bytes), received: natural(r.received), done: typeof r.done === "boolean" ? r.done : undefined, message, ...(authorizationId ? { authorizationId } : {}) };
 }
 
 const STATUS: Record<string, number> = { invalid_link: 404, expired: 410, used: 410, not_allowed: 403, too_large: 413, chunk_too_large: 413, daily_limit: 429, too_many_attempts: 429 };

@@ -90,6 +90,14 @@ pass the attachment to the plugin at all; if ChatGPT says it has no file to
 send, attach the file in ChatGPT on the web instead, or ask ChatGPT for an
 upload link (see "Adding a picture or PDF from a chat" below).
 
+**Bot messages in ChatGPT.** ChatGPT can list your other bots, send one a
+message and wait for the reply (`mesh_peers`, `mesh_send`, `mesh_wait`) after
+you tick **Allow talking to your other bots** and switch on **Let these apps
+message your other bots** in Connected apps (see "Bot messages and the two new
+permissions" below). Because ChatGPT keeps the scopes it saw when the plugin was
+created, a plugin made before 4.1.25 does not list these tools: uninstall it and
+create it again.
+
 ## ChatGPT dots
 
 Dots are ChatGPT's always-on agents. You create them in ChatGPT on the desktop,
@@ -108,7 +116,9 @@ We have not confirmed whether dots can use custom MCP plugins directly. The
 `get_status` test is how you find out on your plan.
 
 A dot uses only the instructions pasted into it. A skill saved anywhere else is
-not read, so paste the full block into the dot yourself.
+not read, so paste the full block into the dot yourself. The full block is also
+what teaches the dot to pass `ack_ids` back as `ack` when it reads bot messages
+and to ask for an upload link instead of trying to send a file.
 
 ## Grok Bot
 
@@ -119,6 +129,12 @@ not read, so paste the full block into the dot yourself.
 
 Grok Bot's server runs on Cursor's backend, so the approval appears as
 **Cursor** in your Connected apps list. That is expected.
+
+To add a picture or PDF from Grok Bot, ask it for an upload link ("add a
+picture to my memory"), open the link and pick the file. This needs **Allow
+images and documents** and **Allow saving memories** on the approval page, and
+the pictures switch in Connected apps (see below). Bot messages need **Allow
+talking to your other bots** and the bots switch.
 
 ### The local plugin is a separate memory
 
@@ -141,6 +157,10 @@ for your agents and bots".
 3. Connect, sign in with GitHub on the approval page and tick **Allow saving
    memories** if wanted.
 
+After 4.1.25 (or after you allow bot messages or pictures), run a manual
+toolkit re-sync in Composio so it lists the new tools (`mesh_*`, `remember_media`,
+`remember_document`, `get_media`, `media_status`, `media_upload_link`).
+
 If Composio later reports `401` after you turned Web access off and on again,
 its approval was removed. Reconnect it:
 
@@ -153,7 +173,20 @@ composio link custom_superlocalmemory
 Muse connects through the private adapter's secure OAuth connector. Enter both
 the **Server URL** and the **OAuth metadata URL**, then sign in with GitHub on
 the approval page and tick **Allow saving memories** if wanted. If Muse was
-connected before, authorize it again.
+connected before, authorize it again. To add a picture or PDF from Muse, ask it
+for an upload link and open it; for that, tick **Allow images and documents**
+too and switch on the pictures switch in Connected apps (see below).
+
+## Claude on the web
+
+Claude on the web connects as an **MCP connector** with OAuth: choose **Claude
+(web)** (or **Other app (MCP)**) under **Add an app** in Connected apps and use
+the two addresses above. The screens inside Claude change often and are not
+walked through here. Once connected, it uses the same tools as the apps above.
+To add a picture or PDF, ask Claude for an upload link; bot messages and
+pictures need the same two yeses (approval-page box and Connected apps switch).
+Paste the [setup prompt](../web-agents/setup-prompt.md) or a Claude project's
+instructions block so it knows when to use them.
 
 ## Bot messages and the two new permissions
 
@@ -175,13 +208,19 @@ any browser, pick the file and press Save; the page says "Saved to your memory"
 when your computer has it. The file goes from your browser to your computer
 over the connection that is already open, and nothing is kept in the cloud on
 the way. Your computer must be awake and running SuperLocalMemory, and the app
-needs both boxes above and the `media` key permission. Pictures can be up to
-25 MB (PNG, JPEG or WebP) and PDFs up to 100 MB; each connection can make 3
+needs the **Allow images and documents** box, a write key and the pictures
+permission on your computer (below). Pictures can be up to
+25 MB (PNG, JPEG, GIF or WebP) and PDFs up to 100 MB; each connection can make 3
 open links at a time and 20 uploads a day.
 
 Ticking a box is not enough. You must also allow it for the connection on your
-computer. Each connection has a remote key named `web-<connection id>`. Find it
-with `slm remote keys list`, then run:
+computer. In the dashboard, open **Connected apps**; the **Web access** row has
+two switches, **Let these apps message your other bots** and **Let these apps
+save and read pictures and documents**. They apply to every app on that
+connection, on its next request.
+
+From a terminal, the same switches are on the connection's remote key, named
+`web-<connection id>` (find it with `slm remote keys list`):
 
 ```bash
 slm remote keys allow web-<connection id> mesh
@@ -190,15 +229,26 @@ slm remote keys disallow web-<connection id> mesh
 ```
 
 `allow` turns a permission on and `disallow` turns it off. Without both the box
-and the key, the app is refused.
+and the switch, the app is refused. Turning pictures off also ends any upload
+link the connection has not finished.
 
 What a web app can do with bot messages:
 
 - `mesh_peers` lists your other bots.
 - `mesh_send` sends one message to one bot. There is no broadcast.
-- `mesh_inbox` checks for messages.
-- `mesh_wait` waits up to 20 seconds for a message.
+- `mesh_inbox` checks for messages. Pass `ack` (see below) with the ids you already have.
+- `mesh_wait` waits up to 20 seconds for a message. It takes `ack` too.
 - `mesh_state` reads shared notes. It cannot change them.
+
+**Delivery is at least once.** A relay can drop a reply after SLM has sent it, so
+a message is not marked read when it is handed over. Each reply that carries
+messages also carries `ack_ids`; the app passes those ids as `ack` on its next
+`mesh_inbox` or `mesh_wait` call, and the messages are then marked read. A message
+the app did not acknowledge comes again once about two minutes have passed
+(120 seconds), flagged `"repeat": true`, and at most three times in all; after
+that SLM treats it as delivered. Until the lease runs out a second call does not
+return it, so two calls never both receive a fresh message. Local sessions are
+not affected: their messages are marked read when returned.
 
 Limits: 200 messages sent per app per day. Inbox checks have their own daily
 budget. A connection can have at most 2 waits at once.

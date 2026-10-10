@@ -5,6 +5,140 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.25] — Pictures and documents, and bots that talk to each other
+
+### Added
+
+- **Pictures and documents.** Save screenshots, photos and PDFs and find them
+  later by describing them. A picture model runs on your computer
+  (EmbeddingGemma 2), OCR reads the text inside pictures, and each PDF page is
+  indexed by its picture and its text. No generative model looks at your
+  files. Off by default; turn it on from the npm installer or upgrader, the
+  dashboard (**Documents & Images**, with progress and a restart button) or
+  `slm media enable`. Turning it on does not change your existing memories or
+  their embeddings: pictures live in their own database. Needs a computer with
+  16 GB of memory and downloads about 1.5 GB the first time. Limits are listed
+  in docs/pictures-and-documents.md.
+- **Find a picture** in the dashboard, a drop zone for pictures and PDFs (up to
+  25 MB and 100 MB), and `slm media status|disable|gc|repair`.
+- **Folders and Obsidian vaults** as read-only sources: `slm sources add`, or
+  **Choose folder** in the dashboard with the computer's own folder picker.
+- **Bots that talk to each other.** Web apps connected through Web access
+  (ChatGPT, Claude on the web, Grok Bot, Muse, Composio) can join SLM-Mesh
+  beside the agents on your computer: see peers, send a named bot a message,
+  read their inbox and shared state. Each app needs two yeses: a box on the
+  approval page, and a switch on the **Web access** row in Connected apps (or
+  `slm remote keys allow <key> mesh`). A web app's messages are delivered at
+  least once: one it did not acknowledge comes again, marked as a repeat. The
+  **Bot messages** tab lists every bot by name with mute, rename and retire.
+- **Web apps save real files.** Any connected web app can ask for a one-time
+  upload link: you open it, pick the file, and it streams to your computer
+  through the connection gateway, which keeps no copy. A link belongs to the
+  app that asked for it, works once and expires in 10 minutes. ChatGPT can also
+  hand over an attached file directly once its file hosts are on your allowed
+  list (docs/remote-access/hosts.md).
+- **Upgrade memory engine** (preview, opt-in): re-read existing memories with
+  the one-model engine in the background, with recall working throughout and
+  one-click rollback; the previous engine's data stays until you free it.
+  `slm embedder upgrade` or the card in Settings.
+- `slm team status` and `slm team policy --require-login on|off`, run on the
+  SLM computer, so a company workspace's owner can never be locked out.
+- A **What's new** card on the dashboard that knows what is already on.
+- **Agent skills and instructions teach 4.1.25.** A new `slm-media` skill
+  (pictures, PDFs, folders, upload links, `slm media`, `slm sources`) ships in
+  the Claude Code, Codex, Copilot, Antigravity and Hermes plugins, so each
+  carries 16 skills. `slm-mesh` covers `mesh_wait`, web-app peers and
+  at-least-once delivery (`ack_ids` passed back as `ack`); `slm-web-access`
+  covers the Connected apps switches and upload links; `slm-governance` covers
+  `slm team`, `slm token show` and what remote apps can never see; the bot
+  skills, both advisors, the universal agent rules, the web-agent
+  instructions (full, short and the dashboard's **Copy instructions**), the host
+  guides and the text `slm connect` writes for Cursor, Copilot and Antigravity say
+  the same.
+
+### Changed
+
+- Memory guards read real memory use on macOS (physical footprint); the
+  resident size under-reported up to 15 times on a busy Mac.
+- The picture model embeds in small passes; its peak fell from about 12 GB to
+  under 4 GB on large batches.
+- Roles and profiles apply to every picture, document, folder and feature
+  route: reading a file by path, connecting a folder and turning features on
+  need the owner or an admin; SLM's own data folder can never be named.
+- **Company mode is administered by a signed-in admin.** While users are
+  enrolled and login is required, the install token or an API key alone no
+  longer administers the workspace (any local program could fetch the token);
+  use an admin account, or `slm team` on the SLM computer.
+- **Pictures saved before 4.1.25 are held back from web apps** until saved
+  again. They were vetted under the older rule (personal data counted only
+  with redaction on); the whole text is now checked every time. They stay
+  fully searchable on your computer.
+- `npm install` says plainly when the Python it found cannot work (an Intel
+  build on a Mac, 32-bit on Windows) and how to install a supported one;
+  `slm media enable` starts SuperLocalMemory if it is not running.
+
+### Fixed
+
+- A daemon started with `python -m` now publishes its ready record, so `stop`
+  no longer waits 90 seconds.
+- On SQLite 3.44.0 to 3.46.0, existing stores switch off the setting that
+  damages the keyword index, and `slm db repair` rebuilds a damaged one.
+- A picture with no readable text no longer surfaces for questions about
+  pictures you never saved.
+- Removing a PDF or a folder never reports success while one of its memories
+  can still be recalled; it says so and can be retried. A PDF removed while it
+  was finishing stays removed.
+- Imports never lose track of what they saved: a save queued under load, or a
+  file that failed part-way, stays owned, so removal and erasure reach it.
+- PDFs and pictures in a folder that were skipped while pictures were off are
+  read once they are on; a failed save no longer leaves a PDF that answers
+  "Already saved" forever.
+- `slm media gc --apply` only ever touches stored picture files, never SLM's
+  databases; local backups keep picture and PDF originals.
+- Claude Desktop on Windows is configured in %APPDATA%\Claude.
+- **Company mode covers every data route.** With login required, every page of
+  data (export, compliance records, profiles, learning and trust details)
+  needs a signed-in user; a test now walks every route so a new one cannot
+  slip through.
+- A connected web app cannot change, delete, pin or replace a memory it is not
+  allowed to see; it is answered as if the memory did not exist.
+- A folder whose save was still queued is not reported as removed until that
+  save is hidden too; a PDF or picture replaced in a folder is erased at the
+  end of the retention window, like an older text version.
+- Local backups copy picture and PDF originals only, never the upload-link
+  database. A full disk during an upload is reported in plain words.
+- `npm install` also explains Windows on ARM, 32-bit Linux and a Node running
+  under Rosetta, and every repair hint uses `npm rebuild -g superlocalmemory`.
+- **Linux on 64-bit ARM** (aarch64) installs again and can turn on pictures and
+  documents: the graph library uses the version built for it, and the picture
+  tools have their own verified package list. Tested in an ARM64 Linux
+  container.
+- The picture tools are stopped before they go past their memory cap, not
+  after: their memory use is watched during each request, Linux also sets a
+  hard ceiling, and oversized input is refused before it is sent.
+- With `SLM_REQUIRE_CREDENTIALS=1`, the dashboard key is no longer handed to
+  other programs on the computer; the dashboard asks for it once
+  (`slm token show` prints it).
+- A PDF that did not finish has a **Try again** button.
+- Pictures and pages saved before 4.1.25 are re-checked in the background and
+  shared with web apps again when their text is clean.
+- Upload links made before the update stop working; ask the app for a new one.
+- Backup sets made through every backup path include picture and PDF
+  originals.
+- **A damaged keyword index is repaired for good** (#204). On SQLite 3.44.0 to
+  3.46.0, `slm db repair --apply` now turns off the SQLite setting that damages
+  the index before rebuilding it, then checks it again and says plainly if it
+  is still damaged. `slm doctor` and `slm restart` show the SQLite message and
+  the exact repair command instead of "recreate the database". Your memories
+  are kept.
+- **Hermes:** the four SLM advisor tools load again (they failed with
+  "'str' object is not callable"), all 16 skills are registered, and
+  `/slm-agent` outside a chat says how to start an advisor (#155).
+- Every plugin, skill and setup text teaches 4.1.25: a new `slm-media` skill,
+  and the mesh, web access, governance and bot skills, the web agent
+  instructions, Cursor, VS Code, Continue and Cody cover pictures, upload
+  links, `mesh_wait` and the Connected apps switches.
+
 ## [4.1.24] — Connecting ChatGPT, Grok Bot, Muse and dots works the first time
 
 ### Added

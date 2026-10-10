@@ -43,13 +43,14 @@ and an inbox/outbox queue across SLM instances on different machines or
 processes. It does not replicate the full memory database; it coordinates peers.
 
 Mesh tools are available in the `full`, `power`, and `whole` MCP profiles.
-The `mesh` profile exposes only the eight Mesh tools without the rest of the
+The `mesh` profile exposes only the nine Mesh tools without the rest of the
 full profile.
 
 | Tool | Description |
 |---|---|
 | `mesh_send` | Send a message to a named peer |
 | `mesh_inbox` | Read incoming peer messages |
+| `mesh_wait` | Wait up to 20 seconds for a new message |
 | `mesh_peers` | List known peers and their status |
 | `mesh_lock` | Acquire a distributed lock |
 | `mesh_state` | Read or write shared mesh state |

@@ -66,7 +66,7 @@ class Ctx:
     def register_command(self, *a):
         pass
 
-    def register_tool(self, *a):
+    def register_tool(self, *a, **k):
         pass
 
 

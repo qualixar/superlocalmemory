@@ -11,7 +11,8 @@ laptop's half: it mints the token, keeps only its hash, accepts the chunks in
 order into a private scratch file, and decides when a link is spent.
 
 The token is the only capability. It is 32 random bytes, bound to one
-connection, one key and one profile, valid for ten minutes (twenty once the
+connection, one key, one profile and the authorization (the web app) that asked
+for it, valid for ten minutes (twenty once the
 upload has started) and usable for one saved file. Everything the gateway says
 about size or type is ignored: limits and the file's first bytes are checked
 here. Nothing in this module logs content, tokens or paths.
@@ -70,7 +71,13 @@ _DDL = """CREATE TABLE IF NOT EXISTS upload_links (
   total INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0,
   next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
-  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""
+  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER,
+  authorization_id TEXT NOT NULL DEFAULT '')"""
+#: Added after the first release of the table: databases made before it get the column on first use.
+_ADD_AUTHORIZATION = "ALTER TABLE upload_links ADD COLUMN authorization_id TEXT NOT NULL DEFAULT ''"
+
+#: ``PRAGMA user_version`` once the links without an app have been ended (see ``UploadLinks._migrate``).
+_MIGRATION_DONE = 1
 
 _MESSAGES = {
     "invalid_kind": "An upload link is for an image or a document.",
@@ -93,9 +100,12 @@ _MESSAGES = {
     "rate_limited": "Too many invalid upload links were tried. Wait ten minutes and try again.",
     "in_progress": "Another upload is already using this link.",
     "interrupted": "The save was interrupted. Ask the app for a new link.",
+    "warming": "The picture tools on your computer are starting. Send the file again in a minute.",
     "revoked": "This upload link no longer works. Ask the app for a new one.",
+    "outdated": "This upload link expired with the update. Ask the app for a new one.",
     "not_allowed": "This computer no longer lets this app add files. Ask the owner to allow it again.",
     "invalid_request": "That upload request was not understood.",
+    "disk_full": files.DISK_FULL,
 }
 
 
@@ -143,6 +153,8 @@ class UploadRow:
     result_json: str
     nonce: str | None
     touched_at: int | None
+    #: The web app (authorization) that asked for the link; empty for a link made before apps were recorded.
+    authorization_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -163,11 +175,11 @@ def max_bytes_for(kind: str) -> int:
 
 
 def looks_like(kind: str, head: bytes) -> bool:
-    """Whether the first bytes are a PNG, JPEG or WebP picture, or a PDF, as ``kind`` says."""
+    """Whether the first bytes are a PNG, JPEG, GIF or WebP picture, or a PDF, as ``kind`` says."""
     if kind == "document":
         return head.startswith(b"%PDF-")
     return (head.startswith(b"\x89PNG\r\n\x1a\n") or head.startswith(b"\xff\xd8\xff")
-            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
+            or head[:6] in (b"GIF87a", b"GIF89a") or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
 
 
 def _hash(token: str) -> str:
@@ -185,6 +197,8 @@ class UploadLinks:
         self._clock = clock
         self._lock = threading.RLock()
         self._ready = False
+        self._columns_ok = False
+        self._migrated = False
         self._last_clean: int | None = None
 
     # -- storage ------------------------------------------------------------
@@ -214,8 +228,10 @@ class UploadLinks:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute(_DDL)
+                self._ensure_columns(conn)
                 conn.execute("BEGIN IMMEDIATE")
                 try:
+                    self._migrate(conn)
                     yield conn
                     conn.execute("COMMIT")
                 except BaseException:
@@ -223,6 +239,36 @@ class UploadLinks:
                     raise
             finally:
                 conn.close()
+
+    def _ensure_columns(self, conn: sqlite3.Connection) -> None:
+        if self._columns_ok:
+            return
+        names = {row[1] for row in conn.execute("PRAGMA table_info(upload_links)")}
+        if "authorization_id" not in names:
+            with contextlib.suppress(sqlite3.OperationalError):  # another process added it first
+                conn.execute(_ADD_AUTHORIZATION)
+        self._columns_ok = True
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Once per database: end the unfinished links no app asked for.
+
+        Links made before ``authorization_id`` existed carry an empty one and used to be honoured
+        for "any consenting app" until they ran out. They are ended here, with a plain message,
+        and the database is marked (``user_version``) so this never runs again.
+        """
+        if self._migrated:
+            return
+        if conn.execute("PRAGMA user_version").fetchone()[0] < _MIGRATION_DONE:
+            result = json.dumps({"ok": False, "code": "outdated", "message": _MESSAGES["outdated"]})
+            stale = conn.execute(
+                "SELECT upload_id FROM upload_links WHERE authorization_id = '' "
+                "AND state IN ('open','receiving','finishing')").fetchall()
+            for found in stale:
+                conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
+                             (result, found[0]))
+                self._unlink(self.temp_path(found[0]))
+            conn.execute(f"PRAGMA user_version = {_MIGRATION_DONE}")
+        self._migrated = True
 
     @staticmethod
     def _row(found: sqlite3.Row | None) -> UploadRow | None:
@@ -245,7 +291,8 @@ class UploadLinks:
 
     # -- minting ------------------------------------------------------------
 
-    def mint(self, connection_id: str, key_id: str, profile_id: str, kind: str, note: str) -> MintedLink:
+    def mint(self, connection_id: str, key_id: str, profile_id: str, kind: str, note: str,
+             authorization_id: str = "") -> MintedLink:
         if kind not in KINDS:
             raise UploadError("invalid_kind")
         if len(note or "") > MAX_NOTE_CHARS:
@@ -263,9 +310,9 @@ class UploadLinks:
             limit = max_bytes_for(kind)
             conn.execute(
                 "INSERT INTO upload_links (upload_id, token_hash, connection_id, key_id, profile_id, kind, note, "
-                "max_bytes, state, created_at, expires_at) VALUES (?,?,?,?,?,?,?,?,'open',?,?)",
+                "max_bytes, state, created_at, expires_at, authorization_id) VALUES (?,?,?,?,?,?,?,?,'open',?,?,?)",
                 (upload_id, _hash(token), connection_id, key_id, profile_id, kind, note or "", limit,
-                 now, now + LINK_TTL_S))
+                 now, now + LINK_TTL_S, authorization_id or ""))
         return MintedLink(token, upload_id, now + LINK_TTL_S, limit)
 
     # -- reading ------------------------------------------------------------
@@ -336,10 +383,16 @@ class UploadLinks:
             raise UploadError("too_much_data")
         path = self.temp_path(row.upload_id)
         path.unlink(missing_ok=True)
-        self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        try:
+            self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except OSError as exc:
+            path.unlink(missing_ok=True)  # no half-written scratch file, and no attempt is spent
+            if files.is_disk_full(exc):
+                raise UploadError("disk_full") from None
+            raise
         conn.execute(
             "UPDATE upload_links SET state='receiving', total=?, received=?, next_index=1, attempts=attempts+1, "
-            "started_at=COALESCE(started_at, ?), nonce=?, touched_at=? WHERE upload_id=?",
+            "started_at=COALESCE(started_at, ?), nonce=?, touched_at=?, result_json='' WHERE upload_id=?",
             (total, len(data), now, nonce, now, row.upload_id))
         return len(data)
 
@@ -361,11 +414,23 @@ class UploadLinks:
                 raise UploadError("bad_order")
         except OSError:
             raise UploadError("bad_order") from None
-        self._write(path, data, os.O_WRONLY | os.O_APPEND)
+        try:
+            self._write(path, data, os.O_WRONLY | os.O_APPEND)
+        except OSError as exc:
+            if files.is_disk_full(exc):
+                self._trim(path, row.received)  # drop a half-written chunk; what arrived stays
+                raise UploadError("disk_full") from None
+            raise
         received = row.received + len(data)
         conn.execute("UPDATE upload_links SET received=?, next_index=next_index+1, touched_at=? WHERE upload_id=?",
                      (received, self._now(), row.upload_id))
         return received
+
+    @staticmethod
+    def _trim(path: Path, size: int) -> None:
+        """Cut the scratch file back to ``size`` bytes (best effort)."""
+        with contextlib.suppress(OSError):
+            os.truncate(path, size)
 
     @staticmethod
     def _write(path: Path, data: bytes, flags: int) -> None:
@@ -390,6 +455,9 @@ class UploadLinks:
             if row.state == "open":
                 raise UploadError("not_started")
             self._live(row)
+            warming = self._warming_result(row)
+            if warming is not None:  # the save had to wait for the picture tools; say so, do not call it a clash
+                return FinishPlan("result", row, warming)
             if row.nonce != nonce:
                 raise UploadError("in_progress")
             if row.received != row.total or row.total < 1:
@@ -418,21 +486,82 @@ class UploadLinks:
     def finish_failed(self, upload_id: str, result: dict[str, Any]) -> None:
         self._end(upload_id, "failed", result)
 
-    def finish_retry(self, upload_id: str) -> None:
-        """A save that may work later (the picture tools are starting): keep the bytes, reopen the link."""
-        with self._tx() as conn:
-            conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=? "
-                         "WHERE upload_id=? AND state='finishing'", (self._now(), upload_id))
+    @staticmethod
+    def _warming_result(row: UploadRow) -> dict[str, Any] | None:
+        """The stored "tools are starting" answer of a reopened link, until a new upload clears it."""
+        if row.state != "receiving" or row.nonce is not None or not row.result_json:
+            return None
+        try:
+            result = json.loads(row.result_json)
+        except ValueError:
+            return None
+        return result if isinstance(result, dict) and result.get("code") == "warming" else None
 
-    def fail_open_links(self, connection_id: str) -> int:
-        """End every unfinished link of a connection (its consent or grant key was revoked or replaced)."""
+    def finish_retry(self, upload_id: str, result: dict[str, Any] | None = None) -> None:
+        """A save that may work later (the picture tools are starting): keep the bytes, reopen the link.
+
+        The nonce is cleared so a fresh upload restarts at once, and the warming answer is kept so the
+        gateway's next ``finish`` (still carrying the old nonce) gets it rather than a clash.
+        """
+        warming = {"ok": False, "code": "warming", **{k: v for k, v in (result or {}).items()
+                                                      if k in ("message",) and v}}
+        warming.setdefault("message", _MESSAGES["warming"])
+        with self._tx() as conn:
+            conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=?, result_json=? "
+                         "WHERE upload_id=? AND state='finishing'",
+                         (self._now(), json.dumps(warming), upload_id))
+
+    def claim_warm_retry(self, upload_id: str) -> UploadRow | None:
+        """Take a link whose save is waiting for the picture tools, to try that save again.
+
+        Only a link still waiting on warming (all bytes held, no new upload begun, not expired) can be
+        taken; it goes back to ``finishing``, so a gateway ``finish`` meanwhile is told "working".
+        Returns ``None`` when there is nothing left to retry, which ends the caller's loop.
+        """
+        now = self._now()
+        with self._tx() as conn:
+            row = self._row(conn.execute("SELECT * FROM upload_links WHERE upload_id = ?",
+                                         (upload_id,)).fetchone())
+            if (row is None or self._warming_result(row) is None or now > _deadline(row)
+                    or row.total < 1 or row.received != row.total):
+                return None
+            taken = conn.execute("UPDATE upload_links SET state='finishing', touched_at=? "
+                                 "WHERE upload_id=? AND state='receiving' AND nonce IS NULL", (now, upload_id))
+            return row if taken.rowcount == 1 else None
+
+    def fail_open_links(self, connection_id: str, authorization_id: str | None = None) -> int:
+        """End every unfinished link of a connection (its consent or grant key was revoked or replaced).
+
+        With ``authorization_id`` only the links that app asked for end, plus links made before apps
+        were recorded (their owner is unknown); the other apps' links stay open.
+        """
+        if authorization_id is None:
+            return self._fail_where(connection_id, "", ())
+        return self._fail_where(connection_id, "AND (authorization_id = ? OR authorization_id = '')",
+                                (authorization_id,))
+
+    def fail_unlisted_authorizations(self, connection_id: str, listed: set[str] | frozenset[str]) -> int:
+        """End the unfinished links of apps the gateway no longer lists for this connection.
+
+        ``listed`` must be the whole list: the caller never passes a partial one.
+        """
+        if not (self._root / "media" / DB_NAME).exists():
+            return 0
+        with self._tx() as conn:
+            owners = {row[0] for row in conn.execute(
+                "SELECT DISTINCT authorization_id FROM upload_links WHERE connection_id = ? "
+                "AND state IN ('open','receiving','finishing') AND authorization_id != ''",
+                (connection_id,)).fetchall()}
+        return sum(self.fail_open_links(connection_id, gone) for gone in sorted(owners - set(listed)))
+
+    def _fail_where(self, connection_id: str, extra: str, params: tuple) -> int:
         if not (self._root / "media" / DB_NAME).exists():
             return 0
         result = json.dumps({"ok": False, "code": "revoked", "message": _MESSAGES["revoked"]})
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT upload_id FROM upload_links WHERE connection_id = ? "
-                "AND state IN ('open','receiving','finishing')", (connection_id,)).fetchall()
+                f"AND state IN ('open','receiving','finishing') {extra}", (connection_id, *params)).fetchall()
             for found in rows:
                 conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
                              (result, found[0]))

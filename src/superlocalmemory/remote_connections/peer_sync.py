@@ -39,12 +39,27 @@ def is_complete(apps: object, valid: Sequence[Mapping[str, Any]]) -> bool:
     return isinstance(apps, list) and len(valid) == len(apps)
 
 
+def _end_links_of_missing_apps(connection_id: str, listed: set[str]) -> None:
+    """An app revoked anywhere (not only on this computer) is gone from the list: its open upload links end."""
+    try:
+        from superlocalmemory.media.upload_links import default_links
+
+        ended = default_links().fail_unlisted_authorizations(connection_id, listed)
+    except Exception as exc:  # noqa: BLE001 - the gateway checks the app at every step anyway
+        logger.warning("upload links of unlisted apps were not closed (%s)", type(exc).__name__)
+        return
+    if ended:
+        logger.info("ended %d upload link(s) of revoked web app(s)", ended)
+
+
 def apply(connection_id: str, valid: Sequence[Mapping[str, Any]], *, complete: bool,
           broker: Any, started: str) -> None:
     """Refresh the names for ``connection_id`` and, if ``complete``, retire the
     peers of apps that are no longer listed."""
     peer_names.set_names(connection_id, {
         app["authorization_id"]: app["name"] for app in valid})
+    if complete:
+        _end_links_of_missing_apps(connection_id, {app["authorization_id"] for app in valid})
     if not complete or broker is None:
         return
     refs = {peer_ref(connection_id, app["authorization_id"]) for app in valid}

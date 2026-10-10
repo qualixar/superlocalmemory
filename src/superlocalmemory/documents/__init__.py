@@ -12,10 +12,10 @@ from superlocalmemory.documents.runner import (
     stop_document_jobs,
 )
 from superlocalmemory.documents.status import job_status, remove_document
-from superlocalmemory.documents.submit import DocumentReceipt, submit_document
+from superlocalmemory.documents.submit import DocumentReceipt, retry_document, submit_document
 
 __all__ = [
     "DocumentJobService", "DocumentReceipt", "document_index", "document_lint", "job_status",
-    "remove_document",
+    "remove_document", "retry_document",
     "start_document_jobs", "stop_document_jobs", "submit_document",
 ]

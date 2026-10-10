@@ -42,6 +42,23 @@ describe('the registry says whether an upload link may still be used', () => {
     const lapsed = await registry(false); await lapsed.addAuthorization(full('app-a')); expect(await lapsed.uploadsAllowed()).toBe(false);
   });
 
+  test('asked about one app, it answers for that app only', async () => {
+    const stub = await registry(); await stub.addAuthorization(full('app-a')); await stub.addAuthorization(full('app-b'));
+    expect(await stub.uploadsAllowed('app-a')).toBe(true);
+    await stub.revokeAuthorization('owner-a', 'app-a', 1);
+    expect(await stub.uploadsAllowed('app-a')).toBe(false);   // A is revoked even though B still has the consent
+    expect(await stub.uploadsAllowed('app-b')).toBe(true);
+    expect(await stub.uploadsAllowed()).toBe(true);
+    expect(await stub.uploadsAllowed('nobody')).toBe(false);
+  });
+
+  test('an app without the upload consent is refused even while another app has it', async () => {
+    const stub = await registry(); await stub.addAuthorization(full('app-a'));
+    await stub.addAuthorization(grant('app-c', ['recall'], ['slm:read']));
+    expect(await stub.uploadsAllowed('app-c')).toBe(false);
+    expect(await stub.uploadsAllowed()).toBe(true);
+  });
+
   test('an unconfigured registry says no', async () => {
     expect(await env.REGISTRIES.getByName(crypto.randomUUID()).uploadsAllowed()).toBe(false);
   });

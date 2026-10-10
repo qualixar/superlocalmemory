@@ -27,7 +27,10 @@ from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
-from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
+from superlocalmemory.sources.store import (
+    SourceStore, carried_entries, current_documents, entries_of, memory_entries, pending_documents,
+    replaced_documents, replaced_pictures,
+)
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
 logger = logging.getLogger(__name__)
@@ -76,6 +79,7 @@ class _Pass:
     vanished: dict[str, list[str]] = field(default_factory=dict)
     names: links.NameIndex | None = None  # Obsidian sources: where embeds can point
     only: frozenset[str] | None = None  # a targeted pass looks at these paths and nothing else
+    media_ready: bool = False  # read once per pass: files skipped while media was off are read again
 
     @property
     def sid(self) -> str:
@@ -96,7 +100,9 @@ def _digest(path: Path, limit: int | None = None, file_id: str | None = None) ->
     return h.hexdigest(), (bytes(kept) if limit is not None and len(kept) <= limit else None)
 
 
-def _unchanged(row: dict[str, Any] | None, e: Entry) -> bool:
+def _unchanged(row: dict[str, Any] | None, e: Entry, media_ready: bool = False) -> bool:
+    if row and row["state"] == "skipped" and row["reason"] == ingest.MEDIA_NOT_READY and media_ready:
+        return False  # skipped only because images & documents were off; they are ready now
     return bool(row and row["state"] in _QUIET_STATES
                 and (row["size"], row["mtime_ns"], row["file_id"]) == e.signature())
 
@@ -131,16 +137,35 @@ def _placeholder(p: _Pass, e: Entry, row: dict[str, Any] | None) -> None:
     p.store.put_file(p.sid, e.relpath, state="cloud_placeholder", reason="cloud_only", **fields)
 
 
-def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Hide the old version of a file; returns its entries (marked replaced) to keep for the purge."""
+def _supersede(p: _Pass, row: dict[str, Any] | None, resent: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    """Hide the old version of a file; returns its entries (marked replaced) to keep for the purge.
+
+    ``resent`` are keys the new save sent again (a retry of the same version): the writer handed
+    back the memories it already had, the new save owns them, and they are not hidden.
+    """
     if row is None:
         return []
-    entries = entries_of(row)
+    entries = [e for e in entries_of(row) if e.get("k") not in resent]
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
-    retire.hide_document(p.store, p.runtime, p.source, row)
-    retire.hide_picture(p.store, row)
+    undone = retire.hide_document(p.store, p.runtime, p.source, row)
+    if row.get("document_id") and row.get("reason") != "shared":
+        # The row is about to name the new version. A hidden old document is recorded with its time
+        # (the purge erases it after the grace period); one that could not be hidden stays reachable.
+        entries.append({"hd": row["document_id"]} if undone else {"rd": row["document_id"], "sup": utc_stamp()})
+    p.stats.errors += undone
+    if row.get("media_id") and row.get("reason") != "shared":
+        hidden = retire.hide_picture(p.store, row)  # recorded either way; erased only once hidden and aged
+        entries.append({"rp": row["media_id"], "sup": utc_stamp()} if hidden else {"rp": row["media_id"]})
+        p.stats.errors += int(not hidden)
     retire.release_copies(p.store, p.source, row)
     return entries
+
+
+def _still_old(entries: list[dict[str, Any]], out: ingest.Ingested) -> list[dict[str, Any]]:
+    """Drop records of replaced documents that the new save uses again (they are current, not old)."""
+    current = current_documents(out.document_id, out.entries)
+    return [e for e in entries
+            if not ((e.get("hd") or e.get("rd")) in current or (e.get("rp") and e["rp"] == out.media_id))]
 
 
 def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: list) -> None:
@@ -157,14 +182,31 @@ def _is_note(p: _Pass, relpath: str) -> bool:
     return p.source["kind"] == "obsidian" and relpath.lower().endswith((".md", ".markdown", ".canvas"))
 
 
-def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested:
-    """One save of the file; each call takes the next save number of its path."""
+def _save_number(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, kind: str, fresh: bool) -> int:
+    """Every save of a path has its own number; only a retry of the same text version keeps it.
+
+    A text file whose last attempt ended in ``error`` on these very bytes is retried under the
+    same number, so the parts that did save are re-sent with the same keys and not saved twice.
+    ``fresh`` forces a new number (a repeat that pointed at hidden copies is saved again).
+    """
+    retry = (not fresh and kind == "text" and row is not None
+             and row["state"] == "error" and row["sha256"] == sha)
+    if retry:
+        n = p.store.current_save_n(p.sid, e.relpath)
+        if n:
+            return n
+    return p.store.next_save_n(p.sid, e.relpath)
+
+
+def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None, row: dict[str, Any] | None = None,
+            *, fresh: bool = False) -> ingest.Ingested:
+    """One save of the file, under its save number (see ``_save_number``)."""
     version, kind = sha[:12], kind_of(e.relpath)
     if kind != "text":  # pictures and PDFs are handed over as bytes, never re-opened by path
         data = ingest.load_verified(p.root / e.relpath, e.file_id, sha, kind)
         if data is None:  # edited since the hash: look again next pass
             return ingest.Ingested(retry=True)
-    n = p.store.next_save_n(p.sid, e.relpath)
+    n = _save_number(p, e, row, sha, kind, fresh)
     if kind == "text" and _is_note(p, e.relpath):
         return obsidian.ingest_note(p.host, p.runtime, p.source, e.relpath, data or b"", version, n, p.names)
     if kind == "text":
@@ -181,9 +223,9 @@ def _hidden_copy(p: _Pass, out: ingest.Ingested) -> bool:
 
 
 def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
-    out = _ingest(p, e, sha, data)
+    out = _ingest(p, e, sha, data, row)
     if not out.retry and not out.skip_reason and _hidden_copy(p, out):
-        out = _ingest(p, e, sha, data)  # once more, under a new save number
+        out = _ingest(p, e, sha, data, row, fresh=True)  # once more, under a new save number
     if out.retry:
         p.stats.deferred += 1
         return
@@ -192,9 +234,9 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
                          entries=_supersede(p, row), **_stat_fields(e))
         _record_links(p, e, out)
         return
-    old = _supersede(p, row)
+    old = _supersede(p, row, frozenset(x["k"] for x in out.entries if x.get("k")))
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
-                     entries=memory_entries(old) + out.entries, document_id=out.document_id,
+                     entries=_still_old(carried_entries(old), out) + out.entries, document_id=out.document_id,
                      media_id=out.media_id, **_stat_fields(e))
     _record_links(p, e, out)
     p.stats.changed += 1 if row and row["state"] != "tombstoned" else 0
@@ -270,7 +312,10 @@ def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
     for rel, row in list(p.rows.items()):
         if rel in seen or row["state"] == "tombstoned" or walked.under_unreadable(rel):
             continue
-        if memory_entries(entries_of(row)) or row.get("document_id"):
+        entries = entries_of(row)
+        if (memory_entries(entries) or pending_documents(entries) or replaced_documents(entries)
+                or replaced_pictures(entries)
+                or row.get("document_id")):
             p.stats.errors += retire.hide_file(p.host, p.store, p.runtime, p.source, row, tombstone=True)
             p.stats.tombstoned += 1
         else:
@@ -312,7 +357,7 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
         row = p.rows.get(e.relpath)
         if e.placeholder:
             _placeholder(p, e, row)
-        elif _unchanged(row, e):
+        elif _unchanged(row, e, p.media_ready):
             p.stats.unchanged += 1
         else:
             candidates.append(e)
@@ -330,10 +375,21 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
         try:
             _process(p, e, sha)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the pass
-            logger.warning("a folder file could not be saved (%s)", type(exc).__name__)
-            p.stats.errors += 1
-            p.store.put_file(p.sid, e.relpath, state="error", reason=type(exc).__name__[:60],
-                             sha256=sha, **_stat_fields(e))
+            cause = exc.__cause__ if isinstance(exc, ingest.PartialSave) and exc.__cause__ else exc
+            if isinstance(exc, ingest.SaveBudgetSpent):
+                p.stats.deferred += 1  # the writer is busy: the rest of the file waits, nothing failed
+            else:
+                logger.warning("a folder file could not be saved (%s)", type(cause).__name__)
+                p.stats.errors += 1
+            fields: dict[str, Any] = {}
+            if isinstance(exc, ingest.PartialSave) and exc.entries:
+                # The parts saved before the failure stay owned by the row, so the next save
+                # (which supersedes the row) and any removal or purge also reach them.
+                kept = p.store.get_file(p.sid, e.relpath)
+                fields["entries"] = (entries_of(kept) if kept else []) + exc.entries
+            reason = "save_queued" if isinstance(exc, ingest.SaveBudgetSpent) else type(cause).__name__[:60]
+            p.store.put_file(p.sid, e.relpath, state="error", reason=reason,
+                             sha256=sha, **_stat_fields(e), **fields)
         if progress:
             progress(i + 1, len(hashed))
     if _gone(p):
@@ -415,7 +471,7 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
     if device or (not walked.entries and not walked.capped and _holders(store, source["source_id"])):
         return _offline(store, source, stats, device or "empty_folder")
     stats.skipped, stats.capped = walked.skipped, walked.capped
-    p = _Pass(host, store, source, runtime, root, stats, {}, only=only)
+    p = _Pass(host, store, source, runtime, root, stats, {}, only=only, media_ready=ingest.media_ready())
     with background_work():
         _work(p, walked, progress)
     if stats.removed:

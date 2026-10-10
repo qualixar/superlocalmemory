@@ -94,8 +94,12 @@ def _python_supported() -> bool:
 
 
 def _platform_tag() -> str:
+    """``<system>-<machine>`` as the lock files name it (``linux-aarch64``, ``darwin-arm64``, ...)."""
     system = {"darwin": "darwin", "win32": "windows"}.get(sys.platform, "linux")
-    return f"{system}-{platform.machine().lower()}"
+    machine = platform.machine().lower()
+    if system == "linux" and machine == "arm64":
+        machine = "aarch64"  # Linux says aarch64; a few images report arm64 for the same CPU
+    return f"{system}-{machine}"
 
 
 def _base_python() -> tuple[str, str]:

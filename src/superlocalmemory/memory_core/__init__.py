@@ -8,12 +8,14 @@ from superlocalmemory.memory_core.save_path import (
     effective_pii_redaction,
     ContentOrigin,
     PreparedContent,
+    SensitiveScan,
     pii_redaction_enabled,
     prepare_for_save,
     prepare_key,
     prepare_metadata,
     prepare_user_text,
     same_after_redaction,
+    scan_sensitive,
 )
 
 __all__ = [
@@ -21,10 +23,12 @@ __all__ = [
     "find_redacted_duplicate",
     "ContentOrigin",
     "PreparedContent",
+    "SensitiveScan",
     "pii_redaction_enabled",
     "prepare_for_save",
     "prepare_key",
     "prepare_metadata",
     "prepare_user_text",
     "same_after_redaction",
+    "scan_sensitive",
 ]

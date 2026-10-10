@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 YOUNG_FILE_S = 600.0
 _SKIP_DIRS = ("tmp",)
+# Only a content-addressed original (``files.is_original``) can be a stray. Everything else
+# under media/ (uploads.db and its sidecars, anything a later release adds) is never collected.
 
 
 @dataclass
@@ -41,6 +43,7 @@ class GcReport:
     files_skipped_young: int = 0
     rows_removed: int = 0
     files_removed: int = 0
+    anchors_filled: int = 0
 
 
 def _memory_conn(root: Path) -> sqlite3.Connection | None:
@@ -78,6 +81,11 @@ def _media_memories(conn: sqlite3.Connection, profile_id: str) -> list[tuple[str
     return out
 
 
+def _unanchored(named: list[tuple[str, str]], every: dict[str, str | None]) -> list[tuple[str, str]]:
+    """(memory_id, media_id) of memories that name a picture whose row has no anchor yet."""
+    return [(memory_id, media_id) for memory_id, media_id in named if media_id in every and not every[media_id]]
+
+
 def _stray_files(store, root: Path, now: float) -> tuple[list[Path], int]:
     known = store.known_relpaths()
     base = files.media_root(root)
@@ -89,7 +97,7 @@ def _stray_files(store, root: Path, now: float) -> tuple[list[Path], int]:
         rel = path.relative_to(base)
         if rel.parts[0] in _SKIP_DIRS or path.is_symlink() or not path.is_file():
             continue
-        if rel.as_posix() in known:
+        if not files.is_original(rel.as_posix()) or rel.as_posix() in known:
             continue
         if now - path.stat().st_mtime < YOUNG_FILE_S:
             young += 1
@@ -136,9 +144,50 @@ def _memory_side(store, conn: sqlite3.Connection, profile_id: str, report: GcRep
     alive = _existing(conn, profile_id, sorted(set(anchored.values())))
     orphans = sorted(m for m, a in anchored.items() if a not in alive)
     report.rows_without_memory = orphans
-    report.memories_without_row = sorted(m for m, media_id in _media_memories(conn, profile_id)
-                                         if media_id not in every)
+    named = _media_memories(conn, profile_id)
+    report.memories_without_row = sorted(m for m, media_id in named if media_id not in every)
+    # A picture saved while its memory was still queued has no anchor yet; the memory names it.
+    for memory_id, media_id in _unanchored(named, every):
+        report.anchors_filled += 1
+        if not report.dry_run:
+            store.fill_anchor(media_id, memory_id)
     if orphans and not report.dry_run:
         out = erase_items(store, root, orphans)
         report.rows_removed = out["items"]
         report.files_removed += out["files"]
+
+
+def fill_anchors(profile_id: str | None = None, *, data_root: str | Path | None = None) -> int:
+    """Link pictures saved while their memory was queued to that memory; returns how many were linked.
+
+    This is only the anchor part of ``gc``: nothing is ever deleted, so it is safe to run on a
+    timer. With no ``profile_id`` every profile that has an unanchored picture is looked at.
+    """
+    if data_root is None:
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        data_root = canonical_data_root()
+    root = Path(data_root)
+    if not media_db_exists(root):
+        return 0
+    store = open_media_store(data_root=root)
+    if store is None:
+        return 0
+    conn = None
+    filled = 0
+    try:
+        profiles = [profile_id] if profile_id else store.profiles_missing_anchor()
+        if not profiles:
+            return 0
+        conn = _memory_conn(root)
+        if conn is None:
+            return 0
+        for profile in profiles:
+            every = store.anchors(profile)
+            for memory_id, media_id in _unanchored(_media_memories(conn, profile), every):
+                filled += int(store.fill_anchor(media_id, memory_id))
+    finally:
+        if conn is not None:
+            conn.close()
+        store.close()
+    return filled

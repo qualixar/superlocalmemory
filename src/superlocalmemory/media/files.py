@@ -13,6 +13,7 @@ the media folder; nothing here follows a link out of it.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -22,9 +23,19 @@ from pathlib import Path
 
 _SHA = re.compile(r"[0-9a-f]{64}")
 _EXT = re.compile(r"[a-z0-9]{1,8}")
+#: ``ab/ab<62 hex>.ext``: the only shape an original takes (see ``original_relpath``).
+_ORIGINAL = re.compile(r"([0-9a-f]{2})/\1[0-9a-f]{62}\.[a-z0-9]{1,8}")
 _STALE_S = 3600.0
 _swept: set[str] = set()
 _sweep_lock = threading.Lock()
+
+
+#: What a person is told when a save fails because the disk (or their quota) is full.
+DISK_FULL = "The disk is full. Free some space and try again."
+
+
+def is_disk_full(exc: BaseException) -> bool:
+    return isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC))
 
 
 def media_root(data_root: str | Path) -> Path:
@@ -36,6 +47,15 @@ def original_relpath(stored_sha256: str, ext: str) -> str:
     if not _SHA.fullmatch(stored_sha256 or "") or not _EXT.fullmatch(ext or ""):
         raise ValueError("invalid content address")
     return f"{stored_sha256[:2]}/{stored_sha256}.{ext}"
+
+
+def is_original(relpath: str) -> bool:
+    """True only for a content-addressed original.
+
+    Everything else under ``media/`` (``uploads.db`` and its sidecars, scratch files, anything a later
+    release adds) is not an original: it is never collected as a stray and never copied into a backup.
+    """
+    return _ORIGINAL.fullmatch(relpath or "") is not None
 
 
 def original_path(data_root: str | Path, stored_sha256: str, ext: str) -> Path:

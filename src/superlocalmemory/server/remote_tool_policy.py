@@ -208,8 +208,11 @@ def denial_message(tool: str, key_name: str, scope: str) -> str:
     if tool in MESH_TOOLS or tool in MEDIA_TOOLS:
         what, extra = (("to talk to your other bots", "mesh") if tool in MESH_TOOLS
                        else ("to use images and documents", "media"))
+        switch = ("Let these apps message your other bots" if extra == "mesh"
+                  else "Let these apps save and read pictures and documents")
         return (f"'{tool}' needs the app to be allowed {what} and the remote key "
-                f"'{key_name}' to allow it: slm remote keys allow {key_name} {extra}. "
+                f"'{key_name}' to allow it. On the SLM computer, switch on \"{switch}\" "
+                f"in Connected apps, or run: slm remote keys allow {key_name} {extra}. "
                 f"[{DENIAL_CODE}]")
     return f"'{tool}' is not available to remote key '{key_name}'. [{DENIAL_CODE}]"
 

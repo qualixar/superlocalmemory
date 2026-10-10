@@ -8,12 +8,14 @@ A web app cannot type a file into a tool call. It asks for a link instead; the
 person opens the link in any browser, picks the file and presses Save, and the
 file travels to this computer over the connection that is already open. The
 link works once, for ten minutes, and nothing is stored in the cloud on the way.
+It is for the person alone and must not be shared with anyone.
 
 Only a remote app can ask: an app on this computer passes a path to
 ``remember_media`` or ``remember_document``. A remote app needs what the saving
 tools need: the signed media and write permissions in its grant, and a write key
 that has opted in to media. The link is bound to that connection, key and
-profile; the profile is the key's own, never an argument.
+profile and to the app (authorization) that asked for it, so taking that app's
+access away ends its links; the profile is the key's own, never an argument.
 """
 
 from __future__ import annotations
@@ -72,7 +74,8 @@ def _link(kind: str, note: str) -> dict[str, Any]:
     if "upload-v1" not in companion.CONNECTOR_FEATURES:
         return _fail("update_required", "This computer's SuperLocalMemory must be updated to use upload links.")
     try:
-        minted = default_links().mint(grant.connection_id, key.key_id, key.profile, kind, note or "")
+        minted = default_links().mint(grant.connection_id, key.key_id, key.profile, kind, note or "",
+                                      authorization_id=grant.authorization_id)
     except UploadError as refused:
         return _fail(refused.code, refused.message)
     url = f"{UPLOAD_BASE_URL}/u/{grant.connection_id}/{minted.token}"
@@ -80,7 +83,8 @@ def _link(kind: str, note: str) -> dict[str, Any]:
     return {"success": True, "kind": kind, "url": url, "expires_at": expires,
             "max_mb": minted.max_bytes // (1024 * 1024),
             "message": (f"Tell the person: open this link to add the {_WORDS[kind]}, pick the file and press Save. "
-                        f"It works once and expires in 10 minutes: {url}")}
+                        "The link works once, expires in 10 minutes, and is only for them: do not share it "
+                        f"with anyone. {url}")}
 
 
 def register_upload_link_tool(server: Any) -> None:
@@ -93,8 +97,8 @@ def register_upload_link_tool(server: Any) -> None:
 
         Use this when you cannot send the file yourself. ``kind`` is "image" or "document";
         ``note`` is the words to save with it. Show the person the link and ask them to open it,
-        pick the file and press Save. Only for apps on other computers: it works once and expires
-        in 10 minutes.
+        pick the file and press Save. Only for apps on other computers: it works once, expires
+        in 10 minutes, and must not be shared with anyone.
         """
         try:
             return await asyncio.to_thread(_link, kind, note)

@@ -149,7 +149,10 @@ def register_kind_tools(server, get_engine: Callable) -> None:
 
         if parse_kind(kind) is None:
             return _invalid_kind_error()
-        path = "/fact/" + urllib.parse.quote(fact_id, safe="")
+        from superlocalmemory.mcp.remote_visibility import with_view
+
+        # A remote app is marked, so the daemon changes only what that app may see.
+        path = with_view("/fact/" + urllib.parse.quote(fact_id, safe=""))
         result = await _kinds_request("PATCH", path,
                                       _body_with_profile({"kind": kind}, profile_id))
         if result.get("success") and not result.get("ok", True):
@@ -215,7 +218,9 @@ def register_kind_tools(server, get_engine: Callable) -> None:
             if raw.get("kind") is not None:
                 entry["kind"] = raw["kind"]
             cleaned.append(entry)
-        return await _kinds_request("POST", "/confirm",
+        from superlocalmemory.mcp.remote_visibility import with_view
+
+        return await _kinds_request("POST", with_view("/confirm"),
                                     _body_with_profile({"items": cleaned}, profile_id))
 
 

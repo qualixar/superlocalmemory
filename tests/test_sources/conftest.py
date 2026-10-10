@@ -12,6 +12,16 @@ from superlocalmemory.media import open_media_store
 from superlocalmemory.sources.host import SourceHost
 
 
+class ListDb:
+    """Like ``storage.database.DatabaseManager``: ``execute`` returns a list of rows, never a cursor."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        return self._conn.execute(sql, params).fetchall()
+
+
 class FakeRuntime:
     ready = True
 
@@ -108,3 +118,14 @@ def env(tmp_path, monkeypatch):
     sources.configure(e.host)
     yield e
     sources.configure(None)
+
+
+@pytest.fixture(autouse=True)
+def _media_ready_by_default(monkeypatch):
+    """Folder tests fake the PDF and picture savers; images & documents count as set up.
+
+    test_media_not_ready.py turns this off to cover files skipped while the feature was off.
+    """
+    from superlocalmemory.sources import ingest
+
+    monkeypatch.setattr(ingest, "media_ready", lambda: True)

@@ -350,7 +350,7 @@ def test_ingest_refuses_when_the_index_was_built_for_another_space(env, monkeypa
     assert save(env).status == "stored"  # separate
     monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
     receipt = save(env, png("b"))
-    assert receipt.status == "refused" and "different model" in receipt.reason and "rebuild" in receipt.reason
+    assert receipt.status == "refused" and "different model" in receipt.reason and "slm media repair" in receipt.reason
     assert len(env.runtime.requests) == 1
     assert env.store.count_and_bytes("p1")[0] == 1
     assert not list((env.root / "media" / "tmp").iterdir())
@@ -447,3 +447,94 @@ def test_a_one_word_note_without_image_text_still_saves(env):
     env.runtime.on_remember = _admitting
     r = save(env, content="cat")
     assert r.status == "stored" and env.runtime.requests[0].content.startswith("cat")
+
+
+def test_a_local_save_waits_out_a_cold_start_and_a_web_app_gets_an_answer_in_time(monkeypatch):
+    """Loading the picture model takes about 45 s on a Mac. A person or agent on this computer waits
+    for it; a web app's call must answer within its 25 s relay budget, so it is told to ask again."""
+    monkeypatch.delenv("SLM_MEDIA_COLD_WAIT_S", raising=False)
+    assert ingest._cold_wait_s(remote=False) >= 90
+    assert ingest._cold_wait_s(remote=True) <= 20
+    monkeypatch.setenv("SLM_MEDIA_COLD_WAIT_S", "5")
+    assert ingest._cold_wait_s(remote=False) == 5 and ingest._cold_wait_s(remote=True) == 5
+
+
+def test_an_upload_link_save_waits_out_a_cold_start(env, monkeypatch):
+    """A web app's live call answers fast; an upload link finishes in the background and waits."""
+    seen = []
+    monkeypatch.setattr(ingest, "_cold_wait_s", lambda remote=False: seen.append(remote) or 0.01)
+    env.client.warm = False
+    remote_inp = lambda: MediaInput(base64=base64.b64encode(png()).decode(), remote=True)
+    save(env, inp=remote_inp())
+    save(env, inp=remote_inp(), can_wait=True)
+    assert seen == [True, False]
+
+
+# -- remote vetting: "not scanned" is never "clean" (audit F2) ----------------------
+
+CUT_FILLER = "menu item " * 900  # 9,000 characters, past the 8,000-character cut
+
+
+def test_email_in_picture_text_blocks_remote_even_with_redaction_off(env):
+    env.client.ocr = ("rapidocr", "call amy@example.org for the table")
+    r = save(env, png("e1"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    # what is stored is untouched: redaction is off, so the address stays
+    assert "amy@example.org" in env.runtime.requests[-1].content
+
+
+def test_credential_after_the_ocr_cut_blocks_remote(env):
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}{KEY}")
+    r = save(env, png("e2"))
+    assert len(CUT_FILLER) > ingest.MAX_OCR_CHARS
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    assert KEY not in env.runtime.requests[-1].content  # the cut text is still what is stored
+
+
+def test_email_after_the_ocr_cut_blocks_remote_with_redaction_on(env):
+    env.config = SimpleNamespace(pii_redaction=True)
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}write to amy@example.org")
+    r = save(env, png("e3"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+
+
+def test_a_scan_that_cannot_run_is_not_clean(env, monkeypatch):
+    def boom(_text):
+        raise RuntimeError("scanner down")
+
+    monkeypatch.setattr(ingest, "scan_sensitive", boom)
+    env.client.ocr = ("rapidocr", "just a menu")
+    r = save(env, png("e4"))
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+
+
+def test_cached_ocr_keeps_the_scan_verdict(env):
+    env.client.ocr = ("rapidocr", "call amy@example.org for the table")
+    save(env, png("e5"))
+    again = save(env, png("e5"), profile_id="p2")
+    assert env.client.calls.count("ocr") == 1
+    assert env.store.get_item(again.media_id)["remote_ok"] == 0
+
+
+def test_clean_text_past_the_cut_is_still_remote_ok(env):
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}the end")
+    r = save(env, png("e6"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 1
+
+
+def test_picture_text_longer_than_the_scan_cap_is_not_shareable(env):
+    from superlocalmemory.memory_core import save_path
+
+    assert save_path.MAX_SCAN_CHARS == 1_000_000
+    env.client.ocr = ("rapidocr", "menu item " * 110_000)       # 1.1 million characters, nothing sensitive
+    r = save(env, png("e7"))
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    assert len(env.runtime.requests[-1].content) < 10_000        # what is stored is still the cut text
+
+
+def test_picture_text_at_the_scan_cap_is_still_scanned(env):
+    env.client.ocr = ("rapidocr", "x " * 500_000)                 # exactly 1,000,000 characters
+    r = save(env, png("e8"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 1

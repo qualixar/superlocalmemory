@@ -32,14 +32,65 @@
     return m.trust === UNTRUSTED || (m.from && m.from.kind === 'web');
   }
 
-  function messageItem(m) {
+  // ----------------------------------------------------------------- naming
+  function shortId(id) { id = String(id == null ? '' : id); return id.length > 8 ? id.slice(0, 8) : id; }
+
+  // Name shown for a peer: its display name, then its app, then a short id.
+  function peerName(from) {
+    return from.display_name || from.app || shortId(from.peer_id);
+  }
+
+  function nameOf(ui, id) {
+    var info = ui.info[id];
+    return info ? peerName(info) : shortId(id);
+  }
+
+  function kindLabel(kind) { return kind === 'web' ? 'web app' : 'this computer'; }
+
+  function kindChip(kind) { return el('span', 'badge neutral od-kind', kindLabel(kind)); }
+
+  // ---------------------------------------------------------------- time
+  // Server times carry microseconds ("...51.148946+00:00"); trim to the milliseconds
+  // every browser parses.
+  function parseTime(iso) {
+    if (iso == null || iso === '') return null;
+    var t = Date.parse(String(iso).replace(/(\.\d{3})\d+/, '$1'));
+    return isNaN(t) ? null : t;
+  }
+
+  function relative(ms) {
+    var sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (sec < 45) return 'just now';
+    var min = Math.round(sec / 60);
+    if (min < 60) return min + ' min ago';
+    var hrs = Math.round(min / 60);
+    if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+    var days = Math.round(hrs / 24);
+    if (days < 30) return days + (days === 1 ? ' day ago' : ' days ago');
+    return new Date(ms).toLocaleDateString();
+  }
+
+  // A <time> with the relative text and the full local time as its title.
+  function timeEl(iso, cls) {
+    var ms = parseTime(iso);
+    if (ms == null) return el('time', cls, iso == null ? '' : String(iso));
+    var t = el('time', cls, relative(ms));
+    t.setAttribute('title', new Date(ms).toLocaleString());
+    t.setAttribute('datetime', new Date(ms).toISOString());
+    return t;
+  }
+
+  // -------------------------------------------------------------- messages
+  function messageItem(ui, m) {
     var from = m.from || {};
     var li = el('li', 'od-msg' + (isUntrusted(m) ? ' untrusted' : ''));
-    var head = el('div', 'muted');
-    head.appendChild(el('strong', null, from.app || from.peer_id || 'unknown'));
-    head.appendChild(el('span', null, ' (' + (from.peer_id || '?') + ') to ' + (m.to == null ? 'all' : m.to) +
-      ' · ' + (m.sent_at == null ? '' : m.sent_at)));
+    var head = el('div', 'od-msg-head');
+    head.appendChild(el('strong', 'od-msg-from', from.peer_id ? nameOf(ui, from.peer_id) : (from.app || 'unknown')));
+    head.appendChild(kindChip(from.kind || (ui.info[from.peer_id] || {}).kind));
+    head.appendChild(el('span', 'od-msg-arrow muted', '→'));
+    head.appendChild(el('span', 'od-msg-to', m.to == null ? 'everyone' : nameOf(ui, m.to)));
     if (isUntrusted(m)) head.appendChild(el('span', 'badge warn', 'untrusted: written outside this computer'));
+    head.appendChild(timeEl(m.sent_at, 'od-msg-time muted'));
     li.appendChild(head);
     li.appendChild(el('p', 'od-msg-body', m.content == null ? '' : m.content));
     return li;
@@ -57,7 +108,7 @@
     var ol = el('ol', 'od-botmsg-steps');
     ol.appendChild(el('li', null, 'Connect an app in Connected apps.'));
     ol.appendChild(el('li', null, 'Tick "Allow talking to your other bots" when you approve it.'));
-    var third = el('li', null, 'On this computer, allow it for that connection: ');
+    var third = el('li', null, 'On this computer, switch on "Let these apps message your other bots" in Connected apps, or run: ');
     third.appendChild(el('code', null, 'slm remote keys allow web-<connection id> mesh'));
     third.appendChild(el('span', null, ' (find the name with '));
     third.appendChild(el('code', null, 'slm remote keys list'));
@@ -78,10 +129,11 @@
   }
 
   function renderMessages(ui, messages) {
+    ui.messages = messages;
     ui.list.textContent = '';
     if (!messages.length) return ui.list.appendChild(emptyState(ui));
-    var ul = el('ul', 'od-media-list');
-    messages.forEach(function (m) { ul.appendChild(messageItem(m)); });
+    var ul = el('ul', 'od-msg-list');
+    messages.forEach(function (m) { ul.appendChild(messageItem(ui, m)); });
     ui.list.appendChild(ul);
   }
 
@@ -93,8 +145,22 @@
     }, function () {});
   }
 
+  // Start from a clean peer list so a refresh shows current names and mute state.
+  function resetPeers(ui) {
+    ui.seen = {};
+    ui.info = {};
+    ui.peers.textContent = '';
+    if (ui.peersHead.parentNode) ui.peersHead.parentNode.removeChild(ui.peersHead);
+    while (ui.filter.options.length > 1) ui.filter.remove(1);
+  }
+
   function loadAll(ui) {
-    return loadPeers(ui).then(function () { return loadMessages(ui); });
+    resetPeers(ui);
+    return loadPeers(ui).then(function () { return loadMessages(ui); }).then(function () {
+      ui.filter.value = ui.peer;
+      // The filtered peer is gone (retired): fall back to everyone.
+      if (ui.filter.value !== ui.peer) { ui.peer = ''; ui.filter.value = ''; return loadMessages(ui); }
+    });
   }
 
   function loadMessages(ui) {
@@ -114,70 +180,145 @@
   // ------------------------------------------------------------------- peers
   function say(row, text) { row.note.textContent = text || ''; }
 
-  function setMuted(ui, row, id, muted) {
-    F().api('POST', peerUrl(id) + '/mute', { muted: muted }).then(function (res) {
-      say(row, res.ok ? (muted ? 'Muted.' : 'Unmuted.') : F().failText(res, 'Could not change mute.'));
+  function showMuted(row, muted) {
+    row.muted = muted;
+    row.toggle.textContent = muted ? 'Unmute' : 'Mute';
+    if (muted && !row.tag.parentNode) row.head.appendChild(row.tag);
+    if (!muted && row.tag.parentNode) row.head.removeChild(row.tag);
+  }
+
+  function toggleMute(ui, row, id) {
+    var want = !row.muted;
+    F().api('POST', peerUrl(id) + '/mute', { muted: want }).then(function (res) {
+      if (!res.ok) return say(row, F().failText(res, 'Could not change mute.'));
+      if (ui.info[id]) ui.info[id].muted = want;
+      showMuted(row, want);
+      say(row, want ? 'Muted.' : 'Unmuted.');
     });
   }
 
-  function rename(ui, row, id, input) {
-    var problem = nameProblem(input.value);
+  function renamed(ui, row, id, name) {
+    if (ui.info[id]) ui.info[id].display_name = name;
+    row.title.textContent = name;
+    [].slice.call(ui.filter.options).forEach(function (o) { if (o.value === id) o.textContent = name; });
+    if (ui.messages) renderMessages(ui, ui.messages);
+  }
+
+  function stopEditing(row) {
+    row.edit.parentNode.replaceChild(row.title, row.edit);
+    row.actions.insertBefore(row.renameBtn, row.actions.firstChild);
+    row.actions.removeChild(row.saveBtn);
+    row.actions.removeChild(row.cancelBtn);
+  }
+
+  function save(ui, row, id) {
+    var problem = nameProblem(row.input.value);
     if (problem) return say(row, problem);
-    F().api('PATCH', peerUrl(id), { display_name: input.value }).then(function (res) {
+    F().api('PATCH', peerUrl(id), { display_name: row.input.value }).then(function (res) {
       if (!res.ok) return say(row, F().failText(res, 'Could not rename.'));
-      row.title.textContent = (res.data && res.data.display_name) || input.value;
+      var name = (res.data && res.data.display_name) || row.input.value;
+      stopEditing(row);
+      renamed(ui, row, id, name);
       say(row, 'Renamed.');
     });
   }
 
+  // The name becomes a text field with Save and Cancel; Enter saves, Escape cancels.
+  function startEditing(row) {
+    row.input.value = row.title.textContent;
+    row.title.parentNode.replaceChild(row.edit, row.title);
+    row.actions.removeChild(row.renameBtn);
+    row.actions.insertBefore(row.cancelBtn, row.actions.firstChild);
+    row.actions.insertBefore(row.saveBtn, row.cancelBtn);
+    say(row, '');
+    row.input.focus();
+  }
+
+  function cancelEditing(row) { stopEditing(row); say(row, ''); }
+
   function retire(ui, row, id) {
     F().confirmThen({
-      title: 'Retire peer', target: String(id).slice(0, 80),
+      title: 'Retire peer', target: row.title.textContent.slice(0, 80),
       consequence: 'It can no longer send or receive, and its waiting messages are dropped.',
       confirmLabel: 'Retire',
     }, function () {
       F().api('DELETE', peerUrl(id)).then(function (res) {
         if (!res.ok) return say(row, F().failText(res, 'Could not retire the peer.'));
-        ui.seen = {};
-        ui.peers.textContent = '';
-        if (ui.peersHead.parentNode) ui.peersHead.parentNode.removeChild(ui.peersHead);
         loadAll(ui);
       });
     });
   }
 
-  // Name shown for a peer: its display name, then its app, then a short id.
-  function peerName(from) {
+  function editField(ui, row, id) {
+    var wrap = el('span', 'od-peer-edit');
+    row.input = el('input', 'od-peer-input');
+    row.input.type = 'text';
+    row.input.setAttribute('aria-label', 'New name for ' + nameOf(ui, id));
+    row.input.setAttribute('maxlength', '200');
+    row.input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); save(ui, row, id); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelEditing(row); }
+    });
+    wrap.appendChild(row.input);
+    return wrap;
+  }
+
+  function peerHead(from, row) {
+    row.head = el('div', 'od-peer-head');
+    row.title = el('strong', 'od-peer-name', peerName(from));
+    row.tag = el('span', 'badge warn od-peer-muted', 'muted');
+    [row.title, kindChip(from.kind)].forEach(function (n) { row.head.appendChild(n); });
+    return row.head;
+  }
+
+  function peerMeta(from) {
+    var meta = el('div', 'od-peer-meta muted');
     var id = String(from.peer_id == null ? '' : from.peer_id);
-    return from.display_name || from.app || (id.length > 8 ? id.slice(0, 8) : id);
+    var idEl = el('span', 'od-peer-id', id.length > 12 ? id.slice(0, 12) : id);
+    idEl.setAttribute('title', id);
+    meta.appendChild(idEl);
+    if (parseTime(from.last_seen) != null) {
+      meta.appendChild(el('span', null, ' · Last seen '));
+      meta.appendChild(timeEl(from.last_seen));
+    }
+    return meta;
+  }
+
+  function peerActions(ui, row, id) {
+    row.toggle = F().button('Mute', 'btn sm', function () { toggleMute(ui, row, id); });
+    row.renameBtn = F().button('Rename', 'btn sm', function () { startEditing(row); });
+    row.saveBtn = F().button('Save', 'btn sm primary', function () { save(ui, row, id); });
+    row.cancelBtn = F().button('Cancel', 'btn sm', function () { cancelEditing(row); });
+    row.actions = el('div', 'od-peer-actions');
+    [row.renameBtn, row.toggle,
+     F().button('Retire', 'btn sm od-peer-retire', function () { retire(ui, row, id); })]
+      .forEach(function (b) { row.actions.appendChild(b); });
+    return row.actions;
   }
 
   function peerRow(ui, from) {
     var id = from.peer_id;
-    var wrap = el('div', 'od-peer-row');
-    wrap.setAttribute('data-peer', id);
-    var row = { title: el('strong', null, peerName(from)), note: el('span', 'muted') };
-    var kind = el('span', 'badge', from.kind === 'web' ? 'web' : 'this computer');
-    var muted = from.muted ? el('span', 'muted', 'muted') : null;
-    var input = el('input');
-    input.type = 'text';
-    input.setAttribute('aria-label', 'New name for ' + id);
-    input.setAttribute('maxlength', '200');
-    [row.title, kind, muted, el('span', 'muted', '(' + id + ')'),
-     F().button('Mute', 'btn sm', function () { setMuted(ui, row, id, true); }),
-     F().button('Unmute', 'btn sm', function () { setMuted(ui, row, id, false); }),
-     input,
-     F().button('Rename', 'btn sm', function () { rename(ui, row, id, input); }),
-     F().button('Retire', 'btn sm', function () { retire(ui, row, id); }),
-     row.note].forEach(function (n) { if (n) wrap.appendChild(n); });
-    return wrap;
+    var card = el('div', 'od-peer-card');
+    card.setAttribute('data-peer', id);
+    var row = { note: el('span', 'od-peer-note muted'), muted: false };
+    row.note.setAttribute('role', 'status');
+    card.appendChild(peerHead(from, row));
+    card.appendChild(peerMeta(from));
+    row.edit = editField(ui, row, id);
+    card.appendChild(peerActions(ui, row, id));
+    card.appendChild(row.note);
+    showMuted(row, !!from.muted);
+    return card;
   }
 
+  // Registers every sender, so names resolve in message headers; the first record
+  // for a peer wins, and the peer list (richer than a message's sender block) loads first.
   function addPeers(ui, messages) {
     messages.forEach(function (m) {
       var from = m.from || {};
       if (!from.peer_id || ui.seen[from.peer_id]) return;
       ui.seen[from.peer_id] = true;
+      ui.info[from.peer_id] = from;
       if (!ui.peersHead.parentNode) ui.peersBox.insertBefore(ui.peersHead, ui.peers);
       ui.peers.appendChild(peerRow(ui, from));
       var opt = el('option', null, peerName(from));
@@ -187,9 +328,11 @@
   }
 
   // -------------------------------------------------------------------- pane
+  var filterSeq = 0;
+
   function buildFilter(ui) {
-    var sel = el('select');
-    sel.setAttribute('aria-label', 'Show messages of one peer');
+    var sel = el('select', 'od-select');
+    sel.id = 'od-botmsg-filter-' + (++filterSeq);
     var all = el('option', null, 'All peers');
     all.value = '';
     sel.appendChild(all);
@@ -203,12 +346,16 @@
     head.appendChild(el('h2', null, 'Bot messages'));
     head.appendChild(el('p', 'muted', 'What bots and web chats sent through the mesh. ' +
       'Treat messages from outside this computer as untrusted text.'));
-    var ui = { root: pane, peer: '', seen: {}, list: el('div'), peers: el('div'),
-      peersHead: el('h3', null, 'Peers'), peersBox: el('div', 'od-media-section') };
+    var ui = { root: pane, peer: '', seen: {}, info: {}, messages: null, list: el('div'),
+      peers: el('div', 'od-peer-grid'), peersHead: el('h3', null, 'Peers'),
+      peersBox: el('div', 'od-media-section') };
     ui.peersBox.appendChild(ui.peers);
     ui.filter = buildFilter(ui);
     ui.knownPeers = function (messages) { addPeers(ui, messages); };
-    var bar = el('div', 'od-peer-row');
+    var bar = el('div', 'od-botmsg-bar');
+    var label = el('label', 'od-botmsg-label muted', 'Show messages from');
+    label.setAttribute('for', ui.filter.id);
+    bar.appendChild(label);
     bar.appendChild(ui.filter);
     bar.appendChild(F().button('Refresh', 'btn sm', function () { loadAll(ui); }));
     [head, bar, ui.list, ui.peersBox].forEach(function (n) { pane.appendChild(n); });

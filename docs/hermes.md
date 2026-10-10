@@ -1,12 +1,12 @@
 # Hermes native integration
 
-SuperLocalMemory 4.1.24 ships a native Hermes plugin. It is a companion to,
+SuperLocalMemory 4.1.25 ships a native Hermes plugin. It is a companion to,
 not a replacement for, Hermes's built-in memory provider and configuration.
 
 Install the owning runtime first:
 
 ```bash
-python -m pip install --upgrade superlocalmemory==4.1.24
+python -m pip install --upgrade superlocalmemory==4.1.25
 slm doctor
 ```
 
@@ -20,7 +20,7 @@ To pin an exact release, add `--ref` with that release's 40-character commit.
 Hermes asks before it enables the plugin (`--no-enable` installs it disabled);
 the plugin cannot grant itself capabilities or MCP access.
 
-The plugin registers 15 namespaced skills, four on-demand Hermes child-agent
+The plugin ships 16 namespaced skills, four on-demand Hermes child-agent
 roles, `/slm <command>`, and `/slm-<command>` aliases for the public SLM CLI.
 It calls only the configured `superlocalmemory` MCP server. Grant that server
 to this plugin when Hermes asks; no wildcard MCP grant is needed.

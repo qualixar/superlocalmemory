@@ -29,6 +29,7 @@ from superlocalmemory.media.store_doc_erase import DocumentEraseMixin
 from superlocalmemory.media.store_documents import DocumentsMixin
 from superlocalmemory.media.store_erase import EraseMixin
 from superlocalmemory.media.store_jobs import JobsMixin, utc_stamp
+from superlocalmemory.media.store_revet import RevetMixin
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ def _exif_text(raw: Any) -> str:
     return json.dumps(kept, sort_keys=True)
 
 
-class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
+class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin, RevetMixin):
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._wlock = threading.RLock()
@@ -234,6 +235,12 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                              (f"space_signature:{space_id}", json.dumps(signature, sort_keys=True)))
             return space_id
 
+    def record_signature(self, space_id: str, signature: dict[str, Any]) -> None:
+        """Replace what a space says it was built with (its vectors depend only on the image model)."""
+        with self._write() as conn:
+            conn.execute("INSERT OR REPLACE INTO media_schema(key, value) VALUES (?, ?)",
+                         (f"space_signature:{space_id}", json.dumps(signature, sort_keys=True)))
+
     # -- items -------------------------------------------------------------
     def insert_item(self, **fields: Any) -> str:
         unknown = set(fields) - set(_ITEM_FIELDS)
@@ -329,6 +336,20 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         row = self._read().execute(
             "SELECT COUNT(*) FROM media_vector_rows WHERE profile_id = ?", (profile_id,)).fetchone()
         return int(row[0])
+
+    def images_without_vector(self, space_id: str | None) -> list[dict[str, Any]]:
+        """Active pictures with a file and no vector in ``space_id`` (every picture when it is None).
+
+        Rows come from every profile, oldest first: ``{"media_id", "profile_id", "original_relpath"}``.
+        """
+        rows = self._read().execute(
+            "SELECT i.media_id, i.profile_id, i.original_relpath FROM media_items i "
+            "WHERE i.kind = 'image' AND i.state = 'active' "
+            "AND COALESCE(i.original_relpath, '') != '' "
+            "AND NOT EXISTS (SELECT 1 FROM media_vector_rows v "
+            "WHERE v.media_id = i.media_id AND v.space_id = ?) "
+            "ORDER BY i.created_at, i.media_id", (space_id or "",)).fetchall()
+        return [dict(r) for r in rows]
 
     def memory_ids_of(self, media_ids: Sequence[str]) -> dict[str, list[str]]:
         """The memories that stand for each active item: its anchor, or a page's own memories."""

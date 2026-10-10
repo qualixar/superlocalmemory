@@ -45,6 +45,16 @@ _SENSITIVE_READ_PREFIXES = (
     # so /api/summary/projects and /api/summary/sessions are covered too —
     # the project list was an exact-path miss before.
     "/api/summary", "/api/v3/views",
+    # 4.1.25 audit: these answered a session-less caller in company mode.
+    # Learning and trust counters, agent trust scores, the feature switches,
+    # compliance and audit records, workspace names, lifecycle and tier
+    # counts, adapter state, provider and model settings, and setup status.
+    "/api/v3/learning", "/api/v3/trust", "/api/v3/features",
+    "/api/compliance", "/api/lifecycle", "/api/tiers", "/api/profiles",
+    "/api/adapters", "/api/v3/answer-check", "/api/v3/auto",
+    "/api/v3/graph", "/api/v3/runtime", "/api/v3/provider",
+    "/api/v3/hooks", "/api/v3/ide", "/api/v3/math", "/api/v3/ollama",
+    "/api/v3/components",
 )
 _SENSITIVE_READ_EXACT_PATHS = (
     "/api/search", "/api/v3/recall/trace", "/api/patterns",
@@ -68,6 +78,16 @@ def is_sensitive_dashboard_read(method: str, path: str) -> bool:
             or path.startswith("/api/v3/recall")
         )
     )
+
+
+#: Status reads the command line makes (``slm features``). They hold no memory content,
+#: so the daemon capability, which only this computer's own user can read, is enough
+#: for them even where every person must sign in. Anyone else needs a session.
+CLI_STATUS_READ_PREFIXES = ("/api/v3/features",)
+
+
+def is_cli_status_read(method: str, path: str) -> bool:
+    return method == "GET" and path.startswith(CLI_STATUS_READ_PREFIXES)
 
 
 def _json(status: int, message: str):
@@ -137,6 +157,18 @@ def _capability_ok(request, app_state) -> bool:
                                     str(getattr(descriptor, "instance_id", ""))))
 
 
+def status_details_allowed(request, app_state) -> bool:
+    """Whether ``GET /status`` may carry paths and counts for this caller.
+
+    Where every person must sign in, a caller with no session (and without the
+    daemon's private capability, which the command line and MCP send) gets the
+    discovery fields only. Everywhere else the answer is unchanged.
+    """
+    return rbac_read_gate(
+        request, app_state, machine_principal=_capability_ok(request, app_state),
+    ) is None
+
+
 def mesh_read_gate(request, app_state):
     """READ for ``GET /mesh/*``. ``None`` allows; else the refusal response.
 
@@ -163,8 +195,11 @@ def mesh_read_gate(request, app_state):
 
 
 __all__ = [
+    "CLI_STATUS_READ_PREFIXES",
     "READ_ONLY_POST_PATHS",
+    "is_cli_status_read",
     "is_sensitive_dashboard_read",
     "mesh_read_gate",
     "rbac_read_gate",
+    "status_details_allowed",
 ]

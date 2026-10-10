@@ -2,7 +2,7 @@
 
 Built by `scripts/build-codex-plugin.mjs` from the single source in `plugin-src/`. Version stamped from `plugin-src/manifest.json`.
 
-Version: **4.1.24**
+Version: **4.1.25**
 
 ## Derived — do not edit by hand
 
@@ -28,6 +28,7 @@ Version: **4.1.24**
 - `skills/slm-governance/SKILL.md`
 - `skills/slm-graph/SKILL.md`
 - `skills/slm-loop/SKILL.md`
+- `skills/slm-media/SKILL.md`
 - `skills/slm-mesh/SKILL.md`
 - `skills/slm-profile/SKILL.md`
 - `skills/slm-recall/SKILL.md`
