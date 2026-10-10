@@ -129,7 +129,7 @@ describe('Find a picture', () => {
         const h = setup({ results: [
             hit('f1', 'Quarterly numbers\nRevenue up 12%', 0.91, pic(MID)),
             hit('f2', 'A plain text note about quarterly numbers', 0.88, null),
-            hit('f3', 'Page text\nsecond line', 0.5, pic(MID2, 'page')),
+            hit('f3', 'Page text\nsecond line', 0.85, pic(MID2, 'page')),
         ] });
         await h.open();
         await h.find('the slide with the quarterly numbers');
@@ -141,6 +141,19 @@ describe('Find a picture', () => {
         assert.ok(!rows[0].textContent.includes('Revenue up 12%'), 'first line only');
         assert.match(rows[0].textContent, /91%/);
         assert.ok(!h.pane.textContent.includes('plain text note'));
+    });
+
+    it('shows only strong matches: near the best one, eight at most', async () => {
+        const many = Array.from({ length: 12 }, (_, i) =>
+            hit('g' + i, 'pic ' + i, 0.80 - i * 0.001, pic(String(i).padStart(2, '0').repeat(16))));
+        const h = setup({ results: [hit('top', 'best', 0.69, pic(MID)), hit('weak', 'weak', 0.53, pic(MID2))] });
+        await h.open();
+        await h.find('the dashboard');
+        assert.deepEqual(h.found().map(r => r.textContent.split(/\d+%/)[0].trim()), ['best']);
+        const h2 = setup({ results: many });
+        await h2.open();
+        await h2.find('pictures');
+        assert.equal(h2.found().length, 8);
     });
 
     it('does not make a write-credential request or clear the dashboard cache', async () => {

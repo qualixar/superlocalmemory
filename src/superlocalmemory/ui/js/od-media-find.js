@@ -11,6 +11,8 @@
   var ID_RE = /^[0-9a-f]{32}$/;
   var LIMIT = 50;
   var LINE_MAX = 140;
+  var SHOW_MAX = 8;      // the best few, not a list to scroll
+  var NEAR_BEST = 0.10;  // weaker matches than this below the best one are left out
   var EMPTY = 'Nothing matched. Pictures are found by what they show and the text inside them.';
   var FAILED = 'Search did not work. Try again in a moment.';
 
@@ -40,9 +42,14 @@
   }
 
   function withPicture(results) {
-    return (results || []).filter(function (r) {
+    var found = (results || []).filter(function (r) {
       return r && r.media && ID_RE.test(String(r.media.media_id || ''));
     });
+    var best = found.reduce(function (m, r) { var s = Number(r.score); return isFinite(s) && s > m ? s : m; }, -Infinity);
+    if (isFinite(best)) {
+      found = found.filter(function (r) { var s = Number(r.score); return !isFinite(s) || s >= best - NEAR_BEST; });
+    }
+    return found.slice(0, SHOW_MAX);
   }
 
   function card(r) {
