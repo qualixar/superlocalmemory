@@ -41,7 +41,8 @@ def test_every_tool_the_instructions_name_is_one_a_web_app_can_be_granted():
     assert tools == {"recall", "search", "fetch", "get_status", "remember",
                      "session_init", "close_session", "report_feedback", "report_outcome",
                      "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait", "mesh_state",
-                     "get_media", "media_status", "remember_media", "remember_document"}
+                     "get_media", "media_status", "remember_media", "remember_document",
+                     "media_upload_link"}
     for block in (_block("Full"), _block("Short")):
         named = {word for word in re.findall(r"\b[a-z]+(?:_[a-z]+)*\b", block)
                  if word in tools or word.endswith(("_status", "_init"))}

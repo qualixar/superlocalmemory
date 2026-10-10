@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-SuperLocalMemory exposes 108 tools and 7 resources through the Model Context
+SuperLocalMemory exposes 109 tools and 7 resources through the Model Context
 Protocol (MCP). A client sees only the tools its tool set allows (see
 [Which tools a client sees](#which-tools-a-client-sees)); the registered
 function signatures are the source of truth for names and parameters, and a
@@ -50,11 +50,11 @@ changes. The tool set is fixed when the MCP server starts.
 | `full` | 57 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
 | `power` | 69 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | 9 | the mesh tools only |
-| `whole` | 108 | every registered tool |
+| `whole` | 109 | every registered tool |
 
 With no `SLM_MCP_PROFILE`, a client gets the same 57 tools as `full` (the mesh
 tools are included while mesh is enabled, which is the default).
-`SLM_MCP_ALL_TOOLS=1` exposes all 108. `SLM_MCP_TOOLS=name1,name2` exposes
+`SLM_MCP_ALL_TOOLS=1` exposes all 109. `SLM_MCP_TOOLS=name1,name2` exposes
 exactly the names listed. An unknown `SLM_MCP_PROFILE` value is an error, not a
 silent fallback.
 
@@ -489,6 +489,7 @@ needs a write key. A remote app cannot name a file (`path`), can paste at most
 | `get_media` | `media_id`, `variant` (`thumb`), `profile_id` | Returns the thumbnail as an image, never as text data |
 | `remember_document` | exactly one of `path` or `base64` (a PDF); `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF; returns `status`, `document_id` and `job_id`. Links are not accepted |
 | `media_status` | `job_id` (32 hex characters), `profile_id` | Progress of a document's background work |
+| `media_upload_link` | `kind` (`image` or `document`), `note` | For apps on other computers only. Returns a one-time link (`url`, `expires_at`, `max_mb`) the person opens in any browser to pick the file; it works once, expires in 10 minutes, and the file goes straight to this computer. Needs the same two permissions as saving. An app on this computer passes a `path` instead |
 
 ---
 

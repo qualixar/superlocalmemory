@@ -144,6 +144,17 @@ only when the app asks for them.
   list (`SLM_MEDIA_URL_HOSTS`, empty by default, which refuses every link).
   Saving also needs a write key.
 
+**Adding a picture or PDF from a chat.** A chat cannot hand a file to the tool
+directly. Ask the app to make an upload link ("add a picture to my memory"). It
+answers with a link that works once and expires in 10 minutes. Open the link in
+any browser, pick the file and press Save; the page says "Saved to your memory"
+when your computer has it. The file goes from your browser to your computer
+over the connection that is already open, and nothing is kept in the cloud on
+the way. Your computer must be awake and running SuperLocalMemory, and the app
+needs both boxes above and the `media` key permission. Pictures can be up to
+25 MB (PNG, JPEG or WebP) and PDFs up to 100 MB; each connection can make 3
+open links at a time and 20 uploads a day.
+
 Ticking a box is not enough. You must also allow it for the connection on your
 computer. Each connection has a remote key named `web-<connection id>`. Find it
 with `slm remote keys list`, then run:
