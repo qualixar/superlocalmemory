@@ -156,7 +156,9 @@ class SourceScanService:
         cutoff = utc_stamp(-self._interval_s)
         remote = self._host.remote_on()  # one check per pass
         for source in store.list_sources(states=("active", "offline", "paused")):
-            if remote and source["state"] == "paused":
+            if source["state"] == "paused":
+                if not remote:  # remote access is off: resume now, not after the interval
+                    store.queue_scan(source["profile_id"], source["source_id"])
                 continue
             last = source["last_scan_at"] or ""
             if last <= cutoff:
