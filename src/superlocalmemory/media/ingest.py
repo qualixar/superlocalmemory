@@ -250,11 +250,10 @@ def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
     return info
 
 
-def _place(job: _Job, info: dict[str, Any]) -> str:
-    target = files.original_path(job.root, info["stored_sha"], info["stored_ext"])
-    job.placed_new = not target.exists()
+def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
     try:
-        job.placed = files.place_original(job.root, info["stored_path"], info["stored_sha"], info["stored_ext"])
+        job.placed_new = not files.planned_path(job.root, profile_id, info["stored_path"], info["stored_ext"]).exists()
+        job.placed = files.place_original(job.root, info["stored_path"], profile_id, info["stored_ext"])
     except (OSError, ValueError):
         raise _refuse("The image could not be saved.") from None
     return job.placed
@@ -349,7 +348,7 @@ def _cleanup(job: _Job) -> None:
 def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> MediaReceipt:
     profile_id = args["profile_id"]
     info = _prepare(job, data)
-    relpath = _place(job, info)
+    relpath = _place(job, info, profile_id)
     ocr = _ocr(job, info)
     vector = job.client.embed_images([info["stored_path"]], wait_cold=False)[0]
     signature = _check_space(job, len(vector))

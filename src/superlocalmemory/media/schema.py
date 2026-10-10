@@ -10,8 +10,9 @@ documents or folder sources never needs a migration. Vectors live in one
 the same shape memory.db uses; ``media_vector_rows`` maps a vector row back
 to its item.
 
-Originals on disk are content-addressed and shared by all profiles:
-``<data_root>/media/<sha256[:2]>/<sha256>.<ext>``; ``original_relpath``
+Originals on disk are addressed per profile (the hash of profile id, a NUL
+byte and the file), so no file is shared between profiles:
+``<data_root>/media/<address[:2]>/<address>.<ext>``; ``original_relpath``
 is relative to ``<data_root>/media/`` and never contains a profile id.
 """
 

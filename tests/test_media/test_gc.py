@@ -11,8 +11,8 @@ from tests.test_media._erase_support import add_image, make_root
 def _setup(tmp_path, file_age=3600):
     root, db, store = make_root(tmp_path)
     db.add_memory("m1", fact_id="f1")
-    sha_ok, _ = add_image(root, store, media_id="a" * 32, memory_id="m1", data=b"ok")
-    sha_orphan_row, _ = add_image(root, store, media_id="b" * 32, memory_id="deleted", data=b"orph")
+    _, rel_ok = add_image(root, store, media_id="a" * 32, memory_id="m1", data=b"ok")
+    _, rel_orph = add_image(root, store, media_id="b" * 32, memory_id="deleted", data=b"orph")
     stray = files.media_root(root) / "ab" / ("ab" + "0" * 62 + ".png")
     stray.parent.mkdir(parents=True, exist_ok=True)
     stray.write_bytes(b"x")
@@ -20,27 +20,27 @@ def _setup(tmp_path, file_age=3600):
     old = time.time() - file_age
     os.utime(stray, (old, old))
     db.add_memory("m9", media_id="c" * 32)  # media-sourced memory, no row
-    return root, db, store, sha_ok, sha_orphan_row, stray
+    return root, db, store, rel_ok, rel_orph, stray
 
 
 def test_dry_run_reports_and_changes_nothing(tmp_path):
-    root, db, store, sha_ok, sha_orph, stray = _setup(tmp_path)
+    root, db, store, rel_ok, rel_orph, stray = _setup(tmp_path)
     rep = gc("p1", dry_run=True, data_root=root)
     assert rep.dry_run and rep.rows_without_memory == ["b" * 32]
     assert rep.files_without_row == [stray.name] and rep.memories_without_row == ["m9"]
     assert len(store.list_items("p1")) == 2 and stray.exists()
-    assert files.original_path(root, sha_orph, "png").exists()
+    assert (files.media_root(root) / rel_orph).exists()
     store.close()
 
 
 def test_real_run_fixes_rows_and_files_but_never_memories(tmp_path):
-    root, db, store, sha_ok, sha_orph, stray = _setup(tmp_path)
+    root, db, store, rel_ok, rel_orph, stray = _setup(tmp_path)
     rep = gc("p1", dry_run=False, data_root=root)
     assert not rep.dry_run
     assert [r["media_id"] for r in store.list_items("p1")] == ["a" * 32]
     assert not stray.exists()
-    assert not files.original_path(root, sha_orph, "png").exists()
-    assert files.original_path(root, sha_ok, "png").exists()
+    assert not (files.media_root(root) / rel_orph).exists()
+    assert (files.media_root(root) / rel_ok).exists()
     assert db.execute("SELECT 1 FROM memories WHERE memory_id='m9'")  # user memory is kept
     assert rep.memories_without_row == ["m9"]
     store.close()
@@ -68,7 +68,7 @@ def test_a_real_run_keeps_the_stored_pdf_of_a_document(tmp_path):
     sha = hashlib.sha256(data).hexdigest()
     scratch = tmp_path / "upload.pdf"
     scratch.write_bytes(data)
-    relpath = files.place_original(root, scratch, sha, "pdf")
+    relpath = files.place_original(root, scratch, "p1", "pdf")
     old = time.time() - 3600
     os.utime(files.media_root(root) / relpath, (old, old))
     store.insert_document(document_id="d" * 32, profile_id="p1", sha256=sha, title="kept.pdf",

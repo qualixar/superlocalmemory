@@ -206,17 +206,17 @@ def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) ->
     return store.enqueue_job(profile_id, "document", 0, {**payload, "document_id": doc_id})
 
 
-def _place(root: Path, tmp: Path, sha: str) -> tuple[str, bool]:
-    new = not files.original_path(root, sha, "pdf").exists()
+def _place(root: Path, tmp: Path, profile_id: str) -> tuple[str, bool]:
     try:
-        return files.place_original(root, tmp, sha, "pdf"), new
+        new = not files.planned_path(root, profile_id, tmp, "pdf").exists()
+        return files.place_original(root, tmp, profile_id, "pdf"), new
     except (OSError, ValueError):
         raise _refuse("The document could not be saved.") from None
 
 
 def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str, profile_id: str,
             title: str, payload: dict[str, Any]) -> DocumentReceipt:
-    relpath, placed_new = _place(root, tmp, sha)
+    relpath, placed_new = _place(root, tmp, profile_id)
     try:
         store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
                               mime="application/pdf", bytes=size, source_relpath=relpath,

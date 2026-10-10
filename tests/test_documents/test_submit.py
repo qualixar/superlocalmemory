@@ -12,7 +12,7 @@ import pytest
 
 from superlocalmemory.documents import submit as submit_mod
 from superlocalmemory.documents.submit import submit_document
-from superlocalmemory.media import open_media_store
+from superlocalmemory.media import files, open_media_store
 from superlocalmemory.media.ingest import MediaInput
 from tests.test_documents.pdfs import make_pdf
 from tests.test_documents.support import KEY, pdf_input
@@ -48,8 +48,9 @@ def test_receipt_row_job_and_original(store, root):
     doc = store.get_document(r.document_id)
     assert doc["state"] == "processing" and doc["sha256"] == sha and doc["profile_id"] == "p1"
     assert doc["mime"] == "application/pdf" and doc["bytes"] == len(data) and doc["title"] == "Report"
-    assert doc["source_relpath"] == f"{sha[:2]}/{sha}.pdf"
     orig = root / "media" / doc["source_relpath"]
+    address = files.content_address("p1", orig)
+    assert doc["source_relpath"] == f"{address[:2]}/{address}.pdf" and address != sha
     assert orig.read_bytes() == data and stat.S_IMODE(orig.stat().st_mode) == 0o600
     job = store.get_job(r.job_id)
     assert job["kind"] == "document" and job["state"] == "queued" and job["profile_id"] == "p1"
