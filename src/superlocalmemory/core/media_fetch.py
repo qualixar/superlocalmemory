@@ -16,10 +16,16 @@ step is checked:
   a second time (no DNS rebinding window).
 * Redirects are followed by hand, at most three, each one checked again.
 * At most 25 MB is read (counted while streaming) and the whole fetch has 10 s.
+  A document link (``fetch_media_to_file``) streams into the caller's file instead,
+  up to the document cap and with a longer deadline; nothing else changes.
 
 The bytes are returned untouched; the caller sniffs them by their magic bytes.
 The ``Content-Type`` header is passed on for logging only. Refusal reasons are
 fixed sentences: they never repeat the link, its query string or its user info.
+
+``DEFAULT_FILE_HOSTS`` are the hosts of a chat app's own file links. They join the
+owner's ``SLM_MEDIA_URL_HOSTS`` list for a call that came with a ``file`` object
+(``file_param=True``) and never for a link the model typed by itself.
 """
 
 from __future__ import annotations
@@ -39,11 +45,19 @@ import httpx
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 25 * 1024 * 1024
+#: The most a document link may deliver, and how long that fetch may take.
+MAX_DOCUMENT_BYTES = 100 * 1024 * 1024
+DOCUMENT_TIMEOUT_S = 120.0
 #: The most pasted (base64) data a remote app may send, measured after decoding.
 MAX_REMOTE_BASE64_BYTES = 512 * 1024
 TIMEOUT_S = 10.0
 MAX_REDIRECTS = 3
 HOSTS_ENV = "SLM_MEDIA_URL_HOSTS"
+#: Exact, lower-case host names of ChatGPT's own file links (the ``download_url`` of an attached
+#: file). Empty until the host names are confirmed in a live ChatGPT test; until then a remote
+#: file object works only for hosts the owner lists in ``SLM_MEDIA_URL_HOSTS``. Merged with that
+#: list, and only for a call that carried a ``file`` object; every other check still applies.
+DEFAULT_FILE_HOSTS: tuple[str, ...] = ()
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 _IP = ipaddress.IPv4Address | ipaddress.IPv6Address
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
@@ -68,6 +82,15 @@ class FetchedMedia:
 
 
 @dataclass(frozen=True)
+class FetchedFile:
+    """What a streamed fetch tells the caller; the bytes went to its ``write``."""
+
+    final_url: str
+    content_type_header: str
+    size: int
+
+
+@dataclass(frozen=True)
 class _Plan:
     remote: bool
     hosts: tuple[str, ...]
@@ -75,6 +98,8 @@ class _Plan:
     deadline: float
     clock: Callable[[], float]
     max_bytes: int
+    noun: str = "image"
+    accept: str = "image/*"
 
 
 # -- address checks ------------------------------------------------------------
@@ -132,9 +157,17 @@ def _parse(link: str) -> httpx.URL:
     return url
 
 
-def _allow_list(configured: str | None) -> tuple[str, ...]:
+def _allow_list(configured: str | None, *, file_param: bool = False,
+                remote: bool = False) -> tuple[str, ...]:
+    """The owner's hosts, plus ``DEFAULT_FILE_HOSTS`` for a call that carried a file object.
+
+    A local caller with no list of its own may already fetch from any public host, so the
+    defaults never narrow that to just themselves."""
     raw = os.environ.get(HOSTS_ENV, "") if configured is None else configured
-    return tuple(h.strip().lower() for h in raw.split(",") if h.strip())
+    own = tuple(h.strip().lower() for h in raw.split(",") if h.strip())
+    if not file_param or not DEFAULT_FILE_HOSTS or (not own and not remote):
+        return own
+    return tuple(dict.fromkeys(own + tuple(h.strip().lower() for h in DEFAULT_FILE_HOSTS)))
 
 
 def _host_allowed(host: str, plan: _Plan) -> None:
@@ -143,7 +176,7 @@ def _host_allowed(host: str, plan: _Plan) -> None:
             raise _refuse("Links are not accepted from remote callers until a host list is set.")
         return
     if host.lower() not in plan.hosts:
-        raise _refuse("That host is not on the allowed list for image links.")
+        raise _refuse(f"That host is not on the allowed list for {plan.noun} links.")
 
 
 def _vetted_addresses(host: str, port: int, plan: _Plan) -> list[str]:
@@ -177,7 +210,7 @@ def _send(client: httpx.Client, url: httpx.URL, ip: str, plan: _Plan) -> httpx.R
     port = f":{url.port}" if url.port else ""
     request = client.build_request(
         "GET", url.copy_with(host=ip),
-        headers={"Host": shown + port, "Accept": "image/*", "Accept-Encoding": "identity"},
+        headers={"Host": shown + port, "Accept": plan.accept, "Accept-Encoding": "identity"},
         extensions={"sni_hostname": host}, timeout=_remaining(plan),
     )
     return client.send(request, stream=True)
@@ -200,29 +233,29 @@ def _open(client: httpx.Client, url: httpx.URL, plan: _Plan) -> httpx.Response:
     raise _refuse("That link could not be reached.") from last
 
 
-def _read_body(resp: httpx.Response, plan: _Plan) -> bytes:
+def _read_body(resp: httpx.Response, plan: _Plan, write: Callable[[bytes], object]) -> int:
+    """Pass the body to ``write`` chunk by chunk, counting as it streams; returns its size."""
     limit = plan.max_bytes
-    too_big = _refuse(f"That image is too large ({limit // (1024 * 1024)} MB limit).")
+    too_big = _refuse(f"That {plan.noun} is too large ({limit // (1024 * 1024)} MB limit).")
     try:
         declared = int(resp.headers.get("content-length", "0") or 0)
     except ValueError:
         declared = 0
     if declared > limit:
         raise too_big
-    chunks: list[bytes] = []
     total = 0
     try:
         for chunk in resp.iter_bytes():
             total += len(chunk)
             if total > limit:
                 raise too_big
-            chunks.append(chunk)
+            write(chunk)
             _remaining(plan)
     except httpx.TimeoutException:
         raise _refuse("Fetching that link took too long.") from None
     except httpx.HTTPError:
         raise _refuse("That link could not be fetched.") from None
-    return b"".join(chunks)
+    return total
 
 
 def _next_url(resp: httpx.Response, url: httpx.URL) -> httpx.URL:
@@ -236,14 +269,8 @@ def _clean(url: httpx.URL) -> str:
     return str(url.copy_with(query=None, fragment=None, userinfo=b""))
 
 
-def fetch_media(
-    link: str, *, remote: bool, max_bytes: int = MAX_BYTES, timeout_s: float = TIMEOUT_S,
-    resolver: Resolver | None = None, transport: Any = None, allowed_hosts: str | None = None,
-    clock: Callable[[], float] = time.monotonic,
-) -> FetchedMedia:
-    """Fetch ``link`` (GET, https only) or raise ``MediaFetchRefused``."""
-    plan = _Plan(remote, _allow_list(allowed_hosts), resolver or _system_resolver,
-                 clock() + timeout_s, clock, max_bytes)
+def _run(link: str, plan: _Plan, write: Callable[[bytes], object],
+         transport: Any) -> FetchedFile:
     url = _parse(link)
     try:
         with httpx.Client(transport=transport, trust_env=False, follow_redirects=False) as client:
@@ -254,15 +281,46 @@ def fetch_media(
                         url = _next_url(resp, url)
                         continue
                     if resp.status_code != 200:
-                        raise _refuse("That link did not return an image.")
-                    return FetchedMedia(_read_body(resp, plan), _clean(url),
-                                        resp.headers.get("content-type", ""))
+                        article = "an" if plan.noun[0] in "aeiou" else "a"
+                        raise _refuse(f"That link did not return {article} {plan.noun}.")
+                    size = _read_body(resp, plan, write)
+                    return FetchedFile(_clean(url), resp.headers.get("content-type", ""), size)
                 finally:
                     resp.close()
     except MediaFetchRefused as refused:
-        logger.info("image link refused for host %s", url.raw_host.decode("ascii", "replace"))
+        logger.info("%s link refused for host %s", plan.noun, url.raw_host.decode("ascii", "replace"))
         raise refused
     raise _refuse("That link redirected too many times.")
+
+
+def fetch_media(
+    link: str, *, remote: bool, max_bytes: int = MAX_BYTES, timeout_s: float = TIMEOUT_S,
+    resolver: Resolver | None = None, transport: Any = None, allowed_hosts: str | None = None,
+    clock: Callable[[], float] = time.monotonic, file_param: bool = False,
+) -> FetchedMedia:
+    """Fetch ``link`` (GET, https only) or raise ``MediaFetchRefused``.
+
+    ``file_param`` is True only when the call carried a ``file`` object: then the hosts in
+    ``DEFAULT_FILE_HOSTS`` are trusted next to the owner's list."""
+    plan = _Plan(remote, _allow_list(allowed_hosts, file_param=file_param, remote=remote),
+                 resolver or _system_resolver, clock() + timeout_s, clock, max_bytes)
+    chunks: list[bytes] = []
+    got = _run(link, plan, chunks.append, transport)
+    return FetchedMedia(b"".join(chunks), got.final_url, got.content_type_header)
+
+
+def fetch_media_to_file(
+    link: str, write: Callable[[bytes], object], *, remote: bool, max_bytes: int = MAX_DOCUMENT_BYTES,
+    timeout_s: float = DOCUMENT_TIMEOUT_S, resolver: Resolver | None = None, transport: Any = None,
+    allowed_hosts: str | None = None, clock: Callable[[], float] = time.monotonic,
+    file_param: bool = False, noun: str = "document",
+) -> FetchedFile:
+    """Like ``fetch_media``, but each chunk goes to ``write`` as it arrives, so a big document is
+    never held in memory. ``write`` may raise to stop the download (its error passes through)."""
+    plan = _Plan(remote, _allow_list(allowed_hosts, file_param=file_param, remote=remote),
+                 resolver or _system_resolver, clock() + timeout_s, clock, max_bytes,
+                 noun=noun, accept="application/pdf, */*;q=0.1")
+    return _run(link, plan, write, transport)
 
 
 def base64_decoded_size(data: str) -> int:

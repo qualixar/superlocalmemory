@@ -152,3 +152,92 @@ def test_on_but_not_ready_says_set_up_is_not_finished(root, monkeypatch, state, 
     monkeypatch.setattr(module, "media_env", lambda root=None: fake)
     r = submit_document(pdf_input(("x",)), profile_id="p1", actor_id="a", config=CFG)
     assert r.status == "refused" and words in r.reason and "not installed" not in r.reason
+
+
+# -- a document that arrives as a link ---------------------------------------------------
+
+LINK = "https://files.example/doc.pdf?sig=SECRET"
+from superlocalmemory.core.media_fetch import fetch_media_to_file as _REAL_FETCH  # noqa: E402
+
+
+def linked(monkeypatch, chunks, *, seen=None, status=200):
+    """Make the document fetcher answer from ``chunks`` through a mock connection."""
+    import httpx
+
+    from superlocalmemory.core import media_fetch
+
+    real = _REAL_FETCH
+
+    def fetch(link, write, **kw):
+        if seen is not None:
+            seen.update(kw, link=link)
+        return real(link, write, transport=httpx.MockTransport(
+            lambda req: httpx.Response(status, content=iter(chunks), headers={"content-type": "application/pdf"})),
+            resolver=lambda host, port: ["93.184.216.34"], **{**kw, "allowed_hosts": "files.example"})
+
+    monkeypatch.setattr(media_fetch, "fetch_media_to_file", fetch)
+
+
+def test_a_link_is_streamed_into_a_temp_file_then_saved_like_any_document(store, root, monkeypatch):
+    data = make_pdf(["hello"])
+    parts = [data[i:i + 64] for i in range(0, len(data), 64)]
+    seen = {}
+    linked(monkeypatch, parts, seen=seen)
+    r = go(store, MediaInput(download_url=LINK, remote=True, file_param=True, file_name="Scan.pdf"))
+    assert r.status == "processing" and r.document_id
+    doc = store.get_document(r.document_id)
+    assert doc["sha256"] == hashlib.sha256(data).hexdigest() and doc["bytes"] == len(data)
+    assert doc["title"] == "Scan"
+    assert (root / "media" / doc["source_relpath"]).read_bytes() == data
+    assert seen["remote"] is True and seen["file_param"] is True and seen["noun"] == "document"
+    assert not list((root / "media" / "tmp").iterdir())
+
+
+def test_a_link_never_holds_the_whole_document_in_memory_at_once(store, root, monkeypatch):
+    data = make_pdf(["hello"])
+    writes = []
+    from superlocalmemory.core import media_fetch
+
+    def fetch(link, write, **kw):
+        for i in range(0, len(data), 100):
+            writes.append(len(data[i:i + 100]))
+            write(data[i:i + 100])
+        return media_fetch.FetchedFile("https://files.example/doc.pdf", "application/pdf", len(data))
+
+    monkeypatch.setattr(media_fetch, "fetch_media_to_file", fetch)
+    assert go(store, MediaInput(download_url=LINK)).status == "processing"
+    assert len(writes) > 1 and max(writes) <= 100
+
+
+def test_a_link_to_something_that_is_not_a_pdf_is_refused_early_and_leaves_nothing(store, root, monkeypatch):
+    linked(monkeypatch, [b"\x89PNG\r\n\x1a\n" + b"x" * 5000])
+    r = go(store, MediaInput(download_url=LINK))
+    assert r.status == "refused" and "image" in r.reason and "SECRET" not in r.reason
+    linked(monkeypatch, [b"hello world, no pdf here"])
+    assert go(store, MediaInput(download_url=LINK)).status == "refused"
+    assert not list((root / "media" / "tmp").iterdir())
+
+
+def test_a_link_over_the_document_cap_is_refused_and_leaves_nothing(store, root, monkeypatch):
+    monkeypatch.setenv("SLM_DOC_MAX_MB", "0.0001")  # about 100 bytes
+    linked(monkeypatch, [b"%PDF-1.4 " + b"a" * 400])
+    r = go(store, MediaInput(download_url=LINK))
+    assert r.status == "refused" and "too large" in r.reason
+    assert not list((root / "media" / "tmp").iterdir())
+
+
+def test_a_refused_link_reason_is_the_fetchers_plain_sentence(store, root, monkeypatch):
+    linked(monkeypatch, [b"%PDF-1.4"], status=404)
+    r = go(store, MediaInput(download_url=LINK))
+    assert r.status == "refused" and "did not return a document" in r.reason and "SECRET" not in r.reason
+
+
+def test_an_empty_link_body_is_refused(store, root, monkeypatch):
+    linked(monkeypatch, [])
+    assert go(store, MediaInput(download_url=LINK)).status == "refused"
+
+
+def test_a_link_together_with_another_source_is_refused(store, root, monkeypatch):
+    linked(monkeypatch, [make_pdf(["x"])])
+    r = go(store, MediaInput(download_url=LINK, base64=base64.b64encode(make_pdf(["x"])).decode()))
+    assert r.status == "refused" and "Give a document" in r.reason

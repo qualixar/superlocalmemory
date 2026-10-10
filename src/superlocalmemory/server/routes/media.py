@@ -6,7 +6,7 @@
 
 ``POST /api/v3/media/remember`` saves an image from a file path on this machine,
 base64 data or an https download link, and ``POST /api/v3/documents`` queues a
-PDF; neither is part of any remote tool list. The thumbnail, job-status and
+PDF (from a file path, base64 data or an https download link); neither is part of any remote tool list. The thumbnail, job-status and
 document-removal routes answer only for the profile the item belongs to.
 """
 
@@ -41,13 +41,16 @@ _CODES = {"stored": 200, "duplicate": 200, "warming": 202, "refused": 422, "proc
 class MediaRememberRequest(BaseModel):
     path: str | None = None
     base64: str | None = Field(default=None, max_length=12_000_000)
-    download_url: str | None = Field(default=None, max_length=2_048)
+    download_url: str | None = Field(default=None, max_length=8_192)
     content: str = Field(default="", max_length=24_000)
     tags: str = ""
     profile_id: str = ""
     idempotency_key: str = ""
     session_date: str = ""
     origin: str = Field(default="", max_length=16)
+    #: Set by the in-process tool when the link came inside a ``file`` object (a chat app's
+    #: attachment): the app's own file hosts are then trusted next to the owner's list.
+    from_file: bool = False
     #: Who the memory is visible to; ``None`` takes the configured default, as for typed text.
     scope: str | None = None
     shared_with: list[str] | None = Field(default=None, max_length=256)
@@ -141,7 +144,8 @@ async def remember(req: MediaRememberRequest, request: Request):
     if runtime is None:
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")
     inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64,
-                     download_url=req.download_url or None, remote=remote)
+                     download_url=req.download_url or None, remote=remote,
+                     file_param=req.from_file and bool(req.download_url))
     receipt = await asyncio.to_thread(
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
@@ -294,9 +298,7 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
     _require_local(request)
-    if req.download_url:
-        raise HTTPException(422, detail="Links are accepted for images only.")
-    _stricter_for_remote(req)
+    remote = _stricter_for_remote(req)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id, request, Permission.WRITE)
@@ -304,7 +306,9 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     scope, shared_with = _save_scope(engine, req, request, profile)
     words = prepare_user_text(engine._config, req.content).text if req.content.strip() else ""
     enforce_remember_governance(request, engine, actor_id=actor_id, profile=profile, preview=words)
-    inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64, file_name=req.file_name)
+    inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64, file_name=req.file_name,
+                     download_url=req.download_url or None, remote=remote,
+                     file_param=req.from_file and bool(req.download_url))
     receipt = await asyncio.to_thread(
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
         tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,

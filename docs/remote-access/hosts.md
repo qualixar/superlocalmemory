@@ -66,6 +66,29 @@ Three things to know:
   the skill somewhere else on its own, for example into Composio's skill
   library, ChatGPT chats do not use that copy; paste it yourself.
 
+### Saving pictures and PDFs from ChatGPT
+
+Attach the picture or PDF in the chat and ask ChatGPT to save it to
+SuperLocalMemory. ChatGPT hands the plugin a temporary link to the attachment
+and your computer downloads it, so the file never has to be typed out by the
+model. This needs three things on your side: the approval ticked **Allow images
+and documents** (and saving), the remote key allowed for media
+(`slm remote keys allow <key> media`) and a write key. The file is saved to the
+key's own profile, as with every remote save.
+
+SuperLocalMemory only downloads from hosts it trusts. For an attachment, those
+are ChatGPT's own file hosts plus any host in `SLM_MEDIA_URL_HOSTS`. This
+release has not yet confirmed ChatGPT's file host names in a live test, so the
+built-in list is empty: until it is filled in, add the host of the attachment
+link to `SLM_MEDIA_URL_HOSTS` yourself. If a save is refused with "Links are not
+accepted from remote callers until a host list is set" or "That host is not on
+the allowed list", that is the reason. A link the model types out by itself
+never gets the built-in hosts; it always needs your list.
+
+Pictures can be up to 25 MB and PDFs up to 100 MB. ChatGPT on a phone may not
+pass the attachment to the plugin at all; if ChatGPT says it has no file to
+send, attach the file in ChatGPT on the web instead.
+
 ## ChatGPT dots
 
 Dots are ChatGPT's always-on agents. You create them in ChatGPT on the desktop,

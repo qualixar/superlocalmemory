@@ -480,14 +480,27 @@ tool set. They work for AI apps on this computer. An app on another computer can
 use them only when its approval ticked **Allow images and documents** and its
 remote key allows `media` (`slm remote keys allow <key> media`); saving also
 needs a write key. A remote app cannot name a file (`path`), can paste at most
-512 KB, and its image links must come from a host on the allowed list
+512 KB, and its links must come from a host on the allowed list
 (`SLM_MEDIA_URL_HOSTS`; an empty list refuses every link).
+
+`remember_media` and `remember_document` also take a `file` argument for a
+picture or PDF attached in a ChatGPT chat. ChatGPT fills it in (the tools carry
+`_meta["openai/fileParams"] = ["file"]`, which is how ChatGPT knows to do that);
+you do not write it by hand. It holds a temporary `download_url` and a
+`file_id`, and may hold `mime_type` and `file_name`. SuperLocalMemory downloads
+the file from that link with the same safety checks as any other link (https
+only, public addresses only, redirects re-checked, size limit, file type checked
+by its content). Hosts of ChatGPT's own attachment links are trusted for a call
+that came with a `file` object, together with your `SLM_MEDIA_URL_HOSTS` list;
+a link the model types into `download_url` still needs your list. A remote
+save still needs the media permission, the write permission and a write key, and
+is saved to the key's own profile only.
 
 | Tool | Parameters | Notes |
 |------|-----------|-------|
-| `remember_media` | exactly one of `path`, `download_url` (https) or `base64`; `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
+| `remember_media` | exactly one of `path`, `download_url` (https), `base64` or `file` (a ChatGPT attachment); `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
 | `get_media` | `media_id`, `variant` (`thumb`), `profile_id` | Returns the thumbnail as an image, never as text data |
-| `remember_document` | exactly one of `path` or `base64` (a PDF); `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF; returns `status`, `document_id` and `job_id`. Links are not accepted |
+| `remember_document` | exactly one of `path`, `download_url` (https), `base64` or `file` (a ChatGPT attachment), all of them a PDF; `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF (a linked one is streamed to disk, up to 100 MB); returns `status`, `document_id` and `job_id` |
 | `media_status` | `job_id` (32 hex characters), `profile_id` | Progress of a document's background work |
 
 ---
