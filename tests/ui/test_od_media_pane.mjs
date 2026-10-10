@@ -31,6 +31,15 @@ function setup({ on = true, routes = [], docs = [], ram, offExtra = {} } = {}) {
         const input = h.pane.querySelector('input[type=file]');
         Object.defineProperty(input, 'files', { value: [file], configurable: true });
         input.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+        // Reading the file is asynchronous in jsdom; under a loaded machine two ticks are not
+        // enough. Wait until the pane has reacted (a request went out, or it said why not).
+        const before = h.pane.textContent;
+        const start = Date.now();
+        while (Date.now() - start < 3000) {
+            await flushPromises();
+            if (writes(h).length || h.pane.textContent !== before) break;
+            await new Promise(r => h.window.setTimeout(r, 10));
+        }
         await flushPromises(); await flushPromises();
     };
     h.click_turn_on = async () => {
