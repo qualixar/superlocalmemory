@@ -430,3 +430,22 @@ async def test_the_background_retry_stops_when_the_link_has_expired(tmp_path):
     await asyncio.sleep(0.3)
     assert len(finisher.calls) == 1
     assert relay._retrying == {}                  # nothing left running
+
+
+@pytest.mark.asyncio
+async def test_a_full_disk_reaches_the_page_in_plain_words(setup, monkeypatch):
+    import errno
+
+    from superlocalmemory.media import files
+
+    relay, links, _, minted = setup
+
+    def write(path, data, flags):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(UploadLinks, "_write", staticmethod(write))
+
+    out = await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
+
+    assert out["ok"] is False and out["code"] == "disk_full"
+    assert out["message"] == files.DISK_FULL

@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from superlocalmemory.documents import submit_document
+from superlocalmemory.media import files
 from superlocalmemory.media.ingest import MediaInput, remember_media
 from superlocalmemory.server.routes.media import _CODES, _profile, _require_local, _save_scope
 from superlocalmemory.server.write_governance import enforce_remember_governance
@@ -48,14 +49,22 @@ def _too_large(kind: str) -> HTTPException:
     return HTTPException(413, detail=f"That {noun} is too large ({_limit(kind) // MB} MB limit).")
 
 
+def _disk_full() -> HTTPException:
+    return HTTPException(507, detail=files.DISK_FULL)
+
+
 async def _spool(request: Request, kind: str) -> Path:
-    """Stream the body into a new scratch folder; returns the folder. 413 past the limit."""
+    """Stream the body into a new scratch folder; returns the folder.
+
+    413 past the limit; 507 when the disk (or quota) fills while it is written.
+    """
     limit = _limit(kind)
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > limit:
         raise _too_large(kind)
-    work = Path(tempfile.mkdtemp(prefix="slm-upload-"))
+    work: Path | None = None
     try:
+        work = Path(tempfile.mkdtemp(prefix="slm-upload-"))
         fd = os.open(work / "upload.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         size = 0
         with os.fdopen(fd, "wb") as fh:
@@ -64,8 +73,11 @@ async def _spool(request: Request, kind: str) -> Path:
                 if size > limit:
                     raise _too_large(kind)
                 fh.write(chunk)
-    except BaseException:
-        shutil.rmtree(work, ignore_errors=True)
+    except BaseException as exc:
+        if work is not None:
+            shutil.rmtree(work, ignore_errors=True)
+        if files.is_disk_full(exc):
+            raise _disk_full() from None
         raise
     return work
 

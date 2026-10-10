@@ -465,3 +465,59 @@ def test_gif_is_a_picture_the_link_accepts(links, head):
 def test_a_gif_header_that_is_not_one_is_still_refused():
     assert not ul.looks_like("image", b"GIF99a" + b"0" * 10)
     assert not ul.looks_like("image", b"GIF")
+
+
+# -- a full disk is said plainly (audit MU-M2) ---------------------------------
+
+def _disk_full(monkeypatch, *, after=0):
+    import errno
+
+    real = ul.UploadLinks._write
+    calls = {"n": 0}
+
+    def write(path, data, flags):
+        calls["n"] += 1
+        if calls["n"] > after:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        real(path, data, flags)
+
+    monkeypatch.setattr(ul.UploadLinks, "_write", staticmethod(write))
+
+
+def test_a_full_disk_on_the_first_chunk_is_a_plain_refusal_and_costs_no_attempt(links, monkeypatch):
+    from superlocalmemory.media import files
+
+    link = mint(links)
+    _disk_full(monkeypatch)
+
+    err = refused("disk_full", links.accept_chunk, link.token, CONN, 0, len(PNG), PNG, NONCE)
+
+    assert err.message == files.DISK_FULL
+    row = links.find(link.token, CONN)
+    assert row.state == "open" and row.attempts == 0
+
+
+def test_a_full_disk_on_a_later_chunk_is_a_plain_refusal_and_keeps_what_arrived(links, monkeypatch):
+    body = PNG + b"x" * 50
+    link = mint(links)
+    _disk_full(monkeypatch, after=1)
+    assert links.accept_chunk(link.token, CONN, 0, len(body), body[:60], NONCE) == 60
+
+    refused("disk_full", links.accept_chunk, link.token, CONN, 1, len(body), body[60:], NONCE)
+
+    row = links.find(link.token, CONN)
+    assert row.received == 60
+    assert links.temp_path(row.upload_id).stat().st_size == 60   # no half chunk left behind
+
+
+def test_other_write_errors_are_not_called_disk_full(links, monkeypatch):
+    import errno
+
+    def write(path, data, flags):
+        raise OSError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(ul.UploadLinks, "_write", staticmethod(write))
+    link = mint(links)
+
+    with pytest.raises(OSError):
+        links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)

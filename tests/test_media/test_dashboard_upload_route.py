@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -183,3 +184,55 @@ def test_the_real_ingest_takes_what_this_route_hands_it(tmp_path, monkeypatch) -
     pdf.write_bytes(PDF + b"x" * (30 * MB))
     staged, _sha, size = submit._stage(MediaInput(path=pdf, file_name="big.pdf"), root)
     assert size == pdf.stat().st_size and staged.parent == files.tmp_dir(root)
+
+
+# -- a full disk is a plain 507, not a 500 (audit F-9) --------------------------
+
+def _enospc(*_a, **_k):
+    import errno
+
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+def test_a_full_disk_while_streaming_is_a_plain_507(spy, monkeypatch) -> None:
+    from superlocalmemory.media import files
+
+    class Full:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, data):
+            _enospc()
+
+    monkeypatch.setattr(up.os, "fdopen", lambda fd, mode: (os.close(fd), Full())[1])
+
+    r = make().post(f"{URL}?kind=pdf", content=PDF + b"x" * 100)
+
+    assert r.status_code == 507
+    assert r.json()["detail"] == files.DISK_FULL
+    assert spy.docs == []
+
+
+def test_a_full_disk_when_the_scratch_file_is_made_is_a_plain_507(spy, monkeypatch) -> None:
+    from superlocalmemory.media import files
+
+    monkeypatch.setattr(up.tempfile, "mkdtemp", _enospc)
+
+    r = make().post(f"{URL}?kind=image", content=PNG + b"x" * 100)
+
+    assert r.status_code == 507 and r.json()["detail"] == files.DISK_FULL
+
+
+def test_another_write_error_stays_a_server_error_not_disk_full(spy, monkeypatch) -> None:
+    import errno
+
+    def denied(*_a, **_k):
+        raise OSError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(up.tempfile, "mkdtemp", denied)
+
+    with pytest.raises(OSError):
+        make().post(f"{URL}?kind=image", content=PNG + b"x" * 100)
