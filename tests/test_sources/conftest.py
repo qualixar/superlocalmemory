@@ -12,6 +12,16 @@ from superlocalmemory.media import open_media_store
 from superlocalmemory.sources.host import SourceHost
 
 
+class ListDb:
+    """Like ``storage.database.DatabaseManager``: ``execute`` returns a list of rows, never a cursor."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        return self._conn.execute(sql, params).fetchall()
+
+
 class FakeRuntime:
     ready = True
 

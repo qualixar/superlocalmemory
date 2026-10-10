@@ -251,12 +251,13 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
     if db is None or not memory_ids:
         return False
     try:
-        row = db.execute("SELECT 1 FROM atomic_facts WHERE lifecycle = 'archived' AND memory_id IN ("
-                         + ",".join("?" * len(memory_ids)) + ") LIMIT 1", tuple(memory_ids)).fetchone()
+        # ``execute`` returns a list of rows (storage/database.py), never a cursor.
+        rows = db.execute("SELECT 1 FROM atomic_facts WHERE lifecycle = 'archived' AND memory_id IN ("
+                          + ",".join("?" * len(memory_ids)) + ") LIMIT 1", tuple(memory_ids))
     except Exception as exc:  # noqa: BLE001 - not knowing is treated as "not archived"
         logger.warning("could not look up folder memories (%s)", type(exc).__name__)
         return False
-    return row is not None
+    return len(rows) > 0
 
 
 __all__ = ["Ingested", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
