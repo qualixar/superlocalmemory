@@ -36,7 +36,7 @@ class ModelProfile:
 #: The EG2 numbers are provisional until the Mac memory check; the floor comes from
 #: n=7 unanswerable test queries.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
-    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 262_144),
+    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
         "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0),
 })

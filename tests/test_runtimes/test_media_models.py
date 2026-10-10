@@ -25,7 +25,7 @@ def test_revision_is_a_full_commit_hash():
 def test_profiles_for_the_shipped_models():
     eg2 = media_models.MODEL_PROFILES[EG2]
     assert (eg2.repo, eg2.revision, eg2.dim) == (EG2, media_env.MEDIA_MODEL_REVISION, 768)
-    assert eg2.rss_limit_mb == 4500 and eg2.media_min_score == 0.69 and eg2.image_max_pixels == 262_144
+    assert eg2.rss_limit_mb == 4500 and eg2.media_min_score == 0.69 and eg2.image_max_pixels == 0
     vision = media_models.MODEL_PROFILES[NOMIC_VISION]
     assert vision.dim == 768 and vision.media_min_score == 0.084
 
