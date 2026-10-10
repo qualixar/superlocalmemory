@@ -53,7 +53,21 @@ def vec_table(space_id: str) -> str:
     return f"media_vec_{space_id}"
 
 
+class MediaVectorsUnavailable(sqlite3.NotSupportedError):
+    """This Python's sqlite3 was built without extension loading, so sqlite-vec cannot load."""
+
+
+def extensions_supported() -> bool:
+    return hasattr(sqlite3.Connection, "enable_load_extension")
+
+
+def require_extensions() -> None:
+    if not extensions_supported():
+        raise MediaVectorsUnavailable("this Python cannot load SQLite extensions")
+
+
 def _load_vec(conn: sqlite3.Connection) -> None:
+    require_extensions()
     import sqlite_vec
 
     conn.enable_load_extension(True)
