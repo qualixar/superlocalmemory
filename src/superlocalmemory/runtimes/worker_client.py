@@ -84,6 +84,11 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     # -- state ----------------------------------------------------------------
     @property
+    def root(self) -> Path:
+        """The managed environment this client's worker runs from."""
+        return Path(self._env.root)
+
+    @property
     def pid(self) -> int | None:
         proc = self._proc
         return proc.pid if proc is not None and proc.poll() is None else None
@@ -342,7 +347,7 @@ class MediaWorkerClient(MediaEmbedderPort):
 
 # -- factory --------------------------------------------------------------------
 
-_CLIENTS: dict[tuple[str, str, str], MediaWorkerClient] = {}
+_CLIENTS: dict[tuple[str, str, str, str], MediaWorkerClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
@@ -350,6 +355,19 @@ def live_clients() -> list[MediaWorkerClient]:
     """The clients that already exist in this process; creates nothing and starts nothing."""
     with _CLIENTS_LOCK:
         return list(_CLIENTS.values())
+
+
+def _shared_client(managed: Any, model_id: str, revision: str, role: str, *,
+                   stop_hook: bool = True) -> MediaWorkerClient:
+    """The one client per (folder, model, revision, role) in this process."""
+    key = (str(managed.root), model_id, revision, role)
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is None:
+            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=model_id, revision=revision, role=role)
+            if stop_hook:
+                register_media_stop_hook(client.stop)
+        return client
 
 
 def media_embedder(*, env: Any = None, data_root: str | Path | None = None, model_id: str | None = None,
@@ -371,13 +389,27 @@ def media_embedder(*, env: Any = None, data_root: str | Path | None = None, mode
         plan = current_space_plan(data_root)
         model_id, revision = plan.image_model, plan.image_revision if revision is None else revision
         role = "image" if plan.mode == "paired" else ""
-    key = (str(managed.root), model_id, "" if revision is None else revision)
-    with _CLIENTS_LOCK:
-        client = _CLIENTS.get(key)
-        if client is None:
-            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=key[1], revision=key[2], role=role)
-            register_media_stop_hook(client.stop)
-        return client
+    return _shared_client(managed, model_id, "" if revision is None else revision, role)
 
 
-__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder"]
+def text_loadout_role(data_root: str | Path | None = None) -> str:
+    """``""`` (the full model) while pictures are on, so text and pictures share one process; else ``"text"``."""
+    return "" if media_enabled(data_root) else "text"
+
+
+def text_embedder(*, env: Any, data_root: str | Path | None, model_id: str,
+                  revision: str = "") -> MediaWorkerClient | None:
+    """The shared client that makes text vectors, or None unless the environment is ready.
+
+    Not gated on the pictures switch: the text provider is chosen in the embedding settings. The
+    text-only loadout is used when pictures are off and registers no stop hook (turning pictures
+    off has nothing of its own to stop). Starts nothing.
+    """
+    if env.status().state != "ready":
+        return None
+    role = text_loadout_role(data_root)
+    return _shared_client(env, model_id, revision, role, stop_hook=role == "")
+
+
+__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder",
+           "text_embedder", "text_loadout_role"]

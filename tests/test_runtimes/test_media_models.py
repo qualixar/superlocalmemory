@@ -84,3 +84,11 @@ def test_watchdog_leaves_the_picture_worker_its_own_larger_cap(monkeypatch):
     assert _worker_limit_mb(media, 2500) == 6000
     monkeypatch.setenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", "0")
     assert _worker_limit_mb(media, 2500) == 0
+
+
+def test_text_floor_comes_from_the_table_and_unknown_models_have_none():
+    assert media_models.text_min_semantic_for(EG2) == media_models.MODEL_PROFILES[EG2].text_min_semantic
+    assert isinstance(media_models.text_min_semantic_for(EG2), float)
+    assert media_models.text_min_semantic_for(NOMIC_VISION) is None  # a picture model has no text floor
+    assert media_models.text_min_semantic_for("fake:768") is None
+    assert media_models.text_min_semantic_for("nomic-ai/nomic-embed-text-v1.5") is None

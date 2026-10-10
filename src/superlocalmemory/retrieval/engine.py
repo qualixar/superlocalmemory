@@ -568,7 +568,7 @@ class RetrievalEngine:
                 fused = windowed_candidates(
                     fused, lambda fid: in_window(etimes.get(fid), bounds),
                     explicit=_explicit_window,
-                    min_semantic=getattr(self._config, "min_semantic_evidence", 0.60),
+                    min_semantic=self._text_floor(),
                     min_media=self._media_floor(),
                 )
                 _em("time_window")
@@ -641,7 +641,7 @@ class RetrievalEngine:
             and _os_floor.environ.get("SLM_RECALL_NO_FLOOR", "0") != "1"
         )
         if floor_enabled:
-            min_sem = getattr(self._config, "min_semantic_evidence", 0.60)
+            min_sem = self._text_floor()
             # Qualify the rerank pool BEFORE applying the caller's limit.  RRF
             # can rank associative-only hits above an exact BM25 match; slicing
             # first allowed those hits to occupy every output slot and then be
@@ -767,6 +767,13 @@ class RetrievalEngine:
             return None
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
+
+    def _text_floor(self) -> float:
+        """Text evidence floor: the live text model's own, else the configured one."""
+        from superlocalmemory.retrieval.text_floor import text_semantic_floor
+
+        return text_semantic_floor(
+            getattr(self, "_embedder", None), getattr(self._config, "min_semantic_evidence", 0.60))
 
     def _media_floor(self) -> float:
         """Picture evidence floor: the live paired plan's, else the configured one."""

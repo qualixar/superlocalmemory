@@ -34,12 +34,14 @@ class ModelProfile:
     media_min_score: float   # picture similarity that counts as evidence
     image_max_pixels: int    # larger pictures are shrunk before embedding; 0 = no cap
     load_mb: int = 1500      # free memory wanted before this model loads (peak while loading)
+    text_min_semantic: float | None = None  # text similarity that counts as evidence; None = not a text model
 
 
 #: The EG2 numbers are provisional until the Mac memory check; the floor comes from
-#: n=7 unanswerable test queries.
+#: n=7 unanswerable test queries. The text floor is provisional too: it equals the
+#: configured default until the text split is measured.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
-    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
+    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000, 0.60),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
         "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0, 1500),
 })
@@ -75,6 +77,12 @@ def min_score_for(model: str) -> float | None:
     return profile.media_min_score if profile is not None else None
 
 
+def text_min_semantic_for(model: str) -> float | None:
+    """The model's own text evidence floor, or None to keep the configured ``min_semantic_evidence``."""
+    profile = profile_for(model)
+    return profile.text_min_semantic if profile is not None else None
+
+
 def watchdog_limit_mb(default: int) -> int:
     """Memory limit the daemon's watchdog applies to the picture worker; 0 means no limit.
 
@@ -89,4 +97,4 @@ def watchdog_limit_mb(default: int) -> int:
 
 
 __all__ = ["DEFAULT_LOAD_MB", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
-           "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]
+           "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "text_min_semantic_for", "watchdog_limit_mb"]
