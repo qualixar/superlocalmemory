@@ -101,20 +101,39 @@ describe('upgrade memory engine card', () => {
         assert.equal(h.btn('Upgrade memory engine').disabled, true);
     });
 
-    it('images off: button disabled with the reason, and a turn-on button that installs first', async () => {
+    it('images off: the upgrade is disabled, the reason is plain words, and one button opens the images pane', async () => {
         const h = setup({ plan: { available: false, needs_media: true, media_enabled: false, env_state: 'not_installed',
             turn_on_command: 'slm media enable',
             reason: 'Turn on images and documents first (about 1.5 GB): slm media enable' } });
         await h.mount();
         assert.equal(h.btn('Upgrade memory engine').disabled, true);
-        assert.match(h.text(), /Turn on images and documents first/);
-        h.btn('Turn on images and documents').click();
+        assert.match(h.text(), /Turn on images and documents first \(about 1\.5 GB\)\./);
+        assert.ok(!/slm media enable/.test(h.text()), 'no developer command in the card');
+        const seen = [];
+        h.window.slmNavigate = p => seen.push(p);
+        h.btn('Turn on images & documents first').click();
         await flushPromises();
-        const w = writes(h);
-        assert.equal(w[0].url, '/api/v3/features/media/enable');
-        assert.deepEqual(JSON.parse(w[0].body), { yes: true, source: 'dashboard' });
+        assert.deepEqual(seen, ['media-pane']);
+        assert.equal(writes(h).length, 0, 'the pane owns the turn-on flow, with its memory check and confirmation');
+        assert.equal(h.confirms.length, 0);
+    });
+
+    it('not set up yet: the "Run:" developer hint is dropped too', async () => {
+        const h = setup({ plan: { available: false, needs_media: true, media_enabled: false, env_state: 'not_installed',
+            turn_on_command: 'slm media enable',
+            reason: 'Images and documents are not set up yet. Run: slm media enable' } });
+        await h.mount();
+        assert.match(h.text(), /Images and documents are not set up yet\./);
+        assert.ok(!/slm media enable|Run:/.test(h.text()));
+    });
+
+    it('while images are being set up: shows the reason, no turn-on button, and stops polling when ready', async () => {
+        const h = setup({ plan: { available: false, needs_media: false, media_enabled: true, env_state: 'installing',
+            reason: 'Images and documents are still being set up. Try again when they finish.' } });
+        await h.mount();
         assert.match(h.text(), /still being set up/);
-        assert.equal(h.btn('Turn on images and documents'), undefined);
+        assert.equal(h.btn('Turn on images'), undefined);
+        assert.equal(h.timers.length, 1, 'polls while it installs');
         h.state.plan = { ...PLAN };
         await h.tick();
         assert.equal(h.btn('Upgrade memory engine').disabled, false, 'offered once the environment is ready');

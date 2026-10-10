@@ -1023,9 +1023,19 @@ async def search_memories(request: Request, body: SearchRequest):
                     recall_response_metadata,
                     serialize_recall_response,
                 )
+                # Results that came from a picture or a document page get a
+                # ``media`` block (the same one GET /recall adds), so the
+                # dashboard's "Find a picture" box can show the picture. One
+                # batched read; empty, with no query, when images are off.
+                from superlocalmemory.retrieval.media_channel import memory_sources
+                _memory_ids = list({
+                    r.fact.memory_id for r in response.results[:_search_limit]
+                    if r.fact.memory_id
+                })
                 results, no_confident_match = serialize_recall_response(
                     response,
                     limit=_search_limit,
+                    source_map=memory_sources(engine._db, _memory_ids),
                     per_fact_max=300,
                     total_max=max(300, body.limit * 300),
                     display_min_confidence=engine_display_min_confidence(engine),
