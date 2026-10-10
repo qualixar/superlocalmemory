@@ -289,3 +289,32 @@ async def test_origin_is_wired_to_the_grant_keys_and_refresh(tmp_path):
     runtime, row, _ = completed_runtime(tmp_path, FakeProvider())
     assert runtime.origin._grant_keys is not None
     assert runtime.origin._on_unknown_kid == runtime.request_grant_refresh
+
+
+@pytest.mark.asyncio
+async def test_key_fetches_for_one_connection_never_exchange_the_token_twice_at_once(tmp_path):
+    running = {"now": 0, "most": 0}
+
+    class Counting(FakeProvider):
+        async def exchange(self, value, code):
+            running["now"] += 1
+            running["most"] = max(running["most"], running["now"])
+            await asyncio.sleep(0.02)
+            running["now"] -= 1
+            return await super().exchange(value, code)
+
+    runtime, row, _ = completed_runtime(tmp_path, Counting())
+    await asyncio.gather(*(runtime.ensure_grant_key(row, force=True) for _ in range(4)))
+    assert running["most"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_key_fetch_waits_for_the_connection_lock_other_exchanges_hold(tmp_path):
+    runtime, row, _ = completed_runtime(tmp_path, FakeProvider())
+    lock = runtime._locks.setdefault(row.connection_id, asyncio.Lock())
+    async with lock:
+        task = asyncio.create_task(runtime.ensure_grant_key(row))
+        await asyncio.sleep(0.05)
+        assert not task.done()
+    await task
+    assert runtime.grant_keys.load(row.connection_id).current is not None

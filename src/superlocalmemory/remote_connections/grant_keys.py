@@ -108,6 +108,8 @@ class GrantKeyStore:
             held = self._read(connection_id)
             if held is not None and held["version"] == version and held["key"] == key_b64url:
                 return
+            if held is not None and version <= held["version"]:
+                raise ValueError("stale_grant_key")
             previous = None
             if held is not None:
                 previous = {"version": held["version"], "key": held["key"],

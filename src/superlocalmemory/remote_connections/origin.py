@@ -94,7 +94,7 @@ class CanonicalMcpOrigin:
         self._clock = clock
         self._grant_keys = grant_keys
         self._on_unknown_kid = on_unknown_kid
-        self._replays = ReplayGuard()
+        self._replays: dict[str, ReplayGuard] = {}
 
     async def _verified_grant(
         self, request: dict, credential: ConnectorCredential,
@@ -120,7 +120,8 @@ class CanonicalMcpOrigin:
             return verify_grant(
                 presented[0], keys=keys, connection_id=cid, frame_id=request["id"],
                 generation=request["generation"], deadline_at_ms=request["deadlineAt"],
-                now_ms=self._clock() * 1000, seen=self._replays)
+                now_ms=self._clock() * 1000,
+                seen=self._replays.setdefault(cid, ReplayGuard()))
         except GrantError as error:
             logger.info("remote grant refused: %s", error.args[0])
             if error.args[0] == "unknown_kid":

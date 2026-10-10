@@ -191,3 +191,28 @@ async def test_missing_header_with_no_key_held_does_not_ask():
     asked = []
     await origin(Recorder(), GrantKeys(None, None), asked.append)(frame(), credential())
     assert asked == []
+
+
+@pytest.mark.asyncio
+async def test_one_connection_filling_its_replay_guard_does_not_refuse_another():
+    from superlocalmemory.remote_connections import grant as grant_module
+
+    other = "b" * 32
+    app = Recorder()
+    both = CanonicalMcpOrigin(
+        app, clock=lambda: NOW, grant_keys=lambda cid: KEYS)
+    original = grant_module.MAX_SEEN_FRAMES
+    grant_module.MAX_SEEN_FRAMES = 2
+    try:
+        for n in range(2):
+            fid = f"wire_{n}"
+            await both(frame(signed(frame_id=fid), fid=fid), credential())
+        refused = frame(signed(frame_id="wire_x"), fid="wire_x")
+        await both(refused, credential())
+        assert app.seen[-1][1] is None            # connection A is full
+        fid = "wire_y"
+        await both(frame(signed(connection_id=other, frame_id=fid), fid=fid),
+                   credential(other))
+        assert app.seen[-1][1] is not None        # connection B is not
+    finally:
+        grant_module.MAX_SEEN_FRAMES = original

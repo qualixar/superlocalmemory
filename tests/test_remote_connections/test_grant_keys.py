@@ -159,3 +159,20 @@ def test_secret_never_appears_in_repr_or_error_text():
     store, _, _ = make()
     store.store_new(CID, 1, key_b64(7))
     assert key_b64(7) not in repr(store.load(CID))
+
+
+def test_an_older_or_equal_version_with_a_different_key_is_refused():
+    store, backend, _ = make()
+    store.store_new(CID, 3, key_b64(3))
+    before = dict(backend.values)
+    for version in (3, 2, 1):
+        try:
+            store.store_new(CID, version, key_b64(9))
+        except ValueError as error:
+            assert str(error) == "stale_grant_key"
+        else:
+            raise AssertionError("accepted a version that is not newer")
+    assert backend.values == before
+    assert store.load(CID).current == (3, bytes([3]) * 32)
+    store.store_new(CID, 3, key_b64(3))          # the identical key stays a no-op
+    assert backend.values == before

@@ -469,3 +469,57 @@ def test_remote_mesh_state_get_is_allowed() -> None:
             _, _, stub = _run(_call("mesh_state", arguments=arguments), WEB_WRITE,
                               key_store=keys)
             assert stub.reached
+
+
+def test_key_extras_are_read_from_the_file_once_until_it_changes(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from superlocalmemory.server.remote_keys import RemoteKeyStore
+
+    store = RemoteKeyStore(tmp_path / "remote_keys.json")
+    record, _ = store.add("web-" + "a" * 32, "write", profile="default")
+    reads = []
+    original = Path.read_text
+
+    def counting(self, *args, **kwargs):
+        if self.name == "remote_keys.json":
+            reads.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting)
+    fresh = RemoteKeyStore(store.path)
+    assert fresh.extras_for(record.key_id) == frozenset()
+    assert fresh.extras_for(record.key_id) == frozenset()
+    assert len(reads) == 1
+    store.set_extras(record.name, ["mesh"])
+    del reads[:]
+    assert fresh.extras_for(record.key_id) == frozenset({"mesh"})
+    assert fresh.extras_for("missing") == frozenset()
+    assert len(reads) == 1
+
+
+def test_two_granted_requests_read_the_key_file_once(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from superlocalmemory.server.remote_keys import RemoteKeyStore
+
+    seed = RemoteKeyStore(tmp_path / "remote_keys.json")
+    record, _ = seed.add("web-" + "a" * 32, "write", profile="default")
+    seed.set_extras(record.name, ["mesh"])
+    store = RemoteKeyStore(seed.path)
+    reads = []
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: (
+        reads.append(1) if self.name == "remote_keys.json" else None) or original(self, *a, **k))
+    app = policy.RemoteToolScopeASGI(_StubMcp(), runtime_for=lambda _s: None, key_store=store)
+    principal = type("P", (), {"name": record.name, "key_id": record.key_id})()
+    grant = type("G", (), {"connection_id": "a" * 32})()
+    from superlocalmemory.mcp.remote_caller import remote_grant
+
+    async def go():
+        with remote_grant(grant):
+            return [await app._grant_and_extras(principal) for _ in range(2)]
+
+    out = asyncio.run(go())
+    assert [extras for _, extras in out] == [frozenset({"mesh"})] * 2
+    assert len(reads) == 1

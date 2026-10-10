@@ -493,9 +493,12 @@ class NativeConnectionRuntime:
         try:
             if not force and self.grant_keys.load(row.connection_id).current is not None:
                 return
-            latest = await self.provider.exchange(
-                await asyncio.to_thread(self.store.by_connection, row.connection_id) or row, "")
-            fetched = await self.provider.grant_key(latest)
+            lock = self._locks.setdefault(row.connection_id, asyncio.Lock())
+            async with lock:
+                latest = await self.provider.exchange(
+                    await asyncio.to_thread(self.store.by_connection, row.connection_id) or row,
+                    "")
+                fetched = await self.provider.grant_key(latest)
             await asyncio.to_thread(
                 self.grant_keys.store_new, row.connection_id, fetched["version"], fetched["key"])
         except asyncio.CancelledError:

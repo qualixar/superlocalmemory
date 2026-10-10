@@ -28,6 +28,7 @@ caller sees the reason in the tool result.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -448,6 +449,18 @@ def _mesh_target(scope: dict[str, Any], tool: str, profile: str) -> Any:
     return RemoteMeshTarget(broker=broker, profile=profile, connection_id=grant.connection_id)
 
 
+async def _key_extras(store: Any, key_id: str) -> Any:
+    """The key's opt-ins: from the store's cache when the file is unchanged,
+    otherwise read off the event loop."""
+    cached = getattr(store, "cached_extras", None)
+    if cached is None:
+        return next((k.extras for k in store.list() if k.key_id == key_id), frozenset())
+    known = cached(key_id)
+    if known is not None:
+        return known
+    return await asyncio.to_thread(store.extras_for, key_id)
+
+
 class RemoteToolScopeASGI:
     """Wraps the MCP app. Local callers pass straight through.
 
@@ -466,7 +479,7 @@ class RemoteToolScopeASGI:
             runtime_for = runtime_from_scope
         self._runtime_for = runtime_for
 
-    def _grant_and_extras(self, principal: Any) -> tuple[Any, frozenset[str]]:
+    async def _grant_and_extras(self, principal: Any) -> tuple[Any, frozenset[str]]:
         """The verified grant for this request when it belongs to this key's
         connection, with the key's opt-ins. A grant for another connection, or
         on a key that is not a connection key, is ignored."""
@@ -484,9 +497,7 @@ class RemoteToolScopeASGI:
             from superlocalmemory.server.remote_keys import default_store
 
             store = default_store()
-        extras = next((k.extras for k in store.list() if k.key_id == principal.key_id),
-                      frozenset())
-        return grant, frozenset(extras)
+        return grant, frozenset(await _key_extras(store, principal.key_id))
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -525,7 +536,7 @@ class RemoteToolScopeASGI:
             await _send_json(send, violation.status,
                              {"error": violation.code, "message": str(violation)})
             return
-        grant, extras = self._grant_and_extras(principal)
+        grant, extras = await self._grant_and_extras(principal)
         if tool is not None:
             allowed = tool_allowed(principal.scope, tool, grant, extras)
             _audit(principal, scope, tool, "allow" if allowed else "deny",

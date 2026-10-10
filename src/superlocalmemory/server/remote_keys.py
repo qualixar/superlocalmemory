@@ -194,6 +194,7 @@ class RemoteKeyStore:
         self._cache_lock = threading.Lock()
         self._cache: tuple[tuple[str, int, int, int], tuple[RemoteKey, ...]] | None = None
         self._warned: str | None = None
+        self._extras: tuple[tuple[str, int, int], dict[str, frozenset[str]]] | None = None
 
     @property
     def path(self) -> Path:
@@ -236,6 +237,38 @@ class RemoteKeyStore:
 
     def list(self) -> tuple[RemoteKey, ...]:
         return self._load()
+
+    def _file_signature(self) -> tuple[str, int, int] | None:
+        path = self.path
+        if store_problem(path) is not None:
+            return None
+        try:
+            info = path.stat()
+        except OSError:
+            return None
+        return (str(path), info.st_mtime_ns, info.st_size)
+
+    def cached_extras(self, key_id: str) -> frozenset[str] | None:
+        """The key's opt-ins when they are already known for the file as it is
+        now, else ``None``. Never reads the file, so it is safe on the event loop."""
+        signature = self._file_signature()
+        with self._cache_lock:
+            held = self._extras
+        if signature is None or held is None or held[0] != signature:
+            return None
+        return held[1].get(key_id, frozenset())
+
+    def extras_for(self, key_id: str) -> frozenset[str]:
+        """The key's opt-ins. The file is read again only when it changed."""
+        known = self.cached_extras(key_id)
+        if known is not None:
+            return known
+        signature = self._file_signature()
+        mapping = {r.key_id: r.extras for r in self._load()}
+        if signature is not None:
+            with self._cache_lock:
+                self._extras = (signature, mapping)
+        return mapping.get(key_id, frozenset())
 
     def verify(self, presented: str) -> RemoteKey | None:
         """The active key matching ``presented``, or ``None``.

@@ -487,6 +487,7 @@ def mark_read(peer_id: str, req: ReadRequest, request: Request):
 def pending(peer_id: str, request: Request, project_path: str = ""):
     """Get pending broadcast/project messages for this peer."""
     broker = _get_broker(request)
+    _refuse_web_peer(broker, peer_id)
     messages = broker.get_pending(peer_id, project_path,
                                   profile_id=_active_profile())
     return {"messages": messages, "count": len(messages)}

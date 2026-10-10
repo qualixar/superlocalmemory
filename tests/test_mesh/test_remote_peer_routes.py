@@ -72,3 +72,13 @@ def test_http_reads_of_a_local_peers_mail_are_unchanged(client, broker) -> None:
     broker.send_message(a, b, "hi")
     r = client.get(f"/mesh/inbox/{b}", headers=HEADERS)
     assert r.status_code == 200 and r.json()["messages"][0]["content"] == "hi"
+
+
+def test_http_pending_for_a_web_peer_is_refused(client, broker, web_ref) -> None:
+    r = client.get(f"/mesh/pending/{web_ref}", headers=HEADERS)
+    assert r.status_code == 403
+
+
+def test_http_pending_for_a_local_peer_is_unchanged(client, broker) -> None:
+    local = make_peer(broker, "sess-2")
+    assert client.get(f"/mesh/pending/{local}", headers=HEADERS).status_code == 200
