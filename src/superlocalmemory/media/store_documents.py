@@ -20,25 +20,31 @@ class DocumentsMixin:
     """Mixed into MediaStore; needs its ``_write()`` and ``_read()`` helpers."""
 
     def insert_document(self, **fields: Any) -> str:
+        origin = fields.pop("origin", "user")
         if set(fields) != set(_NEW_DOC):
             raise ValueError(f"expected exactly {sorted(_NEW_DOC)}")
         now = utc_stamp()
         with self._write() as conn:
             conn.execute(
-                f"INSERT INTO documents({','.join(_NEW_DOC)}, state, created_at, updated_at)"
-                f" VALUES ({','.join('?' * len(_NEW_DOC))}, 'processing', ?, ?)",
-                [fields[k] for k in _NEW_DOC] + [now, now])
+                f"INSERT INTO documents({','.join(_NEW_DOC)}, origin, state, created_at, updated_at)"
+                f" VALUES ({','.join('?' * len(_NEW_DOC))}, ?, 'processing', ?, ?)",
+                [fields[k] for k in _NEW_DOC] + [origin, now, now])
         return fields["document_id"]
 
     def get_document(self, document_id: str) -> dict[str, Any] | None:
         row = self._read().execute("SELECT * FROM documents WHERE document_id = ?", (document_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_document_by_sha(self, profile_id: str, sha256: str) -> dict[str, Any] | None:
-        """The newest document of this profile with this content that has not been removed."""
+    def find_document_by_sha(self, profile_id: str, sha256: str, *,
+                             exclude_origin: str | None = None) -> dict[str, Any] | None:
+        """The newest document of this profile with this content that has not been removed.
+
+        ``exclude_origin`` skips documents made by that origin (a user's save never joins a folder's).
+        """
         row = self._read().execute(
             "SELECT * FROM documents WHERE profile_id = ? AND sha256 = ? AND state != 'tombstoned'"
-            " ORDER BY created_at DESC LIMIT 1", (profile_id, sha256)).fetchone()
+            " AND origin != ? ORDER BY created_at DESC LIMIT 1",
+            (profile_id, sha256, exclude_origin or "")).fetchone()
         return dict(row) if row else None
 
     def update_document(self, document_id: str, **fields: Any) -> None:

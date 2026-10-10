@@ -30,10 +30,12 @@ _IN_CHUNK = 500
 
 @dataclass(frozen=True)
 class VisibilityContext:
-    """``hidden_fact_ids`` are never shown; ``hide_media`` also hides pictures and pages."""
+    """``hidden_fact_ids`` are never shown; ``hide_media`` also hides pictures and pages;
+    ``hide_sources`` also hides everything that came from a connected folder."""
 
     hidden_fact_ids: frozenset[str] = frozenset()
     hide_media: bool = False
+    hide_sources: bool = False
 
 
 _EMPTY = VisibilityContext()
@@ -47,7 +49,7 @@ def current() -> VisibilityContext:
 
 def is_empty() -> bool:
     ctx = _current.get()
-    return not ctx.hidden_fact_ids and not ctx.hide_media
+    return not ctx.hidden_fact_ids and not ctx.hide_media and not ctx.hide_sources
 
 
 def hides_media() -> bool:
@@ -63,11 +65,19 @@ def use(ctx: VisibilityContext) -> Iterator[VisibilityContext]:
         _current.reset(token)
 
 
-def _media_memories(db: Any, memory_ids: Iterable[str]) -> set[str]:
-    """The memories that are pictures or pages. Always asks, whatever the feature switch says;
-    metadata that cannot be read counts as media."""
+def _is_hidden_source(source: Any, ctx: VisibilityContext) -> bool:
+    if not isinstance(source, dict):
+        return False
     from superlocalmemory.retrieval.media_channel import MEDIA_SOURCE_TYPES
 
+    if ctx.hide_media and source.get("type") in MEDIA_SOURCE_TYPES:
+        return True
+    return ctx.hide_sources and (source.get("type") == "folder" or source.get("origin") == "folder")
+
+
+def _hidden_source_memories(db: Any, memory_ids: Iterable[str], ctx: VisibilityContext) -> set[str]:
+    """The memories the context hides by where they came from (pictures, pages, folders).
+    Always asks, whatever the feature switches say; metadata that cannot be read counts as hidden."""
     ids = list(dict.fromkeys(i for i in memory_ids if i))
     found: set[str] = set()
     for i in range(0, len(ids), _IN_CHUNK):
@@ -78,10 +88,10 @@ def _media_memories(db: Any, memory_ids: Iterable[str]) -> set[str]:
         for row in rows:
             try:
                 source = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
-                is_media = isinstance(source, dict) and source.get("type") in MEDIA_SOURCE_TYPES
+                hidden = _is_hidden_source(source, ctx)
             except (ValueError, AttributeError):
-                is_media = True
-            if is_media:
+                hidden = True
+            if hidden:
                 found.add(row["memory_id"])
     return found
 
@@ -97,10 +107,11 @@ def _memory_of_facts(db: Any, profile_id: str, fact_ids: Sequence[str]) -> dict[
     return out
 
 
-def _hidden_media_facts(db: Any, profile_id: str, fact_ids: Sequence[str]) -> set[str]:
+def _hidden_source_facts(db: Any, profile_id: str, fact_ids: Sequence[str],
+                         ctx: VisibilityContext) -> set[str]:
     memory_of = _memory_of_facts(db, profile_id, fact_ids) if fact_ids else {}
-    media = _media_memories(db, memory_of.values())
-    return {fid for fid, mem in memory_of.items() if mem in media}
+    hidden = _hidden_source_memories(db, memory_of.values(), ctx)
+    return {fid for fid, mem in memory_of.items() if mem in hidden}
 
 
 def drop_hidden_results(fused: list, db: Any, profile_id: str) -> list:
@@ -110,10 +121,10 @@ def drop_hidden_results(fused: list, db: Any, profile_id: str) -> list:
         return fused
     ctx = current()
     hidden = {fr.fact_id for fr in fused if fr.fact_id in ctx.hidden_fact_ids}
-    if ctx.hide_media:
+    if ctx.hide_media or ctx.hide_sources:
         try:
-            hidden |= _hidden_media_facts(
-                db, profile_id, [fr.fact_id for fr in fused if fr.fact_id not in hidden])
+            hidden |= _hidden_source_facts(
+                db, profile_id, [fr.fact_id for fr in fused if fr.fact_id not in hidden], ctx)
         except Exception as exc:  # noqa: BLE001 - fail closed
             logger.warning("visibility lookup failed, hiding all (%s)", type(exc).__name__)
             return []
@@ -127,9 +138,9 @@ def drop_hidden_facts(facts: dict, db: Any) -> dict:
         return facts
     ctx = current()
     hidden = {fid for fid in facts if fid in ctx.hidden_fact_ids}
-    if ctx.hide_media:
+    if ctx.hide_media or ctx.hide_sources:
         try:
-            media = _media_memories(db, {f.memory_id for f in facts.values()})
+            media = _hidden_source_memories(db, {f.memory_id for f in facts.values()}, ctx)
         except Exception as exc:  # noqa: BLE001 - fail closed
             logger.warning("visibility lookup failed, hiding all (%s)", type(exc).__name__)
             return {}

@@ -215,10 +215,13 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         row = self._read().execute("SELECT * FROM media_items WHERE media_id = ?", (media_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_by_sha(self, profile_id: str, source_sha256: str) -> dict[str, Any] | None:
+    def find_by_sha(self, profile_id: str, source_sha256: str, *,
+                    exclude_origin: str | None = None) -> dict[str, Any] | None:
+        """The oldest active item with this content; ``exclude_origin`` skips items made by that origin."""
         row = self._read().execute(
             "SELECT * FROM media_items WHERE profile_id = ? AND source_sha256 = ? AND state = 'active'"
-            " ORDER BY created_at LIMIT 1", (profile_id, source_sha256)).fetchone()
+            " AND origin != ? ORDER BY created_at LIMIT 1",
+            (profile_id, source_sha256, exclude_origin or "")).fetchone()
         return dict(row) if row else None
 
     def phash_candidates(self, profile_id: str) -> list[tuple[str, str]]:

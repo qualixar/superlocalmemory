@@ -56,6 +56,8 @@ class MediaInput:
     file_name: str = ""
     download_url: str | None = None
     remote: bool = False
+    #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
+    data: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,10 @@ def _download(inp: MediaInput) -> bytes:
 def _read_input(inp: MediaInput) -> bytes:
     if inp.download_url:
         return _download(inp)
+    if inp.data is not None:
+        if len(inp.data) > MAX_FILE_BYTES:
+            raise _refuse("That image is too large (25 MB limit).")
+        return inp.data
     if inp.base64 is not None:
         if len(inp.base64) * 3 // 4 > MAX_BASE64_BYTES + 3:
             raise _refuse("That image is too large (8 MB limit for pasted images).")
@@ -331,7 +337,8 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     request = SaveRequest(
         segments=_segments(args["content"], ocr.text), profile_id=profile_id, source_type="media",
         trusted_actor_id=args["actor_id"], tags=args["tags"], session_date=args["session_date"],
-        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool"}},
+        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool",
+                                          **(args.get("folder") or {})}},
         idempotency_key=args["idempotency_key"])
     try:
         saved = submit_memory(args["runtime"], request, config=job.config)
@@ -344,7 +351,8 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         stored_sha256=info["stored_sha"], phash=info.get("phash"), mime=info["mime"],
         bytes=info["stored_size"], width=info.get("width"), height=info.get("height"),
         original_relpath=relpath, exif_json=info.get("exif") or {}, captured_at=_captured_at(info.get("exif") or {}),
-        anchor_memory_id=saved.memory_id, origin="tool", thumb_webp=info["thumb"],
+        anchor_memory_id=saved.memory_id,
+        origin="folder" if args.get("folder") else "tool", thumb_webp=info["thumb"],
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
@@ -360,7 +368,7 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
 def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
-    client: Any = None, store: Any = None, cache: Any = None,
+    client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
 ) -> MediaReceipt:
     """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
     opened = False
@@ -370,7 +378,7 @@ def remember_media(
         _check_kind(data)
         client, store_ref, opened = _resolve(client, store)
         src_sha = hashlib.sha256(data).hexdigest()
-        known = store_ref.find_by_sha(profile_id, src_sha)
+        known = store_ref.find_by_sha(profile_id, src_sha, exclude_origin=None if folder else "folder")
         if known:
             return MediaReceipt("duplicate", media_id=known["media_id"], memory_id=known["anchor_memory_id"],
                                 duplicate_of=known["media_id"])
@@ -379,7 +387,7 @@ def remember_media(
             raise _refuse("The image library is full (2 GB limit). Remove some images first.")
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
-            session_date=session_date, idempotency_key=idempotency_key))
+            session_date=session_date, idempotency_key=idempotency_key, folder=folder))
     except _Stop as stop:
         return stop.receipt
     finally:
