@@ -67,6 +67,9 @@ _TOKEN_SHAPES: tuple[tuple[re.Pattern[str], str], ...] = (
                 r"[A-Za-z0-9_\-]{8,300}"), "DISCORD_WEBHOOK"),
 )
 
+#: The vendor token shapes, for callers that only detect (no replacement).
+TOKEN_SHAPES = _TOKEN_SHAPES
+
 #: ``Authorization: <scheme> <credential>`` — keep the header and the scheme.
 _AUTH_HEADER = re.compile(
     r"(?i)(\b(?:proxy-)?authorization[\"']?\s*[:=]\s*[\"']?\s*"

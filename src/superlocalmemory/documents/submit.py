@@ -133,13 +133,25 @@ def _stage_path(inp: MediaInput, out: Any) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+def _stage_data(inp: MediaInput, out: Any) -> tuple[str, int]:
+    data = inp.data or b""
+    if len(data) > _max_bytes():
+        raise _refuse("That document is too large.")
+    _check_head(data[:8])
+    out.write(data)
+    return hashlib.sha256(data).hexdigest(), len(data)
+
+
 def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
-    if (inp.base64 is None) == (inp.path is None):
+    if inp.data is None and (inp.base64 is None) == (inp.path is None):
         raise _refuse("Give a document file or document data.")
     tmp, out = _new_tmp(files.tmp_dir(root))
     try:
         with out:
-            sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
+            if inp.data is not None:
+                sha, size = _stage_data(inp, out)
+            else:
+                sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
         return tmp, sha, size
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -159,7 +171,8 @@ def _document_id(profile_id: str, key: str) -> str:
     return secrets.token_hex(16)
 
 
-def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool) -> dict | None:
+def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool,
+              folder: bool = False) -> dict | None:
     """A document that makes this submit a repeat, or None; raises when a key names other content."""
     if keyed:
         row = store.get_document(doc_id)
@@ -167,7 +180,7 @@ def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool) -
             if row["sha256"] != sha:
                 raise _refuse("That key was already used for a different document.")
             return row
-    return store.find_document_by_sha(profile_id, sha)
+    return store.find_document_by_sha(profile_id, sha, exclude_origin=None if folder else "folder")
 
 
 def _repeat(store: Any, row: dict) -> DocumentReceipt | None:
@@ -195,7 +208,8 @@ def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str,
     relpath, placed_new = _place(root, tmp, sha)
     try:
         store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
-                              mime="application/pdf", bytes=size, source_relpath=relpath)
+                              mime="application/pdf", bytes=size, source_relpath=relpath,
+                              origin="folder" if "folder" in payload else "user")
         job_id = _queue(store, doc_id, profile_id, payload)
     except Exception as exc:  # noqa: BLE001 - nothing usable was stored; undo the file
         logger.warning("document was not queued (%s)", type(exc).__name__)
@@ -215,7 +229,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
     tmp, sha, size = _stage(inp, root)
     try:
         doc_id = _document_id(profile_id, key)
-        row = _existing(store, profile_id, doc_id, sha, bool(key))
+        row = _existing(store, profile_id, doc_id, sha, bool(key), "folder" in payload)
         if row:
             tmp.unlink(missing_ok=True)
             return _repeat(store, row) or _retry(store, row, payload)
@@ -230,13 +244,19 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
 def submit_document(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "", store: Any = None,
+    folder: dict[str, Any] | None = None,
 ) -> DocumentReceipt:
-    """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes."""
+    """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes.
+
+    ``folder`` (set only by folder sources) is added to every memory's provenance.
+    """
     opened, store_ref = False, store
     try:
         store_ref, opened = _resolve(store)
         words = prepare_user_text(config, content).text if content.strip() else ""
         payload = {"user_words": words, "tags": tags, "session_date": session_date, "actor_id": actor_id}
+        if folder:
+            payload["folder"] = dict(folder)
         receipt = _submit(store_ref, inp, Path(store_ref.path).parent, profile_id, payload, idempotency_key)
     except _Stop as stop:
         return stop.receipt

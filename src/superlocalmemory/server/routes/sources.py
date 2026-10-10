@@ -1,0 +1,131 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+# Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
+
+"""Folder source routes (local only).
+
+Connecting a folder is two steps: ``POST /sources`` checks it and returns a preview that saves
+nothing, ``POST /sources/{id}/confirm`` connects it. Every route answers only for the active
+profile's sources. Nothing here reads or writes a file in the folder.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+from typing import Any, Callable
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from superlocalmemory import sources
+from superlocalmemory.server.routes.media import _profile, _require_local
+from superlocalmemory.sources.roots import RootRefused
+
+router = APIRouter(prefix="/api/v3/sources", tags=["sources"])
+_NO_STORE = {"Cache-Control": "no-store"}
+_STATUS = {"unknown_source": 404, "remote_access_on": 409, "writer_not_ready": 503,
+           "erasure_incomplete": 503, "cannot_save": 500}
+
+
+class AddRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    profile_id: str = ""
+    kind: str | None = Field(default=None, pattern="^(folder|obsidian)$")
+
+
+class ReleaseRequest(BaseModel):
+    relpath: str = Field(min_length=1, max_length=4096)
+
+
+async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except sources.SourceRefused as exc:
+        raise HTTPException(_STATUS.get(exc.code, 409), detail={"code": exc.code, "message": str(exc)}) from None
+    except RootRefused as exc:
+        raise HTTPException(422, detail={"code": exc.code, "message": str(exc)}) from None
+    except sources.HintsNotAvailable:
+        raise HTTPException(404, detail="Not found.") from None
+
+
+async def _context(request: Request, *, write: bool = False, delete: bool = False,
+                   profile_id: str = "") -> tuple[str, str]:
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import require_engine
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    actor = authenticated_request_actor(request, actor_kind="http-sources") if (write or delete) else ""
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id or request.query_params.get("profile_id", ""))
+    perm = Permission.DELETE if delete else Permission.WRITE if write else Permission.READ
+    require_permission(request, perm, profile=profile)
+    return profile, actor
+
+
+async def _owned(profile: str, source_id: str) -> None:
+    mine = await _call(sources.list_sources, profile)
+    if source_id not in {s.source_id for s in mine}:
+        raise HTTPException(404, detail="Not found.")
+
+
+@router.get("")
+async def list_all(request: Request, profile_id: str = ""):
+    profile, _ = await _context(request, profile_id=profile_id)
+    found = await _call(sources.list_sources, profile)
+    return JSONResponse({"sources": [dataclasses.asdict(s) for s in found]}, headers=_NO_STORE)
+
+
+@router.post("")
+async def add(req: AddRequest, request: Request):
+    profile, _ = await _context(request, write=True, profile_id=req.profile_id)
+    preview = await _call(sources.add_source, req.path, profile_id=profile, kind=req.kind)
+    return JSONResponse(dataclasses.asdict(preview), headers=_NO_STORE)
+
+
+@router.post("/{source_id}/confirm")
+async def confirm(source_id: str, request: Request):
+    await _context(request, write=True)
+    await _call(sources.confirm_source, source_id, via="dashboard")
+    return JSONResponse({"confirmed": True, "source_id": source_id}, status_code=202)
+
+
+@router.delete("/{source_id}")
+async def remove(source_id: str, request: Request, purge: bool = False):
+    profile, _ = await _context(request, delete=True)
+    await _owned(profile, source_id)
+    await _call(sources.remove_source, source_id, purge=purge)
+    return {"removed": True, "source_id": source_id, "purged": purge}
+
+
+@router.post("/{source_id}/rescan")
+async def rescan(source_id: str, request: Request):
+    profile, _ = await _context(request, write=True)
+    await _owned(profile, source_id)
+    return JSONResponse(await _call(sources.rescan, source_id), status_code=202)
+
+
+@router.get("/{source_id}/report")
+async def report(source_id: str, request: Request):
+    profile, _ = await _context(request)
+    await _owned(profile, source_id)
+    found = await _call(sources.source_report, source_id)
+    return JSONResponse(dataclasses.asdict(found), headers=_NO_STORE)
+
+
+@router.post("/{source_id}/quarantine/release")
+async def release(source_id: str, req: ReleaseRequest, request: Request):
+    profile, _ = await _context(request, write=True)
+    await _owned(profile, source_id)
+    if not await _call(sources.release_file, source_id, req.relpath):
+        raise HTTPException(404, detail="Not found.")
+    return {"released": True}
+
+
+@router.post("/{source_id}/hint")
+async def hint(source_id: str, request: Request):
+    """Watcher hints need the watcher token, which this build does not create."""
+    raise HTTPException(404, detail="Not found.")

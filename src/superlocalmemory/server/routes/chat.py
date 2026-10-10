@@ -374,6 +374,7 @@ def _recall_via_resident_engine(app_state, query: str, limit: int) -> list:
                 include_global=True, include_shared=True,
             ) if memory_ids else {}
         )
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
         from superlocalmemory.server.recall_serializer import (
             serialize_recall_response,
@@ -383,6 +384,7 @@ def _recall_via_resident_engine(app_state, query: str, limit: int) -> list:
             response,
             limit=limit,
             memory_map=memory_map,
+            source_map=memory_sources(engine._db, memory_ids),
             per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
             total_max=getattr(_rc, "recall_total_max_chars", 12000),
             display_min_confidence=engine_display_min_confidence(engine),

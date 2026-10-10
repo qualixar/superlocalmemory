@@ -215,10 +215,13 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
         row = self._read().execute("SELECT * FROM media_items WHERE media_id = ?", (media_id,)).fetchone()
         return dict(row) if row else None
 
-    def find_by_sha(self, profile_id: str, source_sha256: str) -> dict[str, Any] | None:
+    def find_by_sha(self, profile_id: str, source_sha256: str, *,
+                    exclude_origin: str | None = None) -> dict[str, Any] | None:
+        """The oldest active item with this content; ``exclude_origin`` skips items made by that origin."""
         row = self._read().execute(
             "SELECT * FROM media_items WHERE profile_id = ? AND source_sha256 = ? AND state = 'active'"
-            " ORDER BY created_at LIMIT 1", (profile_id, source_sha256)).fetchone()
+            " AND origin != ? ORDER BY created_at LIMIT 1",
+            (profile_id, source_sha256, exclude_origin or "")).fetchone()
         return dict(row) if row else None
 
     def phash_candidates(self, profile_id: str) -> list[tuple[str, str]]:
@@ -263,6 +266,33 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
             cur = conn.execute(f"INSERT INTO {table}(profile_id, embedding) VALUES (?, ?)", (profile_id, blob))
             conn.execute("INSERT INTO media_vector_rows(space_id, vec_rowid, media_id, profile_id)"
                          " VALUES (?, ?, ?, ?)", (space_id, cur.lastrowid, media_id, profile_id))
+
+    def vector_count(self, profile_id: str) -> int:
+        """How many vectors this profile has (0 means searching by picture has nothing to find)."""
+        row = self._read().execute(
+            "SELECT COUNT(*) FROM media_vector_rows WHERE profile_id = ?", (profile_id,)).fetchone()
+        return int(row[0])
+
+    def memory_ids_of(self, media_ids: Sequence[str]) -> dict[str, list[str]]:
+        """The memories that stand for each active item: its anchor, or a page's own memories."""
+        ids = list(dict.fromkeys(media_ids))
+        if not ids:
+            return {}
+        conn = self._read()
+        rows = conn.execute(
+            "SELECT m.media_id, m.anchor_memory_id, p.memory_ids_json FROM media_items m"
+            " LEFT JOIN doc_pages p ON p.document_id = m.document_id AND p.page_no = m.page_no"
+            f" WHERE m.state = 'active' AND m.media_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        out: dict[str, list[str]] = {}
+        for media_id, anchor, pages in rows:
+            found = [anchor] if anchor else []
+            try:
+                found += [str(x) for x in json.loads(pages or "[]")]
+            except ValueError:
+                pass
+            if found:
+                out[media_id] = found
+        return out
 
     def knn(self, vector: Sequence[float], profile_id: str, k: int,
             space_id: str | None = None) -> list[tuple[str, float]]:

@@ -882,6 +882,7 @@ class EngineRecallAdapter:
             if memory_ids else {}
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
         from superlocalmemory.server.recall_serializer import (
             recall_response_metadata,
@@ -892,6 +893,7 @@ class EngineRecallAdapter:
             response,
             limit=limit,
             memory_map={k: _sanitize_json_text(v) for k, v in memory_map.items()},
+            source_map=memory_sources(self._engine._db, memory_ids),
             per_fact_max=getattr(_rc, "recall_per_fact_max_chars", 2400),
             total_max=getattr(_rc, "recall_total_max_chars", 12000),
             # Option B: markers only on session-bearing recalls. A marker can
@@ -3367,6 +3369,13 @@ async def lifespan(application: FastAPI):
         except Exception as exc:  # pragma: no cover — optional feature
             logger.warning("document job service not started: %s", type(exc).__name__)
 
+        # Connected folders are scanned in the background; idle (no thread) until a folder is confirmed.
+        try:
+            from superlocalmemory.server.sources_wiring import start_source_scanner
+            start_source_scanner(application, _SERVICES)
+        except Exception as exc:  # pragma: no cover — optional feature
+            logger.warning("folder source service not started: %s", type(exc).__name__)
+
         # Boot sweep for wedged enrichment leases (#131): a killed daemon
         # leaves rows stuck in enriching; the materializer loop reclaims
         # them only once it cycles, and its reap used to sit behind the
@@ -3664,6 +3673,11 @@ async def lifespan(application: FastAPI):
         kind_runner_stopped = stop_document_jobs(_SERVICES) and kind_runner_stopped
     except Exception:  # pragma: no cover — defensive
         pass
+    try:
+        from superlocalmemory.server.sources_wiring import stop_source_scanner
+        kind_runner_stopped = stop_source_scanner(_SERVICES) and kind_runner_stopped
+    except Exception:  # pragma: no cover — defensive
+        pass
     materializer_stopped = _stop_pending_materializer() and kind_runner_stopped
     canonical_writer_stopped = _release_canonical_remember_runtime(application)
     _profile_runtime = None
@@ -3869,6 +3883,13 @@ def create_app() -> FastAPI:
     try:
         from superlocalmemory.server.routes.media import router as media_router
         application.include_router(media_router)
+    except ImportError:
+        pass
+
+    # -- Folder source routes (local only) --
+    try:
+        from superlocalmemory.server.routes.sources import router as sources_router
+        application.include_router(sources_router)
     except ImportError:
         pass
 
