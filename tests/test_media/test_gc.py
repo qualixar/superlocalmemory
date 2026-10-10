@@ -56,3 +56,24 @@ def test_young_files_are_skipped(tmp_path):
 def test_no_media_db_is_a_no_op(tmp_path):
     rep = gc("p1", dry_run=False, data_root=tmp_path)
     assert rep.rows_without_memory == [] and not media_db_path(tmp_path).exists()
+
+
+def test_a_real_run_keeps_the_stored_pdf_of_a_document(tmp_path):
+    import hashlib
+    import os
+    import time
+
+    root, _db, store = make_root(tmp_path)
+    data = b"%PDF-1.4 kept"
+    sha = hashlib.sha256(data).hexdigest()
+    scratch = tmp_path / "upload.pdf"
+    scratch.write_bytes(data)
+    relpath = files.place_original(root, scratch, sha, "pdf")
+    old = time.time() - 3600
+    os.utime(files.media_root(root) / relpath, (old, old))
+    store.insert_document(document_id="d" * 32, profile_id="p1", sha256=sha, title="kept.pdf",
+                          mime="application/pdf", bytes=len(data), source_relpath=relpath)
+    rep = gc("p1", dry_run=False, data_root=root)
+    assert rep.files_without_row == []
+    assert (files.media_root(root) / relpath).exists()
+    store.close()
