@@ -6481,6 +6481,21 @@ def _terminalize_orphan_operation(engine, operation_id: str) -> None:
         )
 
 
+def _add_projection_verdict(health: dict) -> None:
+    """Add ``behind`` and ``waiting_for_promotion`` to an outbox report.
+
+    ``behind`` is one boolean an alert can key on without knowing what a
+    healthy depth looks like: rows are queued AND a projection is open to take
+    them, or rows were refused. Queued rows with no projection open are not
+    behind; they wait for a promotion. A report without ``projection_open``
+    (an older orchestrator) is read as open.
+    """
+    depth = int(health.get("depth", 0) or 0)
+    is_open = bool(health.get("projection_open", True))
+    health["behind"] = (depth > 0 and is_open) or bool(health.get("stalled", 0))
+    health["waiting_for_promotion"] = depth > 0 and not is_open
+
+
 def _projection_health() -> dict:
     """Queue depth, stall count, and whether the worker is running.
 
@@ -6503,11 +6518,7 @@ def _projection_health() -> dict:
             return {"available": False}
         health = dict(orchestrator.outbox_health())
         health["available"] = True
-        # One boolean an alert can key on without knowing what a healthy depth
-        # looks like on this store.
-        health["behind"] = bool(health.get("depth", 0)) or bool(
-            health.get("stalled", 0)
-        )
+        _add_projection_verdict(health)
         return health
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "error": str(exc)[:120]}
