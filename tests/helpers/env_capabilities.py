@@ -73,20 +73,22 @@ NO_VECTOR_SEARCH_REASON = (
 
 
 def keyword_index_forgets_at_once() -> bool:
-    """Whether FTS5 ``secure-delete`` exists here (SQLite 3.42+).
+    """Whether FTS5 ``secure-delete`` is usable here (SQLite 3.42+, not 3.44.0-3.46.0).
 
     Without it a deleted row's words stay inside the keyword index file until
     the next ``slm db repair`` purges them. That is the product's documented
-    behaviour on an older SQLite (storage/fts_residue.py, GitHub #153), not a
-    defect: Ubuntu 22.04's system SQLite is 3.37.2.
+    behaviour (storage/fts_residue.py, GitHub #153), not a defect: Ubuntu
+    22.04's SQLite is 3.37.2 (too old), and 3.44.0 to 3.46.0 corrupt the index
+    when secure-delete is on, so the product leaves it off there.
     """
-    from superlocalmemory.storage.fts_residue import SECURE_DELETE_MIN_SQLITE
+    from superlocalmemory.storage.fts_residue import secure_delete_supported
 
-    return sqlite3.sqlite_version_info >= SECURE_DELETE_MIN_SQLITE
+    return secure_delete_supported()
 
 
 NO_SECURE_DELETE_REASON = (
-    f"SQLite {sqlite3.sqlite_version} predates FTS5 secure-delete (3.42); there "
+    f"SQLite {sqlite3.sqlite_version} cannot use FTS5 secure-delete safely (it is "
+    "missing before 3.42 and corrupts the index in 3.44.0 to 3.46.0); there "
     "deleted words leave the keyword index at the next 'slm db repair', by design"
 )
 
@@ -95,8 +97,8 @@ def purge_keyword_index_on_old_sqlite(db_path) -> None:
     """Apply the repair's keyword-index purge where secure-delete cannot exist.
 
     A test asserting that an erasure leaves the words nowhere then checks the
-    whole documented contract on every SQLite: at once on 3.42+, after the
-    repair's purge before that. A no-op on 3.42+.
+    whole documented contract on every SQLite: at once where secure-delete works, after the
+    repair's purge where secure-delete is unavailable. A no-op where it works.
     """
     if keyword_index_forgets_at_once():
         return
