@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from superlocalmemory.infra.backup import MANAGED_DATABASES, BackupManager
 from superlocalmemory.infra.cloud_backup import _find_latest_backup_set
 from superlocalmemory.media import open_media_store
+from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
 
 
 def _memory_db(root):
@@ -23,6 +26,7 @@ def test_media_db_is_managed():
     assert "media.db" in MANAGED_DATABASES
 
 
+@pytest.mark.skipif(not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON)
 def test_backup_includes_media_db_when_present(tmp_path):
     root = tmp_path / "slm"
     db = _memory_db(root)
