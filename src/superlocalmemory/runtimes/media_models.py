@@ -10,6 +10,7 @@ superlocalmemory installed) never imports this file; the client passes it what i
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -57,5 +58,18 @@ def min_score_for(model: str) -> float | None:
     return profile.media_min_score if profile is not None else None
 
 
+def watchdog_limit_mb(default: int) -> int:
+    """Memory limit the daemon's watchdog applies to the picture worker; 0 means no limit.
+
+    The worker enforces its own cap per model after each request. The watchdog must not
+    kill it earlier than that, so it uses the same override, else the largest model cap.
+    """
+    try:
+        wanted = int(float(os.environ["SLM_MEDIA_WORKER_RSS_LIMIT_MB"]))
+    except (KeyError, ValueError):
+        return max([default, *(p.rss_limit_mb for p in MODEL_PROFILES.values())])
+    return max(wanted, 0)
+
+
 __all__ = ["DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "MODEL_PROFILES", "ModelProfile",
-           "min_score_for", "profile_for", "rss_limit_mb_for"]
+           "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]

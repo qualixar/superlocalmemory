@@ -70,3 +70,17 @@ def test_plan_floor_reaches_the_channel_floor():
     p = space_plan.resolve_space_plan("nomic-ai/nomic-embed-text-v1.5", 768, requested="separate",
                                       separate_model=(EG2, "", 768))
     assert p.min_score == 0.69
+
+
+def test_watchdog_leaves_the_picture_worker_its_own_larger_cap(monkeypatch):
+    from superlocalmemory.server.unified_daemon import _worker_limit_mb
+
+    monkeypatch.delenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", raising=False)
+    other = ["/venv/bin/python", "-m", "superlocalmemory.core.embedding_worker"]
+    media = ["/media/venv/bin/python", "-I", "/site/runtimes/multimodal_worker.py"]
+    assert _worker_limit_mb(other, 2500) == 2500
+    assert _worker_limit_mb(media, 2500) == 4500
+    monkeypatch.setenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", "6000")
+    assert _worker_limit_mb(media, 2500) == 6000
+    monkeypatch.setenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", "0")
+    assert _worker_limit_mb(media, 2500) == 0
