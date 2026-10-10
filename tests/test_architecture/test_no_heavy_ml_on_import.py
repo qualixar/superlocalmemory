@@ -17,8 +17,12 @@ import pytest
 _SRC = Path(__file__).resolve().parents[2] / "src"
 
 PACKAGES = [
-    "superlocalmemory.daemon", "superlocalmemory.mesh", "superlocalmemory.cache",
-    "superlocalmemory.media", "superlocalmemory.runtimes", "superlocalmemory.memory_core",
+    "superlocalmemory.daemon",
+    "superlocalmemory.mesh",
+    "superlocalmemory.cache",
+    "superlocalmemory.memory_core",
+    "superlocalmemory.media",
+    "superlocalmemory.runtimes",
 ]
 
 _PROBE = (
