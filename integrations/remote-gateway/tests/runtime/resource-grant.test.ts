@@ -19,7 +19,7 @@ async function setup(withKey: boolean) {
   await registry.setEntitlement('owner-a', Date.now() + 60000, 0);
   const relay = env.RELAYS.getByName(id); await relay.configureBinding({ ownerId: 'owner-a', connectionId: id, installationId: 'installation-a', profileId: 'profile-a', deviceDigest: digest, deviceExpiresAt: Date.now() + 60000 });
   const key = withKey ? (await relay.rotateGrantKey('owner-a')).key : null;
-  const upgrade = await relay.fetch(new Request('https://private.invalid/connector', { headers: { Upgrade: 'websocket', Authorization: 'Bearer ' + token } }));
+  const upgrade = await relay.fetch(new Request('https://private.invalid/connector', { headers: { Upgrade: 'websocket', Authorization: 'Bearer ' + token, 'x-slm-connector-features': 'grant-v1' } }));
   const socket = upgrade.webSocket!; sockets.push(socket); const ready = new Promise<string>(r => socket.addEventListener('message', e => r(String(e.data)), { once: true })); socket.accept(); await ready;
   const frames: RequestFrame[] = []; const waiting: Array<() => void> = [];
   socket.addEventListener('message', e => { const d = decodeRelayFrame(String(e.data)); if (d.ok && d.frame.kind === 'request') { frames.push(d.frame); waiting.shift()?.(); } });

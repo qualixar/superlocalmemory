@@ -9,7 +9,7 @@ export interface RelayBinding {
  * missed heartbeats means it is asleep or its network dropped without closing. */
 export const CONNECTOR_SILENCE_MS = 45000;
 interface StoredState { binding: RelayBinding | null; generation: number; revoked: boolean; }
-interface Attachment { generation: number; connectionId: string; connectedAt?: number; }
+interface Attachment { generation: number; connectionId: string; connectedAt?: number; grants?: boolean; }
 /** What the resource Worker passes with a forwarded call: who is calling (signed for the laptop) and whether it parks on the laptop. */
 export interface ForwardContext { grant?: GrantInput; wait?: boolean; }
 /** A laptop holds one slot per long wait; more than this many at once would starve ordinary calls. */
@@ -102,11 +102,23 @@ export class RelayDO extends DurableObject {
   private async signingKey(): Promise<{version:number;key:CryptoKey}|null> {
     if(this.signing)return this.signing;
     if(this.unkeyed)return null;
-    const secret=this.wrapSecret();const stored=await this.ctx.storage.get<StoredGrantKey>("grant-key");
-    if(!stored){this.unkeyed=true;return null;}
-    if(!secret)return null;
-    try{this.signing={version:stored.version,key:await importGrantKey(await unwrapGrantKey(stored,secret))};}catch{return null;}
-    return this.signing;
+    const secret=this.wrapSecret();
+    for(let attempt=0;attempt<3;attempt++){
+      const stored=await this.ctx.storage.get<StoredGrantKey>("grant-key");
+      if(this.signing)return this.signing;
+      if(!stored){this.unkeyed=true;return null;}
+      if(!secret)return null;
+      let opened:{version:number;key:CryptoKey};
+      try{opened={version:stored.version,key:await importGrantKey(await unwrapGrantKey(stored,secret))};}catch{return null;}
+      // A rotation or revocation may have landed while the key was being opened: never publish over it.
+      if(this.signing)return this.signing;
+      if(this.unkeyed)return null;
+      const current=await this.ctx.storage.get<StoredGrantKey>("grant-key");
+      if(this.signing)return this.signing;
+      if(this.unkeyed)return null;
+      if(current?.version===stored.version){this.signing=opened;return opened;}
+    }
+    return null;
   }
   async forwardCurrent(request: Omit<Extract<RelayFrame,{kind:'request'}>,'generation'>, options: RelayCodecOptions = {}, context: ForwardContext = {}): Promise<Response> {
     // Only the authenticated resource Worker calls this. Client metadata cannot
@@ -141,7 +153,7 @@ export class RelayDO extends DurableObject {
       for(const old of this.ctx.getWebSockets("connector"))this.closeSocket(old,503,"connector_replaced");
       const pair=new WebSocketPair();const [client,server]=Object.values(pair);
       this.ctx.acceptWebSocket(server,["connector"]);
-      server.serializeAttachment({generation:next.generation,connectionId:binding.connectionId,connectedAt:Date.now()} satisfies Attachment);
+      server.serializeAttachment({generation:next.generation,connectionId:binding.connectionId,connectedAt:Date.now(),...(request.headers.get("x-slm-connector-features")==="grant-v1"?{grants:true}:{})} satisfies Attachment);
       server.send(JSON.stringify({v:1,kind:"ready",generation:next.generation}));
       return new Response(null,{status:101,webSocket:client});
     });
@@ -165,7 +177,7 @@ export class RelayDO extends DurableObject {
     // can never complete a later operation that happens to reuse that caller ID.
     const wireId=crypto.randomUUID();
     // Signing may wait on storage, so it happens before the capacity checks below, which must run without an await in between.
-    const binding=this.state.binding;const key=context.grant?await this.signingKey():null;
+    const binding=this.state.binding;const attached=socket.deserializeAttachment() as Attachment|null;const key=context.grant&&attached?.grants===true?await this.signingKey():null;
     const headers=key&&context.grant?[...frame.headers,[GRANT_HEADER,await signGrant(key.key,key.version,context.grant,{cid:binding.connectionId,fid:wireId,gen:frame.generation,dl:frame.deadlineAt})] as const]:frame.headers;
     const outbound=encodeRelayFrame({...frame,id:wireId,headers},options);
     if(!outbound.ok)return failure(400,"invalid_relay_request");

@@ -19,7 +19,7 @@ export async function connectFetch(request:Request,env:ConnectEnv,_ctx:Execution
   const consumed=await device.consume(digest,verified);if(!consumed)return denial(401,'device_unauthorized');
   const current=await env.OWNERS.getByName(binding.ownerId).getConnection(binding.ownerId,binding.connectionId);
   if(!current||current.revokedAt!==null||current.deviceDigest!==digest||current.deviceJkt!==binding.deviceJkt||current.installationId!==binding.installationId||current.profileId!==binding.profileId||current.deviceExpiresAtMs<=Date.now())return denial(403,'connection_unavailable');
-  return await env.RELAYS.getByName(binding.connectionId).fetch(new Request('https://private.invalid/connector',{headers:{Upgrade:'websocket',Authorization:'Bearer '+token}}));
+  return await env.RELAYS.getByName(binding.connectionId).fetch(new Request('https://private.invalid/connector',{headers:{Upgrade:'websocket',Authorization:'Bearer '+token,...(request.headers.get('x-slm-connector-features')==='grant-v1'?{'x-slm-connector-features':'grant-v1'}:{})}}));
  }catch{return denial(503,'connector_unavailable');}
 }
 export default {fetch:connectFetch};
