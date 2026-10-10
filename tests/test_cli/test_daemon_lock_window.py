@@ -33,12 +33,9 @@ pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="flock-based lock simulation is POSIX-only",
 )
 
-# Imported after the skip mark: Windows has no fcntl, and a module-level import
-# failed collection there, which stopped every Windows test shard before a
-# single test ran.
-fcntl = pytest.importorskip(
-    "fcntl", reason="flock-based lock simulation is POSIX-only",
-)
+# Imported after the marker: Windows has no fcntl, and a module-level import
+# would fail collection before the skip above could apply.
+fcntl = pytest.importorskip("fcntl")
 
 
 @contextmanager
