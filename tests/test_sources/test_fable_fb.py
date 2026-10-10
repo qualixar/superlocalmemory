@@ -202,3 +202,70 @@ def test_a_scan_hides_a_queued_save_that_was_replaced_once_it_commits(env, monke
     ops.put(key, "queryable", ["q1"])
     env.scan(sid)
     assert "q1" in env.runtime.archived
+
+
+# -- CX5 residual: a retry of the same file version re-sends the same keys --------------------
+
+from tests.test_sources.test_audit2_ownership import LONG, _fail_once_on_part  # noqa: E402
+
+
+def _live(env, sid, relpath):
+    entries = json.loads(env.files(sid)[relpath]["memory_ids_json"])
+    return [e for e in entries if e.get("m") and not e.get("sup")]
+
+
+def test_a_retry_after_a_partial_save_re_sends_the_same_keys_and_saves_nothing_twice(env):
+    env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    _fail_once_on_part(env, 2)
+    env.scan(sid)
+    assert env.files(sid)["long.txt"]["state"] == "error"
+    first_attempt = len(env.runtime.saved)
+    env.scan(sid)  # same bytes: the retry
+    row = env.files(sid)["long.txt"]
+    assert row["state"] == "indexed"
+    keys = [r["key"] for r in env.runtime.saved]
+    assert len(keys) == len(set(keys)) and len({k.rsplit(":", 2)[1] for k in keys}) == 1  # one save number
+    assert len(keys) > first_attempt  # the parts that had not been saved yet were saved
+    assert env.runtime.archived == []  # nothing was hidden: the re-sent parts are the file's live memories
+    assert len(_live(env, sid, "long.txt")) == len(keys)
+
+
+def test_the_save_number_moves_on_once_the_version_is_saved_or_changes(env):
+    path = env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    _fail_once_on_part(env, 2)
+    env.scan(sid)
+    env.scan(sid)
+    path.write_bytes((LONG + " changed").encode())
+    import os as _os
+    st = _os.stat(path)
+    _os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10**9))
+    env.scan(sid)
+    numbers = [r["key"].split(":")[-2] for r in env.runtime.saved]
+    assert sorted(set(numbers)) == ["1", "2"]
+    first = [r["key"] for r in env.runtime.saved if r["key"].split(":")[-2] == "1"]
+    assert len(first) == len(set(first))
+    assert len(_live(env, sid, "long.txt")) == numbers.count("2")  # only the new version is live
+
+
+def test_a_retry_that_fails_again_keeps_the_same_keys(env):
+    env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    real = env.runtime.remember
+    state = {"down": True}
+
+    def remember(admission, actor, deadline_ms=0, accept_after_ms=0):
+        if state["down"] and admission.idempotency_key.endswith(":2"):
+            raise RuntimeError("writer busy")
+        return real(admission, actor, deadline_ms=deadline_ms, accept_after_ms=accept_after_ms)
+
+    env.runtime.remember = remember
+    env.scan(sid)
+    env.scan(sid)
+    assert env.files(sid)["long.txt"]["state"] == "error"
+    state["down"] = False
+    env.scan(sid)
+    keys = [r["key"] for r in env.runtime.saved]
+    assert env.files(sid)["long.txt"]["state"] == "indexed" and len({k.split(":")[-2] for k in keys}) == 1
+    assert env.runtime.archived == [] and len(_live(env, sid, "long.txt")) == len(keys)

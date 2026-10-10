@@ -134,11 +134,15 @@ def _placeholder(p: _Pass, e: Entry, row: dict[str, Any] | None) -> None:
     p.store.put_file(p.sid, e.relpath, state="cloud_placeholder", reason="cloud_only", **fields)
 
 
-def _supersede(p: _Pass, row: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Hide the old version of a file; returns its entries (marked replaced) to keep for the purge."""
+def _supersede(p: _Pass, row: dict[str, Any] | None, resent: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    """Hide the old version of a file; returns its entries (marked replaced) to keep for the purge.
+
+    ``resent`` are keys the new save sent again (a retry of the same version): the writer handed
+    back the memories it already had, the new save owns them, and they are not hidden.
+    """
     if row is None:
         return []
-    entries = entries_of(row)
+    entries = [e for e in entries_of(row) if e.get("k") not in resent]
     p.stats.errors += retire.hide_entries(p.host, p.runtime, p.source, entries, row["relpath"])
     p.stats.errors += retire.hide_document(p.store, p.runtime, p.source, row)
     retire.hide_picture(p.store, row)
@@ -160,14 +164,31 @@ def _is_note(p: _Pass, relpath: str) -> bool:
     return p.source["kind"] == "obsidian" and relpath.lower().endswith((".md", ".markdown", ".canvas"))
 
 
-def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None) -> ingest.Ingested:
-    """One save of the file; each call takes the next save number of its path."""
+def _save_number(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, kind: str, fresh: bool) -> int:
+    """Every save of a path has its own number; only a retry of the same text version keeps it.
+
+    A text file whose last attempt ended in ``error`` on these very bytes is retried under the
+    same number, so the parts that did save are re-sent with the same keys and not saved twice.
+    ``fresh`` forces a new number (a repeat that pointed at hidden copies is saved again).
+    """
+    retry = (not fresh and kind == "text" and row is not None
+             and row["state"] == "error" and row["sha256"] == sha)
+    if retry:
+        n = p.store.current_save_n(p.sid, e.relpath)
+        if n:
+            return n
+    return p.store.next_save_n(p.sid, e.relpath)
+
+
+def _ingest(p: _Pass, e: Entry, sha: str, data: bytes | None, row: dict[str, Any] | None = None,
+            *, fresh: bool = False) -> ingest.Ingested:
+    """One save of the file, under its save number (see ``_save_number``)."""
     version, kind = sha[:12], kind_of(e.relpath)
     if kind != "text":  # pictures and PDFs are handed over as bytes, never re-opened by path
         data = ingest.load_verified(p.root / e.relpath, e.file_id, sha, kind)
         if data is None:  # edited since the hash: look again next pass
             return ingest.Ingested(retry=True)
-    n = p.store.next_save_n(p.sid, e.relpath)
+    n = _save_number(p, e, row, sha, kind, fresh)
     if kind == "text" and _is_note(p, e.relpath):
         return obsidian.ingest_note(p.host, p.runtime, p.source, e.relpath, data or b"", version, n, p.names)
     if kind == "text":
@@ -184,9 +205,9 @@ def _hidden_copy(p: _Pass, out: ingest.Ingested) -> bool:
 
 
 def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes | None) -> None:
-    out = _ingest(p, e, sha, data)
+    out = _ingest(p, e, sha, data, row)
     if not out.retry and not out.skip_reason and _hidden_copy(p, out):
-        out = _ingest(p, e, sha, data)  # once more, under a new save number
+        out = _ingest(p, e, sha, data, row, fresh=True)  # once more, under a new save number
     if out.retry:
         p.stats.deferred += 1
         return
@@ -195,7 +216,7 @@ def _save(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, data: bytes 
                          entries=_supersede(p, row), **_stat_fields(e))
         _record_links(p, e, out)
         return
-    old = _supersede(p, row)
+    old = _supersede(p, row, frozenset(x["k"] for x in out.entries if x.get("k")))
     p.store.put_file(p.sid, e.relpath, sha256=sha, state="indexed", reason="shared" if out.shared else None,
                      entries=memory_entries(old) + out.entries, document_id=out.document_id,
                      media_id=out.media_id, **_stat_fields(e))

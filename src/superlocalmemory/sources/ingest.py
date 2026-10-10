@@ -86,7 +86,8 @@ def provenance(source_id: str, relpath: str, version: str) -> dict[str, str]:
 
 
 def _key(source_id: str, relpath: str, n: int, part: int) -> str:
-    """Per source, path and save number ``n``: every save of a path is its own save, never a repeat."""
+    """Per source, path and save number ``n``. A new save of a path has a new ``n``; a retry of the
+    same file version after a failure keeps its ``n``, so the writer recognises the parts it already has."""
     path = hashlib.sha256(relpath.encode()).hexdigest()[:12]
     return f"src:{source_id[:12]}:{path}:{n}:{part}"
 
@@ -120,7 +121,9 @@ def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts
             continue
         except Exception as exc:
             raise PartialSave(out.entries) from exc
-        out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version})
+        # ``k`` is kept beside the ids: a retry of this version re-sends the same key, and the
+        # entry it gets back is recognised as the same save (see ``reconcile._supersede``).
+        out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version, "k": key})
     return out
 
 

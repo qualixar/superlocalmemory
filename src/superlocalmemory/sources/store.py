@@ -132,6 +132,12 @@ class SourceStore:
                 " AND reason = 'shared' AND relpath != ? AND state IN ('indexed', 'pending')",
                 (source_id, sha256, except_relpath)).rowcount
 
+    def current_save_n(self, source_id: str, relpath: str) -> int:
+        """The save number of this path's latest save attempt (0 when it was never saved)."""
+        row = self._m._read().execute("SELECT n FROM source_save_counters WHERE source_id = ? AND relpath = ?",
+                                      (source_id, relpath)).fetchone()
+        return int(row[0]) if row else 0
+
     def next_save_n(self, source_id: str, relpath: str) -> int:
         """How many times this path has been saved, counting this one. Never reset, not even by a purge."""
         with self._m._write() as conn:
