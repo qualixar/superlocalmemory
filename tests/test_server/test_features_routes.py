@@ -83,6 +83,21 @@ def test_enable_answers_202_and_records_the_dashboard(ctx):
     assert calls["enable"][0]["source"] == "dashboard"
 
 
+def test_enable_records_the_given_source(ctx):
+    client, _root, _env, calls = ctx
+    body = {"yes": True, "source": "cli"}
+    assert client.post("/api/v3/features/media/enable", json=body, headers=AUTH).status_code == 202
+    assert calls["enable"][0]["source"] == "cli"
+
+
+@pytest.mark.parametrize("source", ["npm", "bogus", 7])
+def test_enable_with_a_bad_source_is_400(ctx, source):
+    client, _root, _env, calls = ctx
+    body = {"yes": True, "source": source}
+    assert client.post("/api/v3/features/media/enable", json=body, headers=AUTH).status_code == 400
+    assert calls["enable"] == []
+
+
 @pytest.mark.parametrize("body", [{}, {"yes": False}, {"yes": "true"}])
 def test_enable_without_a_literal_yes_is_400(ctx, body):
     client, _r, _e, calls = ctx

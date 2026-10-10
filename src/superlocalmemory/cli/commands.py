@@ -3097,6 +3097,10 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Automation", [
         ("loop", "Run gate-verified bounded agent loops"),
     ]),
+    ("Images, documents & bots", [
+        ("features", "See what is on: images & documents, bot mesh"),
+        ("media", "Images & documents: enable | disable | status"),
+    ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),
     ]),

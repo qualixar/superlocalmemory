@@ -74,9 +74,19 @@ def _enable(args: Namespace) -> None:
     if not _confirmed(args):
         print("Nothing changed.")
         return
-    reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True})
-    _emit(args, reply, "Turning on. The set-up runs in the background; "
-                       "check progress with: slm media status")
+    reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True, "source": "cli"})
+    _emit(args, reply, _enable_text(reply.get("media") or {}))
+
+
+def _enable_text(media: dict[str, Any]) -> str:
+    state = media.get("env_state", "")
+    step = str(media.get("step") or "").strip()
+    if state == "unsupported":
+        return ("Saved your choice, but images & documents can't be set up on this computer yet"
+                + (f": {step}" if step else "") + ". Nothing is downloaded.")
+    if state == "failed":
+        return "Saved your choice, but set-up failed" + (f" ({step})" if step else "") + ". See: slm doctor"
+    return "Turning on. The set-up runs in the background; check progress with: slm media status"
 
 
 def _disable(args: Namespace) -> None:
