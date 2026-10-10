@@ -256,3 +256,30 @@ def test_a_refused_receipt_carries_its_reason_as_detail(monkeypatch):
     assert r.json()["detail"] == reason and r.json()["reason"] == reason and r.json()["status"] == "refused"
     monkeypatch.setattr(routes, "remember_media", lambda inp, **kw: MediaReceipt("stored", media_id="a" * 32))
     assert "detail" not in c.post("/api/v3/media/remember", json=BODY).json()
+
+
+def test_repair_route_repairs_by_default_is_local_only_and_a_real_run_needs_credentials(monkeypatch):
+    from superlocalmemory.media.repair import RepairReport
+
+    seen = []
+    monkeypatch.setattr(routes, "run_repair",
+                        lambda profile, dry_run: seen.append((profile, dry_run)) or RepairReport(dry_run=dry_run))
+    c, _ = make(monkeypatch)
+    r = c.post("/api/v3/media/repair", json={})
+    assert r.status_code == 200 and r.json()["dry_run"] is False and seen == [("default", False)]
+    assert c.post("/api/v3/media/repair", json={"dry_run": True}).json()["dry_run"] is True
+    assert make(monkeypatch, client=REMOTE)[0].post("/api/v3/media/repair", json={}).status_code == 403
+    nobody, _ = make(monkeypatch, actor="")
+    assert nobody.post("/api/v3/media/repair", json={}).status_code == 403
+    assert nobody.post("/api/v3/media/repair", json={"dry_run": True}).status_code == 200
+
+
+def test_repair_route_needs_manage(monkeypatch):
+    from superlocalmemory.media.repair import RepairReport
+    from superlocalmemory.server import rbac_enforce
+
+    seen = []
+    monkeypatch.setattr(routes, "run_repair", lambda profile, dry_run: RepairReport(dry_run=dry_run))
+    monkeypatch.setattr(rbac_enforce, "require_manage", lambda request, profile: seen.append(profile))
+    c, _ = make(monkeypatch)
+    assert c.post("/api/v3/media/repair", json={}).status_code == 200 and seen == ["default"]

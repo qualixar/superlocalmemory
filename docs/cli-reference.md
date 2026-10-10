@@ -371,7 +371,7 @@ view removes the saved query only.
 
 What is on and what you can turn on: images and documents, folder sources and bot messages.
 
-### `slm media enable|disable|status|gc`
+### `slm media enable|disable|status|gc|repair`
 
 ```bash
 slm media enable              # shows the download size (about 1.5 GB) and a disk check, then asks; --yes skips the question
@@ -379,9 +379,13 @@ slm media status              # what is on and how set-up is going
 slm media disable             # off again; memories are kept (--remove-files also deletes the downloaded models)
 slm media gc                  # report picture records without a memory and files without a record; removes nothing
 slm media gc --apply          # remove them (owner or admin)
+slm media repair              # give pictures that can't be found by what they show a place in the picture index (owner or admin)
+slm media repair --dry-run    # only count them
 ```
 
 Images and documents need a computer with at least 16 GB of memory. On a smaller computer `enable` refuses with a plain reason and exits with code 4; your text memories keep working. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
+
+`slm media repair` re-reads each kept picture and stores its vector in the current picture index. Use it when a save told you the picture "can't be found by what it shows yet", or after the picture model or mode changed (saving then says the index was built with a different model). It rebuilds the index for the current model first, only once the first picture has embedded, so a failed run never leaves you without an index. One run works for up to four minutes; if it says pictures are left, run it again. Pictures whose file is no longer kept are counted and skipped.
 
 ### `slm sources ...`
 

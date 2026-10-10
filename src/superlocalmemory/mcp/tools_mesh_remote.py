@@ -68,25 +68,35 @@ def _send(target: RemoteMeshTarget, peer: RemotePeer, to: str, message: str,
         reply_to=reply_to, profile_id=target.profile)
 
 
-def _inbox(target: RemoteMeshTarget, peer: RemotePeer) -> dict:
+def _delivery(msgs: list[dict]) -> dict:
+    """The part of a reply that lets the app acknowledge what it just received."""
+    return {"ack_ids": [m["id"] for m in msgs]} if msgs else {}
+
+
+def _inbox(target: RemoteMeshTarget, peer: RemotePeer, ack: list[int] | None) -> dict:
     joined = _join(target, peer)
     if not joined.get("ok"):
         return joined
-    msgs = [_hide(m) for m in target.broker.claim_web_inbox(peer.peer_ref, target.profile)]
-    return {"messages": msgs, "count": len(msgs), "unread": len(msgs), "preface": PREFACE}
+    msgs = [_hide(m) for m in target.broker.claim_web_inbox(
+        peer.peer_ref, target.profile, ack=ack or ())]
+    return {"messages": msgs, "count": len(msgs), "unread": len(msgs),
+            "preface": PREFACE, **_delivery(msgs)}
 
 
-def _wait(target: RemoteMeshTarget, peer: RemotePeer, timeout_s: int) -> dict:
+def _wait(target: RemoteMeshTarget, peer: RemotePeer, timeout_s: int,
+          ack: list[int] | None) -> dict:
     joined = _join(target, peer)
     if not joined.get("ok"):
         return joined
     try:
         found, timed_out = target.broker.wait_web_inbox(
-            peer.peer_ref, timeout_s=timeout_s, profile_id=target.profile)
+            peer.peer_ref, timeout_s=timeout_s, profile_id=target.profile,
+            ack=ack or ())
     except RuntimeError:
         return dict(_TOO_MANY_WAITS)
     msgs = [_hide(m) for m in found]
-    return {"messages": msgs, "count": len(msgs), "timed_out": timed_out, "preface": PREFACE}
+    return {"messages": msgs, "count": len(msgs), "timed_out": timed_out,
+            "preface": PREFACE, **_delivery(msgs)}
 
 
 def _state(target: RemoteMeshTarget, peer: RemotePeer, key: str, action: str) -> dict:
@@ -124,14 +134,14 @@ async def send(peer: RemotePeer, to: str, message: str, refs: list[str] | None,
     return await _run(lambda t: _send(t, peer, to, message, refs, reply_to))
 
 
-async def inbox(peer: RemotePeer) -> dict:
-    return await _run(lambda t: _inbox(t, peer))
+async def inbox(peer: RemotePeer, ack: list[int] | None = None) -> dict:
+    return await _run(lambda t: _inbox(t, peer, ack))
 
 
-async def wait(peer: RemotePeer, timeout_s: object) -> dict:
+async def wait(peer: RemotePeer, timeout_s: object, ack: list[int] | None = None) -> dict:
     """The broker wait holds a worker thread, bounded by the broker's own cap."""
     seconds = _clamp_wait(timeout_s)
-    return await _run(lambda t: _wait(t, peer, seconds))
+    return await _run(lambda t: _wait(t, peer, seconds, ack))
 
 
 async def state(peer: RemotePeer, key: str, action: str) -> dict:

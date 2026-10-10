@@ -340,19 +340,25 @@ def _check_space(job: _Job, dim: int) -> dict[str, Any]:
     """The signature this picture's space must carry; refuses before anything is saved when the index differs."""
     plan = replace(job.plan, image_model=str(job.client.model_id), image_revision=str(job.client.revision), dim=dim)
     if not compatible(plan, job.store.active_signature()):
-        raise _refuse("The picture index was built with a different model; rebuild it from the dashboard.")
+        raise _refuse("The picture index was built with a different model; run: slm media repair")
     return plan.signature()
 
 
+NO_VECTOR_REASON = ("Saved, but this picture can't be found by what it shows yet. "
+                    "To fix that, run: slm media repair")
+
+
 def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str,
-               signature: dict[str, Any]) -> str:
+               signature: dict[str, Any]) -> bool:
+    """Insert the picture's row, then its vector. False when only the vector could not be written."""
     media_id = job.store.insert_item(**fields)
     try:
         space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector), signature)
         job.store.put_vector(media_id, space, profile_id, vector)
     except Exception as exc:  # noqa: BLE001 - the row is kept; only searching by picture is lost
         logger.warning("image %s saved without its vector (%s)", media_id, type(exc).__name__)
-    return media_id
+        return False
+    return True
 
 
 def _cleanup(job: _Job) -> None:
@@ -399,13 +405,14 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
-        _write_row(job, fields, vector, profile_id, signature)
+        indexed = _write_row(job, fields, vector, profile_id, signature)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
                             reason="The text was saved; the picture could not be indexed.")
     return MediaReceipt("stored", media_id=media_id, memory_id=saved.memory_id,
-                        near_duplicate_of=near, extracted_text_preview=preview)
+                        near_duplicate_of=near, extracted_text_preview=preview,
+                        reason="" if indexed else NO_VECTOR_REASON)
 
 
 def remember_media(

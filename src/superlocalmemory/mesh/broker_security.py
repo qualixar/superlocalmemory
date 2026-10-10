@@ -352,6 +352,15 @@ CREATE TABLE IF NOT EXISTS mesh_message_envelopes (
     reply_to INTEGER
 )"""
 
+# Delivery leases of a web app's mail (see ``broker_web_lease``): no existing
+# table changes, and local agents never read it.
+WEB_DELIVERIES_DDL = """
+CREATE TABLE IF NOT EXISTS mesh_web_deliveries (
+    message_id   INTEGER PRIMARY KEY,
+    delivered_at REAL NOT NULL,
+    deliveries   INTEGER NOT NULL DEFAULT 0
+)"""
+
 
 def ensure_db_healthy(db_path: str) -> bool:
     """Return True (degraded) if the DB was corrupt and had to be quarantined.
@@ -407,7 +416,7 @@ def apply_security_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(_SENT_OPS_DDL)
     except sqlite3.OperationalError:
         pass
-    for ddl in (_NONCES_DDL, _PEER_PROFILES_DDL, _ENVELOPES_DDL):
+    for ddl in (_NONCES_DDL, _PEER_PROFILES_DDL, _ENVELOPES_DDL, WEB_DELIVERIES_DDL):
         try:
             conn.executescript(ddl)
         except sqlite3.OperationalError:

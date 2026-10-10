@@ -85,13 +85,13 @@ describe('drop zone', () => {
     });
 
     it('dropping files uses the normal upload and shows one result line per file', async () => {
-        const h = setup({ routes: [['POST', '/api/v3/media/remember', () => ({ json: { status: 'stored', media_id: MID } })]] });
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({ json: { status: 'stored', media_id: MID } })]] });
         await h.open();
         const ev = await h.drop([h.file('one.png', 'image/png'), h.file('two.txt', 'text/plain')]);
         assert.equal(ev.defaultPrevented, true, 'the browser does not open the file');
         const w = writes(h);
         assert.equal(w.length, 1);
-        assert.equal(w[0].url, '/api/v3/media/remember');
+        assert.equal(w[0].url, '/api/v3/media/upload?kind=image');
         const rows = [...h.pane.querySelectorAll('.od-media-list li')].filter(li => /one\.png|two\.txt/.test(li.textContent));
         assert.equal(rows.length, 2);
         assert.match(rows[0].textContent, /one\.png[\s\S]*Saved\./);

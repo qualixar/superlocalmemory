@@ -687,6 +687,7 @@ class BackupManager:
 
             # v3.4.10: Backup ALL .db files in the SLM directory
             self._backup_all_dbs(timestamp, suffix)
+            self._backup_media_originals()
 
             self._enforce_retention()
             return backup_name
@@ -737,6 +738,23 @@ class BackupManager:
                 )
         if backed_up:
             logger.info("Backed up %d companion databases", backed_up)
+
+    def _backup_media_originals(self) -> None:
+        """Keep the picture and PDF originals beside the media.db copy (see ``backup_media``)."""
+        from superlocalmemory.infra import backup_media
+
+        try:
+            backup_media.sync_originals(self.db_path.parent, self.backup_dir)
+        except Exception as exc:  # noqa: BLE001 - the database backups above already succeeded
+            logger.warning("media originals were not backed up (non-critical): %s", exc)
+
+    def _restore_media_originals(self) -> None:
+        from superlocalmemory.infra import backup_media
+
+        try:
+            backup_media.restore_originals(self.db_path.parent, self.backup_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("media originals were not put back: %s", exc)
 
     def _enforce_retention(self) -> None:
         """Remove old backups exceeding the configured max."""
@@ -841,6 +859,8 @@ class BackupManager:
                     src.close()
 
             logger.info("Restored: %s -> %s", filename, target.name)
+            if target_name == "media.db":
+                self._restore_media_originals()
 
             # GDPR obligation replay — prevent a restore from resurrecting
             # previously erased personal data.  Failure is fatal: return False

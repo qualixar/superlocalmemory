@@ -48,4 +48,6 @@ def test_a_repeat_user_save_still_dedupes_against_the_users_document(store):
     go(store, folder=FOLDER)
     first = go(store)
     again = go(store)
-    assert again.status == "duplicate" and again.document_id == first.document_id
+    assert again.status == "processing" and again.document_id == first.document_id  # still being read
+    store.update_document(first.document_id, state="ready")
+    assert go(store).status == "duplicate"

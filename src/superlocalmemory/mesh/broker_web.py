@@ -15,11 +15,13 @@ broker's ``_conn``, ``_write_with_retry``, ``_log_event``, ``_waiter``,
 from __future__ import annotations
 
 import sqlite3
+import time
 import unicodedata
 from collections.abc import Collection, Sequence
 from datetime import datetime, timezone
 
-from . import broker_inbox, broker_profiles
+from . import broker_inbox, broker_profiles, broker_web_lease
+from .broker_web_lease import LEASE_S, MAX_DELIVERIES  # noqa: F401  (the lease terms)
 from .envelope import Origin
 
 FALLBACK_NAME = "Web app "
@@ -27,6 +29,11 @@ DIRECTORY_LIMIT = 100
 SUMMARY_LIMIT = 200
 CLAIM_MAX_MESSAGES = 20
 CLAIM_MAX_BYTES = 256 * 1024
+
+
+def _now() -> float:
+    """Wall-clock seconds; one place for the lease clock so tests can move it."""
+    return time.time()
 
 
 def _has_control(text: str) -> bool:
@@ -169,20 +176,26 @@ class WebPeersMixin:
             origin=Origin("web", app), refs=refs, reply_to=reply_to,
         )
 
-    def claim_web_inbox(self, peer_id: str, profile_id: str = "default") -> list[dict]:
-        """Take the unread direct mail of a web app: select and mark read in one
-        transaction, so two readers never receive the same message."""
+    def claim_web_inbox(self, peer_id: str, profile_id: str = "default", *,
+                        ack: Sequence[int] = ()) -> list[dict]:
+        """Hand over the direct mail of a web app, at least once.
+
+        In one transaction: mark the ``ack`` ids read, select the mail that is
+        free to hand over, and take a delivery lease on it. Mail is not marked
+        read here, so a reply the relay drops costs nothing: the message comes
+        again after the lease, flagged ``repeat``. Two readers never both get a
+        fresh message, because the lease is taken under the write lock.
+        """
+        ack_ids = broker_web_lease.clean_ack(ack)
+
         def _claim(conn: sqlite3.Connection) -> list[dict]:
             conn.execute("BEGIN IMMEDIATE")
-            msgs = _within_budget(
-                broker_inbox.query_inbox(conn, peer_id, "", profile_id, direct_only=True))
-            if msgs:
-                marks = ",".join("?" * len(msgs))
-                conn.execute(
-                    f"UPDATE mesh_messages SET read=1 WHERE id IN ({marks}) "
-                    "AND to_peer=? AND profile_id=? AND COALESCE(read, 0)=0",
-                    (*[m["id"] for m in msgs], peer_id, profile_id),
-                )
+            now = _now()
+            broker_web_lease.acknowledge(conn, peer_id, profile_id, ack_ids)
+            free = broker_web_lease.deliverable(conn, broker_inbox.query_inbox(
+                conn, peer_id, "", profile_id, direct_only=True), now)
+            msgs = _within_budget(free)
+            broker_web_lease.record(conn, msgs, now)
             broker_inbox.attach_envelopes(conn, msgs, remote_view=True)
             conn.commit()
             for msg in msgs:
@@ -192,21 +205,36 @@ class WebPeersMixin:
         return self._write_with_retry(_claim)
 
     def wait_web_inbox(self, peer_id: str, *, timeout_s: float,
-                       profile_id: str = "default") -> tuple[list[dict], bool]:
+                       profile_id: str = "default",
+                       ack: Sequence[int] = ()) -> tuple[list[dict], bool]:
         """Block up to a clamped timeout for direct mail; ``(messages, timed_out)``.
 
-        Raises ``RuntimeError("too many waits")`` past the concurrent-wait cap.
+        ``ack`` is applied once, before waiting. Raises
+        ``RuntimeError("too many waits")`` past the concurrent-wait cap.
         """
+        if ack:
+            self._write_with_retry(lambda conn: self._ack_only(conn, peer_id, profile_id, ack))
+
         def poll() -> list[dict]:
             conn = self._conn()
             try:
-                if not broker_inbox.has_unread_direct(conn, peer_id, profile_id):
+                if not broker_web_lease.has_deliverable(
+                        conn, peer_id, profile_id, _now(),
+                        datetime.now(timezone.utc).isoformat()):
                     return []
             finally:
                 conn.close()
             return self.claim_web_inbox(peer_id, profile_id)
 
         return self._waiter.wait(poll, timeout_s)
+
+    @staticmethod
+    def _ack_only(conn: sqlite3.Connection, peer_id: str, profile_id: str,
+                  ack: Sequence[int]) -> None:
+        conn.execute("BEGIN IMMEDIATE")
+        broker_web_lease.acknowledge(
+            conn, peer_id, profile_id, broker_web_lease.clean_ack(ack))
+        conn.commit()
 
     def retire_missing_web_peers(self, connection_id: str, listed: Collection[str], *,
                                  registered_before: str | None = None) -> list[str]:

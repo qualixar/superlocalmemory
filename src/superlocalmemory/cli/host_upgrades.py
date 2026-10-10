@@ -65,6 +65,7 @@ def _detected_hosts(home: Path | None = None) -> list[str]:
     """Return only hosts already containing an SLM-owned integration block."""
     from superlocalmemory.hooks.portable_kit import (
         IDE_MATRIX,
+        global_config_path,
         _load_config,
         _ParseError,
     )
@@ -74,7 +75,7 @@ def _detected_hosts(home: Path | None = None) -> list[str]:
     for host, desc in IDE_MATRIX.items():
         if not desc.fmt:
             continue
-        path = effective_home / desc.mcp_path_global
+        path = global_config_path(desc, effective_home, environ=None if home is None else {})
         try:
             data = _load_config(path, desc.fmt)
         except _ParseError:

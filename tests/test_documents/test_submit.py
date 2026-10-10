@@ -69,8 +69,17 @@ def test_words_are_stored_prepared_never_raw(store):
     assert KEY in json.loads(store.get_job(r2.job_id)["payload_json"])["user_words"]
 
 
-def test_same_pdf_twice_is_a_duplicate_until_removed(store):
+def test_a_pdf_dropped_again_while_it_is_still_being_read_is_reported_as_processing(store):
     first = go(store)
+    again = go(store)
+    assert again.status == "processing" and again.document_id == first.document_id
+    assert again.job_id == first.job_id and again.job_id is not None
+    assert len(store.list_jobs("p1")) == 1
+
+
+def test_same_pdf_twice_is_a_duplicate_once_ready_until_removed(store):
+    first = go(store)
+    store.update_document(first.document_id, state="ready")
     again = go(store)
     assert again.status == "duplicate" and again.document_id == first.document_id and again.job_id == first.job_id
     assert len(store.list_jobs("p1")) == 1
@@ -90,6 +99,7 @@ def test_a_failed_document_is_retried_under_the_same_id(store):
 
 def test_same_key_is_the_same_document(store):
     a = go(store, pdf_input(("one",)), idempotency_key="k1")
+    store.update_document(a.document_id, state="ready")
     b = go(store, pdf_input(("one",)), idempotency_key="k1")
     assert b.status == "duplicate" and b.document_id == a.document_id
 

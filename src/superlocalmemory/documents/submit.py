@@ -235,17 +235,22 @@ def _existing(store: Any, profile_id: str, doc_id: str, sha: str, keyed: bool,
 _LIVE_JOB_STATES = ("queued", "running")
 
 
-def _repeat(store: Any, row: dict) -> DocumentReceipt | None:
-    """A receipt when the repeat needs no new work (still running or done).
+def _repeat(store: Any, row: dict, *, from_folder: bool = False) -> DocumentReceipt | None:
+    """A receipt when the repeat needs no new work.
 
+    A document still being read answers ``processing`` with its job, so a person who drops it
+    again follows the job it already has; only a finished one is a ``duplicate``. A folder source
+    always gets ``duplicate``: that answer means "someone else's document, borrowed, never owned".
     A ``processing`` document with no queued or running job is stuck (an older release could
-    leave one behind); it needs work, so the caller re-queues it."""
+    leave one behind); it needs work, so None tells the caller to re-queue it.
+    """
     if row["state"] not in _HOLD_STATES:
         return None
     job = store.job_for_document(row["document_id"])
     if row["state"] == "processing" and (not job or job["state"] not in _LIVE_JOB_STATES):
         return None
-    return DocumentReceipt("duplicate", document_id=row["document_id"], job_id=job["job_id"] if job else None)
+    status = "processing" if row["state"] == "processing" and not from_folder else "duplicate"
+    return DocumentReceipt(status, document_id=row["document_id"], job_id=job["job_id"] if job else None)
 
 
 def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) -> str:
@@ -293,7 +298,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
         doc_id = _document_id(profile_id, key)
         row = _existing(store, profile_id, doc_id, sha, bool(key), "folder" in payload)
         if row:
-            receipt = _repeat(store, row)
+            receipt = _repeat(store, row, from_folder="folder" in payload)
             if receipt is None:
                 _restore_original(root, tmp, row)
             tmp.unlink(missing_ok=True)

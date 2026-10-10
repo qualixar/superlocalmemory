@@ -350,7 +350,7 @@ def test_ingest_refuses_when_the_index_was_built_for_another_space(env, monkeypa
     assert save(env).status == "stored"  # separate
     monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
     receipt = save(env, png("b"))
-    assert receipt.status == "refused" and "different model" in receipt.reason and "rebuild" in receipt.reason
+    assert receipt.status == "refused" and "different model" in receipt.reason and "slm media repair" in receipt.reason
     assert len(env.runtime.requests) == 1
     assert env.store.count_and_bytes("p1")[0] == 1
     assert not list((env.root / "media" / "tmp").iterdir())
