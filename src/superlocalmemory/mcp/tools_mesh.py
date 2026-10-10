@@ -29,7 +29,7 @@ from mcp.types import ToolAnnotations
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp import tools_mesh_remote
-from superlocalmemory.mcp.remote_caller import current_remote_peer
+from superlocalmemory.mcp.remote_caller import current_remote_key_id, current_remote_peer
 from superlocalmemory.mesh.envelope import PREFACE
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,8 @@ def _web_caller_refused() -> dict | None:
     for this computer refuse it rather than act as the local session. The mesh
     tools a web app may use are served in process (``tools_mesh_remote``).
     """
-    return dict(_WEB_UNAVAILABLE) if current_remote_peer() is not None else None
+    remote = current_remote_peer() is not None or current_remote_key_id() is not None
+    return dict(_WEB_UNAVAILABLE) if remote else None
 
 
 def _mesh_request(method: str, path: str, body: dict | None = None, *,
@@ -301,6 +302,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         """
         if (web := current_remote_peer()) is not None:
             return await tools_mesh_remote.peers(web)
+        if (refused := _web_caller_refused()) is not None:
+            return refused  # a remote call without a verified app
         await asyncio.to_thread(_ensure_registered)
         result = await asyncio.to_thread(_mesh_request, "GET", "/peers")
         peers = (result or {}).get("peers", [])
@@ -327,6 +330,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         """
         if (web := current_remote_peer()) is not None:
             return await tools_mesh_remote.send(web, to, message, refs, reply_to)
+        if (refused := _web_caller_refused()) is not None:
+            return refused  # a remote call without a verified app
         # Enforce the documented 4KB notification cap client-side too (the
         # broker also caps, but fail fast without a round-trip).
         if len(message.encode("utf-8")) > MAX_MESSAGE_SIZE:
@@ -385,6 +390,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         """
         if (web := current_remote_peer()) is not None:
             return await tools_mesh_remote.inbox(web)
+        if (refused := _web_caller_refused()) is not None:
+            return refused  # a remote call without a verified app
         peer = await asyncio.to_thread(_caller_peer)
         if peer is None:
             return {"messages": [], "count": 0, "unread": 0, "preface": PREFACE}
@@ -416,6 +423,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         """
         if (web := current_remote_peer()) is not None:
             return await tools_mesh_remote.wait(web, timeout_s)
+        if (refused := _web_caller_refused()) is not None:
+            return refused  # a remote call without a verified app
         peer = await asyncio.to_thread(_caller_peer)
         try:
             wait = max(1, min(int(timeout_s), 20))
@@ -462,6 +471,8 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         """
         if (web := current_remote_peer()) is not None:
             return await tools_mesh_remote.state(web, key, action)
+        if (refused := _web_caller_refused()) is not None:
+            return refused  # a remote call without a verified app
         await asyncio.to_thread(_ensure_registered)
 
         if action == "set" and key:

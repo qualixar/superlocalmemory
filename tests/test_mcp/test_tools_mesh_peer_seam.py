@@ -141,3 +141,16 @@ def test_wait_tool_clamps_and_survives_daemon_down(tools, monkeypatch) -> None:
     monkeypatch.setattr(tools_mesh, "_mesh_request", lambda *a, **k: None)
     out = asyncio.run(fns["mesh_wait"]())
     assert out["messages"] == [] and out["timed_out"] is True
+
+
+@pytest.mark.parametrize("name", sorted(ALL_TOOL_ARGS))
+def test_a_remote_key_without_a_verified_peer_never_runs_as_the_local_session(
+        tools, name) -> None:
+    """A remote call with no grant-verified app is refused, never served as this computer."""
+    from superlocalmemory.mcp.remote_caller import remote_caller
+    fns, calls = tools
+    with remote_caller("key-1"):
+        out = asyncio.run(fns[name](*ALL_TOOL_ARGS[name]))
+    assert out == {"ok": False,
+                   "error": "mesh messages for connected web apps are not available yet"}
+    assert calls == []
