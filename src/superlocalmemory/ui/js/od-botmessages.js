@@ -3,7 +3,7 @@
 // XSS-safe: message bodies, app names, peer ids and server errors are untrusted
 // (bots and web chats write them) and are set with textContent only.
 // Writes go through the page's fetch, which core.js wraps with the local write credential.
-// Routes: GET /api/v3/mesh/messages?limit=&peer=
+// Routes: GET /api/v3/mesh/messages?limit=&peer=   GET /api/v3/mesh/peers
 //         POST /api/v3/mesh/peers/{id}/mute   PATCH /api/v3/mesh/peers/{id}   DELETE /api/v3/mesh/peers/{id}
 (function () {
   'use strict';
@@ -66,6 +66,18 @@
     ui.list.appendChild(ul);
   }
 
+  // Every connected peer, including ones that have not sent anything. A failure
+  // here only means fewer rows; messages still load.
+  function loadPeers(ui) {
+    return F().api('GET', '/api/v3/mesh/peers').then(function (res) {
+      if (res.ok && res.data) addPeers(ui, (res.data.peers || []).map(function (p) { return { from: p }; }));
+    }, function () {});
+  }
+
+  function loadAll(ui) {
+    return loadPeers(ui).then(function () { return loadMessages(ui); });
+  }
+
   function loadMessages(ui) {
     var url = '/api/v3/mesh/messages?limit=' + LIMIT + '&peer=' + encodeURIComponent(ui.peer);
     return F().api('GET', url).then(function (res) {
@@ -110,7 +122,7 @@
         ui.seen = {};
         ui.peers.textContent = '';
         if (ui.peersHead.parentNode) ui.peersHead.parentNode.removeChild(ui.peersHead);
-        loadMessages(ui);
+        loadAll(ui);
       });
     });
   }
@@ -179,9 +191,9 @@
     ui.knownPeers = function (messages) { addPeers(ui, messages); };
     var bar = el('div', 'od-peer-row');
     bar.appendChild(ui.filter);
-    bar.appendChild(F().button('Refresh', 'btn sm', function () { loadMessages(ui); }));
+    bar.appendChild(F().button('Refresh', 'btn sm', function () { loadAll(ui); }));
     [head, bar, ui.list, ui.peersBox].forEach(function (n) { pane.appendChild(n); });
-    return loadMessages(ui);
+    return loadAll(ui);
   }
 
   window.odRenderBotMessages = odRenderBotMessages;

@@ -2,7 +2,7 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""Owner controls for bot messages: list messages, mute, rename, retire a peer.
+"""Owner controls for bot messages: list messages and peers, mute, rename, retire a peer.
 
 Local dashboard only: a loopback caller on a loopback host with the same
 checks the connection routes use, the daemon capability on every change, and
@@ -66,6 +66,12 @@ def _checked(result: dict) -> dict:
 def list_messages(request: Request, limit: int = Query(50, ge=1, le=500), peer: str = ""):
     broker, profile = _owner_context(request, mutation=False)
     return {"messages": broker.list_messages(limit, peer, profile_id=profile)}
+
+
+@router.get("/peers")
+def list_peers(request: Request):
+    broker, profile = _owner_context(request, mutation=False)
+    return {"peers": broker.list_peer_overview(profile_id=profile)}
 
 
 @router.post("/peers/{peer_id}/mute")
