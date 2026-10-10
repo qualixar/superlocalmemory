@@ -97,6 +97,7 @@ _MESSAGES = {
     "rate_limited": "Too many invalid upload links were tried. Wait ten minutes and try again.",
     "in_progress": "Another upload is already using this link.",
     "interrupted": "The save was interrupted. Ask the app for a new link.",
+    "warming": "The picture tools on your computer are starting. Send the file again in a minute.",
     "revoked": "This upload link no longer works. Ask the app for a new one.",
     "not_allowed": "This computer no longer lets this app add files. Ask the owner to allow it again.",
     "invalid_request": "That upload request was not understood.",
@@ -357,7 +358,7 @@ class UploadLinks:
         self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
         conn.execute(
             "UPDATE upload_links SET state='receiving', total=?, received=?, next_index=1, attempts=attempts+1, "
-            "started_at=COALESCE(started_at, ?), nonce=?, touched_at=? WHERE upload_id=?",
+            "started_at=COALESCE(started_at, ?), nonce=?, touched_at=?, result_json='' WHERE upload_id=?",
             (total, len(data), now, nonce, now, row.upload_id))
         return len(data)
 
@@ -408,6 +409,9 @@ class UploadLinks:
             if row.state == "open":
                 raise UploadError("not_started")
             self._live(row)
+            warming = self._warming_result(row)
+            if warming is not None:  # the save had to wait for the picture tools; say so, do not call it a clash
+                return FinishPlan("result", row, warming)
             if row.nonce != nonce:
                 raise UploadError("in_progress")
             if row.received != row.total or row.total < 1:
@@ -436,11 +440,30 @@ class UploadLinks:
     def finish_failed(self, upload_id: str, result: dict[str, Any]) -> None:
         self._end(upload_id, "failed", result)
 
-    def finish_retry(self, upload_id: str) -> None:
-        """A save that may work later (the picture tools are starting): keep the bytes, reopen the link."""
+    @staticmethod
+    def _warming_result(row: UploadRow) -> dict[str, Any] | None:
+        """The stored "tools are starting" answer of a reopened link, until a new upload clears it."""
+        if row.state != "receiving" or row.nonce is not None or not row.result_json:
+            return None
+        try:
+            result = json.loads(row.result_json)
+        except ValueError:
+            return None
+        return result if isinstance(result, dict) and result.get("code") == "warming" else None
+
+    def finish_retry(self, upload_id: str, result: dict[str, Any] | None = None) -> None:
+        """A save that may work later (the picture tools are starting): keep the bytes, reopen the link.
+
+        The nonce is cleared so a fresh upload restarts at once, and the warming answer is kept so the
+        gateway's next ``finish`` (still carrying the old nonce) gets it rather than a clash.
+        """
+        warming = {"ok": False, "code": "warming", **{k: v for k, v in (result or {}).items()
+                                                      if k in ("message",) and v}}
+        warming.setdefault("message", _MESSAGES["warming"])
         with self._tx() as conn:
-            conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=? "
-                         "WHERE upload_id=? AND state='finishing'", (self._now(), upload_id))
+            conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=?, result_json=? "
+                         "WHERE upload_id=? AND state='finishing'",
+                         (self._now(), json.dumps(warming), upload_id))
 
     def fail_open_links(self, connection_id: str, authorization_id: str | None = None) -> int:
         """End every unfinished link of a connection (its consent or grant key was revoked or replaced).

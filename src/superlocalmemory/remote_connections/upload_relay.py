@@ -203,7 +203,7 @@ class UploadRelay:
         result = {"ok": False, "code": "refused", "message": reason or _CANNOT}
         if status == "warming":
             result["code"] = "warming"
-            await asyncio.to_thread(links.finish_retry, row.upload_id)
+            await asyncio.to_thread(links.finish_retry, row.upload_id, result)
         else:
             await asyncio.to_thread(links.finish_failed, row.upload_id, result)
         return result

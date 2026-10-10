@@ -402,3 +402,50 @@ OLD_DDL = """CREATE TABLE upload_links (
   next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
   result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""
+
+
+# -- a warming save answers honestly instead of "another upload is using this link" -
+
+WARMING = {"ok": False, "code": "warming", "message": "The picture tools are starting."}
+
+
+def test_finish_after_a_warming_save_returns_the_warming_result_not_in_progress(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    assert plan.action == "run"
+    links.finish_retry(plan.row.upload_id, WARMING)
+    again = links.begin_finish(link.token, CONN, NONCE)  # the gateway asks again with the same nonce
+    assert again.action == "result" and again.result["code"] == "warming"
+    assert again.result["message"] == WARMING["message"]
+    assert links.temp_path(plan.row.upload_id).exists()
+
+
+def test_a_default_warming_message_is_plain_when_none_is_given(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id)
+    result = links.begin_finish(link.token, CONN, NONCE).result
+    assert result["code"] == "warming" and "again in a minute" in result["message"]
+
+
+def test_a_new_upload_after_a_warming_save_restarts_and_finishes(links):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id, WARMING)
+    assert links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, OTHER_NONCE) == len(PNG)
+    assert links.get(plan.row.upload_id).result_json == ""
+    assert links.begin_finish(link.token, CONN, OTHER_NONCE).action == "run"
+    links.finish_done(plan.row.upload_id, {"ok": True, "done": True, "message": "Saved to your memory."})
+    assert links.begin_finish(link.token, CONN, OTHER_NONCE).result["done"] is True
+
+
+def test_an_expired_link_still_expires_after_a_warming_save(links, clock):
+    link = mint(links)
+    links.accept_chunk(link.token, CONN, 0, len(PNG), PNG, NONCE)
+    plan = links.begin_finish(link.token, CONN, NONCE)
+    links.finish_retry(plan.row.upload_id, WARMING)
+    clock.now += ul.STARTED_TTL_S + 5
+    refused("expired", links.begin_finish, link.token, CONN, NONCE)

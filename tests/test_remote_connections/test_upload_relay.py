@@ -328,3 +328,18 @@ async def test_info_names_the_authorization_that_issued_the_link(tmp_path):
     minted = links.mint(CID, "key1", "personal", "image", "", authorization_id="app-a")
     out = await call(relay, frame("info", minted.token))
     assert out["ok"] is True and out["authorization_id"] == "app-a"
+
+
+@pytest.mark.asyncio
+async def test_a_warming_save_answers_the_gateways_next_finish_with_the_warming_message(tmp_path):
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    finisher = Finisher(reply={"status": "warming", "reason": "The picture tools are starting."})
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    first = await call(relay, frame("finish", minted.token, 0, len(body)))
+    assert first["ok"] is False and first["code"] == "warming"
+    again = await call(relay, frame("finish", minted.token, 0, len(body)))   # same nonce, as the gateway sends it
+    assert again["code"] == "warming" and "starting" in again["message"]
+    assert len(finisher.calls) == 1
