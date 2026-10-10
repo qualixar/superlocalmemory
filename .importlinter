@@ -13,7 +13,10 @@ type = forbidden
 source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
+    superlocalmemory.cache
     superlocalmemory.memory_core
+    superlocalmemory.media
+    superlocalmemory.runtimes
     superlocalmemory.tagging
 forbidden_modules =
     torch
@@ -51,6 +54,29 @@ name = The daemon services package never imports the server, CLI or MCP layers
 type = forbidden
 source_modules =
     superlocalmemory.daemon
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
+allow_indirect_imports = True
+
+[importlinter:contract:cache-no-upward]
+name = The cache package never imports the server, CLI or MCP layers
+type = forbidden
+source_modules =
+    superlocalmemory.cache
+forbidden_modules =
+    superlocalmemory.server
+    superlocalmemory.cli
+    superlocalmemory.mcp
+allow_indirect_imports = True
+
+[importlinter:contract:media-runtimes-no-upward]
+name = The media and runtimes packages never import the server, CLI or MCP layers
+type = forbidden
+source_modules =
+    superlocalmemory.media
+    superlocalmemory.runtimes
 forbidden_modules =
     superlocalmemory.server
     superlocalmemory.cli
@@ -108,7 +134,6 @@ ignore_imports =
 # type = forbidden
 # source_modules =
 #     superlocalmemory.memory_core
-#     superlocalmemory.media
 #     superlocalmemory.documents
 #     superlocalmemory.sources
 #     superlocalmemory.tagging
@@ -126,7 +151,6 @@ ignore_imports =
 # type = independence
 # modules =
 #     superlocalmemory.memory_core
-#     superlocalmemory.media
 #     superlocalmemory.documents
 #     superlocalmemory.sources
 #     superlocalmemory.tagging
@@ -137,7 +161,6 @@ ignore_imports =
 # type = forbidden
 # source_modules =
 #     superlocalmemory.memory_core
-#     superlocalmemory.media
 #     superlocalmemory.documents
 #     superlocalmemory.sources
 #     superlocalmemory.tagging

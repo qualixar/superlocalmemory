@@ -3674,6 +3674,20 @@ def cmd_doctor(args: Namespace) -> None:
     except Exception:
         pass  # advisory only — never fail doctor on this check
 
+    # 11b. Images & documents: a read-only line, "off" until someone turns it on.
+    try:
+        from superlocalmemory.runtimes import media_feature_status
+
+        _mf = media_feature_status()
+        if not _mf["enabled"]:
+            _check("Images & documents", "PASS", "off")
+        elif _mf["env"]["state"] == "ready":
+            _check("Images & documents", "PASS", "on")
+        else:
+            _check("Images & documents", "WARN", f"on, but not ready ({_mf['env']['state']})")
+    except Exception:
+        pass  # advisory only — never fail doctor on this check
+
     # 12a. Component registry (v3.8.2) — models + optional vector/graph/
     #      compression backends the older checks above did NOT cover
     #      (embedder/reranker/compressor cache presence, sqlite-vec, lancedb,
