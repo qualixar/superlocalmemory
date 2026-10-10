@@ -447,3 +447,24 @@ def test_a_one_word_note_without_image_text_still_saves(env):
     env.runtime.on_remember = _admitting
     r = save(env, content="cat")
     assert r.status == "stored" and env.runtime.requests[0].content.startswith("cat")
+
+
+def test_a_local_save_waits_out_a_cold_start_and_a_web_app_gets_an_answer_in_time(monkeypatch):
+    """Loading the picture model takes about 45 s on a Mac. A person or agent on this computer waits
+    for it; a web app's call must answer within its 25 s relay budget, so it is told to ask again."""
+    monkeypatch.delenv("SLM_MEDIA_COLD_WAIT_S", raising=False)
+    assert ingest._cold_wait_s(remote=False) >= 90
+    assert ingest._cold_wait_s(remote=True) <= 20
+    monkeypatch.setenv("SLM_MEDIA_COLD_WAIT_S", "5")
+    assert ingest._cold_wait_s(remote=False) == 5 and ingest._cold_wait_s(remote=True) == 5
+
+
+def test_an_upload_link_save_waits_out_a_cold_start(env, monkeypatch):
+    """A web app's live call answers fast; an upload link finishes in the background and waits."""
+    seen = []
+    monkeypatch.setattr(ingest, "_cold_wait_s", lambda remote=False: seen.append(remote) or 0.01)
+    env.client.warm = False
+    remote_inp = lambda: MediaInput(base64=base64.b64encode(png()).decode(), remote=True)
+    save(env, inp=remote_inp())
+    save(env, inp=remote_inp(), can_wait=True)
+    assert seen == [True, False]

@@ -74,7 +74,7 @@ async def finish_upload(upload_id: str, request: Request):
     common = dict(content=row.note, profile_id=profile, actor_id=actor_id, config=engine._config,
                   idempotency_key=f"upload:{upload_id}", scope="personal", shared_with=())
     if row.kind == "image":
-        receipt = await asyncio.to_thread(remember_media, inp, runtime=runtime, **common)
+        receipt = await asyncio.to_thread(remember_media, inp, runtime=runtime, can_wait=True, **common)  # finishing runs in the background
     else:
         receipt = await asyncio.to_thread(submit_document, inp, **common)
     body = dataclasses.asdict(receipt)
