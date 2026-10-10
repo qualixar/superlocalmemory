@@ -45,6 +45,7 @@ class GcReport:
     files_skipped_young: int = 0
     rows_removed: int = 0
     files_removed: int = 0
+    anchors_filled: int = 0
 
 
 def _memory_conn(root: Path) -> sqlite3.Connection | None:
@@ -140,8 +141,14 @@ def _memory_side(store, conn: sqlite3.Connection, profile_id: str, report: GcRep
     alive = _existing(conn, profile_id, sorted(set(anchored.values())))
     orphans = sorted(m for m, a in anchored.items() if a not in alive)
     report.rows_without_memory = orphans
-    report.memories_without_row = sorted(m for m, media_id in _media_memories(conn, profile_id)
-                                         if media_id not in every)
+    named = _media_memories(conn, profile_id)
+    report.memories_without_row = sorted(m for m, media_id in named if media_id not in every)
+    # A picture saved while its memory was still queued has no anchor yet; the memory names it.
+    for memory_id, media_id in named:
+        if media_id in every and not every[media_id]:
+            report.anchors_filled += 1
+            if not report.dry_run:
+                store.fill_anchor(media_id, memory_id)
     if orphans and not report.dry_run:
         out = erase_items(store, root, orphans)
         report.rows_removed = out["items"]

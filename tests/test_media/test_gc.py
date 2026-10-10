@@ -96,3 +96,17 @@ def test_operational_files_under_media_are_never_collected(tmp_path):
     assert all(p.exists() for p in kept)
     assert not stray.exists()
     store.close()
+
+
+def test_a_picture_saved_while_its_memory_was_queued_gets_its_anchor(tmp_path):
+    """Audit round 2 (CX1): an item with no anchor is linked to the memory that names it."""
+    root, db, store = make_root(tmp_path)
+    add_image(root, store, media_id="d" * 32, memory_id=None, data=b"queued")
+    db.add_memory("m7", media_id="d" * 32)
+    dry = gc("p1", dry_run=True, data_root=root)
+    assert dry.anchors_filled == 1 and store.anchors("p1")["d" * 32] is None
+    rep = gc("p1", dry_run=False, data_root=root)
+    assert rep.anchors_filled == 1 and store.anchors("p1")["d" * 32] == "m7"
+    assert rep.memories_without_row == [] and rep.rows_without_memory == []
+    assert gc("p1", dry_run=False, data_root=root).anchors_filled == 0
+    store.close()
