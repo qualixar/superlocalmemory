@@ -73,10 +73,10 @@ def test_a_local_recall_runs_with_nothing_hidden(engine_with_mock_deps) -> None:
     assert visibility.is_empty()
 
 
-def test_an_unknown_view_is_a_local_recall(engine_with_mock_deps) -> None:
+def test_an_unknown_view_gets_the_strictest_remote_rules(engine_with_mock_deps) -> None:
     seen: list = []
     _client(engine_with_mock_deps, seen).get("/recall", params={"q": "x", "caller_view": "bogus"})
-    assert seen == [visibility.VisibilityContext()]
+    assert seen == [visibility.VisibilityContext(hide_media=True, hide_sources=True)]
 
 
 def test_the_keyword_fallback_hides_what_the_context_hides(tmp_path) -> None:
