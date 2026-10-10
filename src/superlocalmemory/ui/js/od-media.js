@@ -5,7 +5,7 @@
 // wraps with the local write credential.
 // The Folders section (od-sources.js) is rendered below the documents list.
 // Routes: POST /api/v3/media/remember   POST /api/v3/documents
-//         GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
+//         GET /api/v3/media (saved images)  GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
 //         GET /api/v3/documents         GET /api/v3/documents/lint
 //         DELETE /api/v3/documents/{id}
 (function () {
@@ -17,6 +17,7 @@
   var POLL_MS = 2000;
   var ID_RE = /^[0-9a-f]{32}$/;
   var FINAL_JOB = { done: 1, failed: 1, cancelled: 1 };
+  var PAGE = 60;
 
   function F() { return window.odFeatures; }
   function el(tag, cls, text) { return F().el(tag, cls, text); }
@@ -62,6 +63,8 @@
 
   function addThumb(ui, mediaId, name) {
     if (!ID_RE.test(String(mediaId || ''))) return;
+    if (ui.shown[mediaId]) return;
+    ui.shown[mediaId] = true;
     var fig = el('figure');
     var img = el('img');
     img.setAttribute('src', '/api/v3/media/' + mediaId + '/thumb');
@@ -71,6 +74,35 @@
     fig.appendChild(img);
     fig.appendChild(el('figcaption', null, name));
     ui.grid.appendChild(fig);
+  }
+
+  // ----------------------------------------------------------- saved images
+  function savedName(item) {
+    var day = String(item.created_at || '').slice(0, 10);
+    return day ? 'Saved ' + day : 'Saved image';
+  }
+
+  function showMore(ui, cursor) {
+    if (ui.more) { ui.more.remove(); ui.more = null; }
+    if (!cursor) return;
+    ui.more = F().button('Show more', 'btn sm', function () { loadImages(ui, cursor); });
+    ui.gridWrap.appendChild(ui.more);
+  }
+
+  function loadImages(ui, cursor) {
+    var url = '/api/v3/media?limit=' + PAGE + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+    return F().api('GET', url).then(function (res) {
+      if (ui.note) { ui.note.remove(); ui.note = null; }
+      if (res.status === 404) return;
+      if (!res.ok) {
+        ui.note = el('p', 'muted', 'Saved images could not be loaded.');
+        return ui.gridWrap.appendChild(ui.note);
+      }
+      (res.data.items || []).forEach(function (it) {
+        if (it && it.has_thumb) addThumb(ui, it.media_id, savedName(it));
+      });
+      showMore(ui, typeof res.data.next_cursor === 'string' ? res.data.next_cursor : '');
+    });
   }
 
   function showImageReceipt(ui, row, name, r) {
@@ -207,7 +239,9 @@
   function buildBody(host) {
     host.textContent = '';
     var ui = { root: host, results: el('ul', 'od-media-list'), grid: el('div', 'od-media-grid'),
-               docs: el('div'), lint: el('div') };
+               docs: el('div'), lint: el('div'), shown: {}, more: null, note: null,
+               gridWrap: el('div') };
+    ui.gridWrap.appendChild(ui.grid);
     var input = el('input');
     input.type = 'file';
     input.setAttribute('accept', 'image/*,application/pdf,.pdf');
@@ -216,7 +250,7 @@
     var up = el('div', 'card card-pad od-media-section');
     up.appendChild(el('h3', null, 'Add images or PDFs'));
     up.appendChild(el('p', 'muted', 'Images up to 25 MB and PDFs up to 100 MB. They stay on this computer.'));
-    [input, ui.results, ui.grid].forEach(function (n) { up.appendChild(n); });
+    [input, ui.results, ui.gridWrap].forEach(function (n) { up.appendChild(n); });
     var docs = el('div', 'od-media-section');
     docs.appendChild(el('h3', null, 'Documents'));
     docs.appendChild(ui.lint);
@@ -225,6 +259,7 @@
     host.appendChild(docs);
     loadDocuments(ui);
     loadLint(ui);
+    loadImages(ui, '');
   }
 
   function odRenderMedia(pane) {

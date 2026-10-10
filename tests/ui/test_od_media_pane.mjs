@@ -213,3 +213,66 @@ describe('Documents & Images pane', () => {
         assert.equal(h.calls.filter(c => c.url === '/api/v3/sources').length, 1);
     });
 });
+
+describe('Saved images grid', () => {
+    const idOf = n => String(n).repeat(32).slice(0, 32);
+    const item = (n, extra = {}) => ({ media_id: idOf(n), has_thumb: true, created_at: 't' + n, ...extra });
+    const listRoute = (pages) => ['GET', '/api/v3/media', (call) => {
+        const cursor = new URL(call.url, 'http://x').searchParams.get('cursor') || '';
+        return { json: pages[cursor] };
+    }];
+    const thumbs = h => Array.from(h.pane.querySelectorAll('img')).map(i => i.getAttribute('src'));
+    const more = h => Array.from(h.pane.querySelectorAll('button')).find(b => b.textContent === 'Show more');
+
+    it('shows the images saved earlier when the pane opens', async () => {
+        const h = setup({ routes: [listRoute({ '': { items: [item(1), item(2)], next_cursor: null } })] });
+        await h.open();
+        assert.ok(h.calls.some(c => c.url.startsWith('/api/v3/media?limit=60')));
+        assert.deepEqual(thumbs(h), [`/api/v3/media/${idOf(1)}/thumb`, `/api/v3/media/${idOf(2)}/thumb`]);
+        assert.equal(more(h), undefined);
+    });
+
+    it('skips images that have no thumbnail', async () => {
+        const h = setup({ routes: [listRoute({ '': { items: [item(1, { has_thumb: false }), item(2)], next_cursor: null } })] });
+        await h.open();
+        assert.deepEqual(thumbs(h), [`/api/v3/media/${idOf(2)}/thumb`]);
+    });
+
+    it('Show more appears only with a next cursor and appends the next page', async () => {
+        const h = setup({ routes: [listRoute({
+            '': { items: [item(1)], next_cursor: 'abc' },
+            abc: { items: [item(2)], next_cursor: null } })] });
+        await h.open();
+        assert.equal(thumbs(h).length, 1);
+        more(h).click();
+        await flushPromises(); await flushPromises();
+        assert.ok(h.calls.some(c => c.url.includes('cursor=abc')));
+        assert.equal(thumbs(h).length, 2);
+        assert.equal(more(h), undefined, 'no more pages, no button');
+    });
+
+    it('an image already on screen is not added twice', async () => {
+        const h = setup({ routes: [
+            ['POST', '/api/v3/media/remember', () => ({ json: { status: 'stored', media_id: idOf(1) } })],
+            listRoute({ '': { items: [item(1), item(2)], next_cursor: null } })] });
+        await h.open();
+        await h.pick(h.file('a.png', 'image/png'));
+        assert.deepEqual(thumbs(h), [`/api/v3/media/${idOf(1)}/thumb`, `/api/v3/media/${idOf(2)}/thumb`]);
+    });
+
+    it('a failed load leaves the grid empty and the rest of the pane working', async () => {
+        const h = setup({ routes: [['GET', '/api/v3/media', () => ({ status: 500, json: { detail: 'boom' } })]] });
+        await h.open();
+        assert.equal(thumbs(h).length, 0);
+        assert.equal(more(h), undefined);
+        assert.ok(h.pane.querySelector('input[type=file]'));
+    });
+
+    it('an id with markup is never parsed as HTML', async () => {
+        const h = setup({ routes: [listRoute({ '': { items: [item(1, { media_id: XSS })], next_cursor: null } })] });
+        await h.open();
+        assert.equal(thumbs(h).length, 0);
+        assert.equal(h.window.__pwn, undefined);
+        assert.ok(!h.pane.innerHTML.includes('onerror'));
+    });
+});

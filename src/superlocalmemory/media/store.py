@@ -241,6 +241,23 @@ class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin):
                                     [*args, int(limit), int(offset)]).fetchall()
         return [dict(r) for r in rows]
 
+    def list_images(self, profile_id: str, *, limit: int = 60,
+                    after: tuple[str, str] | None = None) -> list[dict[str, Any]]:
+        """One page of saved images, newest first; ``after`` is the (created_at, media_id) of the last one seen.
+
+        Only fields that are safe to show: no file path, no camera data, no hashes, no picture bytes.
+        """
+        sql = ("SELECT media_id, origin, created_at, captured_at, width, height, bytes,"
+               " (thumb_webp IS NOT NULL) AS has_thumb, anchor_memory_id FROM media_items"
+               " WHERE profile_id = ? AND state = 'active' AND kind = 'image'")
+        args: list[Any] = [profile_id]
+        if after is not None:
+            sql += " AND (created_at, media_id) < (?, ?)"
+            args += [after[0], after[1]]
+        rows = self._read().execute(sql + " ORDER BY created_at DESC, media_id DESC LIMIT ?",
+                                    [*args, int(limit)]).fetchall()
+        return [{**dict(r), "has_thumb": bool(r["has_thumb"])} for r in rows]
+
     def set_state(self, media_id: str, state: str) -> None:
         stamp = utc_stamp() if state == "tombstoned" else None
         with self._write() as conn:
