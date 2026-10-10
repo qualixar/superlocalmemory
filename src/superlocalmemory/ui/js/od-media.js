@@ -223,11 +223,6 @@
     docs.appendChild(ui.docs);
     host.appendChild(up);
     host.appendChild(docs);
-    if (typeof window.odRenderSources === 'function') {
-      var folders = el('div', 'od-media-section');
-      host.appendChild(folders);
-      window.odRenderSources(folders);
-    }
     loadDocuments(ui);
     loadLint(ui);
   }
@@ -239,7 +234,10 @@
     head.appendChild(el('p', 'muted', 'Remember pictures and read PDFs on this computer.'));
     var cardHost = el('div');
     var body = el('div');
-    [head, cardHost, body].forEach(function (n) { pane.appendChild(n); });
+    var folders = el('div', 'od-media-section');
+    [head, cardHost, body, folders].forEach(function (n) { pane.appendChild(n); });
+    // Folders have their own switch, so they show whether or not images are on; drawn once.
+    if (typeof window.odRenderSources === 'function') window.odRenderSources(folders);
     F().mountMediaCard(cardHost, {
       onReady: function () { if (!body.firstChild) buildBody(body); },
       onNotReady: function () { body.textContent = ''; },

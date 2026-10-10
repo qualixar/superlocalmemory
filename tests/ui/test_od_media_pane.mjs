@@ -10,6 +10,8 @@ const DID = 'b'.repeat(32);
 const JID = 'c'.repeat(32);
 const XSS = '<img src=x onerror="window.__pwn=1">';
 const MB = 1024 * 1024;
+import { readFileSync } from 'node:fs';
+const require_sources = () => readFileSync(new URL('../../src/superlocalmemory/ui/js/od-sources.js', import.meta.url), 'utf8');
 
 function setup({ on = true, routes = [], docs = [] } = {}) {
     const media = on ? { enabled: true, env_state: 'ready', restart_required: false }
@@ -30,6 +32,10 @@ function setup({ on = true, routes = [], docs = [] } = {}) {
         Object.defineProperty(input, 'files', { value: [file], configurable: true });
         input.dispatchEvent(new h.window.Event('change', { bubbles: true }));
         await flushPromises(); await flushPromises();
+    };
+    h.click_turn_on = async () => {
+        Array.from(h.pane.querySelectorAll('button')).find(b => b.textContent === 'Turn on').click();
+        await flushPromises(); await flushPromises(); await flushPromises();
     };
     h.file = (name, type, size) => {
         const f = new h.window.File(['hello'], name, { type });
@@ -169,5 +175,41 @@ describe('Documents & Images pane', () => {
         await h.open();
         assert.match(h.pane.textContent, /not available in this build/);
         assert.ok(h.pane.querySelector('input[type=file]'));
+    });
+
+    it('Folders show below the turn-on card while images are off', async () => {
+        const h = setup({ on: false, routes: [['GET', '/api/v3/sources', () => ({ json: { sources: [] } })]] });
+        h.window.eval(require_sources());
+        await h.open();
+        assert.match(h.pane.textContent, /Turn on images and documents/);
+        assert.equal(h.pane.querySelectorAll('input[type=file]').length, 0);
+        assert.equal(h.pane.textContent.split('No folders connected').length - 1, 1);
+        assert.ok(h.calls.some(c => c.url === '/api/v3/sources'));
+    });
+
+    it('Folders show with the body while images are on', async () => {
+        const h = setup({ routes: [['GET', '/api/v3/sources', () => ({ json: { sources: [] } })]] });
+        h.window.eval(require_sources());
+        await h.open();
+        assert.ok(h.pane.querySelector('input[type=file]'));
+        assert.equal(h.pane.textContent.split('No folders connected').length - 1, 1);
+    });
+
+    it('turning images on leaves exactly one Folders section', async () => {
+        let media = { enabled: false, env_state: 'not_installed' };
+        const h = setup({ on: false, routes: [
+            ['GET', '/api/v3/sources', () => ({ json: { sources: [] } })],
+            ['GET', '/api/v3/features', () => ({ json: features(media) })],
+            ['POST', '/api/v3/features/media/enable', () => {
+                media = { enabled: true, env_state: 'ready', restart_required: false };
+                return { json: { media } };
+            }]] });
+        h.window.eval(require_sources());
+        await h.open();
+        await h.click_turn_on();
+        assert.ok(h.pane.querySelector('input[type=file]'), 'body appeared');
+        assert.equal(h.pane.querySelectorAll('h3').length &&
+            Array.from(h.pane.querySelectorAll('h3')).filter(x => x.textContent === 'Folders').length, 1);
+        assert.equal(h.calls.filter(c => c.url === '/api/v3/sources').length, 1);
     });
 });
