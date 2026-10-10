@@ -237,3 +237,33 @@ def test_many_concurrent_claims_split_the_messages_without_overlap(broker) -> No
     for t in threads:
         t.join(20)
     assert len(claimed) == len(set(claimed)) == 30
+
+
+def test_revoke_sync_leaves_a_peer_registered_after_the_list_was_read(broker) -> None:
+    old = _web(broker, _ref(60), app="a")
+    cutoff = datetime.now(timezone.utc).isoformat()
+    new = _web(broker, _ref(61), app="b")
+    assert broker.retire_missing_web_peers(CID, set(), registered_before=cutoff) == [old]
+    ids = {r["peer_id"] for r in rows(broker, "SELECT peer_id FROM mesh_peers")}
+    assert new in ids and old not in ids
+
+
+def test_concurrent_web_senders_cannot_pass_the_unread_cap(broker) -> None:
+    local = make_peer(broker, "sess-1")
+    senders = [_web(broker, _ref(70 + i), app=f"app-{i}") for i in range(8)]
+    outcomes: list[bool] = []
+    lock = threading.Lock()
+
+    def send_ten(ref: str) -> None:
+        for n in range(10):
+            res = broker.web_send(ref, "x", local, f"m{n}", profile_id="default")
+            with lock:
+                outcomes.append(bool(res.get("ok")))
+
+    threads = [threading.Thread(target=send_ten, args=(ref,)) for ref in senders]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert sum(outcomes) == 50 and len(outcomes) == 80
+    assert len(rows(broker, "SELECT id FROM mesh_messages")) == 50

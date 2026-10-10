@@ -160,19 +160,22 @@ class WebPeersMixin:
         return self._waiter.wait(
             lambda: self.claim_web_inbox(peer_id, profile_id), timeout_s)
 
-    def retire_missing_web_peers(self, connection_id: str,
-                                 listed: Collection[str]) -> list[str]:
+    def retire_missing_web_peers(self, connection_id: str, listed: Collection[str], *,
+                                 registered_before: str | None = None) -> list[str]:
         """Retire the web peers of one connection that are not in ``listed``.
 
         ``listed`` holds the peer references of the apps the gateway still lists
-        for the connection. Queued messages of a retired peer are dropped.
+        for the connection. Queued messages of a retired peer are dropped. With
+        ``registered_before`` (an ISO time) only peers registered earlier are
+        considered: an app first used after the list was read is not in it yet.
         """
         def _retire(conn: sqlite3.Connection) -> list[str]:
             found = conn.execute(
                 "SELECT p.peer_id AS peer_id, m.profile_id AS profile_id "
                 "FROM mesh_peer_profiles p JOIN mesh_peers m ON m.peer_id = p.peer_id "
-                "WHERE p.kind='web' AND p.connection_ref=? AND p.retired_at IS NULL",
-                (connection_id,),
+                "WHERE p.kind='web' AND p.connection_ref=? AND p.retired_at IS NULL "
+                "AND (? IS NULL OR m.registered_at < ?)",
+                (connection_id, registered_before, registered_before),
             ).fetchall()
             gone = [(r["peer_id"], r["profile_id"]) for r in found
                     if r["peer_id"] not in listed]

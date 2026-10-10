@@ -419,10 +419,6 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
                        project_path: str, profile_id: str,
                        operation_id: str | None, envelope: tuple) -> dict:
         kind, app, refs, reply_to = envelope
-        if kind == "web":
-            # Take the write lock before counting the recipient's unread mail,
-            # so two senders cannot both pass the last free slot.
-            conn.execute("BEGIN IMMEDIATE")
         now = datetime.now(timezone.utc).isoformat()
         expires_at = self._compute_expires(now)
         replay = self._replay(conn, operation_id)

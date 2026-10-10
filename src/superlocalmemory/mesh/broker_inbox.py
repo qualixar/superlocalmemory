@@ -89,6 +89,10 @@ def _web_target_refusal(conn: sqlite3.Connection, to_peer: str,
     """
     if to_peer == "broadcast" or to_peer.startswith("project:"):
         return {"ok": False, "error": "web apps can only message one peer by id"}
+    if not conn.in_transaction:
+        # Take the write lock before counting, so two senders cannot both
+        # pass the last free slot.
+        conn.execute("BEGIN IMMEDIATE")
     unread = conn.execute(
         "SELECT COUNT(*) FROM mesh_messages WHERE profile_id=? AND to_peer=? "
         "AND target_type='peer' AND COALESCE(read, 0)=0",

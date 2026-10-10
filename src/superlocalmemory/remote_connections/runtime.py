@@ -13,7 +13,7 @@ from typing import Callable
 from superlocalmemory.remote_connections.async_state import finish_on_cancel, mutate
 from superlocalmemory.remote_connections.companion import Companion
 from superlocalmemory.remote_connections.credentials import ConnectorCredential, CredentialVault
-from superlocalmemory.remote_connections import peer_names
+from superlocalmemory.remote_connections import peer_names, peer_sync
 from superlocalmemory.remote_connections.gateway_provider import CloudGatewayProvider
 from superlocalmemory.remote_connections.grant_keys import GrantKeyStore
 from superlocalmemory.remote_connections.journal import EnrollmentJournal, JournalConflict
@@ -81,6 +81,7 @@ def _connected_app_v2(value: object) -> bool:
 
 #: At most one forced grant-key refresh per connection in this many seconds.
 GRANT_REFRESH_INTERVAL_S = 600.0
+PEER_SYNC_INTERVAL_S = peer_sync.INTERVAL_S
 
 
 class NativeConnectionRuntime:
@@ -95,6 +96,8 @@ class NativeConnectionRuntime:
         redirect_uri: str,
     ):
         self.journal, self.store = journal, store
+        self._app = app
+        self._peer_sync_tasks: dict[str, asyncio.Task] = {}
         self.provider = CloudGatewayProvider(store, redirect_uri=redirect_uri)
         self.current_profile, self.can_manage = current_profile, can_manage
         self.grant_keys = GrantKeyStore(lambda: self.store.backend)
@@ -259,6 +262,7 @@ class NativeConnectionRuntime:
         await companion.start()
         self._schedule_renewal(row)
         self._schedule_grant_work(row, force=False)
+        self._schedule_peer_sync(row)
 
     async def renew_credential(self, row: PendingEnrollment, *, recovering: bool = False) -> str:
         """Replace this connection's laptop credential.
@@ -419,26 +423,69 @@ class NativeConnectionRuntime:
         return await self.provider.exchange(row, "")
 
     async def list_apps(self, owner: str, profile: str, connection_id: str) -> dict:
+        started = peer_sync.started_at()
         latest = await self._owned_link(owner, profile, connection_id)
         value = await self.provider.list_apps(latest)
         apps = value.get("apps") if isinstance(value, dict) else None
         rows = apps if isinstance(apps, list) else []
         listed = [app for app in rows if _connected_app(app)]
+        await self._sync_peers_quietly(connection_id, listed, apps, started)
         return {"connection_id": connection_id, "apps": listed}
 
-    async def list_apps_v2(self, owner: str, profile: str, connection_id: str) -> dict:
-        """Connected apps including mesh/media consent; feeds the peer-name cache."""
+    async def _apps_v2(self, owner: str, profile: str, connection_id: str):
+        """``(readable rows, raw answer)`` of the version-2 connected-apps list."""
         latest = await self._owned_link(owner, profile, connection_id)
         value = await self.provider.list_apps_v2(latest)
         apps = value.get("apps") if isinstance(value, dict) else None
         rows = apps if isinstance(apps, list) else []
-        return {"connection_id": connection_id,
-                "apps": [app for app in rows if _connected_app_v2(app)]}
+        return [app for app in rows if _connected_app_v2(app)], apps
+
+    async def list_apps_v2(self, owner: str, profile: str, connection_id: str) -> dict:
+        """Connected apps including mesh/media consent; feeds the peer-name cache."""
+        listed, _ = await self._apps_v2(owner, profile, connection_id)
+        return {"connection_id": connection_id, "apps": listed}
 
     async def refresh_peer_names(self, owner: str, profile: str, connection_id: str) -> None:
-        listed = await self.list_apps_v2(owner, profile, connection_id)
-        peer_names.set_names(connection_id, {
-            app["authorization_id"]: app["name"] for app in listed["apps"]})
+        """Re-read the app list: refresh the names and retire the peers of revoked apps."""
+        started = peer_sync.started_at()
+        listed, apps = await self._apps_v2(owner, profile, connection_id)
+        await self._sync_peers(connection_id, listed, apps, started)
+
+    async def _sync_peers(self, connection_id: str, listed: list, apps: object,
+                          started: str) -> None:
+        broker = getattr(getattr(self._app, "state", None), "mesh_broker", None)
+        await asyncio.to_thread(
+            peer_sync.apply, connection_id, listed,
+            complete=peer_sync.is_complete(apps, listed), broker=broker, started=started)
+
+    async def _sync_peers_quietly(self, connection_id: str, listed: list, apps: object,
+                                  started: str) -> None:
+        """Viewing the apps keeps the mesh in step; a failure here never fails the view."""
+        try:
+            await self._sync_peers(connection_id, listed, apps, started)
+        except Exception:
+            logger.debug("peer sync after viewing apps failed", exc_info=True)
+
+    def _schedule_peer_sync(self, row: PendingEnrollment) -> None:
+        running = self._peer_sync_tasks.get(row.connection_id)
+        if running is None or running.done():
+            self._peer_sync_tasks[row.connection_id] = asyncio.create_task(
+                self._quietly(self._sync_peers_while_running(row)), name="slm-remote-peer-sync")
+
+    async def _sync_peers_while_running(self, row: PendingEnrollment) -> None:
+        """Every ten minutes while the connection runs; ends when it is cancelled."""
+        while True:
+            try:
+                await self.refresh_peer_names(row.owner, row.profile, row.connection_id)
+            except asyncio.CancelledError:
+                raise
+            except JournalConflict:
+                return
+            except Exception as error:
+                if isinstance(error, ValueError) and error.args[:1] == ("not_found",):
+                    return  # the connection is gone
+                logger.debug("peer sync unavailable for %s", row.connection_id[:6])
+            await asyncio.sleep(PEER_SYNC_INTERVAL_S)
 
     async def ensure_grant_key(self, row: PendingEnrollment, *, force: bool = False) -> None:
         """Fetch a grant key when none is held (or ``force``). Failure is silent:
@@ -570,6 +617,10 @@ class NativeConnectionRuntime:
         )
         await asyncio.to_thread(self.grant_keys.forget, connection)
         peer_names.set_names(connection, {})
+        syncing = self._peer_sync_tasks.pop(connection, None)
+        if syncing is not None:
+            syncing.cancel()
+        await self._sync_peers_quietly(connection, [], [], peer_sync.started_at())
         try:
             if row.access_token:
                 row = await self.provider.exchange(row, "")
@@ -601,13 +652,14 @@ class NativeConnectionRuntime:
         await asyncio.gather(*self._verification_tasks.values(), return_exceptions=True)
         self._verification_tasks.clear()
         background = [*self._renewal_tasks.values(), *self._recovery_tasks.values(),
-                      *self._grant_tasks.values()]
+                      *self._grant_tasks.values(), *self._peer_sync_tasks.values()]
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
         self._renewal_tasks.clear()
         self._recovery_tasks.clear()
         self._grant_tasks.clear()
+        self._peer_sync_tasks.clear()
         for companion in self._companions.values():
             await companion.stop()
         self._companions.clear()
