@@ -19,6 +19,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from superlocalmemory.core.derived_cache_policy import clears_derived_cache
+
 logger = logging.getLogger(__name__)
 
 # C1 — Backup residue obligations
@@ -417,6 +419,7 @@ class GDPRCompliance:
 
     # -- Right to Erasure (Art. 17) ----------------------------------------
 
+    @clears_derived_cache
     def forget_profile(self, profile_id: str) -> dict:
         """Delete ALL data for a profile (right to be forgotten, Art. 17).
 
@@ -860,6 +863,7 @@ class GDPRCompliance:
         logger.info("GDPR erasure for '%s': %d tables, %s", profile_id, len(tables), counts)
         return counts
 
+    @clears_derived_cache
     def forget_entity(self, entity_name: str, profile_id: str) -> dict:
         """Delete all data related to a specific entity.
 
