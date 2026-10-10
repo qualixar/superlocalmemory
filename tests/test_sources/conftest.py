@@ -102,8 +102,9 @@ class Env:
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
     e = Env(tmp_path)
+    monkeypatch.setenv("SLM_DATA_DIR", str(e.data))  # the data folder is the host's, not the whole temp folder
     sources.configure(e.host)
     yield e
     sources.configure(None)

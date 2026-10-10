@@ -10,6 +10,12 @@ import pytest
 from superlocalmemory.sources.roots import RootRefused, check_root, is_inside
 
 
+@pytest.fixture(autouse=True)
+def _data_root(tmp_path, monkeypatch):
+    """The data folder is somewhere else, so these folders are judged on their own merits."""
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path.parent / (tmp_path.name + "-slm-data")))
+
+
 @pytest.fixture
 def home(tmp_path):
     h = tmp_path / "home" / "me"

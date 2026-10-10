@@ -124,6 +124,14 @@ def _download(inp: MediaInput) -> bytes:
         raise _refuse(refused.reason) from None
 
 
+def _refuse_own_data(path: Path) -> None:
+    """A file or folder in SuperLocalMemory's own data folder is not the person's to hand over."""
+    from superlocalmemory.infra.data_root import DATA_ROOT_REFUSAL, overlaps_data_root
+
+    if overlaps_data_root(path):
+        raise _refuse(DATA_ROOT_REFUSAL)
+
+
 def _read_input(inp: MediaInput) -> bytes:
     if inp.data is not None:
         if len(inp.data) > MAX_FILE_BYTES:
@@ -145,6 +153,7 @@ def _read_input(inp: MediaInput) -> bytes:
         raise _refuse("Give an image file or image data.")
     try:
         path = Path(inp.path)
+        _refuse_own_data(path)
         if not path.is_file():
             raise _refuse("That image file could not be found.")
         with open(path, "rb") as fh:

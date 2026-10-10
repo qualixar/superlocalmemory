@@ -251,3 +251,27 @@ class DynamicStatePath(os.PathLike[str]):
 
     def __getattr__(self, name: str):
         return getattr(self._resolve(), name)
+
+
+DATA_ROOT_REFUSAL = "That folder holds SuperLocalMemory's own data."
+
+
+def overlaps_data_root(path: str | Path, *extra_roots: str | Path | None) -> bool:
+    """True when ``path`` is, is inside, or contains SuperLocalMemory's data folder.
+
+    Both sides go through ``realpath`` (after ``~`` expansion), so a link into the
+    data folder counts as the data folder, and a parent of it counts too: connecting
+    the parent would take the data folder along with it.
+    """
+    target = os.path.realpath(os.path.expanduser(str(path)))
+    roots = [canonical_data_root(), *(r for r in extra_roots if r)]
+    for root in roots:
+        base = os.path.realpath(os.path.expanduser(str(root)))
+        if _within(base, target) or _within(target, base):
+            return True
+    return False
+
+
+def _within(outer: str, inner: str) -> bool:
+    return inner == outer or inner.startswith(outer.rstrip(os.sep) + os.sep)
+

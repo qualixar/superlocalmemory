@@ -53,6 +53,13 @@ def _refuse(reason: str) -> _Stop:
     return _Stop(DocumentReceipt("refused", reason=reason))
 
 
+def _refuse_own_data(path: Path) -> None:
+    from superlocalmemory.infra.data_root import DATA_ROOT_REFUSAL, overlaps_data_root
+
+    if overlaps_data_root(path):
+        raise _refuse(DATA_ROOT_REFUSAL)
+
+
 def _max_bytes() -> int:
     try:
         return int(float(os.environ.get("SLM_DOC_MAX_MB", DEFAULT_MAX_MB)) * 1024 * 1024)
@@ -116,6 +123,7 @@ def _stage_path(inp: MediaInput, out: Any) -> tuple[str, int]:
     limit, digest, size = _max_bytes(), hashlib.sha256(), 0
     try:
         path = Path(inp.path)
+        _refuse_own_data(path)
         if not path.is_file():
             raise _refuse("That document could not be found.")
         with open(path, "rb") as fh:

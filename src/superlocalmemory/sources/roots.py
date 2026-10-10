@@ -87,7 +87,7 @@ def _is_system_folder(real: Path, home: Path, environ: Mapping[str, str]) -> boo
 
 def check_root(path: str | Path, *, home: Path | None = None,
                environ: Mapping[str, str] | None = None, mounts: str | None = None,
-               windows: bool = False) -> Path:
+               windows: bool = False, data_root: str | Path | None = None) -> Path:
     """The resolved folder when it may be a source; raises :class:`RootRefused` otherwise.
 
     The checks run on the path after ``realpath``, so a link to the home folder is
@@ -107,6 +107,10 @@ def check_root(path: str | Path, *, home: Path | None = None,
         raise RootRefused("home_directory", "Your whole home folder cannot be a source; pick a subfolder.")
     if real == Path(real.anchor) or real.parent == real:
         raise RootRefused("filesystem_root", "A whole drive or the filesystem root cannot be a source.")
+    from superlocalmemory.infra.data_root import DATA_ROOT_REFUSAL, overlaps_data_root
+
+    if overlaps_data_root(real, data_root):
+        raise RootRefused("data_root", DATA_ROOT_REFUSAL)
     if given.is_symlink() and not is_inside(given.parent, real):
         raise RootRefused("symlink_escape", "That folder is a link to somewhere outside its own location.")
     if _is_system_folder(real, home_real, environ):
