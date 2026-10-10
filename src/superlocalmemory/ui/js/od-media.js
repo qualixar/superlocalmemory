@@ -4,7 +4,7 @@
 // are set with textContent only. Writes go through the page's fetch, which core.js
 // wraps with the local write credential.
 // The Folders section (od-sources.js) is rendered below the documents list.
-// Routes: POST /api/v3/media/remember   POST /api/v3/documents
+// Routes: POST /api/v3/media/upload?kind=image|pdf (the file itself as the body, streamed)
 //         GET /api/v3/media (saved images)  GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
 //         GET /api/v3/documents         GET /api/v3/documents/lint
 //         DELETE /api/v3/documents/{id}
@@ -15,6 +15,7 @@
   var IMAGE_LIMIT = 25 * MB;
   var PDF_LIMIT = 100 * MB;
   var POLL_MS = 2000;
+  var UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
   var ID_RE = /^[0-9a-f]{32}$/;
   var FINAL_JOB = { done: 1, failed: 1, cancelled: 1 };
   var PAGE = 60;
@@ -40,13 +41,19 @@
     return '';
   }
 
-  function readBase64(file) {
-    return new Promise(function (resolve, reject) {
-      var r = new FileReader();
-      r.onload = function () { resolve(String(r.result).replace(/^data:[^,]*,/, '')); };
-      r.onerror = function () { reject(new Error('Could not read the file.')); };
-      r.readAsDataURL(file);
-    });
+  // The file goes up as the raw request body, so the sizes above are the real limits
+  // (a JSON/base64 body would stop an image near 9 MB and a PDF near 25 MB). Resolves
+  // {ok, status, data} like odFeatures.api; a dropped connection is status 0.
+  function sendFile(kind, file) {
+    var url = '/api/v3/media/upload?kind=' + kind;
+    if (kind === 'pdf') url += '&file_name=' + encodeURIComponent(String(file.name || '').slice(0, 255));
+    var init = { method: 'POST', body: file, timeoutMs: UPLOAD_TIMEOUT_MS,
+      headers: { 'Content-Type': file.type || 'application/octet-stream' } };
+    return fetch(url, init).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: !!r.ok, status: r.status, data: data || {} };
+      });
+    }, function () { return { ok: false, status: 0, data: {} }; });
   }
 
   // ---------------------------------------------------------------- results
@@ -120,15 +127,14 @@
     return false;
   }
 
-  function sendImage(ui, file, row, b64) {
-    return F().api('POST', '/api/v3/media/remember', { base64: b64 }).then(function (res) {
+  function sendImage(ui, file, row) {
+    return sendFile('image', file).then(function (res) {
       if (postOutcome(res, row, 'Could not save the image.')) showImageReceipt(ui, row, file.name, res.data);
     });
   }
 
-  function sendPdf(ui, file, row, b64) {
-    var body = { base64: b64, file_name: String(file.name || '').slice(0, 255) };
-    return F().api('POST', '/api/v3/documents', body).then(function (res) {
+  function sendPdf(ui, file, row) {
+    return sendFile('pdf', file).then(function (res) {
       if (!postOutcome(res, row, 'Could not save the PDF.')) return;
       var r = res.data;
       if (r.status === 'refused') return setStatus(row, 'Not saved: ' + (r.reason || 'refused'));
@@ -142,9 +148,10 @@
     var row = newResult(ui, file.name || 'file');
     var why = refusal(file);
     if (why) { setStatus(row, why); return Promise.resolve(); }
-    return readBase64(file).then(function (b64) {
-      return kindOf(file) === 'image' ? sendImage(ui, file, row, b64) : sendPdf(ui, file, row, b64);
-    }).catch(function (e) { setStatus(row, e && e.message ? e.message : 'Could not send the file.'); });
+    var send = kindOf(file) === 'image' ? sendImage : sendPdf;
+    return send(ui, file, row).catch(function (e) {
+      setStatus(row, e && e.message ? e.message : 'Could not send the file.');
+    });
   }
 
   // One at a time, in order; each file gets its own result line.

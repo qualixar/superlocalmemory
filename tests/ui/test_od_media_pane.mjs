@@ -83,18 +83,19 @@ describe('Documents & Images pane', () => {
         assert.match(h.pane.textContent, /2 .*without people or places/i);
     });
 
-    it('image upload: base64 JSON with the credential, thumbnail at the right URL, preview as text', async () => {
+    it('image upload: the file itself as the body with the credential, thumbnail at the right URL, preview as text', async () => {
         const preview = 'Invoice ' + XSS;
-        const h = setup({ routes: [['POST', '/api/v3/media/remember', () => ({
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
             json: { status: 'stored', media_id: MID, memory_id: 'm1', extracted_text_preview: preview } })]] });
         await h.open();
         await h.pick(h.file('scan.png', 'image/png'));
         const w = writes(h);
         assert.equal(w.length, 1);
-        assert.equal(w[0].url, '/api/v3/media/remember');
+        assert.equal(w[0].url, '/api/v3/media/upload?kind=image');
         assert.equal(w[0].headers.get('x-install-token'), TOKEN);
-        const body = JSON.parse(w[0].body);
-        assert.equal(body.base64, Buffer.from('hello').toString('base64'));
+        assert.equal(w[0].headers.get('content-type'), 'image/png');
+        assert.ok(w[0].rawBody instanceof h.window.File, 'the File itself, not a base64 copy of it');
+        assert.equal(w[0].rawBody.name, 'scan.png');
         const imgs = h.pane.querySelectorAll('img');
         assert.equal(imgs.length, 1, 'only the thumbnail, nothing built from the preview');
         assert.equal(imgs[0].getAttribute('src'), `/api/v3/media/${MID}/thumb`);
@@ -102,8 +103,37 @@ describe('Documents & Images pane', () => {
         assert.equal(h.window.__pwn, undefined);
     });
 
+    it('a file at the advertised limits is sent whole: no base64 copy, no size cap of its own', async () => {
+        const h = setup({ routes: [
+            ['POST', '/api/v3/media/upload', () => ({ json: { status: 'stored', media_id: MID } })]] });
+        await h.open();
+        const big = h.file('big.png', 'image/png', 25 * MB);
+        await h.pick(big);
+        const w = writes(h);
+        assert.equal(w.length, 1);
+        assert.equal(w[0].rawBody.size, 25 * MB);
+        assert.doesNotMatch(h.pane.textContent, /Too large/);
+    });
+
+    it('the upload asks for a long timeout and a PDF name with odd characters is encoded', async () => {
+        let seen;
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', (c) => {
+            seen = c; return { status: 202, json: { status: 'processing', document_id: DID } }; }]] });
+        await h.open();
+        await h.pick(h.file('a&b #1.pdf', 'application/pdf'));
+        assert.equal(seen.url, '/api/v3/media/upload?kind=pdf&file_name=' + encodeURIComponent('a&b #1.pdf'));
+    });
+
+    it('a 413 from the server shows its reason', async () => {
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
+            status: 413, json: { detail: 'That PDF is too large (100 MB limit).' } })]] });
+        await h.open();
+        await h.pick(h.file('p.pdf', 'application/pdf'));
+        assert.match(h.pane.textContent, /too large \(100 MB limit\)/);
+    });
+
     it('an id that is not 32 hex characters gets no thumbnail request', async () => {
-        const h = setup({ routes: [['POST', '/api/v3/media/remember', () => ({
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
             json: { status: 'stored', media_id: '../../x' } })]] });
         await h.open();
         await h.pick(h.file('a.png', 'image/png'));
@@ -129,7 +159,7 @@ describe('Documents & Images pane', () => {
     });
 
     it('a refused receipt shows the server reason as text', async () => {
-        const h = setup({ routes: [['POST', '/api/v3/media/remember', () => ({
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
             status: 422, json: { status: 'refused', reason: 'bad ' + XSS } })]] });
         await h.open();
         await h.pick(h.file('a.png', 'image/png'));
@@ -138,7 +168,7 @@ describe('Documents & Images pane', () => {
     });
 
     it('PDF upload: file name sent, job polled until done, then the list reloads and polling stops', async () => {
-        const h = setup({ routes: [['POST', '/api/v3/documents', () => ({
+        const h = setup({ routes: [['POST', '/api/v3/media/upload', () => ({
             status: 202, json: { status: 'processing', document_id: DID, job_id: JID } })]] });
         h.state.jobs = [
             { job_id: JID, state: 'running', done: 1, total: 4 },
@@ -146,9 +176,8 @@ describe('Documents & Images pane', () => {
         ];
         await h.open();
         await h.pick(h.file('paper.pdf', 'application/pdf'));
-        const body = JSON.parse(writes(h)[0].body);
-        assert.equal(body.file_name, 'paper.pdf');
-        assert.equal(writes(h)[0].url, '/api/v3/documents');
+        assert.equal(writes(h)[0].url, '/api/v3/media/upload?kind=pdf&file_name=paper.pdf');
+        assert.ok(writes(h)[0].rawBody instanceof h.window.File);
         await h.tick();
         assert.match(h.pane.textContent, /1 of 4/);
         const lists = () => h.calls.filter(c => c.url.startsWith('/api/v3/documents?')).length;
@@ -273,7 +302,7 @@ describe('Saved images grid', () => {
 
     it('an image already on screen is not added twice', async () => {
         const h = setup({ routes: [
-            ['POST', '/api/v3/media/remember', () => ({ json: { status: 'stored', media_id: idOf(1) } })],
+            ['POST', '/api/v3/media/upload', () => ({ json: { status: 'stored', media_id: idOf(1) } })],
             listRoute({ '': { items: [item(1), item(2)], next_cursor: null } })] });
         await h.open();
         await h.pick(h.file('a.png', 'image/png'));

@@ -3963,6 +3963,8 @@ def create_app() -> FastAPI:
         application.include_router(media_router)
         from superlocalmemory.server.routes.media_upload import router as media_upload_router
         application.include_router(media_upload_router)
+        from superlocalmemory.server.routes.media_dashboard_upload import router as media_dash_upload_router
+        application.include_router(media_dash_upload_router)
     except ImportError:
         pass
 
