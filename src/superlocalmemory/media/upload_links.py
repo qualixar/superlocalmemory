@@ -48,6 +48,8 @@ RETENTION_S = DAY_S + 3_600
 STRAY_FILE_S = 3_600
 KINDS = ("image", "document")
 DB_NAME = "uploads.db"
+#: Where a link opens: the gateway's public MCP host. The page is ``<base>/u/<connection>/<token>``.
+UPLOAD_BASE_URL = "https://mcp.superlocalmemory.com"
 
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 _DOMAIN = b"superlocalmemory-upload-link-v1\0"

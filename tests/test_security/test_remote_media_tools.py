@@ -25,7 +25,7 @@ from tests.test_security.test_remote_tool_policy import (
 )
 
 MEDIA = sorted(policy.MEDIA_TOOLS)
-SAVE = ("remember_media", "remember_document")
+SAVE = ("remember_media", "remember_document", "media_upload_link")
 
 
 class _Probe(_StubMcp):

@@ -35,6 +35,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.media.upload_links import UPLOAD_BASE_URL
+
 REDACTED = "[host detail withheld]"
 HOST_PATH = "[host path]"
 
@@ -111,8 +113,24 @@ def _is_diagnostic_key(key: str) -> bool:
     return lowered in _DIAGNOSTIC_KEYS or lowered.endswith(_DIAGNOSTIC_SUFFIXES)
 
 
+#: A one-time upload link made by ``media_upload_link``. It carries no host detail, and
+#: rewriting a stretch of its token that happens to equal the account or computer name
+#: would break it, so it is passed through whole.
+_UPLOAD_LINK = re.compile(re.escape(UPLOAD_BASE_URL) + r"/u/[0-9a-f]{32}/[A-Za-z0-9_-]{43}")
+
+
 def redact_text(text: str) -> str:
-    """Host details in a non-memory string."""
+    """Host details in a non-memory string; an upload link in it is kept as it is."""
+    pieces: list[str] = []
+    last = 0
+    for found in _UPLOAD_LINK.finditer(text):
+        pieces += [_redact_plain(text[last:found.start()]), found.group(0)]
+        last = found.end()
+    pieces.append(_redact_plain(text[last:]))
+    return "".join(pieces)
+
+
+def _redact_plain(text: str) -> str:
     out = _WINDOWS_PATH.sub(HOST_PATH, text)
     out = _POSIX_PATH.sub(HOST_PATH, out)
     out = _TILDE_PATH.sub(HOST_PATH, out)

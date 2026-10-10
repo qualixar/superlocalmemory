@@ -11,7 +11,8 @@ import sys
 
 import pytest
 
-MEDIA_TOOLS = frozenset({"remember_media", "get_media", "remember_document", "media_status"})
+MEDIA_TOOLS = frozenset({"remember_media", "get_media", "remember_document", "media_status",
+                         "media_upload_link"})
 
 
 def _load(monkeypatch: pytest.MonkeyPatch, images_on: bool | Exception):
@@ -52,12 +53,12 @@ def test_images_off_lists_no_media_tool_and_keeps_the_counts(monkeypatch):
     assert server._ESSENTIAL_TOOLS == profiles._PROFILE_DEFINITIONS["full"]
 
 
-def test_images_on_lists_the_four_tools_in_default_and_full(monkeypatch):
+def test_images_on_lists_the_five_tools_in_default_and_full(monkeypatch):
     server, profiles = _load(monkeypatch, True)
     assert MEDIA_TOOLS <= server._ESSENTIAL_TOOLS
     assert MEDIA_TOOLS <= profiles._PROFILE_DEFINITIONS["full"]
-    assert len(server._ESSENTIAL_TOOLS) == 61
-    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 61
+    assert len(server._ESSENTIAL_TOOLS) == 62
+    assert len(profiles._PROFILE_DEFINITIONS["full"]) == 62
     assert server._ESSENTIAL_TOOLS == profiles._PROFILE_DEFINITIONS["full"]
 
 

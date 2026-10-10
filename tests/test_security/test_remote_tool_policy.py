@@ -321,7 +321,7 @@ def test_mesh_and_media_sets_match_the_design() -> None:
     assert policy.MESH_TOOLS == {"mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
                                  "mesh_state"}
     assert policy.MEDIA_TOOLS == {"remember_media", "get_media", "remember_document",
-                                  "media_status"}
+                                  "media_status", "media_upload_link"}
     assert not hasattr(policy, "REMOTE_MESH_TOOLS_ENABLED")
     for host_only in ("mesh_lock", "mesh_events", "mesh_status", "mesh_summary"):
         assert host_only in policy.HOST_ONLY_TOOLS

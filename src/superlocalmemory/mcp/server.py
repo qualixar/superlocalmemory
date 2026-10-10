@@ -166,7 +166,7 @@ except Exception:
 
 if _media_tools_enabled:
     _ESSENTIAL_TOOLS.update({
-        "remember_media", "get_media", "remember_document", "media_status",
+        "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
     })
 
 _ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
@@ -323,6 +323,8 @@ from superlocalmemory.mcp.tools_media import (
 )
 register_media_tools(_target)  # image tools for local AI apps (host-only)
 register_document_tools(_target)  # document tools for local AI apps (host-only)
+from superlocalmemory.mcp.tools_media_upload import register_upload_link_tool
+register_upload_link_tool(_target)  # one-time upload link for web apps (remote-only)
 register_media_resources(server)
 from superlocalmemory.mcp.tools_context import register_prestage_tool
 

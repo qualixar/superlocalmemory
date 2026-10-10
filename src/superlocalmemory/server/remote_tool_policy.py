@@ -75,9 +75,11 @@ MESH_TOOLS: frozenset[str] = frozenset({
 #: tools also need a write key and the grant's write scope. A name that no
 #: tool is registered under is simply never listed or called.
 MEDIA_TOOLS: frozenset[str] = frozenset({
-    "remember_media", "get_media", "remember_document", "media_status",
+    "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
 })
-_MEDIA_SAVE_TOOLS: frozenset[str] = frozenset({"remember_media", "remember_document"})
+_MEDIA_SAVE_TOOLS: frozenset[str] = frozenset({
+    "remember_media", "remember_document", "media_upload_link",
+})
 
 HOST_ONLY_TOOLS: frozenset[str] = frozenset({
     "apply_refactor", "audit_trail", "backup_status", "build_code_graph", "build_graph",

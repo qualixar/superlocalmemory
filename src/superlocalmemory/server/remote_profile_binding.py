@@ -101,7 +101,7 @@ ROUTED_TOOLS: frozenset[str] = frozenset({
     "confirm_memory_kinds", "run_view", "manage_view", "skill_health", "skill_lineage",
     "slm_loop_history", "slm_loop_show", "get_brain_evidence_status",
     # 4.1.25: images and documents, for a key that opted in (remote_tool_policy.MEDIA_TOOLS).
-    "remember_media", "get_media", "remember_document", "media_status",
+    "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
     "record_agent_experience", "record_cognitive_turn", "finalize_cognitive_turn",
 })
 
@@ -131,7 +131,7 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     "finalize", "idempotency_key", "importance", "include_history", "include_unknown",
     "input_summary", "items", "key", "kind", "known_as_of", "limit", "max_age_days",
     "max_results", "memory_ids", "message", "metadata", "min_confidence", "mode", "name",
-    "new_name", "offset", "outcome",
+    "new_name", "note", "offset", "outcome",
     "output_summary", "pattern_id", "pattern_type", "payload", "prefer_project", "project",
     "project_strict",
     "project_path", "query", "recall_query_id", "receipt_id", "refs", "replaces",

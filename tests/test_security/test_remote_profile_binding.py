@@ -62,7 +62,8 @@ def test_every_argument_of_every_remote_tool_is_classified(registry) -> None:
     groups = (binding.PROFILE_ARGUMENTS, binding.READ_SCOPE_ARGUMENTS,
               binding.WRITE_SCOPE_ARGUMENTS, binding.NEUTRAL_ARGUMENTS, binding.MEDIA_ARGUMENTS)
     assert sum(len(g) for g in groups) == len(binding.CLASSIFIED_ARGUMENTS)
-    assert binding.MEDIA_ARGUMENT_TOOLS == policy.MEDIA_TOOLS
+    # media_upload_link takes no file arguments: it is a media tool, but not one that may carry them.
+    assert binding.MEDIA_ARGUMENT_TOOLS | {"media_upload_link"} == policy.MEDIA_TOOLS
     media_seen = {a for t, args in remote.items() if t in policy.MEDIA_TOOLS for a in args}
     assert binding.MEDIA_ARGUMENTS <= media_seen, sorted(binding.MEDIA_ARGUMENTS - media_seen)
     assert binding.NEUTRAL_ARGUMENTS <= seen, sorted(binding.NEUTRAL_ARGUMENTS - seen)
