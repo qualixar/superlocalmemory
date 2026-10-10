@@ -407,6 +407,11 @@ def _watch_parent() -> None:
 
 
 def main() -> int:
+    import warnings
+
+    # Library deprecation notices are for their developers; on stderr they read as daemon warnings.
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         threading.Thread(target=_watch_parent, daemon=True, name="parent-watchdog").start()
