@@ -17,12 +17,16 @@ Principal model
 * **owner** — the machine operator (already proved machine auth via
   write_identity; no user session). In personal mode the owner bypasses RBAC
   (all permissions). When the org turns on *require_login* (company mode) the
-  owner bypass is disabled for data and a user session is mandatory; the
-  owner keeps MANAGE only while presenting the machine credential (daemon
-  capability, install token or API key). A caller with no credential is not
-  the owner in company mode: an uncredentialed loopback process could
-  otherwise switch company mode off and read everyone's data. A session token
-  that does not resolve is refused (401) rather than treated as the owner.
+  owner bypass is disabled for data and a user session is mandatory. The owner
+  keeps MANAGE only through the daemon capability (a 0600 file that is never
+  served over HTTP: the CLI break-glass for a locked-out admin). The install
+  token and an API key are NOT authority to administer: the install token is
+  handed to any loopback caller by ``GET /internal/token`` and an API key
+  reaches the LAN, so either one alone would let anyone switch company mode
+  off and read everyone's data. Administration then needs a signed-in user who
+  holds MANAGE. A session token that does not resolve is refused (401) rather
+  than treated as the owner. With no users enrolled yet the owner is still the
+  machine, so the first administrator can be created.
 """
 
 from __future__ import annotations
@@ -80,6 +84,29 @@ def has_machine_credential(request: Request) -> bool:
     return True
 
 
+def has_daemon_capability(request: Request) -> bool:
+    """True when the caller presents this daemon's private capability.
+
+    The capability lives in a 0600 file next to the daemon and is never served
+    over HTTP, so holding it proves access to this user's files.
+    """
+    from superlocalmemory.server.write_identity import require_daemon_actor
+
+    try:
+        require_daemon_actor(request, getattr(request.app.state, "daemon_descriptor", None))
+    except HTTPException:
+        return False
+    return True
+
+
+def company_mode_active(rbac: Any | None) -> bool:
+    """Company mode: users are enrolled and the workspace requires login."""
+    try:
+        return bool(rbac is not None and rbac.require_login() and rbac.user_count() > 0)
+    except Exception:  # noqa: BLE001 - an unreadable policy is treated as strict
+        return rbac is not None
+
+
 def require_machine_credential(request: Request) -> None:
     """Reject (403) a caller that holds no valid machine credential."""
     if not has_machine_credential(request):
@@ -135,10 +162,10 @@ def require_permission(
     prof = profile or _active_profile()
 
     if principal["kind"] == "owner":
-        # The machine operator keeps MANAGE in company mode so administration
-        # is never locked out of the dashboard, but only while presenting the
-        # machine credential: "no session" alone is any local process.
-        # require_login gates the owner's DATA operations (per-user login).
+        # In company mode the owner keeps MANAGE only through the daemon
+        # capability (command-line break-glass): "no session" alone is any
+        # local process, and the install token / an API key are reachable by
+        # one. require_login also gates the owner's DATA operations.
         if require_login:
             if permission != Permission.MANAGE:
                 raise HTTPException(
@@ -148,7 +175,18 @@ def require_permission(
                         "access."
                     ),
                 )
-            require_machine_credential(request)
+            if company_mode_active(rbac):
+                if not has_daemon_capability(request):
+                    raise HTTPException(
+                        403,
+                        detail=(
+                            "Administration of a workspace that requires login "
+                            "needs a signed-in administrator, or the daemon "
+                            "capability from the command line."
+                        ),
+                    )
+            else:
+                require_machine_credential(request)  # first administrator
         return principal  # personal mode — operator is owner
 
     # Logged-in user: always enforced against their role.
@@ -239,7 +277,12 @@ def principal_info(request: Request) -> dict:
     if principal["kind"] == "owner":
         # Owner has every permission (personal mode) unless login is required.
         info["role"] = "owner"
-        info["permissions"] = [p.value for p in Permission]
+        # A logged-out owner of a company workspace can do nothing from here.
+        company = company_mode_active(rbac)
+        info["permissions"] = (
+            [] if company and not has_daemon_capability(request)
+            else [p.value for p in Permission]
+        )
         return info
     role = rbac.get_role(principal["user_id"], prof) if rbac is not None else None
     info["role"] = role.value if role else None

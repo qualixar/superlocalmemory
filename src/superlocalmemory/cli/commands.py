@@ -521,6 +521,12 @@ def _cmd_summary_dispatch(args: Namespace) -> None:
     cmd_summary(args)
 
 
+def _cmd_team_dispatch(args: Namespace) -> None:
+    """4.1.25: workspace login policy through the daemon (cli/team_cmd.py)."""
+    from superlocalmemory.cli.team_cmd import cmd_team
+    cmd_team(args)
+
+
 def _cmd_kinds_dispatch(args: Namespace) -> None:
     """4.1.19: memory kinds through the daemon (cli/kinds_cmd.py)."""
     from superlocalmemory.cli.kinds_cmd import cmd_kinds
@@ -706,6 +712,7 @@ def dispatch(args: Namespace) -> None:
         "backup": _cmd_backup_dispatch,
         "summary": _cmd_summary_dispatch,
         "kinds": _cmd_kinds_dispatch,
+        "team": _cmd_team_dispatch,
         "sources": _cmd_sources_dispatch,
         "media": _cmd_media_dispatch,
         "features": _cmd_features_dispatch,
@@ -3039,6 +3046,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("summary", "Readable summaries: session, day, or project"),
         ("view", "Saved views: named recall queries you can re-run"),
         ("kinds", "Memory kinds: status, settings, classify (undoable)"),
+        ("team", "Workspace login policy: status, require-login on/off (owner's way back in)"),
         ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove, forget-empty"),
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),

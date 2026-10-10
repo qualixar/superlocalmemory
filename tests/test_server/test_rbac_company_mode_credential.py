@@ -109,16 +109,130 @@ def test_valid_machine_credential_still_administers(app_and_engine):
     assert app.state.rbac.require_login() is False
 
 
-def test_install_token_is_a_machine_credential(app_and_engine):
+def test_install_token_alone_does_not_administer_in_company_mode(app_and_engine):
+    """The install token is served to any loopback caller, so it is not authority to administer."""
     from superlocalmemory.core.security_primitives import ensure_install_token
 
     app = app_and_engine
     _company_mode(app)
     headers = {"X-Install-Token": ensure_install_token()}
+    tc = _loopback(app)
 
-    r = _loopback(app).get("/api/rbac/users", headers=headers)
+    for path in ("/api/rbac/users", "/api/rbac/members"):
+        r = tc.get(path, headers=headers)
+        assert r.status_code in (401, 403), (path, r.text)
+    # ...yet it is still accepted as the dashboard's identity bootstrap
+    assert tc.get("/api/rbac/status", headers=headers).status_code == 200
+
+
+def test_the_token_fetched_from_internal_token_cannot_switch_company_mode_off(app_and_engine):
+    """The reviewer's attack: read the token over loopback, then POST the policy."""
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    ensure_install_token()   # the daemon writes the token file at start-up
+    app = app_and_engine
+    _company_mode(app)
+    tc = _loopback(app)
+
+    fetched = tc.get("/internal/token")
+    assert fetched.status_code == 200, fetched.text
+    token = fetched.json()["token"]
+
+    r = tc.post("/api/rbac/policy", json={"require_login": False},
+                headers={"X-Install-Token": token})
+
+    assert r.status_code in (401, 403), r.text
+    assert app.state.rbac.require_login() is True
+
+
+def test_an_api_key_alone_cannot_administer_in_company_mode(app_and_engine, monkeypatch):
+    from superlocalmemory.infra import auth_middleware
+
+    app = app_and_engine
+    _company_mode(app)
+    monkeypatch.setattr(auth_middleware, "verify_api_key", lambda presented: presented == "lan-key")
+
+    r = TestClient(app, base_url="http://10.0.0.5:8765", client=("10.0.0.5", 4000)).post(
+        "/api/rbac/policy", json={"require_login": False}, headers={"X-SLM-API-Key": "lan-key"})
+
+    assert r.status_code in (401, 403), r.text
+    assert app.state.rbac.require_login() is True
+
+
+def test_an_admin_session_with_the_install_token_administers_from_the_dashboard(app_and_engine):
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    app = app_and_engine
+    _company_mode(app)
+    rbac = app.state.rbac
+    uid = {u["username"]: u["user_id"] for u in rbac.list_users()}["admin1"]
+    headers = {"X-Install-Token": ensure_install_token(),
+               "X-SLM-User-Session": rbac.create_session(uid)}
+    tc = _loopback(app)
+
+    assert tc.get("/api/rbac/users", headers=headers).status_code == 200
+    off = tc.post("/api/rbac/policy", json={"require_login": False}, headers=headers)
+    assert off.status_code == 200, off.text
+
+
+def test_a_viewer_session_cannot_administer_even_with_every_credential(app_and_engine):
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    app = app_and_engine
+    creds = _company_mode(app)
+    rbac = app.state.rbac
+    rbac.create_user("viewer1", "password-1234")
+    uid = {u["username"]: u["user_id"] for u in rbac.list_users()}["viewer1"]
+    rbac.set_membership("default", uid, "viewer", added_by="test")
+    headers = {**creds, "X-Install-Token": ensure_install_token(),
+               "X-SLM-User-Session": rbac.create_session(uid)}
+
+    r = _loopback(app).post("/api/rbac/policy", json={"require_login": False}, headers=headers)
+
+    assert r.status_code == 403, r.text
+
+
+def test_the_install_token_still_carries_a_signed_in_users_ordinary_writes(app_and_engine):
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    app = app_and_engine
+    _company_mode(app)
+    rbac = app.state.rbac
+    rbac.create_user("member1", "password-1234")
+    uid = {u["username"]: u["user_id"] for u in rbac.list_users()}["member1"]
+    rbac.set_membership("default", uid, "admin", added_by="test")
+    headers = {"X-Install-Token": ensure_install_token(),
+               "X-SLM-User-Session": rbac.create_session(uid)}
+
+    r = _loopback(app).delete("/api/memories/nonexistent", headers=headers)
+
+    assert r.status_code == 404, r.text   # past the RBAC gate; the fact simply is not there
+
+
+def test_with_no_users_the_install_token_can_still_create_the_first_admin(app_and_engine):
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    app = app_and_engine
+    app.state.rbac.set_require_login(True)      # company mode chosen, nobody enrolled yet
+    headers = {"X-Install-Token": ensure_install_token()}
+
+    r = _loopback(app).post(
+        "/api/rbac/users", json={"username": "first", "password": "password-1234", "role": "admin"},
+        headers=headers)
 
     assert r.status_code == 200, r.text
+
+
+def test_whoami_for_a_logged_out_owner_lists_no_permissions_in_company_mode(app_and_engine):
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    app = app_and_engine
+    _company_mode(app)
+
+    body = _loopback(app).get(
+        "/api/rbac/whoami", headers={"X-Install-Token": ensure_install_token()}).json()
+
+    assert body["kind"] == "owner" and body["permissions"] == []
 
 
 def test_wrong_install_token_is_refused(app_and_engine):
