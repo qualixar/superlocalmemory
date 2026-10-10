@@ -208,6 +208,10 @@ class IngestionOperationRepository:
         )
         return self._from_row(rows[0]) if rows else None
 
+    def find_for_request(self, request: IngestionRequest) -> IngestionOperation | None:
+        """The stored operation that owns this request's idempotency key."""
+        return self._find_request(request)
+
     @staticmethod
     def _assert_same_request(
         existing: IngestionOperation, request: IngestionRequest
