@@ -343,3 +343,90 @@ async def test_a_warming_save_answers_the_gateways_next_finish_with_the_warming_
     again = await call(relay, frame("finish", minted.token, 0, len(body)))   # same nonce, as the gateway sends it
     assert again["code"] == "warming" and "starting" in again["message"]
     assert len(finisher.calls) == 1
+
+
+# -- a save that hit warming after the gateway said "it will appear shortly" finishes itself ----
+
+class Sequence:
+    """A finisher that answers from a list, then keeps repeating the last answer."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    def __call__(self, upload_id):
+        self.calls.append(upload_id)
+        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+
+WARM = {"status": "warming", "reason": "The picture tools are starting."}
+STORED = {"status": "stored", "media_id": "m" * 32}
+
+
+async def _until(check, seconds=3.0):
+    loop = asyncio.get_running_loop()
+    end = loop.time() + seconds
+    while loop.time() < end:
+        if check():
+            return True
+        await asyncio.sleep(0.01)
+    return check()
+
+
+async def _warm_upload(tmp_path, finisher, clock=None):
+    links = UploadLinks(tmp_path, clock=clock or (lambda: NOW))
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
+                        retry_interval_s=0.02, clock=clock or (lambda: NOW))
+    minted = links.mint(CID, "key1", "personal", "image", "")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    first = await call(relay, frame("finish", minted.token, 0, len(body)))
+    assert first["code"] == "warming"
+    return relay, links, minted, body
+
+
+@pytest.mark.asyncio
+async def test_a_warming_save_is_finished_by_the_laptop_once_the_tools_are_warm(tmp_path):
+    finisher = Sequence(WARM, WARM, STORED)
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher)
+    upload_id = links.find(minted.token, CID).upload_id
+    assert await _until(lambda: links.get(upload_id).state == "done")
+    assert len(finisher.calls) == 3
+    assert json.loads(links.get(upload_id).result_json)["message"] == "Saved to your memory."
+    assert not links.temp_path(upload_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_background_save_that_is_refused_ends_the_link_as_failed(tmp_path):
+    finisher = Sequence(WARM, {"status": "refused", "reason": "Not an image."})
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher)
+    upload_id = links.find(minted.token, CID).upload_id
+    assert await _until(lambda: links.get(upload_id).state == "failed")
+    assert json.loads(links.get(upload_id).result_json)["message"] == "Not an image."
+
+
+@pytest.mark.asyncio
+async def test_a_new_upload_on_the_link_ends_the_background_retry(tmp_path):
+    finisher = Sequence(WARM)
+    relay = None
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=finisher, finish_wait_s=2.0,
+                        retry_interval_s=0.2, clock=lambda: NOW)
+    minted = links.mint(CID, "key1", "personal", "image", "")
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), body))
+    await call(relay, frame("finish", minted.token, 0, len(body)))
+    again = await call(relay, frame("chunk", minted.token, 0, len(body), body, nonce=OTHER_NONCE))
+    assert again["ok"] is True
+    await asyncio.sleep(0.5)
+    assert len(finisher.calls) == 1              # the person's new upload owns the link now
+
+
+@pytest.mark.asyncio
+async def test_the_background_retry_stops_when_the_link_has_expired(tmp_path):
+    now = [NOW]
+    finisher = Sequence(WARM)
+    relay, links, minted, _ = await _warm_upload(tmp_path, finisher, clock=lambda: now[0])
+    now[0] += 3600                                # far past the 20-minute life of a started link
+    await asyncio.sleep(0.3)
+    assert len(finisher.calls) == 1
+    assert relay._retrying == {}                  # nothing left running

@@ -465,6 +465,24 @@ class UploadLinks:
                          "WHERE upload_id=? AND state='finishing'",
                          (self._now(), json.dumps(warming), upload_id))
 
+    def claim_warm_retry(self, upload_id: str) -> UploadRow | None:
+        """Take a link whose save is waiting for the picture tools, to try that save again.
+
+        Only a link still waiting on warming (all bytes held, no new upload begun, not expired) can be
+        taken; it goes back to ``finishing``, so a gateway ``finish`` meanwhile is told "working".
+        Returns ``None`` when there is nothing left to retry, which ends the caller's loop.
+        """
+        now = self._now()
+        with self._tx() as conn:
+            row = self._row(conn.execute("SELECT * FROM upload_links WHERE upload_id = ?",
+                                         (upload_id,)).fetchone())
+            if (row is None or self._warming_result(row) is None or now > _deadline(row)
+                    or row.total < 1 or row.received != row.total):
+                return None
+            taken = conn.execute("UPDATE upload_links SET state='finishing', touched_at=? "
+                                 "WHERE upload_id=? AND state='receiving' AND nonce IS NULL", (now, upload_id))
+            return row if taken.rowcount == 1 else None
+
     def fail_open_links(self, connection_id: str, authorization_id: str | None = None) -> int:
         """End every unfinished link of a connection (its consent or grant key was revoked or replaced).
 
