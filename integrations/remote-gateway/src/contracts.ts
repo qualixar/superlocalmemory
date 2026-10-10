@@ -1,5 +1,5 @@
 // Gateway domain contracts. Not token validation or a deployed gateway.
-export type Scope = "slm:read" | "slm:write" | "slm:session";
+export type Scope = "slm:read" | "slm:write" | "slm:session" | "slm:mesh" | "slm:media";
 export type Era = "legacy" | "modern-2026-07-28";
 // Server-derived properties persisted in the authorization provider grant.
 export interface AuthProps {

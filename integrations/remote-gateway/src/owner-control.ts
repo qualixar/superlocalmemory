@@ -18,16 +18,35 @@ function displayHost(uris:readonly string[]|undefined):string|null {
  try{return uris&&uris[0]?new URL(uris[0]).hostname.slice(0,253):null;}catch{return null;}
 }
 /** The owner's Connected apps list: names come from the client's own registration. */
-async function connectedApps(props:NativeAuthProps,env:OwnerControlEnv):Promise<Response>{
+async function connectedApps(props:NativeAuthProps,env:OwnerControlEnv,extended:boolean):Promise<Response>{
  const apps=await env.REGISTRIES.getByName(props.connectionId).listAuthorizations(props.ownerId);
  const api=authorizationServer.getOAuthApi(env);
  const listed=await Promise.all(apps.map(async app=>{
   const client=await api.lookupClient(app.clientId).catch(()=>null);
   return {authorization_id:app.authorizationId,name:displayName(client?.clientName),client_host:displayHost(client?.redirectUris),
-   permissions:{read:app.consentedScopes.includes('slm:read'),save:app.consentedScopes.includes('slm:write'),session:app.consentedScopes.includes('slm:session')},
+   permissions:{read:app.consentedScopes.includes('slm:read'),save:app.consentedScopes.includes('slm:write'),session:app.consentedScopes.includes('slm:session'),...(extended?{mesh:app.consentedScopes.includes('slm:mesh'),media:app.consentedScopes.includes('slm:media')}:{})},
    version:app.authorizationVersion,connected_at_ms:app.createdAt,last_used_at_ms:app.lastUsedAt};
  }));
  return result(200,{connection_id:props.connectionId,apps:listed});
+}
+/** Only a body of exactly {"version":2} asks for the longer permission list; everything else gets the shape older laptops validate. */
+async function wantsExtendedList(request:Request):Promise<boolean>{
+ try{const body=JSON.parse(await readAuthorizationBody(request,{limit:64})) as unknown;return !!body&&typeof body==='object'&&!Array.isArray(body)&&Object.keys(body).length===1&&(body as {version?:unknown}).version===2;}catch{return false;}
+}
+/** A fresh key for the signed per-request grant. It is returned here once and never readable again. */
+async function grantKey(request:Request,props:NativeAuthProps,env:OwnerControlEnv):Promise<Response>{
+ let body:unknown;
+ try{body=JSON.parse(await readAuthorizationBody(request,{limit:64}));}catch{return result(400,{error:'invalid_request'});}
+ if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==0)return result(400,{error:'invalid_request'});
+ try{
+  const minted=await env.RELAYS.getByName(props.connectionId).rotateGrantKey(props.ownerId);
+  return result(200,{version:minted.version,key:minted.key,connection_id:props.connectionId});
+ }catch(error){
+  const code=error instanceof Error?error.message:'';
+  if(code==='grant_unavailable')return result(503,{error:'grant_unavailable'});
+  if(['connection_revoked','connection_unconfigured','owner_mismatch'].includes(code))return result(403,{error:'connection_unavailable'});
+  throw error;
+ }
 }
 async function removeApp(request:Request,props:NativeAuthProps,env:OwnerControlEnv):Promise<Response>{
  let body:unknown;
@@ -46,7 +65,7 @@ async function removeApp(request:Request,props:NativeAuthProps,env:OwnerControlE
  }
 }
 /** The only owner operations; the auth Worker routes exactly these here. */
-export const OWNER_CONTROL_PATHS:readonly string[]=['/owner/connections','/owner/revoke','/owner/verify','/owner/apps','/owner/apps/revoke','/owner/renew'];
+export const OWNER_CONTROL_PATHS:readonly string[]=['/owner/connections','/owner/revoke','/owner/verify','/owner/apps','/owner/apps/revoke','/owner/renew','/owner/grant-key'];
 function result(status:number,value:unknown):Response{return Response.json(value,{status,headers:{'Cache-Control':'no-store'}});}
 function wrapKey(env:OwnerControlEnv):Uint8Array {if(!/^[a-f0-9]{64}$/.test(env.DEVICE_WRAP_KEY))throw new Error('credential_wrap_unavailable');return new Uint8Array(env.DEVICE_WRAP_KEY.match(/../g)!.map(x=>parseInt(x,16)));}
 interface Delivery {device_token:string;expires_at_ms:number;generation:number;}
@@ -124,10 +143,11 @@ export async function ownerControlFetch(request:Request,env:OwnerControlEnv,_ctx
   const digest=await tokenDigest(token);const replay=env.DEVICES.getByName('control:'+digest);
   await replay.configure({ownerId:props.ownerId,connectionId:props.connectionId,installationId:props.installationId,profileId:props.profileId,deviceDigest:digest,deviceJkt:props.deviceJkt,expiresAtMs:principal.expiresAt*1000});
   if(!await replay.consume(digest,verified))return result(401,{error:'owner_unauthorized'});
-  if(url.pathname==='/owner/apps'||url.pathname==='/owner/apps/revoke'){
+  if(url.pathname==='/owner/apps'||url.pathname==='/owner/apps/revoke'||url.pathname==='/owner/grant-key'){
    const row=await owner.getConnection(props.ownerId,props.connectionId);
    if(!row||row.revokedAt!==null||row.installationId!==props.installationId||row.profileId!==props.profileId)return result(403,{error:'connection_unavailable'});
-   return url.pathname==='/owner/apps'?await connectedApps(props,env):await removeApp(request,props,env);
+   if(url.pathname==='/owner/grant-key')return await grantKey(request,props,env);
+   return url.pathname==='/owner/apps'?await connectedApps(props,env,await wantsExtendedList(request)):await removeApp(request,props,env);
   }
   // Awaited inside the try, so a failure becomes 503 rather than escaping as a sign-in error.
   if(url.pathname==='/owner/renew')return await renew(request,props,env);

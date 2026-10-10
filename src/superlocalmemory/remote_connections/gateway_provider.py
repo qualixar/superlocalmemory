@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import secrets
 import time
 from dataclasses import replace
@@ -53,6 +54,7 @@ class CloudGatewayProvider:
             "/owner/apps",
             "/owner/apps/revoke",
             "/owner/renew",
+            "/owner/grant-key",
             "/bootstrap/cancel",
         }:
             raise ValueError("invalid_gateway_endpoint")
@@ -62,10 +64,10 @@ class CloudGatewayProvider:
             ) as client:
                 async with client.stream("POST", AUTH + path, **kwargs) as response:
                     if not response.is_success:
-                        distinct = CloudGatewayProvider._removal_error(
-                            path, response.status_code
-                        ) or CloudGatewayProvider._renewal_error(path, response.status_code)
-                        raise _GatewayAnswer(distinct or "unavailable")
+                        raise _GatewayAnswer(
+                            CloudGatewayProvider._status_error(path, response.status_code)
+                            or "unavailable"
+                        )
                     chunks, length = [], 0
                     async for chunk in response.aiter_bytes():
                         length += len(chunk)
@@ -82,6 +84,7 @@ class CloudGatewayProvider:
                 "version_conflict",
                 "renewal_conflict",
                 "connection_unavailable",
+                "grant_unavailable",
             }:
                 raise ValueError(answer.args[0]) from None
             raise ValueError("remote_gateway_unavailable") from None
@@ -317,6 +320,27 @@ class CloudGatewayProvider:
         return {409: "renewal_conflict", 403: "connection_unavailable"}.get(status)
 
     @staticmethod
+    def _status_error(path: str, status: int) -> str | None:
+        return (
+            CloudGatewayProvider._removal_error(path, status)
+            or CloudGatewayProvider._renewal_error(path, status)
+            or CloudGatewayProvider._grant_key_error(path, status)
+            or CloudGatewayProvider._apps_error(path, status)
+        )
+
+    @staticmethod
+    def _apps_error(path: str, status: int) -> str | None:
+        """403 on the app list: the connection is gone."""
+        return "connection_unavailable" if path == "/owner/apps" and status == 403 else None
+
+    @staticmethod
+    def _grant_key_error(path: str, status: int) -> str | None:
+        """403: the connection is gone; 503: the gateway cannot mint grant keys."""
+        if path != "/owner/grant-key":
+            return None
+        return {403: "connection_unavailable", 503: "grant_unavailable"}.get(status)
+
+    @staticmethod
     def _removal_error(path: str, status: int) -> str | None:
         """Only app removal distinguishes a stale list and an already-removed app."""
         if path != "/owner/apps/revoke":
@@ -330,6 +354,38 @@ class CloudGatewayProvider:
         return await self._http(
             "/owner/apps", headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof}
         )
+
+    async def list_apps_v2(self, row: PendingEnrollment) -> dict:
+        """The connected apps with their mesh and media consent as well."""
+        proof = DeviceSigner(row.private_key).proof(
+            "POST", AUTH + "/owner/apps", token=row.access_token
+        )
+        return await self._http(
+            "/owner/apps",
+            headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof},
+            json={"version": 2},
+        )
+
+    async def grant_key(self, row: PendingEnrollment) -> dict:
+        """Mint a fresh grant key for this connection (the old one is replaced)."""
+        proof = DeviceSigner(row.private_key).proof(
+            "POST", AUTH + "/owner/grant-key", token=row.access_token
+        )
+        value = await self._http(
+            "/owner/grant-key",
+            headers={"Authorization": "Bearer " + row.access_token, "DPoP": proof},
+            json={},
+        )
+        version, key = value.get("version"), value.get("key")
+        if (
+            type(version) is not int
+            or not 1 <= version <= 2**53 - 1
+            or not isinstance(key, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
+            or value.get("connection_id") != row.connection_id
+        ):
+            raise ValueError("invalid_grant_key")
+        return {"version": version, "key": key}
 
     async def revoke_app(
         self, row: PendingEnrollment, authorization_id: str, expected_version: int

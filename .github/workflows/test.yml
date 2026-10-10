@@ -1,6 +1,9 @@
 name: Tests
 on:
+  # Pull requests run on pull_request; a push runs only on the long-lived
+  # branches, so a PR branch push no longer queues a second, duplicate run.
   push:
+    branches: [main, "release/**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -14,7 +17,26 @@ on:
         required: true
         type: string
         default: '["3.12", "3.13", "3.14"]'
+concurrency:
+  # A newer commit on the same PR or branch supersedes the older run; without
+  # this, superseded runs and duplicate push runs queued for hours.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  architecture:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
+    name: Import contracts
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: pip install "import-linter==2.15"
+      - name: Import contracts
+        run: PYTHONPATH=src lint-imports
   security:
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
     name: Dependency and static security gates

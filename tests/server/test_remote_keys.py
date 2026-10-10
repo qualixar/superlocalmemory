@@ -229,3 +229,87 @@ def test_the_gate_refuses_an_unbound_key(store) -> None:
     store.bind_unbound("work")
     decision = gate_remote_mcp(scope, {"authorization": f"Bearer {old}"}, state, store)
     assert decision.allowed and decision.principal.profile == "work"
+
+
+# -- opt-in extras (mesh, media) -------------------------------------------------------
+
+
+def test_a_new_key_has_no_extras_and_none_are_written(store) -> None:
+    record, _ = store.add("a", "write", profile="default")
+    assert record.extras == frozenset()
+    assert "extras" not in json.loads(store.path.read_text(encoding="utf-8"))["keys"][0]
+    assert record.public()["extras"] == []
+
+
+def test_extras_round_trip_and_are_sorted_in_public(store) -> None:
+    store.add("a", "write", profile="default")
+    changed = store.set_extras("a", {"media", "mesh"})
+    assert changed.extras == frozenset({"mesh", "media"})
+    reloaded = RemoteKeyStore(store.path).list()[0]
+    assert reloaded.extras == frozenset({"mesh", "media"})
+    assert reloaded.public()["extras"] == ["media", "mesh"]
+    raw = json.loads(store.path.read_text(encoding="utf-8"))
+    assert raw["version"] == 2 and raw["keys"][0]["extras"] == ["media", "mesh"]
+    store.set_extras("a", set())
+    assert "extras" not in json.loads(store.path.read_text(encoding="utf-8"))["keys"][0]
+
+
+def test_unknown_extras_are_dropped_on_read(store) -> None:
+    store.add("a", "write", profile="default")
+    raw = json.loads(store.path.read_text(encoding="utf-8"))
+    raw["keys"][0]["extras"] = ["mesh", "root", 5, None]
+    store.path.write_text(json.dumps(raw), encoding="utf-8")
+    os.chmod(store.path, 0o600)
+    assert RemoteKeyStore(store.path).list()[0].extras == frozenset({"mesh"})
+    raw["keys"][0]["extras"] = "mesh"
+    store.path.write_text(json.dumps(raw), encoding="utf-8")
+    assert RemoteKeyStore(store.path).list()[0].extras == frozenset()
+
+
+def test_a_file_written_before_extras_existed_reads_fine(store) -> None:
+    store.add("a", "read", profile="default")
+    assert store.list()[0].extras == frozenset()
+
+
+def test_set_extras_refuses_unknown_values_revoked_and_missing_keys(store) -> None:
+    store.add("a", "write", profile="default")
+    with pytest.raises(RemoteKeyError) as err:
+        store.set_extras("a", {"admin"})
+    assert err.value.code == "invalid_extra"
+    with pytest.raises(RemoteKeyError) as err:
+        store.set_extras("nope", {"mesh"})
+    assert err.value.code == "not_found"
+    store.revoke("a")
+    with pytest.raises(RemoteKeyError):
+        store.set_extras("a", {"mesh"})
+
+
+def test_revoking_keeps_extras_off_a_replacement_key(store) -> None:
+    store.add("a", "write", profile="default")
+    store.set_extras("a", {"mesh"})
+    store.revoke("a")
+    record, _ = store.add("a", "write", profile="default")
+    assert record.extras == frozenset()
+
+
+def test_the_extras_cache_is_dropped_when_the_file_is_replaced_in_place(store) -> None:
+    kid = store.add("a", "read", profile="default")[0].key_id
+    store.set_extras("a", {"mesh"})
+    assert store.extras_for(kid) == frozenset({"mesh"})
+    assert store.cached_extras(kid) == frozenset({"mesh"})
+    before = store.path.stat()
+    replacement = store.path.read_text(encoding="utf-8").replace("mesh", "meSh")
+    other = store.path.with_name("other.json")
+    other.write_text(replacement, encoding="utf-8")
+    os.chmod(other, 0o600)
+    os.utime(other, ns=(before.st_atime_ns, before.st_mtime_ns))
+    os.replace(other, store.path)
+    assert os.stat(store.path).st_mtime_ns == before.st_mtime_ns
+    assert store.cached_extras(kid) is None
+
+
+def test_the_file_signature_includes_inode_and_change_time(store) -> None:
+    store.add("a", "read", profile="default")
+    info = store.path.stat()
+    signature = store._file_signature()
+    assert info.st_ino in signature and info.st_ctime_ns in signature

@@ -11,7 +11,7 @@ MAX_FRAME_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 REQUEST_HEADERS = frozenset(
-    {"content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name"}
+    {"content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name", "x-slm-grant"}
 )
 RESPONSE_HEADERS = frozenset({"content-type", "mcp-protocol-version", "retry-after"})
 _COMMON = {"v", "kind", "id", "generation"}

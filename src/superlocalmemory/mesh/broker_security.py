@@ -323,6 +323,34 @@ CREATE TABLE IF NOT EXISTS mesh_nonces (
     nonce      TEXT PRIMARY KEY,
     expires_at REAL NOT NULL
 )"""
+# Owner-facing profile of each peer, and the envelope of each message that
+# carries one. Created next to the broker tables; no existing table changes.
+_PEER_PROFILES_DDL = """
+CREATE TABLE IF NOT EXISTS mesh_peer_profiles (
+    peer_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('local','web')),
+    app_name TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    authorization_ref TEXT,
+    muted INTEGER NOT NULL DEFAULT 0,
+    retired_at TEXT,
+    updated_at TEXT NOT NULL,
+    connection_ref TEXT
+)"""
+# A web app's profile row remembers which connection it came in on, so that
+# revoking an app on that connection retires exactly its peers.
+_PEER_PROFILES_ALTERS = (
+    "ALTER TABLE mesh_peer_profiles ADD COLUMN connection_ref TEXT",
+)
+_ENVELOPES_DDL = """
+CREATE TABLE IF NOT EXISTS mesh_message_envelopes (
+    message_id INTEGER PRIMARY KEY,
+    from_kind TEXT NOT NULL,
+    from_app TEXT NOT NULL DEFAULT '',
+    hop INTEGER NOT NULL DEFAULT 0 CHECK (hop BETWEEN 0 AND 2),
+    refs_json TEXT NOT NULL DEFAULT '[]',
+    reply_to INTEGER
+)"""
 
 
 def ensure_db_healthy(db_path: str) -> bool:
@@ -355,6 +383,19 @@ def ensure_db_healthy(db_path: str) -> bool:
         return True
 
 
+def _add_peer_profile_columns(conn: sqlite3.Connection) -> None:
+    """Add the profile columns a database lacks; only a duplicate column is ignored."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(mesh_peer_profiles)")}
+    for sql in _PEER_PROFILES_ALTERS:
+        if sql.rsplit(" ", 2)[-2] in have:
+            continue
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
 def apply_security_schema(conn: sqlite3.Connection) -> None:
     """Apply idempotent schema additions (fencing_token, revision, mesh_sent_ops, mesh_nonces, peer_key)."""
     for sql in _SCHEMA_ALTERS:
@@ -366,10 +407,12 @@ def apply_security_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(_SENT_OPS_DDL)
     except sqlite3.OperationalError:
         pass
-    try:
-        conn.executescript(_NONCES_DDL)
-    except sqlite3.OperationalError:
-        pass
+    for ddl in (_NONCES_DDL, _PEER_PROFILES_DDL, _ENVELOPES_DDL):
+        try:
+            conn.executescript(ddl)
+        except sqlite3.OperationalError:
+            pass
+    _add_peer_profile_columns(conn)
     conn.commit()
 
 

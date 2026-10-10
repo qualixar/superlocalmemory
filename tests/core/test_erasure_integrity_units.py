@@ -15,6 +15,12 @@ import uuid
 
 import pytest
 
+from tests.helpers.env_capabilities import (
+    NO_SECURE_DELETE_REASON,
+    keyword_index_forgets_at_once,
+    purge_keyword_index_on_old_sqlite,
+)
+
 
 def _actor() -> str:
     from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
@@ -167,6 +173,7 @@ def test_full_erasure_removes_the_words_from_every_table(engine_with_mock_deps):
         result = _delete(engine, fact_id)
         assert result.get("deleted") == fact_id, result
 
+    purge_keyword_index_on_old_sqlite(engine._db.db_path)
     assert _text_copies(engine._db.db_path, marker) == {}
     journal = dict(engine._db.execute(
         "SELECT raw_content, attempt_count, last_error FROM ingestion_operations "
@@ -217,6 +224,7 @@ def _index_bytes_hold(conn, word: bytes) -> bool:
     return any(word in bytes(b) for (b,) in conn.execute("SELECT block FROM atomic_facts_fts_data"))
 
 
+@pytest.mark.skipif(not keyword_index_forgets_at_once(), reason=NO_SECURE_DELETE_REASON)
 def test_with_secure_delete_a_deleted_word_leaves_the_index(tmp_path):
     from superlocalmemory.storage.fts_residue import ensure_secure_delete
 
@@ -237,6 +245,7 @@ def test_purge_removes_words_deleted_before_secure_delete(tmp_path):
                         "MATCH 'ordinary'").fetchone()[0] == 50
 
 
+@pytest.mark.skipif(not keyword_index_forgets_at_once(), reason=NO_SECURE_DELETE_REASON)
 def test_a_new_store_has_secure_delete_from_the_start(engine_with_mock_deps):
     from superlocalmemory.storage.fts_residue import secure_delete_on
 

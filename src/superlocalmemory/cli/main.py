@@ -106,6 +106,9 @@ _NO_DAEMON_COMMANDS = {
     "backup",
     # 4.1.22: `slm models` is a read-only catalogue + Ollama /api/tags report.
     "models",
+    # Images & documents: the daemon runs the install; these only ask it, and say
+    # so when it is down instead of starting one.
+    "media", "features",
 }
 
 
@@ -683,6 +686,15 @@ def main() -> None:
         help="Auto-repair fixable components (re-download missing models, "
              "install sqlite-vec) before checking, then report",
     )
+    doctor_p.add_argument(
+        "--refile-hidden", action="store_true",
+        help="Show the memories hidden even though they are scored to keep "
+             "(dry run); with --yes, re-file exactly those",
+    )
+    doctor_p.add_argument(
+        "--yes", action="store_true",
+        help="Apply --refile-hidden instead of only showing what it would do",
+    )
 
     # v3.8.2 super-help — grouped overview of every command + focused topics.
     help_p = sub.add_parser(
@@ -1150,6 +1162,15 @@ def main() -> None:
     # 4.1.19: memory kinds (status, settings, undoable classification runs).
     from superlocalmemory.cli.kinds_cmd import register_kinds_parser
     register_kinds_parser(sub)
+    # 4.1.25: folder sources (add, list, report, rescan, remove) through the daemon.
+    from superlocalmemory.cli.sources_cmd import register_sources_parser
+    register_sources_parser(sub)
+
+    # 4.1.25: turn images and documents on or off, see what is on.
+    from superlocalmemory.cli.features_cmd import register_features_parser
+    from superlocalmemory.cli.media_cmd import register_media_parser
+    register_features_parser(sub)
+    register_media_parser(sub)
 
     # 4.1.21: saved views — named, profile-scoped recall queries (issue #113).
     from superlocalmemory.cli.view_cmd import register_view_parser

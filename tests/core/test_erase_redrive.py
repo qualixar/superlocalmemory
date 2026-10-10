@@ -75,7 +75,7 @@ def deleted_fact(engine_with_mock_deps):
 def test_successful_delete_stays_erased_through_background_redrive(deleted_fact):
     engine, _fact_id, erasure_id = deleted_fact
     before = _erase_rows(engine, erasure_id)
-    assert set(before) == {"bm25", "temporal", "vector"}
+    assert set(before) == {"bm25", "media", "temporal", "vector"}
     assert all(row["state"] == "erased" for row in before.values()), before
 
     _redrive(engine)

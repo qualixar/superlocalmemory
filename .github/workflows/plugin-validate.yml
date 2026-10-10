@@ -4,6 +4,7 @@ name: Plugin Validate
 
 on:
   push:
+    branches: [main, "release/**"]
     paths:
       - 'plugin-src/**'
       - 'scripts/build-plugin.mjs'
@@ -13,6 +14,12 @@ on:
       - 'plugin-src/**'
       - 'scripts/build-plugin.mjs'
       - '.github/workflows/plugin-validate.yml'
+
+concurrency:
+  # A newer commit on the same PR or branch supersedes the older run; without
+  # this, superseded runs and duplicate push runs queued for hours.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:

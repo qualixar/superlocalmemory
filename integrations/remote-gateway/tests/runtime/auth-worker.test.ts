@@ -81,3 +81,23 @@ it('expired or consumed browser consent shows recovery instructions instead of r
 it('refreshable recovery URL contains no callback code or state',async()=>{
  const ctx=createExecutionContext();const result=await authFetch(new Request(issuer+'/github/callback?code=synthetic-secret-code&state=synthetic-secret-state',{headers:{Accept:'text/html'}}),configuration(),ctx);expect(result.status).toBe(302);const location=result.headers.get('Location')!;expect(location).not.toContain('synthetic-secret');expect(new URL(location).pathname).toBe('/sign-in/error');const page=await authFetch(new Request(location),configuration(),ctx);expect(await page.text()).toContain('Restart sign-in');await waitOnExecutionContext(ctx);
 });
+
+it('consent page offers the two optional boxes, unticked, only when the app asks for them',async()=>{
+ const settings=configuration();
+ async function page(scope:string){
+  const ctx=createExecutionContext();
+  const registered=await authFetch(new Request(issuer+'/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'mesh-fixture',redirect_uris:['https://client.example/callback'],token_endpoint_auth_method:'none'})}),settings,ctx);
+  const client=await registered.json() as {client_id:string};
+  const response=await authFetch(new Request(issuer+'/authorize?'+new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:'https://client.example/callback',resource:'https://mcp.superlocalmemory.com/mcp',scope,state:'synthetic-state',code_challenge:'a'.repeat(43),code_challenge_method:'S256'})),settings,ctx);
+  expect(response.status).toBe(200);await waitOnExecutionContext(ctx);return response.text();
+ }
+ const all=await page('slm:read slm:write slm:session slm:mesh slm:media');
+ expect(all).toContain('<input type="checkbox" name="mesh" value="yes"> Allow talking to your other bots');
+ expect(all).toContain('<input type="checkbox" name="media" value="yes"> Allow images and documents');
+ expect(all).not.toMatch(/name="(mesh|media|write|session)"[^>]*checked/);
+ expect(all).toContain('Only if selected above: slm:write, slm:session, slm:mesh, slm:media<');
+ const some=await page('slm:read slm:mesh');
+ expect(some).toContain('name="mesh"');expect(some).not.toContain('name="media"');expect(some).not.toContain('name="write"');
+ const plain=await page('slm:read slm:write slm:session');
+ expect(plain).not.toContain('name="mesh"');expect(plain).not.toContain('name="media"');expect(plain).toContain('Only if selected above: slm:write, slm:session<');
+});

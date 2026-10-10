@@ -50,16 +50,21 @@ def registry() -> dict[str, list[str]]:
 
 
 def test_every_argument_of_every_remote_tool_is_classified(registry) -> None:
-    remote = {name: args for name, args in registry.items() if name in policy.WRITE_TOOLS}
+    callable_remotely = policy.WRITE_TOOLS | policy.MESH_TOOLS | policy.MEDIA_TOOLS
+    remote = {name: args for name, args in registry.items() if name in callable_remotely}
     assert remote, "the registry returned no remote-callable tools"
+    assert policy.MESH_TOOLS | policy.MEDIA_TOOLS <= set(remote)
     seen = {arg for args in remote.values() for arg in args}
     unclassified = {f"{t}.{a}" for t, args in remote.items() for a in args
                     if a not in binding.CLASSIFIED_ARGUMENTS}
     assert not unclassified, (
         "Classify these in server/remote_profile_binding.py: " + ", ".join(sorted(unclassified)))
     groups = (binding.PROFILE_ARGUMENTS, binding.READ_SCOPE_ARGUMENTS,
-              binding.WRITE_SCOPE_ARGUMENTS, binding.NEUTRAL_ARGUMENTS)
+              binding.WRITE_SCOPE_ARGUMENTS, binding.NEUTRAL_ARGUMENTS, binding.MEDIA_ARGUMENTS)
     assert sum(len(g) for g in groups) == len(binding.CLASSIFIED_ARGUMENTS)
+    assert binding.MEDIA_ARGUMENT_TOOLS == policy.MEDIA_TOOLS
+    media_seen = {a for t, args in remote.items() if t in policy.MEDIA_TOOLS for a in args}
+    assert binding.MEDIA_ARGUMENTS <= media_seen, sorted(binding.MEDIA_ARGUMENTS - media_seen)
     assert binding.NEUTRAL_ARGUMENTS <= seen, sorted(binding.NEUTRAL_ARGUMENTS - seen)
 
 
@@ -76,7 +81,8 @@ def test_every_remote_tool_that_takes_scope_is_pinned_to_personal(registry) -> N
 
 def test_every_remote_tool_that_names_a_profile_is_told_the_keys_profile(registry) -> None:
     named = {t for t, args in registry.items()
-             if t in policy.WRITE_TOOLS and set(args) & binding.PROFILE_ARGUMENTS}
+             if t in policy.WRITE_TOOLS | policy.MEDIA_TOOLS
+             and set(args) & binding.PROFILE_ARGUMENTS}
     assert named == binding.PROFILE_ARGUMENT_TOOLS
     assert binding.ROUTED_TOOLS <= binding.PROFILE_ARGUMENT_TOOLS
 
@@ -92,7 +98,7 @@ def test_every_remote_tool_is_routed_profile_free_or_active_only_with_a_reason(
         registry) -> None:
     """4.1.21: a key bound to one profile can use every remote tool while the
     computer is on another profile. A tool that cannot be routed must say why."""
-    remote = set(policy.WRITE_TOOLS)
+    remote = set(policy.WRITE_TOOLS | policy.MEDIA_TOOLS)
     routed, free = binding.ROUTED_TOOLS, binding.PROFILE_FREE_TOOLS
     active_only = set(binding.ACTIVE_ONLY_TOOLS)
     assert routed | free | active_only == remote, sorted(remote - routed - free - active_only)
@@ -323,7 +329,9 @@ def test_an_active_only_tool_is_refused_while_another_profile_is_active(active_o
         assert runtime._active_operations == 0
 
 
-_ROUTED = sorted(binding.ROUTED_TOOLS)
+# The media tools need a signed grant to be reached at all; their profile binding
+# is exercised with one in test_remote_media_tools.py.
+_ROUTED = sorted(binding.ROUTED_TOOLS - policy.MEDIA_TOOLS)
 
 
 def _key_for(tool: str) -> RemotePrincipal:
@@ -439,3 +447,27 @@ def test_no_profile_runtime_means_no_remote_tool_call() -> None:
 
     asyncio.run(app(scope, receive, send))
     assert sent[0]["status"] == 503 and stub.reached == []
+
+
+def test_media_arguments_are_accepted_only_for_the_media_tools():
+    import pytest
+    from superlocalmemory.server.remote_profile_binding import BindingRefusal, bind_arguments
+
+    assert bind_arguments("get_media", {"media_id": "abcdef12", "variant": "thumb"},
+                          key_name="k", bound="default")["media_id"] == "abcdef12"
+    for tool in ("remember", "recall", "mesh_send"):
+        with pytest.raises(BindingRefusal):
+            bind_arguments(tool, {"path": "/etc/passwd"}, key_name="k", bound="default")
+        with pytest.raises(BindingRefusal):
+            bind_arguments(tool, {"download_url": "https://x.example/a.png"},
+                           key_name="k", bound="default")
+
+
+def test_a_remote_app_cannot_name_a_file_even_for_a_media_tool():
+    import pytest
+    from superlocalmemory.server.remote_profile_binding import BindingRefusal, bind_arguments
+
+    for tool in ("remember_media", "remember_document"):
+        with pytest.raises(BindingRefusal):
+            bind_arguments(tool, {"path": "/Users/me/photo.jpg"}, key_name="k", bound="default")
+        assert "path" in bind_arguments(tool, {"path": ""}, key_name="k", bound="default")

@@ -1,6 +1,7 @@
 import {DurableObject} from 'cloudflare:workers';
 import type {AuthorizationGrant,ConnectionGrant,PolicyResult,RequestEnvelope,VerifiedActor} from './contracts.ts';
-import {authorizeRequest} from './request-policy.ts';
+import {GRANT_SCOPE_ORDER} from './grant.ts';
+import {authorizeRequest,TOOL_SCOPES} from './request-policy.ts';
 
 interface RegistryState {
   version:1; connection:ConnectionGrant|null; authorizations:AuthorizationGrant[];
@@ -15,8 +16,13 @@ export interface ConnectedApp {authorizationId:string;clientId:string;consentedS
 /** Last-use is coarse on purpose: at most one extra write per app per minute. */
 const LAST_USED_RESOLUTION_MS=60000;
 function dailyLimit(raw:unknown):number{const value=Number(raw);return Number.isSafeInteger(value)&&value>0?value:DEFAULT_DAILY_TOOL_CALL_LIMIT;}
-const tools=new Set(['recall','search','fetch','get_status','remember','session_init','close_session','report_feedback','report_outcome']);
-const scopes=new Set(['slm:read','slm:write','slm:session']);
+/** Mesh polling (inbox, wait) has its own daily budget per connection; sending is capped per app. */
+export const DEFAULT_MESH_POLL_DAILY_LIMIT=2000;
+export const MESH_SEND_DAILY_LIMIT=200;
+interface MeshUsage {day:string;polls:number;sends:Record<string,number>;}
+function pollLimit(raw:unknown):number{const value=Number(raw);return Number.isSafeInteger(value)&&value>0?value:DEFAULT_MESH_POLL_DAILY_LIMIT;}
+const tools:ReadonlySet<string>=new Set(TOOL_SCOPES.keys());
+const scopes:ReadonlySet<string>=new Set(GRANT_SCOPE_ORDER);
 const id=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,256}$/.test(value);
 const client=(value:unknown):value is string=>typeof value==='string'&&value.length>0&&value.length<=2048&&value.trim()===value&&!/[\x00-\x1f\x7f]/.test(value);
 const version=(value:unknown):value is number=>Number.isSafeInteger(value)&&(value as number)>=1&&(value as number)<Number.MAX_SAFE_INTEGER;
@@ -47,6 +53,11 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
   /** Separate key: the strictly versioned registry-state schema is unchanged. */
   private usage:DailyUsage|null=null;
   private meta:Record<string,AppMeta>|null=null;
+  private mesh:MeshUsage|null=null;
+  private async meshUsage(day:string):Promise<MeshUsage>{
+    const stored=this.mesh??await this.ctx.storage.get<MeshUsage>('mesh-usage')??null;
+    return stored&&stored.day===day?stored:{day,polls:0,sends:{}};
+  }
   private async appMeta():Promise<Record<string,AppMeta>>{this.meta??=(await this.ctx.storage.get<Record<string,AppMeta>>('authorization-meta'))??{};return this.meta;}
   constructor(ctx:DurableObjectState,env:Record<string,unknown>){
     super(ctx,env);
@@ -119,16 +130,27 @@ export class RegistryDO extends DurableObject<Record<string,unknown>> {
     if(!decision.allowed||request.rpcMethod!=='tools/call')return decision;
     return this.ctx.blockConcurrencyWhile(async():Promise<PolicyResult>=>{
       const day=new Date().toISOString().slice(0,10);
+      if(request.toolName==='mesh_inbox'||request.toolName==='mesh_wait')return this.admitPoll(day,decision);
       const stored=this.usage??await this.ctx.storage.get<DailyUsage>('usage-day')??null;
       const current=stored&&stored.day===day?stored:{day,count:0};
       if(current.count>=dailyLimit(this.env.DAILY_TOOL_CALL_LIMIT)){this.usage=current;return {allowed:false,code:'DAILY_LIMIT_REACHED',httpStatus:429};}
+      const sending=request.toolName==='mesh_send';const mesh=sending?await this.meshUsage(day):null;
+      if(mesh&&(mesh.sends[actor.authorizationId]??0)>=MESH_SEND_DAILY_LIMIT){this.mesh=mesh;return {allowed:false,code:'MESH_SEND_LIMIT',httpStatus:429};}
       const next={day,count:current.count+1};const now=Date.now();
+      if(mesh){const updated={...mesh,sends:{...mesh.sends,[actor.authorizationId]:(mesh.sends[actor.authorizationId]??0)+1}};await this.ctx.storage.put('mesh-usage',updated);this.mesh=updated;}
       const meta=await this.appMeta();const known=meta[actor.authorizationId];
       if(known?.lastUsedAt!=null&&now-known.lastUsedAt<LAST_USED_RESOLUTION_MS){await this.ctx.storage.put('usage-day',next);}
       else{const updated={...meta,[actor.authorizationId]:{createdAt:known?.createdAt??null,lastUsedAt:now}};await this.ctx.storage.put({'usage-day':next,'authorization-meta':updated});this.meta=updated;}
       this.usage=next;
       return decision;
     });
+  }
+  /** Polling the inbox is the web app's idle loop, so it is budgeted apart from the daily tool-call allowance. */
+  private async admitPoll(day:string,decision:PolicyResult):Promise<PolicyResult>{
+    const mesh=await this.meshUsage(day);
+    if(mesh.polls>=pollLimit(this.env.MESH_POLL_DAILY_LIMIT)){this.mesh=mesh;return {allowed:false,code:'DAILY_LIMIT_REACHED',httpStatus:429};}
+    const updated={...mesh,polls:mesh.polls+1};await this.ctx.storage.put('mesh-usage',updated);this.mesh=updated;
+    return decision;
   }
   /** Active grants for the owner's Connected apps list. No tokens or memory data. */
   async listAuthorizations(owner:string):Promise<ConnectedApp[]>{

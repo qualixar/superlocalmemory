@@ -20,6 +20,7 @@ Every function here runs inside a transaction the caller opened with
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Iterator
@@ -30,6 +31,8 @@ from superlocalmemory.storage import embedding_canonical_slots as slots
 from superlocalmemory.storage import embedding_change_log as change_log
 from superlocalmemory.storage import embedding_spaces as sp
 from superlocalmemory.storage.embedding_reindex_jobs import update_job
+
+logger = logging.getLogger(__name__)
 
 _SCAN_CHUNK = 2000
 
@@ -209,6 +212,18 @@ def _timed(timings: dict, name: str, started: float) -> float:
     return now
 
 
+def _drop_derived_for(prev_cfg: dict) -> None:
+    """Forget what was derived with the replaced model. Never fails a switch."""
+    try:
+        from superlocalmemory.cache import factory
+
+        model = str((prev_cfg or {}).get("model_name") or "")
+        if model:
+            factory.invalidate_for_model(model)
+    except Exception as exc:
+        logger.debug("derivation cache not invalidated after the switch: %s", exc)
+
+
 def activate(conn: Any, job: dict, *, model_name: str, dimension: int,
              live_cfg: dict, prev_cfg: dict, clean_mark: int) -> dict:
     """Make the staged space live and keep the old one as the previous space.
@@ -254,6 +269,7 @@ def activate(conn: Any, job: dict, *, model_name: str, dimension: int,
     now = time.time()
     update_job(conn, job["job_id"], state="activated", activated_at=now, finished_at=now)
     _timed(timings, "rest_ms", mark)
+    _drop_derived_for(prev_cfg)
     return {"facts": staged, **timings,
             "swap_ms": round((time.perf_counter() - started) * 1000, 1)}
 

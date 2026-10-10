@@ -228,6 +228,9 @@ class MemoryEngine:
 
         self._init_db_layer()
 
+        from superlocalmemory.core.derived_cache_policy import sync_cache_with_redaction
+        sync_cache_with_redaction(self._config)
+
         if self._capabilities is Capabilities.FULL:
             self._init_heavy_layer()
         else:

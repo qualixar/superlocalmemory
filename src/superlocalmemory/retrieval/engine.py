@@ -33,6 +33,7 @@ from superlocalmemory.core.config import (
 )
 from superlocalmemory.retrieval import (channel_status as chstat, entity_graph_warmup,
                                       kind_scope, project_search)
+from superlocalmemory.retrieval import visibility
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 from superlocalmemory.retrieval.rerank_pool import rerank_pool
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
@@ -181,6 +182,8 @@ class RetrievalEngine:
         self._reranker = reranker
         self._strategy = strategy or QueryStrategyClassifier(config=config)
         self._base_weights = (base_weights or ChannelWeights()).as_dict()
+        self._media_weight = (base_weights or ChannelWeights()).media
+        self._media_channel = None  # built on first use, only if pictures are on
         self._profile_channel = profile_channel
         self._bridge = bridge_discovery
         self._trust_scorer = trust_scorer
@@ -377,6 +380,8 @@ class RetrievalEngine:
 
         # 3. Single-pass RRF fusion
         ch_results = self._semantic_rank_for_unenriched(ch_results)
+        if ch_results.get("media"):
+            strat.weights["media"] = self._media_weight
         fused = weighted_rrf(ch_results, strat.weights, k=self._config.rrf_k)
         _em("rrf_fusion")
 
@@ -539,6 +544,7 @@ class RetrievalEngine:
             include_global=include_global, include_shared=include_shared,
             lifecycle_cache=correction_admission,
         )
+        fused = visibility.drop_hidden_results(fused, self._db, profile_id)  # hidden: never a candidate
 
         _em("expand+entity_enh")
 
@@ -563,6 +569,7 @@ class RetrievalEngine:
                     fused, lambda fid: in_window(etimes.get(fid), bounds),
                     explicit=_explicit_window,
                     min_semantic=getattr(self._config, "min_semantic_evidence", 0.60),
+                    min_media=self._media_floor(),
                 )
                 _em("time_window")
 
@@ -640,7 +647,8 @@ class RetrievalEngine:
             # first allowed those hits to occupy every output slot and then be
             # removed by the floor, producing a false abstention even though a
             # qualified candidate was immediately below the slice.
-            top = self._apply_evidence_floor(top, facts, min_sem)
+            top = self._apply_evidence_floor(
+                top, facts, min_sem, self._media_floor())
 
         # 5. Cross-encoder rerank (optional, on the evidence-qualified pool)
         # Bug 4 fix: reduced alpha for multi-hop/temporal to preserve diversity
@@ -698,6 +706,7 @@ class RetrievalEngine:
                 include_shared=include_shared,
             ))
 
+        final_top = visibility.keep_loaded(final_top, facts)  # promotions from pre-admission channels
         # Trim facts to the selected, qualified result set.
         selected_ids = {fr.fact_id for fr in final_top}
         facts = {fid: f for fid, f in facts.items() if fid in selected_ids}
@@ -759,11 +768,18 @@ class RetrievalEngine:
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
 
+    def _media_floor(self) -> float:
+        """Picture evidence floor: the live paired plan's, else the configured one."""
+        default = getattr(self._config, "media_min_score", 0.30)
+        channel = getattr(self, "_media_channel", None)
+        return default if channel is None else channel.min_score(default)
+
     @staticmethod
     def _apply_evidence_floor(
         final_top: list[FusionResult],
         facts: dict[str, AtomicFact],
         min_semantic: float,
+        min_media: float = 0.30,
     ) -> list[FusionResult]:
         """Filter results that earned no channel evidence.
 
@@ -777,7 +793,7 @@ class RetrievalEngine:
         """
         kept: list[FusionResult] = []
         for fr in final_top:
-            if has_primary_evidence(fr.channel_scores, min_semantic):
+            if has_primary_evidence(fr.channel_scores, min_semantic, min_media):
                 kept.append(fr)
                 continue
             # Pinned fact bypass — always pass regardless of channel scores
@@ -1138,6 +1154,15 @@ class RetrievalEngine:
                 stage_ms["query_embedding"] = round(
                     (_time_e.monotonic() - _t_embed) * 1000.0, 1)
 
+        media_vec = None  # pictures: one bounded embed, before dispatch (media_channel)
+        if "media" not in disabled and not visibility.hides_media():
+            from superlocalmemory.retrieval import media_channel
+            self._media_channel = self._media_channel or media_channel.for_engine(
+                self._db, text_query_vector=lambda q: self._embed_query(q)[0])
+            media_vec, _media_state = self._media_channel.prepare(query, profile_id)
+            if _media_state and channel_status is not None:
+                channel_status["media"] = _media_state
+
         # Why a channel will not run, recorded BEFORE dispatch. An embedding
         # failure silently takes three of the five channels down together, and
         # the answer never said so: it looked exactly like a store with nothing
@@ -1239,6 +1264,12 @@ class RetrievalEngine:
                 q_emb, profile_id, self._config.bm25_top_k,
             )
 
+        if media_vec is not None:
+            futures["media"] = executor.submit(
+                _safe_channel, "media", self._media_channel.search,
+                media_vec, profile_id, self._config.semantic_top_k,
+            )
+
         # One shared limit keeps parallel dispatch genuinely bounded.  A
         # per-future timeout here would serialise the wait and turn five slow
         # channels into five seconds of UI latency.
@@ -1337,7 +1368,7 @@ class RetrievalEngine:
             include_global=include_global,
             include_shared=include_shared,
         )
-        return {f.fact_id: f for f in facts}
+        return visibility.drop_hidden_facts({f.fact_id: f for f in facts}, self._db)
 
     # -- Cross-encoder rerank -----------------------------------------------
 
@@ -1364,9 +1395,11 @@ class RetrievalEngine:
         # top-5 on 4/8 queries — the CE legitimately promotes items ranked below
         # the fusion top-N into the answer. So exhaustive reranking stays: it is
         # a quality feature, not the latency bottleneck.
+        from superlocalmemory.retrieval import media_rerank
+        neutral = media_rerank.neutral_ids(fused, fact_map)  # pictures without words keep their rank
         candidates = [
             (fact_map[fr.fact_id], fr.fused_score)
-            for fr in fused if fr.fact_id in fact_map
+            for fr in fused if fr.fact_id in fact_map and fr.fact_id not in neutral
         ]
         if not candidates:
             return fused, False, "no_candidates"
@@ -1457,7 +1490,7 @@ class RetrievalEngine:
             for fr in fused
         ]
         updated.sort(key=lambda r: (-r.fused_score, r.fact_id))
-        return updated, True, "applied"
+        return media_rerank.restore_ranks(fused, updated, neutral), True, "applied"
 
     # -- Agentic adapter -----------------------------------
 
@@ -1645,6 +1678,7 @@ _CHANNEL_KEYS: tuple[str, ...] = (
     # contract v2) with bandit-chosen weights; omitting them here silently
     # discarded adaptive reranking for multi-hop relational recall.
     "spreading_activation", "hopfield",
+    "media",  # only scaled when a recall actually carries it (below)
 )
 
 
@@ -1672,7 +1706,7 @@ def apply_channel_weights(
         original_cs = c.channel_scores or {}
         new_cs: dict[str, float] = dict(original_cs)
         base = 0.0
-        for ch in _CHANNEL_KEYS:
+        for ch in (k for k in _CHANNEL_KEYS if k != "media" or k in original_cs):
             raw = float(original_cs.get(ch, 0.0))
             w = float(weights.get(ch, 1.0))
             scaled = raw * w

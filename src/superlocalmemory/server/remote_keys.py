@@ -39,6 +39,7 @@ import re
 import secrets
 import stat
 import threading
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,10 @@ _PROFILE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 #: key was made, or the active profile when a pre-4.1.20 key was upgraded.
 PROFILE_SOURCES: tuple[str, ...] = ("chosen", "active-at-creation", "bound-on-upgrade")
 
+#: Capabilities a key can be opted in to, beyond recall and save. A web app
+#: only gets one when its gateway consent AND this key both allow it.
+EXTRAS: tuple[str, ...] = ("mesh", "media")
+
 Scope = Literal["read", "write"]
 SCOPES: tuple[str, ...] = ("read", "write")
 
@@ -89,16 +94,19 @@ class RemoteKey:
     #: 4.1.20 that has not been bound yet; such a key is refused.
     profile: str | None = None
     profile_source: str | None = None
+    #: Opt-ins from :data:`EXTRAS`. Optional in the file; 4.1.24 ignores the field.
+    extras: frozenset[str] = frozenset()
 
     @property
     def active(self) -> bool:
         return self.revoked_at is None
 
-    def public(self) -> dict[str, str | None]:
+    def public(self) -> dict[str, object]:
         """Everything except the digest - safe to print."""
         return {"name": self.name, "key_id": self.key_id, "scope": self.scope,
                 "profile": self.profile, "profile_source": self.profile_source,
-                "created_at": self.created_at, "revoked_at": self.revoked_at}
+                "created_at": self.created_at, "revoked_at": self.revoked_at,
+                "extras": sorted(self.extras)}
 
 
 def valid_profile_id(profile: object) -> bool:
@@ -138,6 +146,22 @@ def store_problem(path: Path) -> str | None:
     return None
 
 
+def _extras_from(raw: object) -> frozenset[str]:
+    """Known opt-ins only; anything else (including a malformed field) is dropped."""
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(x for x in raw if isinstance(x, str) and x in EXTRAS)
+
+
+def _record_dict(record: RemoteKey) -> dict:
+    data = asdict(record)
+    if record.extras:
+        data["extras"] = sorted(record.extras)
+    else:
+        del data["extras"]
+    return data
+
+
 def _record_from(raw: object) -> RemoteKey | None:
     if not isinstance(raw, dict):
         return None
@@ -147,6 +171,7 @@ def _record_from(raw: object) -> RemoteKey | None:
             digest=str(raw["digest"]), created_at=str(raw["created_at"]),
             revoked_at=(None if raw.get("revoked_at") is None else str(raw["revoked_at"])),
             profile=raw.get("profile"), profile_source=raw.get("profile_source"),
+            extras=_extras_from(raw.get("extras")),
         )
     except (KeyError, TypeError):
         return None
@@ -169,6 +194,7 @@ class RemoteKeyStore:
         self._cache_lock = threading.Lock()
         self._cache: tuple[tuple[str, int, int, int], tuple[RemoteKey, ...]] | None = None
         self._warned: str | None = None
+        self._extras: tuple[tuple[str, int, int], dict[str, frozenset[str]]] | None = None
 
     @property
     def path(self) -> Path:
@@ -211,6 +237,38 @@ class RemoteKeyStore:
 
     def list(self) -> tuple[RemoteKey, ...]:
         return self._load()
+
+    def _file_signature(self) -> tuple[str, int, int, int, int] | None:
+        path = self.path
+        if store_problem(path) is not None:
+            return None
+        try:
+            info = path.stat()
+        except OSError:
+            return None
+        return (str(path), info.st_mtime_ns, info.st_size, info.st_ino, info.st_ctime_ns)
+
+    def cached_extras(self, key_id: str) -> frozenset[str] | None:
+        """The key's opt-ins when they are already known for the file as it is
+        now, else ``None``. Never reads the file, so it is safe on the event loop."""
+        signature = self._file_signature()
+        with self._cache_lock:
+            held = self._extras
+        if signature is None or held is None or held[0] != signature:
+            return None
+        return held[1].get(key_id, frozenset())
+
+    def extras_for(self, key_id: str) -> frozenset[str]:
+        """The key's opt-ins. The file is read again only when it changed."""
+        known = self.cached_extras(key_id)
+        if known is not None:
+            return known
+        signature = self._file_signature()
+        mapping = {r.key_id: r.extras for r in self._load()}
+        if signature is not None:
+            with self._cache_lock:
+                self._extras = (signature, mapping)
+        return mapping.get(key_id, frozenset())
 
     def verify(self, presented: str) -> RemoteKey | None:
         """The active key matching ``presented``, or ``None``.
@@ -258,7 +316,7 @@ class RemoteKeyStore:
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"version": _STORE_VERSION,
-                              "keys": [asdict(r) for r in records]}, indent=2) + "\n"
+                              "keys": [_record_dict(r) for r in records]}, indent=2) + "\n"
         tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -347,6 +405,23 @@ class RemoteKeyStore:
             self._write(tuple(revoked if r is target else r for r in records))
         return revoked
 
+    def set_extras(self, name_or_id: str, extras: Iterable[str]) -> RemoteKey:
+        """Replace the opt-ins of one active key."""
+        wanted = frozenset(extras)
+        if not wanted <= frozenset(EXTRAS):
+            raise RemoteKeyError("invalid_extra",
+                                 "A key can be allowed: " + ", ".join(EXTRAS) + ".")
+        with self._exclusive():
+            records = self._records_for_write()
+            target = next((r for r in records
+                           if r.active and name_or_id in (r.name, r.key_id)), None)
+            if target is None:
+                raise RemoteKeyError("not_found",
+                                     f"No active remote key is named '{name_or_id}'.")
+            changed = replace(target, extras=wanted)
+            self._write(tuple(changed if r is target else r for r in records))
+        return changed
+
     def bind_unbound(self, profile: str) -> tuple[RemoteKey, ...]:
         """Bind every active key that has no profile (made before 4.1.20) to
         ``profile`` - the profile active now, which is the one those keys have
@@ -383,6 +458,7 @@ def default_store() -> RemoteKeyStore:
 
 
 __all__ = [
+    "EXTRAS",
     "KEY_PREFIX",
     "PROFILE_SOURCES",
     "RemoteKey",
