@@ -27,7 +27,7 @@ OPEN_ROUTES = {
     "/": "the dashboard page itself; it has to load to show the sign-in form",
     "/favicon.ico": "a static icon",
     "/health": "liveness probe used by the CLI and the service manager; no memory content",
-    "/status": "daemon discovery probe the CLI uses (`slm status`): counts and file paths, no memory content",
+    "/status": "daemon discovery probe the CLI uses; without a session it answers status, version, port, pid and instance only (see test_status_without_a_session_*)",
     "/api/version": "version string only",
     "/openapi.json": "the shape of the API, no data",
     "/docs": "API documentation page, no data",
@@ -148,3 +148,20 @@ def test_the_command_line_can_read_feature_status_with_the_daemon_capability(com
     assert client.get("/api/memories", headers=capability).status_code in (401, 403)
     assert client.get("/api/export", headers=capability).status_code in (401, 403)
     assert client.get("/api/v3/learning/signals", headers=capability).status_code in (401, 403)
+
+
+#: What /status may say to a caller with no session (it has to be able to find the daemon).
+STATUS_WITHOUT_SESSION = {"status", "version", "port", "pid", "instance_id", "details_hidden"}
+
+
+def test_status_without_a_session_names_no_paths_and_no_counts(company) -> None:
+    """/status stays open so the command line can find the daemon, but only for discovery."""
+    app, client, admin = company
+
+    bare = client.get("/status")
+
+    assert bare.status_code == 200
+    assert set(bare.json()) == STATUS_WITHOUT_SESSION
+    # ...and a signed-in administrator still sees the whole answer.
+    full = client.get("/status", headers=admin).json()
+    assert {"db_path", "base_dir", "fact_count", "entity_count", "edge_count"} <= set(full)

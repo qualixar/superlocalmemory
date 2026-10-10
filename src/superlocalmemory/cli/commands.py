@@ -867,7 +867,10 @@ def cmd_serve(args: Namespace) -> None:
         if is_daemon_running():
             from superlocalmemory.cli.daemon import daemon_request
             status = daemon_request("GET", "/status")
-            if status:
+            if status and status.get("details_hidden"):
+                print(f"Daemon: RUNNING (PID {status.get('pid', '?')}). "
+                      "Sign in to see more (set SLM_USER_SESSION).")
+            elif status:
                 print(f"Daemon: RUNNING (PID {status['pid']}, "
                       f"mode={status['mode']}, facts={status['fact_count']}, "
                       f"uptime={status['uptime_s']}s, idle={status['idle_s']}s)")
