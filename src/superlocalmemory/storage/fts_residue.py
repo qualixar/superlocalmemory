@@ -19,8 +19,10 @@ Two fixes, both idempotent:
   'delete' plus insert) ``PRAGMA quick_check`` reports "malformed inverted
   index for FTS5 table main.atomic_facts_fts" and later SQLite versions read
   it as real corruption. Upgrade SQLite or Python to get the immediate purge.
-  An index that already has the option on is reported "unsupported" and not
-  touched here.
+  An index that already has the option on there (a store made before this was
+  known) gets it turned off at the next start and is reported "disabled" once;
+  if its index is already malformed a single warning points to
+  ``slm db repair``, which rebuilds it from the stored memories.
 * ``purge_deleted_terms``: ``optimize`` rewrites the index without the words of
   rows deleted before ``secure-delete`` was on (the existing-store repair).
 """
@@ -83,11 +85,50 @@ def secure_delete_on(target: Any, table: str) -> bool:
     return bool(rows) and str(tuple(rows[0])[0]) == "1"
 
 
+def _switch_off_if_broken(target: Any, table: str) -> str:
+    """Under a SQLite that corrupts the index with the option on: turn it off.
+
+    Only the range from 3.42 up can have it on. Never raises: a store must open.
+    """
+    if sqlite3.sqlite_version_info < SECURE_DELETE_MIN_SQLITE:
+        return "unsupported"
+    try:
+        if not secure_delete_on(target, table):
+            return "unsupported"
+        _run(target, f"INSERT INTO {table}({table}, rank) VALUES('secure-delete', 0)")  # noqa: S608
+    except Exception as exc:
+        logger.warning("keyword index %s secure delete could not be turned off: %s",
+                       table, exc)
+        return "unsupported"
+    if keyword_index_damaged(target, table):
+        logger.warning("keyword index %s is damaged (a known SQLite %s problem); run "
+                       "'slm db repair' to rebuild it from your memories; nothing is lost",
+                       table, sqlite3.sqlite_version)
+    return "disabled"
+
+
+def keyword_index_damaged(target: Any, table: str) -> bool:
+    """True when FTS5's own integrity check finds the index malformed."""
+    try:
+        _run(target, f"INSERT INTO {table}({table}) VALUES('integrity-check')")  # noqa: S608
+    except sqlite3.DatabaseError:  # includes IntegrityError and "malformed"
+        return True
+    return False
+
+
+def rebuild_keyword_index(target: Any, table: str) -> None:
+    """Rebuild one index from its content table (``atomic_facts``); no memory is lost."""
+    _run(target, f"INSERT INTO {table}({table}) VALUES('rebuild')")  # noqa: S608
+
+
 def ensure_secure_delete(target: Any) -> dict[str, str]:
     """Turn ``secure-delete`` on for every keyword index. Cheap when already on.
 
     ``target`` is a ``sqlite3.Connection`` or a ``DatabaseManager``. Returns
-    ``{table: "on" | "enabled" | "absent" | "unsupported"}``.
+    ``{table: "on" | "enabled" | "disabled" | "absent" | "unsupported"}``.
+    "disabled": this SQLite corrupts the index when the option is on (see the
+    module docstring) and it was on, so it was just turned off. The next call
+    reports "unsupported".
     """
     state: dict[str, str] = {}
     supported = secure_delete_supported()
@@ -98,7 +139,7 @@ def ensure_secure_delete(target: Any) -> dict[str, str]:
         if not supported:
             # A known limit with a fallback: ``slm db repair`` purges deleted words.
             _report_unsupported_once()
-            state[table] = "unsupported"
+            state[table] = _switch_off_if_broken(target, table)
             continue
         if secure_delete_on(target, table):
             state[table] = "on"
@@ -131,6 +172,6 @@ def purge_deleted_terms(conn: Any, table: str) -> None:
 
 __all__ = [
     "FTS_TABLES", "SECURE_DELETE_BROKEN_SQLITE", "enable_quietly",
-    "ensure_secure_delete", "purge_deleted_terms", "secure_delete_on",
-    "secure_delete_supported",
+    "ensure_secure_delete", "keyword_index_damaged", "purge_deleted_terms",
+    "rebuild_keyword_index", "secure_delete_on", "secure_delete_supported",
 ]
