@@ -478,3 +478,39 @@ def test_a_remote_app_cannot_name_a_file_even_for_a_media_tool():
 def test_a_remote_picture_or_document_save_without_scope_is_pinned_to_personal(tool) -> None:
     out = binding.bind_arguments(tool, {"base64": "x"}, key_name="k", bound="p")
     assert out["scope"] == "personal"
+
+
+_ATTACHMENT = {"download_url": "https://files.chat.example/f1?sig=x", "file_id": "file_1",
+               "mime_type": "image/png", "file_name": "a.png"}
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "remember_document"])
+def test_a_remote_app_may_send_a_file_object_and_the_save_stays_personal(tool) -> None:
+    out = binding.bind_arguments(tool, {"file": _ATTACHMENT}, key_name="k", bound="p")
+    assert out["file"] == _ATTACHMENT and out["scope"] == "personal" and out["profile_id"] == "p"
+
+
+@pytest.mark.parametrize("tool", ["remember", "recall", "mesh_send", "get_media", "media_status"])
+def test_the_file_argument_belongs_to_the_two_saving_tools_only(tool) -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments(tool, {"file": _ATTACHMENT}, key_name="k", bound="p")
+
+
+@pytest.mark.parametrize("bad", ["https://x.example/a.png", ["a"], 5, True])
+def test_a_file_argument_must_be_an_object(bad) -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": bad}, key_name="k", bound="p")
+
+
+def test_a_file_object_cannot_smuggle_another_profile_or_a_path() -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": {**_ATTACHMENT, "profile_id": "other"}},
+                               key_name="k", bound="p")
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": {**_ATTACHMENT, "path": "/etc/hosts"}},
+                               key_name="k", bound="p")
+
+
+def test_an_empty_or_missing_file_argument_is_fine() -> None:
+    assert "file" in binding.bind_arguments("remember_media", {"file": None, "base64": "x"},
+                                            key_name="k", bound="p")

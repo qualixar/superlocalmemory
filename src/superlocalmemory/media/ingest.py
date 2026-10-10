@@ -59,6 +59,9 @@ class MediaInput:
     data: bytes | None = None
     download_url: str | None = None
     remote: bool = False
+    #: The link came inside a ``file`` object (a chat app's attachment), so the app's own
+    #: file hosts are trusted next to the owner's list. Never set for a link the model typed.
+    file_param: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,7 +122,8 @@ def _download(inp: MediaInput) -> bytes:
     from superlocalmemory.core.media_fetch import MediaFetchRefused, fetch_media
 
     try:
-        return fetch_media(inp.download_url or "", remote=inp.remote, max_bytes=MAX_FILE_BYTES).data
+        return fetch_media(inp.download_url or "", remote=inp.remote, max_bytes=MAX_FILE_BYTES,
+                           file_param=inp.file_param).data
     except MediaFetchRefused as refused:
         raise _refuse(refused.reason) from None
 

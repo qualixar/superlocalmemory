@@ -199,9 +199,14 @@ def test_remember_document_needs_exactly_one_source_before_any_call(srv, monkeyp
     assert spy.calls == []
 
 
-def test_remember_document_has_no_link_argument(srv):
+def test_remember_document_takes_a_link_and_posts_it(srv, monkeypatch):
     names = {t.name: t for t in run(srv.list_tools())}
-    assert "download_url" not in names["remember_document"].input_schema["properties"]
+    assert "download_url" in names["remember_document"].input_schema["properties"]
+    spy = Spy({"status": "processing", "document_id": "d" * 32, "job_id": "j" * 32})
+    monkeypatch.setattr(daemon, "daemon_request", spy)
+    res = call(srv, "remember_document", {"download_url": LINK})
+    assert spy.calls[0][1] == "/api/v3/documents" and spy.calls[0][2]["download_url"] == LINK
+    assert res["status"] == "processing" and "SECRET123" not in str(res)
 
 
 def test_remember_document_error_never_echoes_a_link(srv, monkeypatch):

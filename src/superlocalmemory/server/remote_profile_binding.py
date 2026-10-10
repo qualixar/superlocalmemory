@@ -143,8 +143,10 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
 #: Arguments only the image and document tools take. Accepted for those tools alone, so a
 #: later tool with a ``path`` argument is never let through by accident.
 MEDIA_ARGUMENTS: frozenset[str] = frozenset({
-    "base64", "download_url", "file_name", "job_id", "media_id", "path", "variant",
+    "base64", "download_url", "file", "file_name", "job_id", "media_id", "path", "variant",
 })
+#: ``file`` is a chat app's attachment object (``openai/fileParams``). Only the two saving tools take it.
+MEDIA_FILE_ARGUMENT_TOOLS: frozenset[str] = frozenset({"remember_media", "remember_document"})
 MEDIA_ARGUMENT_TOOLS: frozenset[str] = frozenset({
     "remember_media", "get_media", "remember_document", "media_status",
 })
@@ -213,6 +215,20 @@ def _check_media_argument(tool: str, name: str, value: Any) -> None:
     if name == "path" and value not in (None, ""):
         raise BindingRefusal(
             ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
+    if name == "file":
+        _check_file_argument(tool, value)
+
+
+def _check_file_argument(tool: str, value: Any) -> None:
+    """A ``file`` is an object that carries a link, never a path, for the two saving tools only."""
+    if tool not in MEDIA_FILE_ARGUMENT_TOOLS:
+        raise BindingRefusal(ARGUMENT_DENIAL, "Argument 'file' is not accepted over remote access.")
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise BindingRefusal(ARGUMENT_DENIAL, "The attached file must be an object.")
+    if "path" in value:
+        raise BindingRefusal(ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
 
 
 def _check_mesh_state(arguments: Mapping[str, Any]) -> None:
