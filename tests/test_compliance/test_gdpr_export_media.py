@@ -109,3 +109,10 @@ def test_export_does_not_change_media_db(tmp_path: Path) -> None:
     before = (tmp_path / "media.db").read_bytes()
     GDPRCompliance(mgr, data_root=tmp_path).export_profile_data("alice")
     assert (tmp_path / "media.db").read_bytes() == before
+
+
+def test_an_unreadable_media_db_is_reported_not_left_out(tmp_path: Path) -> None:
+    mgr = _memory_db(tmp_path)
+    (tmp_path / "media.db").write_bytes(b"this is not a database" * 100)
+    data = GDPRCompliance(mgr, data_root=tmp_path).export_profile_data("alice")
+    assert data["media"] == {"error": "unavailable"}

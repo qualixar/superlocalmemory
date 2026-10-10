@@ -70,7 +70,6 @@ class EnvSpec:
     requirements: tuple[str, ...]
     model_source: ModelSource
     min_free_disk_bytes: int
-    min_ram_bytes_warn: int
     canary: Callable[[Path], bool] | None = None
     expected_download_bytes: int = 0
     lock_prefix: str = "media"
@@ -264,7 +263,7 @@ class ManagedEnv:
             free = 0
         ram = _ram_bytes()
         return {"disk_ok": free >= self.spec.min_free_disk_bytes, "free_bytes": free,
-                "ram_bytes": ram, "ram_warn": 0 < ram < self.spec.min_ram_bytes_warn,
+                "ram_bytes": ram,
                 "python_ok": _python_supported(), "python": platform.python_version(),
                 "sqlite_vec_ok": _sqlite_vec_ok()}
 

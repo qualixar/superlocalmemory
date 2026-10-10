@@ -12,6 +12,7 @@ is kept in sync as a cache for backward compatibility.
 """
 import asyncio
 import logging
+from pathlib import Path
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -22,7 +23,7 @@ from .helpers import (
     get_db_connection, validate_profile_name,
     ProfileSwitch, DB_PATH,
     sync_profiles, ensure_profile_in_db, ensure_profile_in_json,
-    delete_profile_from_db,
+    delete_profile_from_db, PICTURES_PENDING,
     _load_profiles_json, _save_profiles_json,
 )
 from superlocalmemory.server.profile_runtime import (
@@ -187,6 +188,12 @@ async def create_profile(body: ProfileSwitch, request: Request):
         if name in merged_ids:
             raise HTTPException(status_code=409, detail=f"Profile '{name}' already exists")
 
+        from superlocalmemory.storage.pending_media_moves import creation_blocker
+
+        blocker = await asyncio.to_thread(creation_blocker, Path(DB_PATH).parent, name)
+        if blocker:
+            raise HTTPException(status_code=409, detail=blocker)
+
         authorization = authorize_route_mutation(
             request,
             operation="update",
@@ -259,6 +266,7 @@ async def delete_profile(name: str, request: Request):
             counts = await asyncio.to_thread(delete_profile_from_db, name)
         except (ProfileFoldError, SidecarFoldError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        pictures_pending = bool(counts.pop(PICTURES_PENDING, False))
         moved = int(counts.get("memories") or 0)
         facts = int(counts.get("atomic_facts") or 0)
 
@@ -268,11 +276,14 @@ async def delete_profile(name: str, request: Request):
         _save_profiles_json(json_config)
 
         authorization.complete()
+        note = (" Its pictures and documents will finish moving shortly."
+                if pictures_pending else "")
         return {
             "success": True,
             "message": (f"Profile '{name}' deleted. {moved} memories ({facts} facts) "
-                        "moved to 'default'."),
+                        f"moved to 'default'.{note}"),
             "moved": {k: v for k, v in counts.items() if isinstance(v, int) and v},
+            **({"pictures_pending": True} if pictures_pending else {}),
         }
 
     except HTTPException:

@@ -92,3 +92,24 @@ def test_text_floor_comes_from_the_table_and_unknown_models_have_none():
     assert media_models.text_min_semantic_for(NOMIC_VISION) is None  # a picture model has no text floor
     assert media_models.text_min_semantic_for("fake:768") is None
     assert media_models.text_min_semantic_for("nomic-ai/nomic-embed-text-v1.5") is None
+
+
+def test_watchdog_judges_children_on_the_shared_memory_reader(monkeypatch):
+    import os
+    import subprocess
+    import sys
+
+    from superlocalmemory.infra import proc_memory
+    from superlocalmemory.server.unified_daemon import _watchdog_pass
+
+    kids = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]) for _ in range(2)]
+    try:
+        big, small = kids
+        monkeypatch.setattr(proc_memory, "process_memory_mb",
+                            lambda pid: 9000.0 if pid == big.pid else 10.0)
+        _watchdog_pass(os.getpid(), 2500)
+        assert big.wait(timeout=10) is not None and small.poll() is None
+    finally:
+        for kid in kids:
+            kid.kill()
+            kid.wait()

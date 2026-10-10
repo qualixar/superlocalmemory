@@ -94,6 +94,12 @@ def place_original(data_root: str | Path, tmp_file: str | Path, profile_id: str,
     A file already at the address is kept when it really is the same content;
     a different one is never overwritten.
     """
+    return place_original_noting_new(data_root, tmp_file, profile_id, ext)[0]
+
+
+def place_original_noting_new(data_root: str | Path, tmp_file: str | Path, profile_id: str,
+                              ext: str) -> tuple[str, bool]:
+    """:func:`place_original`, also saying whether the file was new, with the content read once."""
     address = content_address(profile_id, tmp_file)
     rel = original_relpath(address, ext)
     dest = media_root(data_root) / rel
@@ -103,10 +109,10 @@ def place_original(data_root: str | Path, tmp_file: str | Path, profile_id: str,
         if dest.is_symlink() or content_address(profile_id, dest) != address:
             raise FileExistsError("a different file already has this address")
         src.unlink(missing_ok=True)
-        return rel
+        return rel, False
     os.chmod(src, 0o600)
     os.replace(src, dest)
-    return rel
+    return rel, True
 
 
 def remove_original(data_root: str | Path, relpath: str) -> bool:

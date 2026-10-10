@@ -81,10 +81,10 @@
   var enableRequested = false;
 
   function startEnable(host, opts, msg, m) {
-    var warning = m && m.ram_warning ? ' ' + m.ram_warning : '';
+    if (lowRam(m)) return;
     confirmThen({
       title: 'Turn on images and documents', target: 'Images and documents',
-      consequence: 'Downloads ' + SIZE_NOTE + ' of models. Everything stays on this computer.' + warning,
+      consequence: 'Downloads ' + SIZE_NOTE + ' of models. Everything stays on this computer.',
       confirmLabel: 'Turn on',
     }, function () {
       msg.textContent = 'Starting…';
@@ -95,14 +95,20 @@
     });
   }
 
+  // The daemon decides (one function, 16 GB) and says so in ram_ok / ram_message; an
+  // older daemon says nothing, which counts as fine.
+  function lowRam(m) {
+    return !!m && m.ram_ok === false;
+  }
+
   function offCard(host, m, opts) {
     var card = cardShell('Turn on images and documents',
       'Remember pictures and read PDFs: ' + SIZE_NOTE + ' of models, and it stays on this computer.');
     var msg = messageLine(card);
     if (m.env_state === 'unsupported' && m.step) msg.textContent = m.step;
-    if (m.ram_warning) card.insertBefore(el('p', 'muted', m.ram_warning), msg);
+    if (lowRam(m) && m.ram_message) card.insertBefore(el('p', null, m.ram_message), msg);
     var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg, m); });
-    go.disabled = m.env_state === 'unsupported';
+    go.disabled = m.env_state === 'unsupported' || lowRam(m);
     card.appendChild(go);
     if (enableRequested && !go.disabled) {
       enableRequested = false;

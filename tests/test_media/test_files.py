@@ -77,3 +77,16 @@ def test_remove_original_stays_inside_the_media_folder(tmp_path):
     assert files.remove_original(tmp_path, rel) is True
     assert not (tmp_path / "media" / rel).exists()
     assert files.remove_original(tmp_path, rel) is False
+
+
+def test_placing_a_file_reads_its_content_once(tmp_path, monkeypatch):
+    src = tmp_path / "scratch"
+    src.write_bytes(b"x" * 100)
+    calls = []
+    real = files.content_address
+    monkeypatch.setattr(files, "content_address", lambda *a: calls.append(a) or real(*a))
+    rel, new = files.place_original_noting_new(tmp_path, src, "p1", "png")
+    assert new is True and len(calls) == 1
+    again = tmp_path / "again"
+    again.write_bytes(b"x" * 100)
+    assert files.place_original_noting_new(tmp_path, again, "p1", "png") == (rel, False)

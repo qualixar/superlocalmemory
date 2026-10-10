@@ -140,7 +140,15 @@ def register_v28_tools(server, get_engine: Callable) -> None:
             if refused:
                 return refused
             from superlocalmemory.mcp.remote_visibility import visible_facts
-            facts = visible_facts(engine._db, pid, engine._db.get_all_facts(pid))[:limit]
+            everything = engine._db.get_all_facts(pid)
+            facts: list = []
+            step = max(int(limit), 1)
+            # The view check runs on a page at a time, not on every fact of the profile.
+            for start in range(0, len(everything), step):
+                facts += visible_facts(engine._db, pid, everything[start:start + step])
+                if len(facts) >= limit:
+                    break
+            facts = facts[:limit]
             states: dict[str, list[dict]] = {
                 "active": [], "warm": [], "cold": [], "archived": [],
             }

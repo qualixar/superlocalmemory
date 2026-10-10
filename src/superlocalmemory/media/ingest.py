@@ -252,8 +252,8 @@ def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
 
 def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
     try:
-        job.placed_new = not files.planned_path(job.root, profile_id, info["stored_path"], info["stored_ext"]).exists()
-        job.placed = files.place_original(job.root, info["stored_path"], profile_id, info["stored_ext"])
+        job.placed, job.placed_new = files.place_original_noting_new(
+            job.root, info["stored_path"], profile_id, info["stored_ext"])
     except (OSError, ValueError):
         raise _refuse("The image could not be saved.") from None
     return job.placed

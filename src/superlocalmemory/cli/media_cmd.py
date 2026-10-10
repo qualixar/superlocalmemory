@@ -15,12 +15,13 @@ import sys
 from argparse import Namespace
 from typing import Any
 
-from superlocalmemory.cli.daemon import daemon_request
+from superlocalmemory.cli.daemon import DaemonConflict, daemon_request
 from superlocalmemory.cli.features_cmd import (
     EXIT_DAEMON_DOWN, FEATURES_PATH, NOT_RUNNING, die, media_line,
 )
 
 SIZE_TEXT = "about 1.5 GB"
+EXIT_LOW_RAM = 4
 
 
 def _is_tty() -> bool:
@@ -30,8 +31,8 @@ def _is_tty() -> bool:
         return False
 
 
-def _call(args: Namespace, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
-    data = daemon_request(method, path, body)
+def _call(args: Namespace, method: str, path: str, body: dict | None = None, **kwargs: Any) -> dict[str, Any]:
+    data = daemon_request(method, path, body, **kwargs)
     if data is None:
         die(args, NOT_RUNNING, EXIT_DAEMON_DOWN)
     return data
@@ -68,15 +69,19 @@ def _confirmed(args: Namespace) -> bool:
 
 def _enable(args: Namespace) -> None:
     media = _call(args, "GET", FEATURES_PATH)["media"]
+    if media.get("ram_ok") is False:  # refused here: say so plainly, ask nothing
+        die(args, str(media.get("ram_message") or ""), EXIT_LOW_RAM)
     if not getattr(args, "json", False):
         print(f"Images & documents download {SIZE_TEXT} of models.")
         print(_disk_text(media.get("precheck", {})))
-        if media.get("ram_warning"):
-            print(f"Memory check: {media['ram_warning']}")
     if not _confirmed(args):
         print("Nothing changed.")
         return
-    reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True, "source": "cli"})
+    try:
+        reply = _call(args, "POST", FEATURES_PATH + "/media/enable", {"yes": True, "source": "cli"},
+                      preserve_conflict=True)
+    except DaemonConflict as exc:  # the daemon refused (not enough memory)
+        die(args, str(exc), EXIT_LOW_RAM)
     _emit(args, reply, _enable_text(reply.get("media") or {}))
 
 
@@ -102,10 +107,32 @@ def _status(args: Namespace) -> None:
     _emit(args, data, "Images & documents: " + media_line(data["media"]))
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _gc_text(report: dict[str, Any]) -> str:
+    if not report.get("dry_run", True):
+        return (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
+                f"{_plural(int(report.get('files_removed', 0)), 'file')}. Your memories are untouched.")
+    rows = len(report.get("rows_without_memory") or [])
+    files = len(report.get("files_without_row") or [])
+    if not rows and not files:
+        return "Nothing to clean up."
+    return (f"Found {_plural(rows, 'picture record')} without a memory and {_plural(files, 'file')} "
+            "without a record. Nothing was removed; to remove them run: slm media gc --apply")
+
+
+def _gc(args: Namespace) -> None:
+    """Report leftovers (default) or remove them with --apply (needs the owner or an admin)."""
+    report = _call(args, "POST", "/api/v3/media/gc", {"dry_run": not getattr(args, "apply", False)})
+    _emit(args, report, _gc_text(report))
+
+
 def cmd_media(args: Namespace) -> None:
     sub = getattr(args, "media_command", None) or "status"
     args.media_command = sub
-    {"enable": _enable, "disable": _disable, "status": _status}[sub](args)
+    {"enable": _enable, "disable": _disable, "status": _status, "gc": _gc}[sub](args)
 
 
 def register_media_parser(sub: Any) -> None:
@@ -121,3 +148,6 @@ def register_media_parser(sub: Any) -> None:
     d.add_argument("--json", **flag)
     s = msub.add_parser("status", help="what is on and how set-up is going")
     s.add_argument("--json", **flag)
+    g = msub.add_parser("gc", help="find picture leftovers (records without a memory, stray files)")
+    g.add_argument("--apply", action="store_true", help="remove them (owner or admin)")
+    g.add_argument("--json", **flag)
