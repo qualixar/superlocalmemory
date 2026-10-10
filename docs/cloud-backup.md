@@ -41,7 +41,9 @@ original in `backups/media-originals/` (only new files are copied each time, so 
 extra space is about the size of your library once, and the size is written to the
 log). Restoring `media-<timestamp>.db` puts back any original the `media/` folder is
 missing and never overwrites a file that is there. An original you erase also leaves
-the backup copy at the next backup. With images and documents off or never used,
+the backup copy at the next backup. A coherent backup set (`BackupCoordinator`) keeps
+and restores them the same way, in the same `media-originals/` folder, so the two kinds of
+local backup share one copy. With images and documents off or never used,
 nothing is added. The copy is not encrypted; keep the data folder on an encrypted disk.
 
 ## GitHub Backup (Recommended)

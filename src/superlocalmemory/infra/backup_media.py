@@ -19,7 +19,9 @@ Only content-addressed originals are mirrored (``media.files.is_original``). Oth
 ``media/`` -- above all the upload-link database ``uploads.db`` and its ``-wal``/``-shm`` -- are live
 state: copied mid-write they would corrupt, and put back they would revive expired links and quotas.
 
-Cloud backup never reads this folder: pictures stay on this computer.
+Every local backup path uses the two ``*_quietly`` helpers below, so a per-file backup
+(``BackupManager``) and a coherent set (``BackupCoordinator``) keep and restore the originals the
+same way, in the same mirror. Cloud backup never reads this folder: pictures stay on this computer.
 """
 
 from __future__ import annotations
@@ -137,6 +139,24 @@ def sync_originals(slm_dir: Path, backup_dir: Path) -> MirrorReport:
     logger.info("media originals: %d files, %s in the backup (%d new, %d removed)",
                 report.files, _human(total), copied, removed)
     return report
+
+
+def sync_originals_quietly(slm_dir: Path, backup_dir: Path) -> MirrorReport | None:
+    """``sync_originals`` for a backup whose databases are already safe: a failure is logged, never raised."""
+    try:
+        return sync_originals(slm_dir, backup_dir)
+    except Exception as exc:  # noqa: BLE001 - the database backups already succeeded
+        logger.warning("media originals were not backed up (non-critical): %s", exc)
+        return None
+
+
+def restore_originals_quietly(slm_dir: Path, backup_dir: Path) -> int:
+    """``restore_originals`` after the library database is back: a failure is logged, never raised."""
+    try:
+        return restore_originals(slm_dir, backup_dir)
+    except Exception as exc:  # noqa: BLE001 - the database restore already succeeded
+        logger.error("media originals were not put back: %s", exc)
+        return 0
 
 
 def restore_originals(slm_dir: Path, backup_dir: Path) -> int:
