@@ -39,7 +39,10 @@ class ModelProfile:
 
 #: The EG2 numbers are provisional until the Mac memory check; the floor comes from
 #: n=7 unanswerable test queries. The text floor is provisional too: it equals the
-#: configured default until the text split is measured.
+#: configured default until the text split is measured. The other text cutoffs
+#: (consolidator 0.85 / 0.95, scene builder 0.6, sufficiency 0.6, contradiction 0.45) are
+#: still global and were tuned on the built-in text model: they need the same calibration
+#: for this model before they are made per model.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
     EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000, 0.60),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
