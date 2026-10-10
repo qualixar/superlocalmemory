@@ -67,6 +67,10 @@ def _link(kind: str, note: str) -> dict[str, Any]:
     key = _writer_key(key_id, grant.connection_id)
     if key is None:
         return _fail("not_allowed", "This computer does not let this app add pictures or documents.")
+    from superlocalmemory.remote_connections import companion
+
+    if "upload-v1" not in companion.CONNECTOR_FEATURES:
+        return _fail("update_required", "This computer's SuperLocalMemory must be updated to use upload links.")
     try:
         minted = default_links().mint(grant.connection_id, key.key_id, key.profile, kind, note or "")
     except UploadError as refused:

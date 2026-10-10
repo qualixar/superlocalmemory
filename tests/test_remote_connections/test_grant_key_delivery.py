@@ -318,3 +318,89 @@ async def test_a_key_fetch_waits_for_the_connection_lock_other_exchanges_hold(tm
         assert not task.done()
     await task
     assert runtime.grant_keys.load(row.connection_id).current is not None
+
+
+# -- upload links die with the consent, the grant key or the connection --------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+NONCE = "n" * 22
+
+
+@pytest.fixture()
+def links(tmp_path, monkeypatch):
+    from superlocalmemory.media import upload_links
+
+    store = upload_links.UploadLinks(tmp_path / "data")
+    monkeypatch.setattr(upload_links, "default_links", lambda: store)
+    return store
+
+
+def started_link(links, cid):
+    link = links.mint(cid, "key1", "personal", "image", "")
+    links.accept_chunk(link.token, cid, 0, len(PNG) + 5, PNG, NONCE)
+    return link
+
+
+@pytest.mark.asyncio
+async def test_rotating_the_grant_key_ends_every_open_link_of_that_connection(tmp_path, links):
+    runtime, row, _ = completed_runtime(tmp_path, FakeProvider())
+    mine, other = started_link(links, row.connection_id), links.mint("b" * 32, "key1", "personal", "image", "")
+    await runtime.rotate_grant_key("owner", "profile", row.connection_id)
+    assert links.find(mine.token, row.connection_id).state == "failed"
+    assert links.find(other.token, "b" * 32).state == "open"
+
+
+@pytest.mark.asyncio
+async def test_revoking_an_app_ends_the_connections_open_links(tmp_path, links):
+    provider = FakeProvider()
+
+    async def revoke_app(latest, authorization_id, expected_version):
+        return {"revoked": True, "version": expected_version + 1}
+
+    provider.revoke_app = revoke_app
+    runtime, row, _ = completed_runtime(tmp_path, provider)
+    mine = started_link(links, row.connection_id)
+    await runtime.revoke_app("owner", "profile", row.connection_id, "app-1", 1)
+    assert links.find(mine.token, row.connection_id).state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_revoke_leaves_links_alone(tmp_path, links):
+    provider = FakeProvider()
+
+    async def revoke_app(latest, authorization_id, expected_version):
+        return {"revoked": False}
+
+    provider.revoke_app = revoke_app
+    runtime, row, _ = completed_runtime(tmp_path, provider)
+    mine = started_link(links, row.connection_id)
+    with pytest.raises(ValueError):
+        await runtime.revoke_app("owner", "profile", row.connection_id, "app-1", 1)
+    assert links.find(mine.token, row.connection_id).state == "receiving"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_connection_ends_its_open_links(tmp_path, links):
+    class Provider(FakeProvider):
+        async def revoke(self, value):
+            return {"revoked": True}
+
+        async def cancel_bootstrap(self, value):
+            return {"cancelled": True}
+
+    runtime, row, _ = completed_runtime(tmp_path, Provider())
+    mine = started_link(links, row.connection_id)
+    await runtime.cancel(row.owner, row.profile, row.connection_id)
+    assert links.find(mine.token, row.connection_id).state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_ending_links_never_fails_the_revocation(tmp_path, monkeypatch):
+    from superlocalmemory.media import upload_links
+
+    def broken():
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(upload_links, "default_links", broken)
+    runtime, row, _ = completed_runtime(tmp_path, FakeProvider())
+    assert await runtime.rotate_grant_key("owner", "profile", row.connection_id) == 1

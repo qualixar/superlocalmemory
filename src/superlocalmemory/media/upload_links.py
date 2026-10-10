@@ -50,11 +50,16 @@ STRAY_FILE_S = 3_600
 KINDS = ("image", "document")
 DB_NAME = "uploads.db"
 HOUSEKEEPING_S = 3_600
+#: A second upload may take over a link only after this long without a byte from the first.
+IDLE_TAKEOVER_S = 60
+#: The daemon waits at most this long for a save (``daemon_finisher``); a longer "finishing" never ended.
+FINISHER_TIMEOUT_S = 300
 #: Where a link opens: the gateway's public MCP host. The page is ``<base>/u/<connection>/<token>``.
 UPLOAD_BASE_URL = "https://mcp.superlocalmemory.com"
 
 logger = logging.getLogger(__name__)
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
+_NONCE = re.compile(r"[A-Za-z0-9_-]{22}")
 _DOMAIN = b"superlocalmemory-upload-link-v1\0"
 _DDL = """CREATE TABLE IF NOT EXISTS upload_links (
   upload_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
@@ -65,7 +70,7 @@ _DDL = """CREATE TABLE IF NOT EXISTS upload_links (
   total INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0,
   next_index INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, started_at INTEGER,
-  result_json TEXT NOT NULL DEFAULT '')"""
+  result_json TEXT NOT NULL DEFAULT '', nonce TEXT, touched_at INTEGER)"""
 
 _MESSAGES = {
     "invalid_kind": "An upload link is for an image or a document.",
@@ -85,6 +90,10 @@ _MESSAGES = {
     "daily_limit": "The limit of 20 uploads a day was reached. Try again tomorrow.",
     "not_started": "No file has been sent on this link yet.",
     "incomplete": "The whole file did not arrive. Start the upload again.",
+    "rate_limited": "Too many invalid upload links were tried. Wait ten minutes and try again.",
+    "in_progress": "Another upload is already using this link.",
+    "interrupted": "The save was interrupted. Ask the app for a new link.",
+    "revoked": "This upload link no longer works. Ask the app for a new one.",
     "not_allowed": "This computer no longer lets this app add files. Ask the owner to allow it again.",
     "invalid_request": "That upload request was not understood.",
 }
@@ -132,6 +141,8 @@ class UploadRow:
     expires_at: int
     started_at: int | None
     result_json: str
+    nonce: str | None
+    touched_at: int | None
 
 
 @dataclass(frozen=True)
@@ -275,8 +286,17 @@ class UploadLinks:
 
     # -- receiving ----------------------------------------------------------
 
-    def accept_chunk(self, token: str, connection_id: str, index: int, total: int, data: bytes) -> int:
-        """Append one chunk; returns the bytes held so far. Chunk 0 (re)starts the upload."""
+    def accept_chunk(self, token: str, connection_id: str, index: int, total: int, data: bytes,
+                     nonce: str) -> int:
+        """Append one chunk; returns the bytes held so far.
+
+        ``nonce`` is made by the gateway for each upload (one POST). Chunk 0 binds it; every later
+        chunk and the finish must carry the same one. Chunk 0 with another nonce restarts the link
+        only when the first upload has been quiet for a minute, so a second holder of the link
+        cannot swap the file under an upload that is still moving.
+        """
+        if not _NONCE.fullmatch(nonce or ""):
+            raise UploadError("invalid_request")
         if not data:
             raise UploadError("empty")
         if len(data) > MAX_CHUNK_BYTES:
@@ -291,13 +311,19 @@ class UploadLinks:
             if total > row.max_bytes:
                 raise UploadError("too_large")
             if index == 0:
-                return self._start(conn, row, total, data)
-            return self._append(conn, row, index, total, data)
+                return self._start(conn, row, total, data, nonce)
+            return self._append(conn, row, index, total, data, nonce)
 
-    def _start(self, conn: sqlite3.Connection, row: UploadRow, total: int, data: bytes) -> int:
+    def _start(self, conn: sqlite3.Connection, row: UploadRow, total: int, data: bytes,
+               nonce: str) -> int:
+        now = self._now()
+        if row.state == "receiving" and row.nonce is not None:
+            if row.nonce == nonce:
+                raise UploadError("bad_order")
+            if now - (row.touched_at or row.started_at or now) <= IDLE_TAKEOVER_S:
+                raise UploadError("in_progress")
         if row.attempts >= MAX_ATTEMPTS:
             raise UploadError("too_many_attempts")
-        now = self._now()
         if row.state == "open":
             started = conn.execute(
                 "SELECT COUNT(*) FROM upload_links WHERE connection_id = ? AND started_at >= ?",
@@ -313,11 +339,17 @@ class UploadLinks:
         self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
         conn.execute(
             "UPDATE upload_links SET state='receiving', total=?, received=?, next_index=1, attempts=attempts+1, "
-            "started_at=COALESCE(started_at, ?) WHERE upload_id=?", (total, len(data), now, row.upload_id))
+            "started_at=COALESCE(started_at, ?), nonce=?, touched_at=? WHERE upload_id=?",
+            (total, len(data), now, nonce, now, row.upload_id))
         return len(data)
 
-    def _append(self, conn: sqlite3.Connection, row: UploadRow, index: int, total: int, data: bytes) -> int:
-        if row.state != "receiving" or index != row.next_index:
+    def _append(self, conn: sqlite3.Connection, row: UploadRow, index: int, total: int, data: bytes,
+                nonce: str) -> int:
+        if row.state != "receiving":
+            raise UploadError("bad_order")
+        if row.nonce != nonce:
+            raise UploadError("in_progress")
+        if index != row.next_index:
             raise UploadError("bad_order")
         if total != row.total:
             raise UploadError("size_changed")
@@ -331,8 +363,8 @@ class UploadLinks:
             raise UploadError("bad_order") from None
         self._write(path, data, os.O_WRONLY | os.O_APPEND)
         received = row.received + len(data)
-        conn.execute("UPDATE upload_links SET received=?, next_index=next_index+1 WHERE upload_id=?",
-                     (received, row.upload_id))
+        conn.execute("UPDATE upload_links SET received=?, next_index=next_index+1, touched_at=? WHERE upload_id=?",
+                     (received, self._now(), row.upload_id))
         return received
 
     @staticmethod
@@ -343,20 +375,36 @@ class UploadLinks:
 
     # -- finishing ----------------------------------------------------------
 
-    def begin_finish(self, token: str, connection_id: str) -> FinishPlan:
+    def begin_finish(self, token: str, connection_id: str, nonce: str) -> FinishPlan:
+        if not _NONCE.fullmatch(nonce or ""):
+            raise UploadError("invalid_request")
+        now = self._now()
         with self._tx() as conn:
             row = self._by_token(conn, token, connection_id)
             if row.state in ("done", "failed"):
                 return FinishPlan("result", row, json.loads(row.result_json or "{}"))
             if row.state == "finishing":
+                if now - (row.touched_at or now) > FINISHER_TIMEOUT_S:
+                    return self._give_up(conn, row)
                 return FinishPlan("working", row)
             if row.state == "open":
                 raise UploadError("not_started")
             self._live(row)
+            if row.nonce != nonce:
+                raise UploadError("in_progress")
             if row.received != row.total or row.total < 1:
                 raise UploadError("incomplete")
-            conn.execute("UPDATE upload_links SET state='finishing' WHERE upload_id=?", (row.upload_id,))
+            conn.execute("UPDATE upload_links SET state='finishing', touched_at=? WHERE upload_id=?",
+                         (now, row.upload_id))
             return FinishPlan("run", row)
+
+    def _give_up(self, conn: sqlite3.Connection, row: UploadRow) -> FinishPlan:
+        """A save that began long enough ago that it cannot still be running."""
+        result = {"ok": False, "code": "interrupted", "message": _MESSAGES["interrupted"]}
+        conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
+                     (json.dumps(result), row.upload_id))
+        self._unlink(self.temp_path(row.upload_id))
+        return FinishPlan("result", row, result)
 
     def _end(self, upload_id: str, state: str, result: dict[str, Any]) -> None:
         with self._tx() as conn:
@@ -373,8 +421,23 @@ class UploadLinks:
     def finish_retry(self, upload_id: str) -> None:
         """A save that may work later (the picture tools are starting): keep the bytes, reopen the link."""
         with self._tx() as conn:
-            conn.execute("UPDATE upload_links SET state='receiving' WHERE upload_id=? AND state='finishing'",
-                         (upload_id,))
+            conn.execute("UPDATE upload_links SET state='receiving', nonce=NULL, touched_at=? "
+                         "WHERE upload_id=? AND state='finishing'", (self._now(), upload_id))
+
+    def fail_open_links(self, connection_id: str) -> int:
+        """End every unfinished link of a connection (its consent or grant key was revoked or replaced)."""
+        if not (self._root / "media" / DB_NAME).exists():
+            return 0
+        result = json.dumps({"ok": False, "code": "revoked", "message": _MESSAGES["revoked"]})
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT upload_id FROM upload_links WHERE connection_id = ? "
+                "AND state IN ('open','receiving','finishing')", (connection_id,)).fetchall()
+            for found in rows:
+                conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
+                             (result, found[0]))
+                self._unlink(self.temp_path(found[0]))
+        return len(rows)
 
     # -- housekeeping -------------------------------------------------------
 
@@ -408,6 +471,9 @@ class UploadLinks:
         with self._tx() as conn:
             for found in conn.execute("SELECT * FROM upload_links").fetchall():
                 row = self._row(found)
+                if row.state == "finishing" and now - (row.touched_at or now) > FINISHER_TIMEOUT_S:
+                    self._give_up(conn, row)
+                    continue
                 running = row.state in ("open", "receiving")
                 if running and now <= _deadline(row):
                     continue

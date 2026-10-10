@@ -18,6 +18,8 @@ CID = "a" * 32
 SECRET = "slmr_" + "b" * 43
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
 NOW = 1_700_000_000.0
+NONCE = "n" * 22
+OTHER_NONCE = "o" * 22
 
 
 @dataclass
@@ -52,15 +54,15 @@ class Finisher:
         return self.reply
 
 
-def credential():
-    return ConnectorCredential("install-a", "owner-a", "personal", CID, 1, int((NOW + 600) * 1000),
+def credential(cid=CID):
+    return ConnectorCredential("install-a", "owner-a", "personal", cid, 1, int((NOW + 600) * 1000),
                                "a" * 64, SECRET)
 
 
-def frame(op, token, index=0, total=0, body=b"", fid="wire_1"):
+def frame(op, token, index=0, total=0, body=b"", fid="wire_1", nonce=NONCE):
     return {"v": 1, "kind": "request", "id": fid, "generation": 1, "deadlineAt": int(NOW * 1000) + 20_000,
             "headers": [["content-type", "application/octet-stream"],
-                        [UPLOAD_HEADER, f"{op} {token} {index} {total}"]],
+                        [UPLOAD_HEADER, f"{op} {token} {index} {total} {nonce}"]],
             "bodyBase64": base64.b64encode(body).decode()}
 
 
@@ -73,8 +75,8 @@ def setup(tmp_path):
     return relay, links, finisher, minted
 
 
-async def call(relay, packet):
-    response = await relay.handle(packet, credential())
+async def call(relay, packet, cid=CID):
+    response = await relay.handle(packet, credential(cid))
     assert response.status == 200 and dict(response.headers)["content-type"] == "application/json"
     return json.loads(response.body)
 
@@ -181,6 +183,8 @@ class _NoKey:
     "", "chunk", "chunk " + "a" * 43, "chunk " + "a" * 43 + " 0", "other " + "a" * 43 + " 0 0",
     "chunk " + "a" * 42 + " 0 0", "chunk " + "a" * 43 + " -1 5", "chunk " + "a" * 43 + " 0 5 extra",
     "chunk " + "a" * 43 + " 99999999999 5", "chunk  " + "a" * 43 + " 0 5", "CHUNK " + "a" * 43 + " 0 5",
+    "chunk " + "a" * 43 + " 0 5", "chunk " + "a" * 43 + " 0 5 " + "n" * 21, "chunk " + "a" * 43 + " 0 5 " + "n" * 23,
+    "chunk " + "a" * 43 + " 0 5 " + "n" * 21 + "!", "chunk " + "a" * 43 + " 0 5 " + "n" * 22 + " x",
 ])
 async def test_malformed_upload_headers_are_refused(setup, value):
     relay, _, _, _ = setup
@@ -224,3 +228,94 @@ def test_the_codec_admits_the_header_on_requests_only():
     del bad["deadlineAt"]
     with pytest.raises(codec.FrameError):
         codec.encode_frame(bad)
+
+
+# -- a second holder of the link cannot swap the file ---------------------------
+
+@pytest.mark.asyncio
+async def test_another_upload_cannot_restart_or_finish_one_that_is_moving(setup):
+    relay, links, finisher, minted = setup
+    body = PNG + b"12345"
+    await call(relay, frame("chunk", minted.token, 0, len(body), PNG, nonce=NONCE))
+    swap = await call(relay, frame("chunk", minted.token, 0, len(body), b"\x89PNG\r\n\x1a\nEVIL", nonce=OTHER_NONCE))
+    assert swap["ok"] is False and swap["code"] == "in_progress"
+    assert (await call(relay, frame("chunk", minted.token, 1, len(body), b"12345", nonce=OTHER_NONCE)))["code"] == "in_progress"
+    assert (await call(relay, frame("finish", minted.token, 0, len(body), nonce=OTHER_NONCE)))["code"] == "in_progress"
+    assert (await call(relay, frame("chunk", minted.token, 1, len(body), b"12345")))["received"] == len(body)
+    assert (await call(relay, frame("finish", minted.token, 0, len(body))))["done"] is True
+    assert finisher.calls and len(finisher.calls) == 1
+
+
+# -- guessing links cannot lock the real one out for long -----------------------
+
+class CountingLinks:
+    def __init__(self, inner):
+        self.inner, self.finds = inner, 0
+
+    def find(self, *args):
+        self.finds += 1
+        return self.inner.find(*args)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+class Clock:
+    def __init__(self):
+        self.now = NOW
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.mark.asyncio
+async def test_too_many_unknown_links_on_a_connection_are_refused_without_a_lookup(tmp_path):
+    clock = Clock()
+    links = CountingLinks(UploadLinks(tmp_path, clock=clock))
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), clock=clock)
+    for i in range(30):
+        out = await call(relay, frame("info", f"{i:043d}"))
+        assert out["code"] == "invalid_link"
+    seen = links.finds
+    out = await call(relay, frame("info", "9" * 43))
+    assert out["ok"] is False and out["code"] == "rate_limited" and "wait" in out["message"].lower()
+    assert links.finds == seen  # no database work
+    other = "d" * 32
+    assert (await call(relay, frame("info", "9" * 43), cid=other))["code"] == "invalid_link"
+    clock.now += 601
+    assert (await call(relay, frame("info", "9" * 43)))["code"] == "invalid_link"
+
+
+@pytest.mark.asyncio
+async def test_a_good_link_is_not_counted_and_a_malformed_frame_is_not_either(tmp_path):
+    clock = Clock()
+    links = UploadLinks(tmp_path, clock=clock)
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(), clock=clock)
+    minted = links.mint(CID, "key1", "personal", "image", "")
+    for _ in range(40):
+        assert (await call(relay, frame("info", minted.token)))["ok"] is True
+    bad = frame("info", "a" * 43)
+    bad["headers"][1] = [UPLOAD_HEADER, "nonsense"]
+    for _ in range(40):
+        assert (await call(relay, bad))["code"] == "invalid_request"
+    assert (await call(relay, frame("info", minted.token)))["ok"] is True
+
+
+# -- refusal reasons are redacted before they reach a public page ---------------
+
+@pytest.mark.asyncio
+async def test_a_refusal_reason_loses_host_paths_and_the_account_name(tmp_path, monkeypatch):
+    from superlocalmemory.server import remote_redaction
+
+    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("/Users/varun", "varunacct"))
+    links = UploadLinks(tmp_path, clock=lambda: NOW)
+    reply = {"status": "refused",
+             "reason": "Cannot read /Users/varun/Pictures/a.png for varunacct (see https://x.example/a?k=1)"}
+    relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
+    minted = links.mint(CID, "key1", "personal", "image", "")
+    await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
+    out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
+    text = out["message"]
+    assert "/Users" not in text and "varunacct" not in text and "Pictures" not in text and "k=1" not in text
+    stored = links.find(minted.token, CID).result_json
+    assert "/Users" not in stored and "varunacct" not in stored

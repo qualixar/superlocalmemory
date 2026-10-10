@@ -171,5 +171,5 @@ def test_the_dial_says_it_reads_grants(monkeypatch):
     monkeypatch.setattr(client,"connect",Fake)
     module._dial("wss://connect.superlocalmemory.com/connector","tok",DeviceSigner.generate().private_pem)
     headers=seen["additional_headers"]
-    assert headers["x-slm-connector-features"]=="grant-v1"
+    assert headers["x-slm-connector-features"]=="grant-v1,upload-v1"
     assert headers["Authorization"]=="Bearer tok" and headers["DPoP"]

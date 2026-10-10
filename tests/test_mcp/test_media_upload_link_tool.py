@@ -80,6 +80,17 @@ def test_the_key_profile_wins_over_an_argument(world):
     assert links.find(out["url"].rsplit("/", 1)[1], CID).profile_id == "p2"
 
 
+def test_a_connector_without_upload_support_is_told_to_update(world, monkeypatch):
+    from superlocalmemory.remote_connections import companion
+
+    server, _, links, key = world
+    monkeypatch.setattr(companion, "CONNECTOR_FEATURES", ("grant-v1",))
+    with Remote(key.key_id):
+        out = call(server, {"kind": "image"})
+    assert out["success"] is False and out["code"] == "update_required" and "update" in out["error"].lower()
+    assert "url" not in out and links.cleanup() == 0
+
+
 def test_a_local_caller_is_pointed_at_a_path(world):
     server, *_ = world
     out = call(server, {"kind": "image"})

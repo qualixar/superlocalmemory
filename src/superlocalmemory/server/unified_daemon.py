@@ -3369,6 +3369,15 @@ async def lifespan(application: FastAPI):
             _consolidation_timer_loop(application)
         )
 
+    # Abandoned half-uploads from one-time upload links are removed at least hourly.
+    _upload_task = getattr(application.state, "_upload_housekeeping_task", None)
+    if _upload_task is None or _upload_task.done():
+        from superlocalmemory.server import upload_housekeeping
+
+        application.state._upload_housekeeping_task = asyncio.create_task(
+            upload_housekeeping.run(), name="upload-housekeeping"
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3520,6 +3529,13 @@ async def lifespan(application: FastAPI):
         _consol = getattr(application.state, "_consolidation_task", None)
         if _consol is not None and not _consol.done():
             _consol.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
+        if _upload_hk is not None and not _upload_hk.done():
+            _upload_hk.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 

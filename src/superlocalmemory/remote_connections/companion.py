@@ -12,6 +12,9 @@ from superlocalmemory.remote_connections.credentials import ConnectorCredential,
 from superlocalmemory.remote_connections.session import OriginResponse, RelaySession
 
 ENDPOINT = "wss://connect.superlocalmemory.com/connector"
+#: What this connector understands beyond plain MCP frames. The gateway sends a grant only to one
+#: that says ``grant-v1`` and an upload frame only to one that says ``upload-v1``.
+CONNECTOR_FEATURES = ("grant-v1", "upload-v1")
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +35,7 @@ def _dial(endpoint: str, token: str, device_key: str = ""):
         additional_headers={
             "Authorization": "Bearer " + token,
             "DPoP": proof,
-            "x-slm-connector-features": "grant-v1",
+            "x-slm-connector-features": ",".join(CONNECTOR_FEATURES),
         },
         proxy=None,
         compression=None,

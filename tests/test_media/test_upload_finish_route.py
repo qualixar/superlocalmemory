@@ -18,15 +18,16 @@ from tests.test_media.test_media_routes import Db, Hooks, Registry
 CID, LOCAL, REMOTE = "a" * 32, ("127.0.0.1", 50000), ("10.1.2.3", 50000)
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
 PDF = b"%PDF-1.7\n" + b"0" * 100
+NONCE = "n" * 22
 
 
 def make(monkeypatch, tmp_path, *, kind="image", data=PNG, state="finishing", actor="authenticated:test",
          client=LOCAL, profile="p2", receipt=None, runtime=True, allowed=True, hooks=None, note="a whiteboard"):
     links = UploadLinks(tmp_path)
     minted = links.mint(CID, "key1", profile, kind, note)
-    links.accept_chunk(minted.token, CID, 0, len(data), data)
+    links.accept_chunk(minted.token, CID, 0, len(data), data, NONCE)
     if state == "finishing":
-        links.begin_finish(minted.token, CID)
+        links.begin_finish(minted.token, CID, NONCE)
     calls = []
 
     def fake_media(inp, **kw):

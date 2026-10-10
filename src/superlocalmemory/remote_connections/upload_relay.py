@@ -27,6 +27,8 @@ import base64
 import json
 import logging
 import re
+import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
@@ -37,9 +39,12 @@ from superlocalmemory.remote_connections.session import OriginResponse
 logger = logging.getLogger(__name__)
 
 UPLOAD_HEADER = "x-slm-upload"
+#: Unknown or foreign tokens tolerated per connection before it is refused outright for a while.
+INVALID_LINK_LIMIT = 30
+INVALID_LINK_WINDOW_S = 600.0
 #: How long one ``finish`` frame waits for the save; the gateway asks again until it ends.
 FINISH_WAIT_S = 15.0
-_HEADER = re.compile(r"(info|chunk|finish) ([A-Za-z0-9_-]{43}) (\d{1,10}) (\d{1,12})")
+_HEADER = re.compile(r"(info|chunk|finish) ([A-Za-z0-9_-]{43}) (\d{1,10}) (\d{1,12}) ([A-Za-z0-9_-]{22})")
 _LINK = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
 _SAVED = {
     ("image", "stored"): "Saved to your memory.",
@@ -68,7 +73,10 @@ def _refusal(code: str) -> dict[str, Any]:
 
 
 def _plain(text: object) -> str:
-    return _LINK.sub("[link]", " ".join(str(text or "").split()))[:300]
+    """A short single line for a public page: no links, and no host detail (paths, account, computer)."""
+    from superlocalmemory.server.remote_redaction import redact_text
+
+    return redact_text(_LINK.sub("[link]", " ".join(str(text or "").split())))[:300]
 
 
 def daemon_finisher(upload_id: str) -> dict[str, Any]:
@@ -88,10 +96,24 @@ def daemon_finisher(upload_id: str) -> dict[str, Any]:
 class UploadRelay:
     def __init__(self, links: Callable[[], UploadLinks] = default_links, *, keys: Any = None,
                  finisher: Callable[[str], dict[str, Any]] = daemon_finisher,
-                 finish_wait_s: float = FINISH_WAIT_S) -> None:
+                 finish_wait_s: float = FINISH_WAIT_S, clock: Callable[[], float] = time.time) -> None:
         self._links, self._keys, self._finisher = links, keys, finisher
-        self._wait = finish_wait_s
+        self._wait, self._clock = finish_wait_s, clock
         self._running: dict[str, asyncio.Task] = {}
+        self._invalid: dict[str, deque[float]] = {}
+
+    def _blocked(self, connection_id: str) -> bool:
+        """Too many unknown links lately on this connection: refuse before any database work."""
+        seen = self._invalid.get(connection_id)
+        if not seen:
+            return False
+        cutoff = self._clock() - INVALID_LINK_WINDOW_S
+        while seen and seen[0] < cutoff:
+            seen.popleft()
+        return len(seen) >= INVALID_LINK_LIMIT
+
+    def _note_invalid(self, connection_id: str) -> None:
+        self._invalid.setdefault(connection_id, deque(maxlen=INVALID_LINK_LIMIT)).append(self._clock())
 
     def _key_store(self) -> Any:
         if self._keys is None:
@@ -104,31 +126,39 @@ class UploadRelay:
         found = _HEADER.fullmatch(upload_op(request) or "")
         if found is None:
             return _answer(_refusal("invalid_request"))
-        op, token, index, total = found[1], found[2], int(found[3]), int(found[4])
+        op, token, index, total, nonce = found[1], found[2], int(found[3]), int(found[4]), found[5]
         body = base64.b64decode(request["bodyBase64"], validate=True)
         if op != "chunk" and body:
             return _answer(_refusal("invalid_request"))
         try:
-            return _answer(await self._dispatch(op, token, index, total, body, credential))
+            return _answer(await self._dispatch(op, token, index, total, nonce, body, credential))
         except UploadError as refused:
             return _answer(_refusal(refused.code))
         except Exception as exc:  # noqa: BLE001 - a plain refusal, never a traceback or a path
             logger.warning("upload step failed (%s)", type(exc).__name__)
             return _answer({"ok": False, "code": "error", "message": _CANNOT})
 
-    async def _dispatch(self, op: str, token: str, index: int, total: int, body: bytes,
+    async def _dispatch(self, op: str, token: str, index: int, total: int, nonce: str, body: bytes,
                         credential: ConnectorCredential) -> dict[str, Any]:
+        cid = credential.connection_id
+        if self._blocked(cid):
+            return _refusal("rate_limited")
         links = self._links()
-        row = await asyncio.to_thread(links.find, token, credential.connection_id)
+        try:
+            row = await asyncio.to_thread(links.find, token, cid)
+        except UploadError as refused:
+            if refused.code == "invalid_link":
+                self._note_invalid(cid)
+            raise
         await asyncio.to_thread(self._authorize, credential, row)
         if op == "info":
             info = await asyncio.to_thread(links.info, token, credential.connection_id)
             return {"ok": True, "kind": info.kind, "max_bytes": info.max_bytes, "expires_at": info.expires_at}
         if op == "chunk":
             held = await asyncio.to_thread(links.accept_chunk, token, credential.connection_id,
-                                           index, total, body)
+                                           index, total, body, nonce)
             return {"ok": True, "received": held}
-        return await self._finish(links, token, credential.connection_id)
+        return await self._finish(links, token, credential.connection_id, nonce)
 
     def _authorize(self, credential: ConnectorCredential, row: UploadRow) -> None:
         key = self._key_store().verify(credential.origin_key)
@@ -136,8 +166,9 @@ class UploadRelay:
                 or key.scope != "write" or "media" not in key.extras or key.profile != row.profile_id):
             raise UploadError("not_allowed")
 
-    async def _finish(self, links: UploadLinks, token: str, connection_id: str) -> dict[str, Any]:
-        plan = await asyncio.to_thread(links.begin_finish, token, connection_id)
+    async def _finish(self, links: UploadLinks, token: str, connection_id: str,
+                      nonce: str) -> dict[str, Any]:
+        plan = await asyncio.to_thread(links.begin_finish, token, connection_id, nonce)
         if plan.action == "result":
             return plan.result or _refusal("used")
         task = self._running.get(plan.row.upload_id)
