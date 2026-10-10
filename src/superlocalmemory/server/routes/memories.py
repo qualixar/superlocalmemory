@@ -1510,6 +1510,17 @@ def _code_links_for_fact(fact_id: str) -> list[dict]:
         return []
 
 
+def _refuse_if_hidden(caller_view: str, engine, profile_id: str, fact_ids: list[str],
+                      detail: str) -> None:
+    """404 ``detail`` when a remote caller (``caller_view``) may not see one of ``fact_ids``.
+
+    The answer is the one for an id that does not exist. A local caller (no view) passes.
+    """
+    view = remote_view.parse_view(caller_view)
+    if view and remote_view.hidden_among(view, engine._db, profile_id, fact_ids):
+        raise HTTPException(status_code=404, detail=detail)
+
+
 @router.delete("/api/memories/{fact_id}")
 def delete_memory(request: Request, fact_id: str, profile_id: str = "",
                   caller_view: str = ""):
@@ -1531,9 +1542,7 @@ def delete_memory(request: Request, fact_id: str, profile_id: str = "",
         )
     except _UnknownRoutedProfile as exc:
         return _unknown_profile_response(exc.profile_id)
-    view = remote_view.parse_view(caller_view)
-    if view and fact_id in remote_view.hidden_among(view, engine._db, target_profile, [fact_id]):
-        raise HTTPException(status_code=404, detail="Memory not found")
+    _refuse_if_hidden(caller_view, engine, target_profile, [fact_id], "Memory not found")
     try:
         from superlocalmemory.core.mutations import delete_fact_authorized
 
@@ -1646,11 +1655,14 @@ def merge_memory(request: Request, fact_id: str):
 
 
 @router.patch("/api/memories/{fact_id}", status_code=202)
-def edit_memory(request: Request, fact_id: str):
+def edit_memory(request: Request, fact_id: str, caller_view: str = ""):
     """Propose an immutable, review-required correction for one memory.
 
     A ``profile_id`` in the body names the profile the memory belongs to,
     authorized like a routed remember; without it, the active profile.
+
+    ``caller_view`` is set when a remote app asks: a memory its recall would
+    hide is answered like an id that does not exist.
     """
     profile = None
     try:
@@ -1675,6 +1687,7 @@ def edit_memory(request: Request, fact_id: str):
             run_pre_hook=False,
             profile=profile,
         )
+        _refuse_if_hidden(caller_view, engine, target_profile, [fact_id], "Memory not found")
         from superlocalmemory.core.mutations import update_fact_authorized
         result = update_fact_authorized(  # embeds, may wait: never on the request loop
             engine,
@@ -1712,7 +1725,7 @@ def edit_memory(request: Request, fact_id: str):
 
 
 @router.post("/api/corrections/{case_id}/{action}")
-def review_correction(request: Request, case_id: str, action: str):
+def review_correction(request: Request, case_id: str, action: str, caller_view: str = ""):
     """Apply, reject, or roll back a correction case.
 
     The caller authenticates through the daemon boundary.  It cannot select a
@@ -1741,6 +1754,15 @@ def review_correction(request: Request, case_id: str, action: str):
         engine, target_profile, hook_context = _authorize_memory_mutation(
             request, "update", case_id, run_pre_hook=False, profile=profile,
         )
+        if remote_view.parse_view(caller_view):
+            # A remote app reviews only a case whose memories it may see.
+            try:
+                case = _correction_store_for(engine, target_profile).get_case(case_id)
+                named = [case.predecessor_fact_id, case.successor_fact_id]
+            except Exception:  # noqa: BLE001 - not found / not in profile: the normal path answers
+                named = []
+            _refuse_if_hidden(caller_view, engine, target_profile,
+                              [n for n in named if n], "Correction case not found")
         result = _canonical_mutation_runtime(request).transition_correction(
             target_profile,
             case_id,

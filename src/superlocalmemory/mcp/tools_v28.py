@@ -83,6 +83,15 @@ def register_v28_tools(server, get_engine: Callable) -> None:
                 }
             tracker = OutcomeTracker(engine._db)
             ids = [mid.strip() for mid in memory_ids.split(",") if mid.strip()]
+            # A remote app reports on memories it can see; the rest are left out, and if
+            # none are left the answer is the one for an id that is not there.
+            from superlocalmemory.mcp.remote_visibility import unseen_ids
+
+            unseen = unseen_ids(engine._db, pid, ids)
+            if unseen:
+                ids = [mid for mid in ids if mid not in unseen]
+                if not ids:
+                    return {"success": False, "error": "Memory not found."}
             ctx = {"note": context} if context else None
             ao = tracker.record_outcome(
                 query="[mcp_feedback]",

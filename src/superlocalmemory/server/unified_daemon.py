@@ -5189,6 +5189,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         req: RememberRequest,
         request: Request,
         wait: bool = False,
+        # How a remote caller came in; it can only hide more.
+        caller_view: str = "",
     ):
         """Journal and commit a bounded, immediately-queryable receipt.
 
@@ -5298,6 +5300,18 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     check_replaceable, engine._db, replaces=req.replaces,
                     profile_id=write_profile, scope=scope,
                 )
+                from superlocalmemory.retrieval.remote_view import hidden_among, parse_view
+
+                view = parse_view(caller_view)
+                if view:
+                    # A remote app replaces only what it may see: a hidden memory is
+                    # refused with the answer for an id that does not exist.
+                    from superlocalmemory.core.remember_replaces import named_facts, not_found
+
+                    named = await asyncio.to_thread(named_facts, engine._db.execute,
+                                                    replaces_id, write_profile)
+                    if hidden_among(view, engine._db, write_profile, [f.fact_id for f in named]):
+                        raise not_found(replaces_id)
             except ReplacesRejected as exc:
                 raise HTTPException(422, detail=exc.as_error()) from exc
 

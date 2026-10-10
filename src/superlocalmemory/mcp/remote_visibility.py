@@ -34,6 +34,25 @@ def hidden_fact_ids(db: Any, profile_id: str, fact_ids: Sequence[str]) -> set[st
     return remote_view.hidden_among(current_view(), db, profile_id, fact_ids)
 
 
+def unseen_ids(db: Any, profile_id: str, fact_ids: Sequence[str]) -> set[str]:
+    """Which of ``fact_ids`` the current remote caller may not act on: hidden from its view, or
+    not a fact of the profile at all (so the two are answered alike). Nothing for a local caller."""
+    if not current_view():
+        return set()
+    ids = [i for i in dict.fromkeys(fact_ids) if i]
+    if not ids:
+        return set()
+    known: set[str] = set()
+    for start in range(0, len(ids), 400):
+        chunk = ids[start:start + 400]
+        marks = ",".join("?" for _ in chunk)
+        rows = db.execute(
+            f"SELECT fact_id FROM atomic_facts WHERE profile_id = ? AND fact_id IN ({marks})",
+            (profile_id, *chunk))
+        known.update(str(dict(r)["fact_id"]) for r in rows)
+    return (set(ids) - known) | hidden_fact_ids(db, profile_id, sorted(known))
+
+
 def with_view(path: str) -> str:
     """``path`` for the daemon, telling it a remote caller asks. Unchanged for a local caller."""
     view = current_view()
@@ -42,4 +61,4 @@ def with_view(path: str) -> str:
     return f"{path}{'&' if '?' in path else '?'}{remote_view.VIEW_PARAM}={view}"
 
 
-__all__ = ["current_view", "hidden_fact_ids", "visible_facts", "with_view"]
+__all__ = ["current_view", "hidden_fact_ids", "unseen_ids", "visible_facts", "with_view"]
