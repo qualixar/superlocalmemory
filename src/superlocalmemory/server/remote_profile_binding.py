@@ -52,6 +52,12 @@ Three rules hold for every call, read key or write key alike:
    are allowed: the recall runs as the bound profile, so they reach only what
    other profiles chose to share with it or with every profile.
 
+The mesh tools a connected web app may call (``remote_tool_policy.MESH_TOOLS``)
+take no ``profile_id``: the mesh is per profile, and they run in process against
+the key's profile (``mcp/remote_caller.RemoteMeshTarget``), with no lease and no
+active-profile check, so a key bound to one profile reaches only that profile's
+peers, messages and shared state.
+
 Every argument a remote-callable tool takes is classified below.
 ``tests/test_security/test_remote_profile_binding.py`` reads the live tool
 registry and fails when a tool gains an argument that is not classified here,
@@ -122,13 +128,14 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     "filters",
     "finalize", "idempotency_key", "importance", "include_history", "include_unknown",
     "input_summary", "items", "key", "kind", "known_as_of", "limit", "max_age_days",
-    "max_results", "memory_ids", "metadata", "min_confidence", "mode", "name", "new_name",
-    "offset", "outcome",
+    "max_results", "memory_ids", "message", "metadata", "min_confidence", "mode", "name",
+    "new_name", "offset", "outcome",
     "output_summary", "pattern_id", "pattern_type", "payload", "prefer_project", "project",
     "project_strict",
-    "project_path", "query", "recall_query_id", "receipt_id", "replaces", "reversible", "run_id",
+    "project_path", "query", "recall_query_id", "receipt_id", "refs", "replaces",
+    "reply_to", "reversible", "run_id",
     "saved_by", "session_date", "session_id", "skill_name", "tags", "tags_match", "target",
-    "tool_name", "ttl_seconds", "valid_at", "value", "window",
+    "timeout_s", "to", "tool_name", "ttl_seconds", "valid_at", "value", "window",
 })
 
 CLASSIFIED_ARGUMENTS: frozenset[str] = (

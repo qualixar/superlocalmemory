@@ -50,8 +50,10 @@ def registry() -> dict[str, list[str]]:
 
 
 def test_every_argument_of_every_remote_tool_is_classified(registry) -> None:
-    remote = {name: args for name, args in registry.items() if name in policy.WRITE_TOOLS}
+    callable_remotely = policy.WRITE_TOOLS | policy.MESH_TOOLS
+    remote = {name: args for name, args in registry.items() if name in callable_remotely}
     assert remote, "the registry returned no remote-callable tools"
+    assert policy.MESH_TOOLS <= set(remote)
     seen = {arg for args in remote.values() for arg in args}
     unclassified = {f"{t}.{a}" for t, args in remote.items() for a in args
                     if a not in binding.CLASSIFIED_ARGUMENTS}

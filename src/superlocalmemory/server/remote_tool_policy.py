@@ -430,6 +430,24 @@ def _peer_for(grant: Any, tool: str | None) -> Any:
                           grant.connection_id, grant.authorization_id, ref))
 
 
+def _mesh_target(scope: dict[str, Any], tool: str, profile: str) -> Any:
+    """Where a web app's mesh tool runs: the daemon's own broker, for the key's profile.
+
+    ``None`` for any other tool. The broker is ``None`` when the mesh is not
+    running or is switched off, and the mesh tools then refuse the call.
+    """
+    from superlocalmemory.mcp.remote_caller import RemoteMeshTarget, current_remote_grant
+
+    grant = current_remote_grant()
+    if tool not in MESH_TOOLS or grant is None:
+        return None
+    state = getattr(scope.get("app"), "state", None)
+    broker = getattr(state, "mesh_broker", None)
+    if not getattr(getattr(state, "config", None), "mesh_enabled", True):
+        broker = None
+    return RemoteMeshTarget(broker=broker, profile=profile, connection_id=grant.connection_id)
+
+
 class RemoteToolScopeASGI:
     """Wraps the MCP app. Local callers pass straight through.
 
@@ -544,9 +562,10 @@ class RemoteToolScopeASGI:
             await _send_json(send, 503, {"error": "remote_profile_unavailable",
                                          "message": "The SLM profile state is not ready."})
             return
-        if tool in ROUTED_TOOLS or tool in PROFILE_FREE_TOOLS:
-            # Routed per request (or touches no profile): the host's active
-            # profile is not involved, so no lease and no active check.
+        if tool in ROUTED_TOOLS or tool in PROFILE_FREE_TOOLS or tool in MESH_TOOLS:
+            # Routed per request (or touches no profile, or runs in process for
+            # the key's profile): the host's active profile is not involved, so
+            # no lease and no active check.
             bound = principal.profile or runtime.snapshot.profile_id
             await self._run_bound(principal, scope, receive, send, downstream_send,
                                   message, tool, bound)
@@ -563,6 +582,7 @@ class RemoteToolScopeASGI:
     async def _run_bound(self, principal: Any, scope: dict[str, Any], receive: Any,
                          send: Any, downstream_send: Any, message: dict[str, Any],
                          tool: str, bound: str) -> None:
+        from superlocalmemory.mcp.remote_caller import remote_mesh
         from superlocalmemory.server.remote_profile_binding import (
             BindingRefusal,
             bind_arguments,
@@ -577,7 +597,8 @@ class RemoteToolScopeASGI:
             await _send_json(send, 200, _tool_error(message, str(refusal), refusal.code))
             return
         body = json.dumps(dict(message, params=dict(params, arguments=arguments))).encode()
-        await self.app(_with_body(scope, body), _replay(body, receive), downstream_send)
+        with remote_mesh(_mesh_target(scope, tool, bound)):
+            await self.app(_with_body(scope, body), _replay(body, receive), downstream_send)
 
 __all__ = [
     "ALLOWED_METHODS",
