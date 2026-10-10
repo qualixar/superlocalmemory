@@ -2,9 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.12, <3.15"
 resolution-markers = [
-    "python_full_version >= '3.14'",
-    "python_full_version == '3.13.*'",
-    "python_full_version < '3.13'",
+    "(python_full_version >= '3.14' and platform_machine != 'aarch64') or (python_full_version >= '3.14' and sys_platform != 'linux')",
+    "python_full_version >= '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.13.*' and platform_machine != 'aarch64') or (python_full_version == '3.13.*' and sys_platform != 'linux')",
+    "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux')",
+    "python_full_version < '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
 ]
 
 [[package]]
@@ -70,7 +73,7 @@ name = "build"
 version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "os_name == 'nt'" },
+    { name = "colorama", marker = "(os_name == 'nt' and platform_machine != 'aarch64') or (os_name == 'nt' and sys_platform != 'linux')" },
     { name = "packaging" },
     { name = "pyproject-hooks" },
 ]
@@ -327,11 +330,29 @@ wheels = [
 name = "cozo-embedded"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "(python_full_version >= '3.14' and platform_machine != 'aarch64') or (python_full_version >= '3.14' and sys_platform != 'linux')",
+    "(python_full_version == '3.13.*' and platform_machine != 'aarch64') or (python_full_version == '3.13.*' and sys_platform != 'linux')",
+    "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux')",
+]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/be/d6cdf495fc73ce2506c66a4078c35f28f9f340ca57e460d0af74832f7c08/cozo_embedded-0.3.0-cp37-abi3-macosx_10_14_x86_64.whl", hash = "sha256:5e8f5904ba37220daf59fec42f53880ceefb89d152c1d096229b946d0573068e", size = 5883455, upload-time = "2022-12-20T04:50:37.701Z" },
     { url = "https://files.pythonhosted.org/packages/a7/23/575b6fb7ed14910231668b6893d7b20ad02d4c35949332d01a52e818ea3f/cozo_embedded-0.3.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:d8a294ce0a15f89c75120ad22df9433769272a5b3bc8fb0b07254fa568bf082c", size = 5297662, upload-time = "2022-12-20T04:50:40.561Z" },
     { url = "https://files.pythonhosted.org/packages/d1/21/885e077de1ddcb28743594dd15e77d8c63f83bfee365140fddef115a0ad5/cozo_embedded-0.3.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:bed5802ee316d78da5f520a28d52048c5376e3de91d04e4e2dd77ba5054dea95", size = 6804152, upload-time = "2022-12-20T04:50:43.092Z" },
     { url = "https://files.pythonhosted.org/packages/1d/e8/82ab8677e1fb8811fcfa2dafb50f9a0e6c44a4f558365c9587694289e61b/cozo_embedded-0.3.0-cp37-abi3-win_amd64.whl", hash = "sha256:53860bfbe73897b92ecfb1a9c520b6b3a784b5bbeed0d8de29e027fd186498d6", size = 5567718, upload-time = "2022-12-20T04:50:45.799Z" },
+]
+
+[[package]]
+name = "cozo-embedded"
+version = "0.7.6"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/bf/19020af2645d8ea398e719bce8fcf7a91c341467aed9804c6d5f6ac878c2/cozo_embedded-0.7.6-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:80de79554138628967d4fd2636fc0a0a8dcca1c0c3bb527e638f1ee6cb763d7d", size = 10515504, upload-time = "2023-12-30T04:42:08.422Z" },
 ]
 
 [[package]]
@@ -420,43 +441,43 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-cuda-nvrtc", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cuda-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cufft", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cufile", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cuda-cupti", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-curand", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cusolver = [
-    { name = "nvidia-cublas", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-cusolver", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-cusparse", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cusolver", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
-    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-nvtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 
 [[package]]
@@ -1245,10 +1266,10 @@ name = "laya-mlx"
 version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "mlx" },
-    { name = "numpy" },
-    { name = "tokenizers" },
+    { name = "huggingface-hub", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "numpy", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "tokenizers", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4c/4c/2b67e41023ee51bf06af9ac4fb4a2b2e015cc3e8af7d779a989fb2332991/laya_mlx-0.2.0.tar.gz", hash = "sha256:d51c2366c3bbccaa1aee87862728b9b51704547ffce5027de37e44756fbf8251", size = 53854, upload-time = "2026-09-22T06:02:22.566Z" }
 wheels = [
@@ -1416,7 +1437,7 @@ name = "mlx"
 version = "0.32.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mlx-metal" },
+    { name = "mlx-metal", marker = "sys_platform == 'darwin'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/26/8c/2f8b796885b4c02ab9644916bebf656cd1d6d366df94d174b046903ea250/mlx-0.32.3-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:7aecc3d4a904279492dae58e28378a3c4bec4533e7066e64ae5c78c7a5511f22", size = 651041, upload-time = "2026-09-29T00:22:36.481Z" },
@@ -2005,6 +2026,11 @@ wheels = [
 name = "pycozo"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "(python_full_version >= '3.14' and platform_machine != 'aarch64') or (python_full_version >= '3.14' and sys_platform != 'linux')",
+    "(python_full_version == '3.13.*' and platform_machine != 'aarch64') or (python_full_version == '3.13.*' and sys_platform != 'linux')",
+    "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux')",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/8f/5e/9e9b8b490fd69b75f969c7cfdebca172af9a82a4cd83e4b32d9e6750683f/pycozo-0.3.0.tar.gz", hash = "sha256:be5c2696c0c18e98452c06f21979ac2ca0c94c4ef313634bbd49936c77d87abb", size = 12521, upload-time = "2022-12-20T04:53:46.796Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/01/83/d873d1b4f6a8224b4efaccfa5fbc207abaa6db03458b3bb5f46b12859f95/pycozo-0.3.0-py3-none-any.whl", hash = "sha256:f256de2f49684621c8dc1f93239d566c2045fd51b2dd74dca6c6a21b937d297d", size = 12250, upload-time = "2022-12-20T04:53:44.629Z" },
@@ -2012,7 +2038,26 @@ wheels = [
 
 [package.optional-dependencies]
 embedded = [
-    { name = "cozo-embedded" },
+    { name = "cozo-embedded", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+]
+
+[[package]]
+name = "pycozo"
+version = "0.7.6"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/18/dc0dd2db0f1661e2cf17a653da59b6812f30ddc976a66b7972fd5d2809bc/pycozo-0.7.6.tar.gz", hash = "sha256:e4be9a091ba71e9d4465179bbf7557d47af84c8114d4889bd5fa13c731d57a95", size = 19091, upload-time = "2023-12-11T09:27:40.435Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/e9/47ccff69e94bc80388c67e12b3c25244198fcfb1d3fad96489ed436a8e3f/pycozo-0.7.6-py3-none-any.whl", hash = "sha256:8930de5f82277d6481998a585c79aa898991cfb0692e168bde8b0a4558d579cf", size = 18977, upload-time = "2023-12-11T09:27:38.171Z" },
+]
+
+[package.optional-dependencies]
+embedded = [
+    { name = "cozo-embedded", version = "0.7.6", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
 ]
 
 [[package]]
@@ -2982,7 +3027,8 @@ dependencies = [
     { name = "orjson" },
     { name = "portalocker" },
     { name = "psutil" },
-    { name = "pycozo", extra = ["embedded"] },
+    { name = "pycozo", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "pycozo", version = "0.7.6", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "pyjwt" },
     { name = "python-dateutil" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
@@ -3009,7 +3055,8 @@ dependencies = [
 
 [package.optional-dependencies]
 cozo = [
-    { name = "pycozo", extra = ["embedded"] },
+    { name = "pycozo", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "pycozo", version = "0.7.6", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
 ]
 dev = [
     { name = "httpx2" },
@@ -3032,7 +3079,8 @@ full = [
     { name = "onnxruntime" },
     { name = "optimum" },
     { name = "orjson" },
-    { name = "pycozo", extra = ["embedded"] },
+    { name = "pycozo", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "pycozo", version = "0.7.6", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "python-multipart" },
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
@@ -3063,7 +3111,8 @@ performance = [
 ]
 scale = [
     { name = "lancedb" },
-    { name = "pycozo", extra = ["embedded"] },
+    { name = "pycozo", version = "0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "pycozo", version = "0.7.6", source = { registry = "https://pypi.org/simple" }, extra = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
 ]
 search = [
     { name = "einops" },
@@ -3129,9 +3178,12 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.9.0" },
     { name = "portalocker", specifier = "==3.2.0" },
     { name = "psutil", specifier = "==7.2.2" },
-    { name = "pycozo", extras = ["embedded"], specifier = "==0.3.0" },
-    { name = "pycozo", extras = ["embedded"], marker = "extra == 'cozo'", specifier = "==0.3.0" },
-    { name = "pycozo", extras = ["embedded"], marker = "extra == 'scale'", specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'", specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = "==0.7.6" },
+    { name = "pycozo", extras = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'cozo'", specifier = "==0.7.6" },
+    { name = "pycozo", extras = ["embedded"], marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'scale'", specifier = "==0.7.6" },
+    { name = "pycozo", extras = ["embedded"], marker = "(platform_machine != 'aarch64' and extra == 'cozo') or (sys_platform != 'linux' and extra == 'cozo')", specifier = "==0.3.0" },
+    { name = "pycozo", extras = ["embedded"], marker = "(platform_machine != 'aarch64' and extra == 'scale') or (sys_platform != 'linux' and extra == 'scale')", specifier = "==0.3.0" },
     { name = "pyjwt", specifier = ">=2.15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
