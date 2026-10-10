@@ -108,12 +108,34 @@ def _switch_off_if_broken(target: Any, table: str) -> str:
 
 
 def keyword_index_damaged(target: Any, table: str) -> bool:
-    """True when FTS5's own integrity check finds the index malformed."""
+    """True when FTS5's own integrity check finds the index malformed.
+
+    Only a corruption error counts. A read-only connection (``slm db health``)
+    cannot run the integrity-check command at all; there the database-wide
+    ``quick_check``, which includes FTS5 indexes on the SQLite versions that can
+    damage them, is read for this table instead. Any other error is not proof
+    of damage.
+    """
     try:
         _run(target, f"INSERT INTO {table}({table}) VALUES('integrity-check')")  # noqa: S608
-    except sqlite3.DatabaseError:  # includes IntegrityError and "malformed"
-        return True
+    except sqlite3.DatabaseError as exc:
+        name = getattr(exc, "sqlite_errorname", "") or ""
+        if name.startswith("SQLITE_CORRUPT"):
+            return True
+        if name == "SQLITE_READONLY":
+            return _quick_check_names(target, table)
+        logger.debug("keyword index %s integrity check did not run: %s", table, exc)
     return False
+
+
+def _quick_check_names(target: Any, table: str) -> bool:
+    """Whether ``PRAGMA quick_check`` reports this FTS5 table malformed."""
+    try:
+        rows = _run(target, "PRAGMA quick_check")
+    except sqlite3.DatabaseError:
+        return False
+    marker = f"fts5 table main.{table}".lower()
+    return any(marker in str(tuple(row)[0]).lower() for row in rows)
 
 
 def rebuild_keyword_index(target: Any, table: str) -> None:

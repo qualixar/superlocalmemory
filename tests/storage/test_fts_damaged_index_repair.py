@@ -144,3 +144,24 @@ def test_below_3_42_nothing_is_touched(monkeypatch):
     monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 37, 2))
     monkeypatch.setattr(fts_residue, "_old_sqlite_reported", False)
     assert fts_residue.ensure_secure_delete(conn)[TABLE] == "unsupported"
+
+
+def _read_only(memory_db):
+    return closing(sqlite3.connect(f"file:{memory_db}?mode=ro", uri=True))
+
+
+def test_a_read_only_connection_does_not_report_a_healthy_index_damaged(tmp_path):
+    """`slm db health` reads the store read-only, where the FTS5 integrity-check
+    command cannot run ("attempt to write a readonly database"). That refusal is
+    not damage."""
+    _, memory_db = store.current_store(tmp_path / "s")
+    store.add_memory(memory_db, "m1", ["alpha beta gamma"])
+    with _read_only(memory_db) as conn:
+        assert fts_residue.keyword_index_damaged(conn, TABLE) is False
+
+
+@needs_broken_sqlite
+def test_a_read_only_connection_still_sees_real_damage(tmp_path):
+    memory_db, _ = _damaged_store(tmp_path / "s")
+    with _read_only(memory_db) as conn:
+        assert fts_residue.keyword_index_damaged(conn, TABLE) is True
