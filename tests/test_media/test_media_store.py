@@ -12,6 +12,9 @@ import pytest
 
 from superlocalmemory.media import MediaStoreReadOnly, media_db_exists, media_db_path, open_media_store
 from superlocalmemory.media.schema import MEDIA_SCHEMA_VERSION
+from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
+
+pytestmark = pytest.mark.skipif(not vector_search_available(), reason=NO_VECTOR_SEARCH_REASON)
 
 DIM = 768
 

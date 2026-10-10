@@ -14,9 +14,9 @@ source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
     superlocalmemory.cache
+    superlocalmemory.memory_core
     superlocalmemory.media
     superlocalmemory.runtimes
-    superlocalmemory.memory_core
 forbidden_modules =
     torch
     transformers
