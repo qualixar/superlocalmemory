@@ -244,13 +244,30 @@ function validateRuntimeLocation(venvRoot) {
   }
 }
 
+function pythonGuidance(platform = os.platform()) {
+  const lines = ['', 'SuperLocalMemory requires Python 3.12, 3.13, or 3.14.'];
+  if (platform === 'darwin') {
+    lines.push('Install it with Homebrew:  brew install python@3.13');
+    lines.push('or the installer from https://www.python.org/downloads/macos/');
+  } else if (platform === 'win32') {
+    lines.push('Install it with:  winget install Python.Python.3.13');
+    lines.push('or from https://www.python.org/downloads/windows/ (the py launcher is found automatically).');
+  } else if (platform === 'linux') {
+    lines.push('Debian 13 / Ubuntu 24.04 and later:  sudo apt install python3 python3-venv');
+    lines.push('Ubuntu 22.04:  sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.12 python3.12-venv');
+    lines.push('Fedora / RHEL 9:  sudo dnf install python3.12');
+  } else {
+    lines.push('Install it from https://www.python.org/downloads/');
+  }
+  lines.push('Then finish the install:  npm rebuild -g superlocalmemory');
+  lines.push('(or set SLM_PYTHON to the interpreter if it is somewhere unusual).');
+  lines.push('The npm installer creates a private virtual environment;');
+  lines.push('it never installs packages into your system Python.');
+  return lines;
+}
+
 function printPythonGuidance() {
-  console.error('');
-  console.error('SuperLocalMemory requires Python 3.12, 3.13, or 3.14.');
-  console.error('Install Python from https://www.python.org/downloads/ and rerun:');
-  console.error('  npm rebuild superlocalmemory');
-  console.error('The npm installer will create a private virtual environment;');
-  console.error('it will not install packages into your system Python.');
+  for (const line of pythonGuidance()) console.error(line);
 }
 
 function failureDetail(result) {
@@ -441,6 +458,7 @@ module.exports = {
   probePython,
   pypiSpecifier,
   pythonCandidates,
+  pythonGuidance,
   runtimePythonPath,
   shouldForceCpuTorch,
   TORCH_CPU_INDEX_URL,
