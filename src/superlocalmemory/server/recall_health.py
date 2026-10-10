@@ -377,7 +377,7 @@ def run_health_tick(engine, state: RecallHealth, *, probe: str = DEFAULT_PROBE,
     if semantic_silent and not dead and _embedder_produces_vector(engine):
         semantic_silent = False
     broken = dead or semantic_silent
-    if dead:
+    if dead and not _heal_paused(state):
         log.critical(
             "recall-health: embedder cannot produce a vector (%d probe results) "
             "— attempting self-heal",

@@ -132,3 +132,17 @@ def test_rearm_is_counted_only_when_a_warmup_actually_started(result, counted):
     state = rh.RecallHealth()
     rh._watch_reranker(engine, state, log=logging.getLogger("t"))
     assert state.reranker_rearms == counted
+
+
+def test_a_paused_tick_does_not_claim_it_is_attempting_a_heal(clock, caplog):
+    """The log must not say "attempting self-heal" on a tick that skips it."""
+    emb, state = _Dead(), rh.RecallHealth()
+    engine = _Engine(emb)
+    _tick(engine, state, caplog)  # first tick: really attempts, and fails
+    caplog.clear()
+    clock.t += 10  # inside the 300 s backoff
+    _tick(engine, state, caplog)
+    assert emb.embed_calls == 1
+    attempting = [r for r in caplog.records
+                  if r.levelno >= logging.WARNING and "attempting self-heal" in r.getMessage()]
+    assert attempting == []
