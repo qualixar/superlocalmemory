@@ -129,6 +129,8 @@
             <li class="nav-item"><button class="nav-link" id="brain-tab" data-bs-toggle="tab" data-bs-target="#brain-pane" type="button" role="tab" aria-controls="brain-pane"></button></li>
             <li class="nav-item"><button class="nav-link" id="agents-tab" data-bs-toggle="tab" data-bs-target="#agents-pane" type="button"></button></li>
             <li class="nav-item"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button"></button></li>
+            <li class="nav-item"><button class="nav-link" id="media-tab" data-bs-toggle="tab" data-bs-target="#media-pane" type="button"></button></li>
+            <li class="nav-item"><button class="nav-link" id="botmsg-tab" data-bs-toggle="tab" data-bs-target="#botmsg-pane" type="button"></button></li>
         </ul>
 
         <!-- Legacy privacy/learning banner removed in 3.7.9 OD redesign:
@@ -150,6 +152,9 @@
                 <h2>Your memory, at a glance</h2>
                 <p id="od-dash-subtitle" class="muted">Connecting to daemon...</p>
               </div>
+
+              <!-- 4.1.25: dismissible what's-new card, filled by od-features.js -->
+              <div id="od-whatsnew" style="margin-bottom:16px"></div>
 
               <!-- KPI strip — 4 cards, values populated by loadDashboardStats() -->
               <section class="kpi-strip" style="margin-bottom:16px">
@@ -1471,6 +1476,8 @@
             </div>
             <div class="tab-pane fade" id="mcp-pane"></div>
             <div class="tab-pane fade" id="apps-pane"></div>
+            <div class="tab-pane fade" id="media-pane"></div>
+            <div class="tab-pane fade" id="botmsg-pane"></div>
             <div class="tab-pane fade" id="backup-pane"></div>
         </div>
       </main><!-- /.content -->
@@ -1592,7 +1599,7 @@
     <script src="static/js/ng-skills.js?v=3411"></script>
     <script src="static/js/ng-mesh.js?v=345"></script>
     <!-- OD Shell v1.0 — replaces ng-shell.js; CSP-safe single-page tab switching -->
-    <script src="static/js/od-shell.js?v=838b8074"></script>
+    <script src="static/js/od-shell.js?v=213ddf4c"></script>
     <!-- Optimize tab (v3.6.0) — runtime config for cache + compress + proxy -->
     <script src="static/js/optimize.js?v=360"></script>
     <!-- B2 (v3.7.9): CSP-safe event delegation — replaces inline on*= handlers -->
@@ -1602,7 +1609,7 @@
     <script src="static/js/od-brain.js?v=77369272"></script>
     <script src="static/js/od-components.js?v=382"></script>
     <script src="static/js/od-health.js?v=526cbb55"></script>
-    <script src="static/js/od-operations.js?v=381"></script>
+    <script src="static/js/od-operations.js?v=44fe5c41"></script>
     <script src="static/js/od-compliance-ext.js?v=101"></script>
     <script src="static/js/od-ops-health.js?v=e17f6a45"></script>
     <script src="static/js/od-store-check.js?v=165f9bf0"></script>
@@ -1633,6 +1640,11 @@
     <script src="static/js/od-connections.js?v=117af437"></script>
     <script src="static/js/od-apps.js?v=b90a840a"></script>
     <script src="static/js/od-mcp.js?v=05ec92d3"></script>
+    <!-- 4.1.25: images and documents card, shared by the Documents & Images pane -->
+    <script src="static/js/od-features.js?v=50ce46c0"></script>
+    <script src="static/js/od-botmessages.js?v=a9b3f3d8"></script>
+    <script src="static/js/od-sources.js?v=966ca37d"></script>
+    <script src="static/js/od-media.js?v=25fbed5e"></script>
 
     <!-- Aggressive compression warning modal (v3.6.0 M-03) -->
     <div class="modal fade" id="optimizeAggressiveModal" tabindex="-1" aria-labelledby="optimizeAggressiveModalLabel" aria-hidden="true">

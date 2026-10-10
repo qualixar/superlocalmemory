@@ -229,3 +229,16 @@ def test_the_health_monitor_counts_and_may_kill_the_media_worker():
     cmd = "/x/venv/bin/python -i -I /site/superlocalmemory/runtimes/multimodal_worker.py"
     assert any(i in cmd for i in HealthMonitor._WORKER_IDENTIFIERS)
     assert HealthMonitor._EMBEDDING_IDENTIFIER not in cmd
+
+
+def test_the_factory_takes_the_image_model_from_the_space_plan(stub_env, tmp_path, no_spawn, monkeypatch):
+    features._write_features(tmp_path, {"schema": 1, "media": {"enabled": True}})
+    monkeypatch.setattr(worker_client, "register_media_stop_hook", lambda f: None)
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    worker_client._CLIENTS.clear()
+    paired = worker_client.media_embedder(env=stub_env, data_root=tmp_path)
+    assert paired.model_id == "nomic-ai/nomic-embed-vision-v1.5" and paired.role == "image"
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "separate")
+    separate = worker_client.media_embedder(env=stub_env, data_root=tmp_path)
+    assert separate is not paired and separate.role == ""
+    worker_client._CLIENTS.clear()

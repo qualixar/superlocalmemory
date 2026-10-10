@@ -16,6 +16,7 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { printWhatsNew, runMediaStep } = require('./postinstall/media-request.js');
 
 const MIN_PYTHON = Object.freeze([3, 12]);
 const MAX_PYTHON_EXCLUSIVE = Object.freeze([3, 15]);
@@ -416,12 +417,16 @@ function main(argv = process.argv.slice(2)) {
   console.log('      slm upgrade-hosts');
   console.log('');
   console.log('  Prefer to tune performance profiles? Use:  slm reconfigure');
+  printWhatsNew();
   console.log('');
   return 0;
 }
 
 if (require.main === module) {
-  process.exit(main());
+  const code = main();
+  const done = () => process.exit(code);
+  if (code !== 0) done();
+  else runMediaStep({ argv: process.argv.slice(2) }).then(done, done);
 }
 
 module.exports = {
@@ -430,6 +435,7 @@ module.exports = {
   hasNvidiaGpu,
   isSupportedPython,
   main,
+  runMediaStep,
   parsePythonVersion,
   probePython,
   pypiSpecifier,

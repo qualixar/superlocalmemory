@@ -4,16 +4,17 @@
 
 """Image and document routes (local only).
 
-``POST /api/v3/media/remember`` saves an image (a file path on this machine, base64 data or an
-https download link) and ``POST /api/v3/documents`` queues a PDF (a file path or base64 data); neither is part of any
-remote tool list. The thumbnail, job-status and document-removal routes answer only for the profile the item
-belongs to.
+``POST /api/v3/media/remember`` saves an image from a file path on this machine,
+base64 data or an https download link, and ``POST /api/v3/documents`` queues a
+PDF; neither is part of any remote tool list. The thumbnail, job-status and
+document-removal routes answer only for the profile the item belongs to.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import dataclasses
 import re
 from pathlib import Path
@@ -135,6 +136,54 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
     require_permission(request, Permission.DELETE, profile=profile)
     report = await asyncio.to_thread(run_gc, profile, req.dry_run)
     return JSONResponse(dataclasses.asdict(report))
+
+
+def _decode_cursor(cursor: str) -> tuple[str, str] | None:
+    """The (created_at, media_id) a cursor stands for; 400 when it is not one of ours."""
+    if not cursor:
+        return None
+    try:
+        stamp, _, media_id = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8").partition("|")
+    except (binascii.Error, UnicodeError, ValueError):
+        raise HTTPException(400, detail="Bad cursor.") from None
+    if not stamp or not _ID.fullmatch(media_id):
+        raise HTTPException(400, detail="Bad cursor.")
+    return stamp, media_id
+
+
+def _encode_cursor(row: dict) -> str:
+    return base64.urlsafe_b64encode(f"{row['created_at']}|{row['media_id']}".encode()).decode("ascii")
+
+
+def _list_page(profile: str, limit: int, after: tuple[str, str] | None) -> dict:
+    from superlocalmemory.media import open_media_store
+
+    store = open_media_store()
+    if store is None:
+        return {"items": [], "next_cursor": None}
+    try:
+        rows = store.list_images(profile, limit=limit + 1, after=after)
+    finally:
+        store.close()
+    page = rows[:limit]
+    return {"items": page, "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None}
+
+
+@router.get("/media")
+async def list_images(request: Request, profile_id: str = "", cursor: str = Query("", max_length=200),
+                      limit: int = Query(60, ge=1, le=200)):
+    """Saved images of this profile, newest first, a page at a time."""
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.rbac_enforce import require_permission
+    from superlocalmemory.server.routes.helpers import require_engine
+
+    _require_local(request)
+    engine = require_engine(request)
+    profile = _profile(engine, profile_id)
+    require_permission(request, Permission.READ, profile=profile)
+    after = _decode_cursor(cursor)
+    found = await asyncio.to_thread(_list_page, profile, limit, after)
+    return JSONResponse(found, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/media/{media_id}/thumb")
@@ -273,10 +322,6 @@ async def remove(document_id: str, request: Request, profile_id: str = "", hard:
     if not _ID.fullmatch(document_id):
         raise HTTPException(404, detail="Not found.")
     enforce_forget_governance(request, engine, actor_id=actor_id, profile=profile, target=document_id)
-    if hard:
-        if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
-            raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
-        return {"removed": True, "document_id": document_id, "erased": True}
     if hard:
         if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
             raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")

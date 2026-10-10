@@ -27,7 +27,7 @@ README = REPO_ROOT / "README.md"
 # raw server, all tools). Pinned by
 # tests/test_mcp/test_mcp_exposure_contract.py
 # (`test_registration_exposure_is_exact_and_duplicate_free`, exposure
-# "whole", expected_count 108).
+# "whole", expected_count 107).
 _WHOLE_TOOLS_COUNT = 108
 
 # "| `core` | 18 |" and "| `full` (and unset) | 54 |".

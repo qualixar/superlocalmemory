@@ -24,7 +24,7 @@ import stat
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -32,6 +32,7 @@ from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,8 @@ class MediaInput:
     path: Path | None = None
     base64: str | None = None
     file_name: str = ""
+    #: Internal only: bytes the caller already read safely (folder sources). Routes never set it.
+    data: bytes | None = None
     download_url: str | None = None
     remote: bool = False
 
@@ -97,6 +100,7 @@ class _Job:
     config: Any
     redact: bool
     root: Path
+    plan: Any = None
     work: Path = field(default_factory=Path)
     placed: str = ""
     placed_new: bool = False
@@ -121,6 +125,10 @@ def _download(inp: MediaInput) -> bytes:
 
 
 def _read_input(inp: MediaInput) -> bytes:
+    if inp.data is not None:
+        if len(inp.data) > MAX_FILE_BYTES:
+            raise _refuse("That image is too large (25 MB limit).")
+        return inp.data
     if inp.download_url:
         return _download(inp)
     if inp.base64 is not None:
@@ -159,20 +167,29 @@ def _check_kind(data: bytes) -> None:
         raise _refuse("That file type is not supported (PNG, JPEG, GIF and WEBP only).")
 
 
+_OFF = "Images are turned off. Turn them on in settings to save images."
+
+
+def _unavailable() -> _Stop:
+    from superlocalmemory.media.readiness import media_refusal
+
+    return _refuse(media_refusal() or _OFF)
+
+
 def _resolve(client: Any, store: Any) -> tuple[Any, Any, bool]:
     if client is None:
         from superlocalmemory.runtimes.worker_client import media_embedder
 
         client = media_embedder()
     if client is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     opened = store is None
     if store is None:
         from superlocalmemory.media import open_media_store
 
         store = open_media_store()
     if store is None:
-        raise _refuse("Images are turned off. Turn them on in settings to save images.")
+        raise _unavailable()
     return client, store, opened
 
 
@@ -295,10 +312,19 @@ def _captured_at(exif: dict[str, Any]) -> str | None:
     return f"{found[1]}-{found[2]}-{found[3]}T{found[4]}" if found else None
 
 
-def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str) -> str:
+def _check_space(job: _Job, dim: int) -> dict[str, Any]:
+    """The signature this picture's space must carry; refuses before anything is saved when the index differs."""
+    plan = replace(job.plan, image_model=str(job.client.model_id), image_revision=str(job.client.revision), dim=dim)
+    if not compatible(plan, job.store.active_signature()):
+        raise _refuse("The picture index was built with a different model; rebuild it from the dashboard.")
+    return plan.signature()
+
+
+def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str,
+               signature: dict[str, Any]) -> str:
     media_id = job.store.insert_item(**fields)
     try:
-        space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector))
+        space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector), signature)
         job.store.put_vector(media_id, space, profile_id, vector)
     except Exception as exc:  # noqa: BLE001 - the row is kept; only searching by picture is lost
         logger.warning("image %s saved without its vector (%s)", media_id, type(exc).__name__)
@@ -317,12 +343,14 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     relpath = _place(job, info)
     ocr = _ocr(job, info)
     vector = job.client.embed_images([info["stored_path"]], wait_cold=False)[0]
+    signature = _check_space(job, len(vector))
     near = _near_duplicate(job.store, profile_id, info.get("phash"))
     media_id = uuid.uuid4().hex
     request = SaveRequest(
         segments=_segments(args["content"], ocr.text), profile_id=profile_id, source_type="media",
         trusted_actor_id=args["actor_id"], tags=args["tags"], session_date=args["session_date"],
-        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool"}},
+        trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool",
+                                          **(args.get("folder") or {})}},
         idempotency_key=args["idempotency_key"])
     try:
         saved = submit_memory(args["runtime"], request, config=job.config)
@@ -335,11 +363,12 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         stored_sha256=info["stored_sha"], phash=info.get("phash"), mime=info["mime"],
         bytes=info["stored_size"], width=info.get("width"), height=info.get("height"),
         original_relpath=relpath, exif_json=info.get("exif") or {}, captured_at=_captured_at(info.get("exif") or {}),
-        anchor_memory_id=saved.memory_id, origin="tool", thumb_webp=info["thumb"],
+        anchor_memory_id=saved.memory_id,
+        origin="folder" if args.get("folder") else "tool", thumb_webp=info["thumb"],
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
-        _write_row(job, fields, vector, profile_id)
+        _write_row(job, fields, vector, profile_id, signature)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
@@ -351,17 +380,17 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
 def remember_media(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, runtime: Any, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "",
-    client: Any = None, store: Any = None, cache: Any = None,
+    client: Any = None, store: Any = None, cache: Any = None, folder: dict[str, Any] | None = None,
 ) -> MediaReceipt:
     """Save an image and the words about it as one memory; see ``MediaReceipt`` for the outcomes."""
     opened = False
     store_ref = store
     try:
-        client, store_ref, opened = _resolve(client, store)
         data = _read_input(inp)
         _check_kind(data)
+        client, store_ref, opened = _resolve(client, store)
         src_sha = hashlib.sha256(data).hexdigest()
-        known = store_ref.find_by_sha(profile_id, src_sha)
+        known = store_ref.find_by_sha(profile_id, src_sha, exclude_origin=None if folder else "folder")
         if known:
             return MediaReceipt("duplicate", media_id=known["media_id"], memory_id=known["anchor_memory_id"],
                                 duplicate_of=known["media_id"])
@@ -370,7 +399,7 @@ def remember_media(
             raise _refuse("The image library is full (2 GB limit). Remove some images first.")
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
-            session_date=session_date, idempotency_key=idempotency_key))
+            session_date=session_date, idempotency_key=idempotency_key, folder=folder))
     except _Stop as stop:
         return stop.receipt
     finally:
@@ -388,7 +417,11 @@ def _run(client: Any, store: Any, cache: Any, config: Any, data: bytes, src_sha:
         except Exception:  # noqa: BLE001 - no cache just means no reuse
             cache = None
     root = Path(store.path).parent
-    job = _Job(client, store, cache, config, effective_pii_redaction(config), root)
+    try:
+        plan = current_space_plan(root)
+    except ValueError:
+        raise _refuse("That picture mode is not available in this build.") from None
+    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan)
     job.work = Path(tempfile.mkdtemp(dir=files.tmp_dir(root)))
     try:
         return _store_it(job, data, src_sha, args)
