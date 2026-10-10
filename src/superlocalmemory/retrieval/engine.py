@@ -1148,7 +1148,8 @@ class RetrievalEngine:
         media_vec = None  # pictures: one bounded embed, before dispatch (media_channel)
         if "media" not in disabled:
             from superlocalmemory.retrieval import media_channel
-            self._media_channel = self._media_channel or media_channel.for_engine(self._db)
+            self._media_channel = self._media_channel or media_channel.for_engine(
+                self._db, text_query_vector=lambda q: self._embed_query(q)[0])
             media_vec, _media_state = self._media_channel.prepare(query, profile_id)
             if _media_state and channel_status is not None:
                 channel_status["media"] = _media_state

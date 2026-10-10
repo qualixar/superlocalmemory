@@ -24,7 +24,7 @@ import stat
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -32,6 +32,7 @@ from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class _Job:
     config: Any
     redact: bool
     root: Path
+    plan: Any = None
     work: Path = field(default_factory=Path)
     placed: str = ""
     placed_new: bool = False
@@ -282,10 +284,19 @@ def _captured_at(exif: dict[str, Any]) -> str | None:
     return f"{found[1]}-{found[2]}-{found[3]}T{found[4]}" if found else None
 
 
-def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str) -> str:
+def _check_space(job: _Job, dim: int) -> dict[str, Any]:
+    """The signature this picture's space must carry; refuses before anything is saved when the index differs."""
+    plan = replace(job.plan, image_model=str(job.client.model_id), image_revision=str(job.client.revision), dim=dim)
+    if not compatible(plan, job.store.active_signature()):
+        raise _refuse("The picture index was built with a different model; rebuild it from the dashboard.")
+    return plan.signature()
+
+
+def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str,
+               signature: dict[str, Any]) -> str:
     media_id = job.store.insert_item(**fields)
     try:
-        space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector))
+        space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector), signature)
         job.store.put_vector(media_id, space, profile_id, vector)
     except Exception as exc:  # noqa: BLE001 - the row is kept; only searching by picture is lost
         logger.warning("image %s saved without its vector (%s)", media_id, type(exc).__name__)
@@ -304,6 +315,7 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     relpath = _place(job, info)
     ocr = _ocr(job, info)
     vector = job.client.embed_images([info["stored_path"]], wait_cold=False)[0]
+    signature = _check_space(job, len(vector))
     near = _near_duplicate(job.store, profile_id, info.get("phash"))
     media_id = uuid.uuid4().hex
     request = SaveRequest(
@@ -326,7 +338,7 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
-        _write_row(job, fields, vector, profile_id)
+        _write_row(job, fields, vector, profile_id, signature)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
@@ -375,7 +387,11 @@ def _run(client: Any, store: Any, cache: Any, config: Any, data: bytes, src_sha:
         except Exception:  # noqa: BLE001 - no cache just means no reuse
             cache = None
     root = Path(store.path).parent
-    job = _Job(client, store, cache, config, effective_pii_redaction(config), root)
+    try:
+        plan = current_space_plan(root)
+    except ValueError:
+        raise _refuse("That picture mode is not available in this build.") from None
+    job = _Job(client, store, cache, config, effective_pii_redaction(config), root, plan)
     job.work = Path(tempfile.mkdtemp(dir=files.tmp_dir(root)))
     try:
         return _store_it(job, data, src_sha, args)

@@ -319,3 +319,29 @@ def test_a_fifo_is_refused_without_blocking(env, tmp_path, monkeypatch):
     finally:
         os.close(fd)
     assert r.status == "refused" and env.client.calls == []
+
+
+# -- picture index and the space plan ------------------------------------------------
+
+
+def test_ingest_records_the_space_signature(env, monkeypatch):
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    assert save(env).status == "stored"
+    sig = env.store.active_signature()
+    assert sig["mode"] == "paired" and sig["text_model"] == "nomic-ai/nomic-embed-text-v1.5"
+    assert (sig["image_model"], sig["image_revision"], sig["dim"]) == ("fake:test", "r1", DIM)
+
+
+def test_ingest_refuses_when_the_index_was_built_for_another_space(env, monkeypatch):
+    assert save(env).status == "stored"  # separate
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    receipt = save(env, png("b"))
+    assert receipt.status == "refused" and "different model" in receipt.reason and "rebuild" in receipt.reason
+    assert len(env.runtime.requests) == 1
+    assert env.store.count_and_bytes("p1")[0] == 1
+    assert not list((env.root / "media" / "tmp").iterdir())
+
+
+def test_ingest_accepts_when_the_space_matches(env, monkeypatch):
+    monkeypatch.setenv("SLM_MEDIA_SPACE_MODE", "paired")
+    assert save(env).status == "stored" and save(env, png("b")).status == "stored"

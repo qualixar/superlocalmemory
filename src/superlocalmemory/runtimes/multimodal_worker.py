@@ -12,7 +12,7 @@ Every request may carry an ``"id"``; the reply echoes it.
 
   {"cmd": "ping"}   -> {"ok": true, "loaded": bool, "model": "...", "device": "cpu|mps"}
   {"cmd": "load", "model": "<repo | folder | fake:768>", "revision": "...",
-   "hf_home": "...", "device": "auto|cpu"}
+   "hf_home": "...", "device": "auto|cpu", "role": "|image"}
                     -> {"ok": true, "dim": 768} | {"ok": false, "error": "..."}
   {"cmd": "embed_text", "texts": [str, ...<=64], "prompt": "SearchQuery|Document"}
                     -> {"ok": true, "vectors": [[...], ...]}
@@ -24,6 +24,9 @@ Every request may carry an ``"id"``; the reply echoes it.
   {"cmd": "ocr_image", "path": "..."}
                     -> {"ok": true, "engine": "apple_vision|rapidocr|none|fake", "text": "..."}
   {"cmd": "quit"}
+
+Role ``image`` loads a vision-only model: it embeds images, never text. A fake model
+does both whatever the role.
 
 Fake mode (``SLM_MEDIA_WORKER_FAKE=1`` or a model id ``fake:<dim>``) answers with
 deterministic unit vectors derived from a hash of the input, so the protocol can be
@@ -108,6 +111,49 @@ def _load_real(model: str, revision: str, hf_home: str, device: str) -> int:
     return _STATE["dim"]
 
 
+def _load_vision(model: str, revision: str, hf_home: str, device: str) -> int:
+    """A vision-only model (the image tower of a text+image pair). Needs the managed environment.
+
+    Untested against the real weights: whether this loader is right is checked on a machine with the model.
+    """
+    if hf_home:
+        os.environ["HF_HOME"] = hf_home
+        if os.path.isdir(hf_home) and os.listdir(hf_home):
+            os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        torch = importlib.import_module("torch")
+        transformers = importlib.import_module("transformers")
+        kwargs = {"revision": revision} if revision and not os.path.isdir(model) else {}
+        chosen = _pick_device(device)
+        processor = transformers.AutoImageProcessor.from_pretrained(model, **kwargs)
+        loaded = transformers.AutoModel.from_pretrained(model, trust_remote_code=True, **kwargs)
+        loaded = loaded.to(chosen).eval()
+    except Exception:  # noqa: BLE001 - library or weights missing, or the loader does not fit this model
+        raise _Invalid("the image model could not be loaded here; it needs the image environment "
+                       "with its model files") from None
+    _STATE.update(model=(loaded, processor, torch), device=chosen, vision=True)
+    return int(getattr(getattr(loaded, "config", None), "hidden_size", 0) or 0)
+
+
+def _encode_vision(paths: list[str]) -> list[list[float]]:
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = 100_000_000
+    model, processor, torch = _STATE["model"]
+    images = []
+    try:
+        for path in paths:
+            with Image.open(path) as img:
+                images.append(img.convert("RGB"))
+        with torch.no_grad():
+            inputs = processor(images, return_tensors="pt").to(_STATE["device"])
+            hidden = model(**inputs).last_hidden_state[:, 0]
+        return _normalise(hidden.float().cpu().tolist())
+    finally:
+        for img in images:
+            img.close()
+
+
 def _normalise(rows) -> list[list[float]]:
     out = []
     for row in rows:
@@ -147,7 +193,11 @@ def _cmd_load(req: dict) -> dict:
     model = req.get("model")
     if not isinstance(model, str) or not model:
         raise _Invalid("model is required")
+    role = req.get("role") or ""
+    if role not in ("", "image"):
+        raise _Invalid("unknown role")
     fake = model.startswith("fake:") or os.environ.get("SLM_MEDIA_WORKER_FAKE") == "1"
+    _STATE["vision"] = False
     if fake:
         try:
             dim = int(model.split(":", 1)[1]) if model.startswith("fake:") else FAKE_DIM
@@ -156,6 +206,9 @@ def _cmd_load(req: dict) -> dict:
         if not 1 <= dim <= 4096:
             raise _Invalid("bad fake model")
         _STATE.update(model=None, device="cpu", dim=dim)
+    elif role == "image":
+        _STATE["dim"] = _load_vision(model, str(req.get("revision") or ""), str(req.get("hf_home") or ""),
+                                     str(req.get("device") or "auto"))
     else:
         _STATE["dim"] = _load_real(model, str(req.get("revision") or ""), str(req.get("hf_home") or ""),
                                    str(req.get("device") or "auto"))
@@ -171,6 +224,8 @@ def _cmd_embed_text(req: dict) -> dict:
         raise _Invalid("invalid texts")
     if _STATE["fake"]:
         return {"vectors": [_fake_vector(t.encode("utf-8"), _STATE["dim"]) for t in texts]}
+    if _STATE.get("vision"):
+        raise _Invalid("this model embeds images only")
     rows = _STATE["model"].encode(texts, prompt_name=prompt, normalize_embeddings=True, show_progress_bar=False)
     return {"vectors": _normalise(rows)}
 
@@ -196,7 +251,7 @@ def _cmd_embed_image(req: dict) -> dict:
             with open(path, "rb") as fh:
                 vectors.append(_fake_vector(fh.read(), _STATE["dim"]))
         return {"vectors": vectors}
-    return {"vectors": _encode_images(paths)}
+    return {"vectors": _encode_vision(paths) if _STATE.get("vision") else _encode_images(paths)}
 
 
 def _image_ops():

@@ -176,8 +176,31 @@ class MediaStore(JobsMixin, EraseMixin):
         row = self._read().execute("SELECT * FROM media_spaces WHERE state = 'active'").fetchone()
         return dict(row) if row else None
 
-    def ensure_active_space(self, model_id: str, model_revision: str, dim: int = DEFAULT_DIM) -> str:
-        """The active space for this model, created (and the old one retired) when it differs."""
+    def active_signature(self) -> dict[str, Any] | None:
+        """What the active space was built with, or None when there is no active space.
+
+        A space made before signatures were recorded is a ``separate`` space of its own model.
+        """
+        space = self.active_space()
+        if space is None:
+            return None
+        row = self._read().execute("SELECT value FROM media_schema WHERE key = ?",
+                                   (f"space_signature:{space['space_id']}",)).fetchone()
+        try:
+            found = json.loads(row[0]) if row else None
+        except ValueError:
+            found = None
+        if isinstance(found, dict):
+            return found
+        return {"mode": "separate", "image_model": space["model_id"], "image_revision": space["model_revision"],
+                "dim": space["dim"], "text_model": ""}
+
+    def ensure_active_space(self, model_id: str, model_revision: str, dim: int = DEFAULT_DIM,
+                            signature: dict[str, Any] | None = None) -> str:
+        """The active space for this model, created (and the old one retired) when it differs.
+
+        ``signature`` is recorded with a new space (a row in ``media_schema``; no table changes).
+        """
         with self._write() as conn:
             row = conn.execute("SELECT * FROM media_spaces WHERE state = 'active'").fetchone()
             if row and (row["model_id"], row["model_revision"], row["dim"]) == (model_id, model_revision, dim):
@@ -190,6 +213,9 @@ class MediaStore(JobsMixin, EraseMixin):
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {vec_table(space_id)} USING vec0("
                 f"profile_id TEXT PARTITION KEY, embedding float[{int(dim)}] distance_metric=cosine)")
+            if signature is not None:
+                conn.execute("INSERT OR REPLACE INTO media_schema(key, value) VALUES (?, ?)",
+                             (f"space_signature:{space_id}", json.dumps(signature, sort_keys=True)))
             return space_id
 
     # -- items -------------------------------------------------------------

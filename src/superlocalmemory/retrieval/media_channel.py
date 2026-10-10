@@ -12,6 +12,11 @@ The question's vector comes from the already-warm media worker, asked once
 before dispatch and for at most a third of a second. A cold worker is started in
 the background and this recall goes on without pictures, saying so as
 ``warming``. Nothing here loads a model or spawns a process inside the call.
+
+When the picture space is paired with the text model (``runtimes.space_plan``)
+the question's vector is the text vector the recall already computed and the
+media worker is not asked at all. If the stored pictures were built for another
+space, the channel stays off.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from superlocalmemory.retrieval import channel_status as chstat
+from superlocalmemory.runtimes.space_plan import SpacePlan, compatible
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +38,7 @@ ACTIVE_TTL_S = 30.0
 QUERY_CACHE_MAX = 256
 MEDIA_SOURCE_TYPES = frozenset({"media", "document"})
 _IN_CHUNK = 500
+MISMATCH_LOG_S = 60.0
 
 
 class MediaChannel:
@@ -41,14 +48,21 @@ class MediaChannel:
 
     def __init__(self, store_factory: Callable[[], Any], embedder_factory: Callable[[], Any],
                  db: Any = None, *, clock: Callable[[], float] = time.monotonic,
-                 ttl_s: float = ACTIVE_TTL_S) -> None:
+                 ttl_s: float = ACTIVE_TTL_S,
+                 text_query_vector: Callable[[str], list[float] | None] | None = None,
+                 plan_factory: Callable[[], SpacePlan | None] | None = None,
+                 enabled_factory: Callable[[], bool] | None = None) -> None:
         self._store_factory = store_factory
         self._embedder_factory = embedder_factory
         self._db = db
         self._clock = clock
         self._ttl = ttl_s
+        self._text_query_vector = text_query_vector
+        self._plan_factory = plan_factory
+        self._enabled_factory = enabled_factory
+        self._mismatch_logged: dict[str, float] = {}
         self._active: dict[str, tuple[float, bool]] = {}
-        self._queries: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+        self._queries: OrderedDict[tuple[str, str, str], list[float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def is_active(self, profile_id: str) -> bool:
@@ -63,22 +77,48 @@ class MediaChannel:
             self._active[profile_id] = (now, active)
         return active
 
+    def _plan(self) -> SpacePlan | None:
+        return self._plan_factory() if self._plan_factory is not None else None
+
+    def _on(self, plan: SpacePlan | None) -> bool:
+        """Media on and, outside paired mode, the worker's environment ready."""
+        if plan is not None and plan.query_from_text:
+            return self._enabled_factory is None or bool(self._enabled_factory())
+        return self._embedder_factory() is not None
+
     def _probe(self, profile_id: str) -> bool:
         try:
-            if self._db is None or self._embedder_factory() is None:
+            plan = self._plan()
+            if self._db is None or not self._on(plan):
                 return False
             store = self._store_factory()
-            return store is not None and store.vector_count(profile_id) > 0
+            if store is None or store.vector_count(profile_id) <= 0:
+                return False
+            if plan is not None and not compatible(plan, store.active_signature()):
+                self._log_mismatch(profile_id)
+                return False
+            return True
         except Exception as exc:  # noqa: BLE001 - a broken picture index never breaks recall
             logger.debug("picture channel is off for this recall (%s)", type(exc).__name__)
             return False
 
+    def _log_mismatch(self, profile_id: str) -> None:
+        now = self._clock()
+        last = self._mismatch_logged.get(profile_id)
+        if last is None or now - last >= MISMATCH_LOG_S:
+            self._mismatch_logged[profile_id] = now
+            logger.debug("picture channel is off: space_mismatch")
+
     def query_vector(self, query: str) -> list[float] | None:
-        """The question as a vector, or None while the worker is cold or busy."""
+        """The question as a vector, or None while the worker (or text embedder) is cold or busy."""
+        plan = self._plan()
+        if plan is not None and plan.query_from_text:
+            return self._text_vector(plan, query)
         client = self._embedder_factory()
         if client is None:
             return None
-        key = (str(getattr(client, "model_id", "")), query)
+        mode = plan.mode if plan is not None else ""
+        key = (mode, str(getattr(client, "model_id", "")), query)
         with self._lock:
             cached = self._queries.get(key)
             if cached is not None:
@@ -92,6 +132,24 @@ class MediaChannel:
             while len(self._queries) > QUERY_CACHE_MAX:
                 self._queries.popitem(last=False)
         return vector
+
+    def _text_vector(self, plan: SpacePlan, query: str) -> list[float] | None:
+        if self._text_query_vector is None:
+            return None
+        key = (plan.mode, plan.text_model, query)
+        with self._lock:
+            cached = self._queries.get(key)
+            if cached is not None:
+                self._queries.move_to_end(key)
+                return cached
+        vector = self._text_query_vector(query)
+        if vector is None:
+            return None
+        with self._lock:
+            self._queries[key] = list(vector)
+            while len(self._queries) > QUERY_CACHE_MAX:
+                self._queries.popitem(last=False)
+        return list(vector)
 
     def prepare(self, query: str, profile_id: str) -> tuple[list[float] | None, str | None]:
         """``(vector, None)`` to run, ``(None, 'warming')`` when only the worker is cold,
@@ -139,8 +197,12 @@ def _data_root(db: Any) -> Path | None:
     return Path(path).parent if isinstance(path, (str, Path)) else None
 
 
-def for_engine(db: Any) -> MediaChannel:
-    """The channel for a retrieval engine's memory database. Builds nothing heavy."""
+def for_engine(db: Any, *, text_query_vector: Callable[[str], list[float] | None] | None = None) -> MediaChannel:
+    """The channel for a retrieval engine's memory database. Builds nothing heavy.
+
+    ``text_query_vector`` is the engine's own text query embedding, used when pictures
+    share the text space.
+    """
     root = _data_root(db)
     holder: dict[str, Any] = {}
     lock = threading.Lock()
@@ -160,7 +222,26 @@ def for_engine(db: Any) -> MediaChannel:
 
         return media_embedder(data_root=root)
 
-    return MediaChannel(store, embedder, db if root is not None else None)
+    plan_cache: list[Any] = [0.0, None]
+
+    def plan() -> SpacePlan | None:
+        if root is None:
+            return None
+        now = time.monotonic()
+        with lock:
+            if plan_cache[1] is None or now - plan_cache[0] >= ACTIVE_TTL_S:
+                from superlocalmemory.runtimes.space_plan import current_space_plan
+
+                plan_cache[:] = [now, current_space_plan(root)]
+            return plan_cache[1]
+
+    def enabled() -> bool:
+        from superlocalmemory.runtimes.features import media_enabled
+
+        return root is not None and media_enabled(root)
+
+    return MediaChannel(store, embedder, db if root is not None else None,
+                        text_query_vector=text_query_vector, plan_factory=plan, enabled_factory=enabled)
 
 
 def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
