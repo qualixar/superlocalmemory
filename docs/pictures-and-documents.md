@@ -24,6 +24,7 @@ Below 16 GB the switch is refused with the reason, because the picture model and
 | One PDF | 100 MB (change with `SLM_DOC_MAX_MB`); 25 MB as pasted data in a tool call from an app on this computer, and 512 KB when a remote app pastes it |
 | PDF pages | 500. A longer PDF is refused as a whole, not cut short. |
 | Reading a PDF | 30 seconds per page and 20 minutes per document; the reader is stopped past 1.6 GB of memory |
+| Picture and text reader memory | Checked while a request runs, twice a second: past 4.5 GB the reader is stopped, that request fails with a plain message, and the next one starts a fresh reader. On Linux the reader also starts with a hard limit above that, so one huge request fails inside the reader instead of taking the machine's memory. Text over 8,000 characters, a picture file over 25 MB or one with more than 50 million pixels is refused before it is sent. |
 | Library | 2 GB of pictures and PDFs per profile |
 
 A PDF that cannot be finished (password-protected, too many pages, a page that takes too long) is marked as not finished with the reason in plain words. Pages read before it stopped stay in your memory; removing the document hides them too. Dropping the same file again retries it.
