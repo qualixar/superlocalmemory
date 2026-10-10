@@ -346,6 +346,12 @@ _CLIENTS: dict[tuple[str, str, str], MediaWorkerClient] = {}
 _CLIENTS_LOCK = threading.Lock()
 
 
+def live_clients() -> list[MediaWorkerClient]:
+    """The clients that already exist in this process; creates nothing and starts nothing."""
+    with _CLIENTS_LOCK:
+        return list(_CLIENTS.values())
+
+
 def media_embedder(*, env: Any = None, data_root: str | Path | None = None, model_id: str | None = None,
                    revision: str | None = None) -> MediaWorkerClient | None:
     """The shared client, or None unless images and documents are on and the environment is ready.
@@ -374,4 +380,4 @@ def media_embedder(*, env: Any = None, data_root: str | Path | None = None, mode
         return client
 
 
-__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "media_embedder"]
+__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder"]

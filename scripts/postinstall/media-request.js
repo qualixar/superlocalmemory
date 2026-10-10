@@ -19,6 +19,17 @@ const readline = require('readline');
 
 const FEATURES_FILE = 'features.json';
 
+const GIB = 1024 ** 3;
+// Same threshold as the Python side (MEDIA_RAM_WARN_BYTES in runtimes/media_env.py).
+const RAM_WARN_BYTES = 7.5 * GIB;
+
+/** One plain sentence for a small machine, or '' when memory is enough or unknown. Never blocks. */
+function ramWarning(totalBytes) {
+  if (!(totalBytes > 0 && totalBytes < RAM_WARN_BYTES)) return '';
+  return 'This computer has ' + (totalBytes / GIB).toFixed(1) + ' GB of memory. Images and documents work best '
+    + 'with 8 GB or more and may slow other apps while they work. You can still turn them on.';
+}
+
 function printWhatsNew(log = console.log) {
   log('');
   log("What's new in 4.1.25:");
@@ -97,8 +108,14 @@ function askYesNo(question) {
  * Decide and (unless dry-run) record. `interactive` allows the question,
  * which defaults to No. Returns true when a request was recorded.
  */
-async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesNo, log = console.log }) {
+async function handleMediaChoice({ args, env, slmDir, interactive, ask = askYesNo, log = console.log,
+  totalMem = os.totalmem() }) {
   let wanted = mediaRequested(args, env);
+  const warning = ramWarning(totalMem);
+  if ((wanted || interactive) && warning) {
+    log('');
+    log('SLM: ' + warning);
+  }
   if (!wanted && interactive) {
     log('');
     wanted = await ask('Turn on images and documents later? It downloads about 1.5 GB when SLM next starts. [y/N] ');
@@ -141,4 +158,4 @@ async function runMediaStep({ argv = [], env = process.env, tty, ask, log = cons
   }
 }
 
-module.exports = { runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };
+module.exports = { ramWarning, runMediaStep, resolveDataRoot, printWhatsNew, mediaRequested, recordMediaRequest, handleMediaChoice, FEATURES_FILE };

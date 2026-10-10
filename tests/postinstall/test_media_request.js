@@ -202,3 +202,47 @@ test('the npm hook prints the what is new banner, from the shared module', () =>
   assert.match(source, /require\('\.\/postinstall\/media-request\.js'\)/);
   assert.equal(require(INSTALLER).printWhatsNew, media.printWhatsNew);
 });
+
+const GIB = 1024 ** 3;
+
+test('a small machine sees the memory warning before the question, and a yes still records', async () => {
+  const dir = tmp();
+  const lines = [];
+  let askedAfterWarning = false;
+  const ask = async () => { askedAfterWarning = lines.some((l) => /4\.0 GB/.test(l)); return true; };
+  const ok = await media.handleMediaChoice({
+    args: {}, env: {}, slmDir: dir, interactive: true, ask, log: (l) => lines.push(l), totalMem: 4 * GIB,
+  });
+  assert.equal(ok, true);
+  assert.equal(askedAfterWarning, true, 'the warning must come before the question');
+  assert.ok(lines.some((l) => /8 GB or more/.test(l)));
+  assert.equal(fs.existsSync(path.join(dir, 'features.json')), true);
+});
+
+test('the warning is also shown when the choice comes from a flag or the environment', async () => {
+  const lines = [];
+  const ok = await media.handleMediaChoice({
+    args: { media: true }, env: {}, slmDir: tmp(), interactive: false, log: (l) => lines.push(l), totalMem: 6 * GIB,
+  });
+  assert.equal(ok, true);
+  assert.ok(lines.some((l) => /6\.0 GB/.test(l)));
+});
+
+test('a machine with enough memory sees no warning, and nothing is shown when nobody asked', async () => {
+  const lines = [];
+  await media.handleMediaChoice({
+    args: { media: true }, env: {}, slmDir: tmp(), interactive: false, log: (l) => lines.push(l), totalMem: 16 * GIB,
+  });
+  assert.ok(!lines.some((l) => /GB of memory/.test(l)));
+  const quiet = [];
+  await media.handleMediaChoice({
+    args: {}, env: {}, slmDir: tmp(), interactive: false, log: (l) => quiet.push(l), totalMem: 4 * GIB,
+  });
+  assert.deepEqual(quiet, []);
+});
+
+test('ramWarning is empty for an unknown or large amount', () => {
+  assert.equal(media.ramWarning(0), '');
+  assert.equal(media.ramWarning(8 * GIB), '');
+  assert.match(media.ramWarning(4 * GIB), /4\.0 GB of memory/);
+});

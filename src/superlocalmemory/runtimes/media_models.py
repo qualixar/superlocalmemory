@@ -55,6 +55,14 @@ def rss_limit_mb_for(model: str) -> int:
     return profile.rss_limit_mb if profile is not None else DEFAULT_RSS_LIMIT_MB
 
 
+def effective_rss_limit_mb(model: str) -> int:
+    """The cap the worker applies to ``model``: the environment override, else the table."""
+    try:
+        return int(float(os.environ["SLM_MEDIA_WORKER_RSS_LIMIT_MB"]))
+    except (KeyError, ValueError):
+        return rss_limit_mb_for(model)
+
+
 def load_mb_for(model: str) -> int:
     """Free memory to ask for before loading ``model`` (the default covers text and fake models)."""
     profile = profile_for(model)
@@ -80,5 +88,5 @@ def watchdog_limit_mb(default: int) -> int:
     return max(wanted, 0)
 
 
-__all__ = ["DEFAULT_LOAD_MB", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "MODEL_PROFILES", "ModelProfile",
+__all__ = ["DEFAULT_LOAD_MB", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
            "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]

@@ -176,3 +176,37 @@ def test_media_line_unsupported_and_failed():
     assert "can't be set up on this computer yet" in features_cmd.media_line(_reply("unsupported")["media"])
     line = features_cmd.media_line(_reply("failed")["media"])
     assert "set-up failed" in line and "slm doctor" in line
+
+
+WARNING = "This computer has 4.0 GB of memory. Images and documents work best with 8 GB or more."
+
+
+def _small_machine(state):
+    media = dict(STATUS["media"], ram_warning=WARNING)
+    state["reply"] = {"media": media, "mesh": STATUS["mesh"]}
+
+
+def test_enable_prints_the_memory_warning_before_installing_and_still_proceeds_with_yes(daemon, monkeypatch, capsys):
+    seen, state = daemon
+    _small_machine(state)
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
+    out = capsys.readouterr().out
+    assert WARNING in out
+    assert any(m == "POST" and p.endswith("/media/enable") for m, p, _b in seen)
+
+
+def test_enable_asks_after_the_warning_and_a_no_changes_nothing(daemon, monkeypatch, capsys):
+    seen, state = daemon
+    _small_machine(state)
+    _tty(monkeypatch, True)
+    monkeypatch.setattr("builtins.input", lambda *_: "")
+    media_cmd.cmd_media(_args(media_command="enable"))
+    assert WARNING in capsys.readouterr().out
+    assert not any(m == "POST" for m, *_ in seen)
+
+
+def test_enable_prints_no_warning_on_a_big_machine(daemon, monkeypatch, capsys):
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
+    assert "memory" not in capsys.readouterr().out.lower().replace("memories", "")

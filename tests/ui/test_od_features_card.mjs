@@ -133,3 +133,42 @@ describe('turn-on card', () => {
         assert.match(host.textContent, /not available in this build/);
     });
 });
+
+describe('memory warning on the turn-on card', () => {
+    const WARNING = 'This computer has 4.0 GB of memory. Images and documents work best with 8 GB or more.';
+
+    it('shows the warning in the confirmation text and still turns on after a yes', async () => {
+        const h = setup({ enabled: false, ram_warning: WARNING });
+        await h.mount();
+        btn(h, 'Turn on').click();
+        await flushPromises();
+        assert.equal(h.confirms.length, 1);
+        assert.ok(h.confirms[0].consequence.includes(WARNING));
+        assert.match(h.confirms[0].consequence, /1\.5 GB/);
+        assert.equal(writes(h).length, 1);
+    });
+
+    it('a declined confirmation still sends nothing', async () => {
+        const h = setup({ enabled: false, ram_warning: WARNING });
+        h.confirmAnswer = false;
+        await h.mount();
+        btn(h, 'Turn on').click();
+        await flushPromises();
+        assert.equal(writes(h).length, 0);
+    });
+
+    it('also shows on the card itself, as a note, before the button is pressed', async () => {
+        const h = setup({ enabled: false, ram_warning: WARNING });
+        await h.mount();
+        assert.ok(h.host.textContent.includes(WARNING));
+    });
+
+    it('no warning text on a machine with enough memory', async () => {
+        const h = setup({ enabled: false });
+        await h.mount();
+        btn(h, 'Turn on').click();
+        await flushPromises();
+        assert.ok(!/GB of memory/.test(h.confirms[0].consequence));
+        assert.ok(!/GB of memory/.test(h.host.textContent));
+    });
+});
