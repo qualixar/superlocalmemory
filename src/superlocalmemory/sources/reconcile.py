@@ -27,7 +27,10 @@ from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
-from superlocalmemory.sources.store import SourceStore, carried_entries, current_documents, entries_of, memory_entries, pending_documents, replaced_documents
+from superlocalmemory.sources.store import (
+    SourceStore, carried_entries, current_documents, entries_of, memory_entries, pending_documents,
+    replaced_documents, replaced_pictures,
+)
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
 logger = logging.getLogger(__name__)
@@ -150,7 +153,10 @@ def _supersede(p: _Pass, row: dict[str, Any] | None, resent: frozenset[str] = fr
         # (the purge erases it after the grace period); one that could not be hidden stays reachable.
         entries.append({"hd": row["document_id"]} if undone else {"rd": row["document_id"], "sup": utc_stamp()})
     p.stats.errors += undone
-    retire.hide_picture(p.store, row)
+    if row.get("media_id") and row.get("reason") != "shared":
+        hidden = retire.hide_picture(p.store, row)  # recorded either way; erased only once hidden and aged
+        entries.append({"rp": row["media_id"], "sup": utc_stamp()} if hidden else {"rp": row["media_id"]})
+        p.stats.errors += int(not hidden)
     retire.release_copies(p.store, p.source, row)
     return entries
 
@@ -158,7 +164,8 @@ def _supersede(p: _Pass, row: dict[str, Any] | None, resent: frozenset[str] = fr
 def _still_old(entries: list[dict[str, Any]], out: ingest.Ingested) -> list[dict[str, Any]]:
     """Drop records of replaced documents that the new save uses again (they are current, not old)."""
     current = current_documents(out.document_id, out.entries)
-    return [e for e in entries if (e.get("hd") or e.get("rd")) not in current]
+    return [e for e in entries
+            if not ((e.get("hd") or e.get("rd")) in current or (e.get("rp") and e["rp"] == out.media_id))]
 
 
 def _quarantine(p: _Pass, e: Entry, row: dict[str, Any] | None, sha: str, hits: list) -> None:
@@ -307,6 +314,7 @@ def _tombstone_missing(p: _Pass, seen: set[str], walked: WalkResult) -> None:
             continue
         entries = entries_of(row)
         if (memory_entries(entries) or pending_documents(entries) or replaced_documents(entries)
+                or replaced_pictures(entries)
                 or row.get("document_id")):
             p.stats.errors += retire.hide_file(p.host, p.store, p.runtime, p.source, row, tombstone=True)
             p.stats.tombstoned += 1

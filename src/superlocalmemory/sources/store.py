@@ -38,9 +38,15 @@ def replaced_documents(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [e for e in entries if e.get("rd")]
 
 
+def replaced_pictures(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replaced pictures: ``{"rp": media_id, "sup": when}`` once hidden (no ``sup`` yet: still to hide)."""
+    return [e for e in entries if e.get("rp")]
+
+
 def carried_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """What a replaced version leaves on the row: its memories and the records of its replaced documents."""
-    return [e for e in entries if "m" in e or e.get("hd") or e.get("rd")]
+    """What a replaced version leaves on the row: its memories and the records of its replaced
+    documents and pictures."""
+    return [e for e in entries if "m" in e or e.get("hd") or e.get("rd") or e.get("rp")]
 
 
 def current_documents(document_id: str | None, entries: list[dict[str, Any]]) -> set[str]:
@@ -173,6 +179,12 @@ class SourceStore:
             entries = entries_of({"memory_ids_json": raw})
             users += int(document_id in current_documents(owned, entries))
         return users
+
+    def media_users(self, media_id: str, *, except_row: tuple[str, str] | None = None) -> int:
+        """How many file rows (of any folder) own this picture right now."""
+        rows = self._m._read().execute(
+            "SELECT source_id, relpath FROM source_files WHERE media_id = ?", (media_id,)).fetchall()
+        return sum(1 for source_id, relpath in rows if except_row != (source_id, relpath))
 
     def next_save_n(self, source_id: str, relpath: str) -> int:
         """How many times this path has been saved, counting this one. Never reset, not even by a purge."""

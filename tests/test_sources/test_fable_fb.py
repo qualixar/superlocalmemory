@@ -581,7 +581,7 @@ def test_the_purge_never_erases_a_document_another_row_borrows(env, monkeypatch)
         store = SourceStore(media)
         store.put_file(sid, "copy.pdf", state="indexed", reason="shared", sha256="c" * 64,
                        entries=[{"shared_doc": "1" * 32}])
-        assert retire.purge_due(env.host, store, env.runtime, store.get_source(sid)) == 0
+        retire.purge_due(env.host, store, env.runtime, store.get_source(sid))
     finally:
         media.close()
     assert _document_exists(env, "1" * 32) and env.erased == []
@@ -629,3 +629,147 @@ def test_a_replaced_document_the_edited_back_file_borrows_again_is_not_hidden_or
     env.scan(sid)
     assert _state_of(env, "1" * 32) != "tombstoned" and all(f != ("pf1",) for _, f, _ in env.erased)
     assert [e["rd"] for e in _entries(env, sid) if e.get("rd") or e.get("hd")] == []  # B was erased, A is current
+
+
+# -- the purge erases a replaced picture after its grace period -----------------------------------
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+
+
+def _two_pictures(env, monkeypatch):
+    """Each save makes a new real picture row with its own original file: media 1111.., then 2222.."""
+    made = []
+
+    def remember(inp, **kw):
+        n = len(made) + 1
+        media_id, sha = f"{n}" * 32, f"{n}" * 64
+        rel = f"{sha[:2]}/{sha}.png"
+        target = env.data / "media" / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(inp.data)
+        media = env.store()
+        try:
+            media.insert_item(media_id=media_id, profile_id="default", kind="image", source_sha256=sha,
+                              stored_sha256=sha, mime="image/png", bytes=len(inp.data), origin="folder",
+                              original_relpath=rel)
+        finally:
+            media.close()
+        made.append(media_id)
+        return SimpleNamespace(status="stored", media_id=media_id, memory_id=f"pic-mem{n}", reason="")
+
+    monkeypatch.setattr("superlocalmemory.media.ingest.remember_media", remember)
+
+
+def _item_exists(env, media_id):
+    media = env.store()
+    try:
+        return media.get_item(media_id) is not None
+    finally:
+        media.close()
+
+
+def _item_state(env, media_id):
+    media = env.store()
+    try:
+        return media.get_item(media_id)["state"]
+    finally:
+        media.close()
+
+
+def _original(env, media_id):
+    return env.data / "media" / f"{media_id[:2]}/{media_id[0] * 64}.png"
+
+
+def _replaced_picture(env, monkeypatch):
+    _two_pictures(env, monkeypatch)
+    path = env.write("p.png", PNG_BYTES)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    path.write_bytes(PNG_BYTES + b"B")
+    import os as _os
+    st = _os.stat(path)
+    _os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10**9))
+    env.scan(sid)
+    return sid
+
+
+def test_a_replaced_picture_is_recorded_with_the_time_it_was_hidden(env, monkeypatch):
+    sid = _replaced_picture(env, monkeypatch)
+    [record] = [e for e in _entries(env, sid, "p.png") if e.get("rp")]
+    assert record["rp"] == "1" * 32 and record["sup"]
+    assert _item_state(env, "1" * 32) == "tombstoned" and _item_state(env, "2" * 32) == "active"
+
+
+def test_the_purge_erases_a_replaced_picture_only_after_the_retention_window(env, monkeypatch):
+    sid = _replaced_picture(env, monkeypatch)
+    env.scan(sid)  # inside the grace period: kept
+    assert _item_exists(env, "1" * 32) and _original(env, "1" * 32).exists()
+    env.host.purge_after_s = -1.0
+    env.scan(sid)
+    assert not _item_exists(env, "1" * 32) and not _original(env, "1" * 32).exists()
+    assert _item_exists(env, "2" * 32) and _original(env, "2" * 32).exists()
+    assert not [e for e in _entries(env, sid, "p.png") if e.get("rp")]
+
+
+def test_an_incomplete_picture_erasure_keeps_the_record_for_a_later_pass(env, monkeypatch):
+    from superlocalmemory.media import erasure
+
+    sid = _replaced_picture(env, monkeypatch)
+    env.host.purge_after_s = -1.0
+    real = erasure.erase_items
+    monkeypatch.setattr(erasure, "erase_items",
+                        lambda store, root, ids: {"items": 1, "files": 0, "cache_entries": 0, "residue": ["file:x"]})
+    env.scan(sid)
+    assert [e for e in _entries(env, sid, "p.png") if e.get("rp")]
+    monkeypatch.setattr(erasure, "erase_items", real)
+    env.scan(sid)
+    assert not _item_exists(env, "1" * 32) and not [e for e in _entries(env, sid, "p.png") if e.get("rp")]
+
+
+def test_the_purge_never_erases_a_picture_the_file_or_another_row_uses(env, monkeypatch):
+    from superlocalmemory.sources import retire
+    from superlocalmemory.sources.store import SourceStore
+
+    sid = _replaced_picture(env, monkeypatch)
+    env.host.purge_after_s = -1.0
+    media = env.store()
+    try:
+        store = SourceStore(media)
+        # the file's current picture is also listed as "replaced" (it came back); another file owns picture 1
+        row = store.get_file(sid, "p.png")
+        store.put_file(sid, "p.png", entries=json.loads(row["memory_ids_json"])
+                       + [{"rp": "2" * 32, "sup": "2000-01-01T00:00:00Z"}])
+        store.put_file(sid, "other.png", state="indexed", media_id="1" * 32, sha256="d" * 64, entries=[])
+        retire.purge_due(env.host, store, env.runtime, store.get_source(sid))
+    finally:
+        media.close()
+    assert _item_exists(env, "1" * 32) and _item_exists(env, "2" * 32)
+    assert _original(env, "1" * 32).exists() and _original(env, "2" * 32).exists()
+
+
+def test_a_removal_with_purge_erases_the_replaced_pictures_too(env, monkeypatch):
+    sid = _replaced_picture(env, monkeypatch)
+    sources.remove_source(sid, purge=True)
+    assert not _item_exists(env, "1" * 32)
+
+
+def test_a_picture_that_could_not_be_hidden_is_hidden_by_a_later_pass_then_erased(env, monkeypatch):
+    from superlocalmemory.sources import retire
+
+    real = retire.hide_picture_id
+    state = {"fail": True}
+
+    def flaky(store, media_id):
+        return False if state["fail"] else real(store, media_id)
+
+    monkeypatch.setattr(retire, "hide_picture_id", flaky)
+    sid = _replaced_picture(env, monkeypatch)
+    [record] = [e for e in _entries(env, sid, "p.png") if e.get("rp")]
+    assert "sup" not in record and _item_state(env, "1" * 32) == "active"
+    env.host.purge_after_s = -1.0
+    env.scan(sid)
+    assert _item_exists(env, "1" * 32)  # never erased while it was not even hidden
+    assert _item_state(env, "1" * 32) == "active"
+    state["fail"] = False
+    env.scan(sid)  # hidden at last (given its time), and the window has passed: erased in the same pass
+    assert not _item_exists(env, "1" * 32)

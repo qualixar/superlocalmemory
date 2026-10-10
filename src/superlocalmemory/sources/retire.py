@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from superlocalmemory.media.store_jobs import utc_stamp
@@ -14,6 +15,7 @@ from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of, resolve_keys
 from superlocalmemory.sources.store import (
     SourceStore, current_documents, entries_of, memory_entries, pending_documents, replaced_documents,
+    replaced_pictures,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,7 @@ def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict
         stale = [e for e in entries if e.get("old") and not e.get("sup")]
         failures_here = hide_entries(host, runtime, source, stale, row["relpath"]) if stale else 0
         in_use = current_documents(row.get("document_id"), entries)
+        in_use_media = {row["media_id"]} if row.get("media_id") else set()
         waiting = pending_documents(entries)
         for document_id in waiting:
             if document_id in in_use:  # the file uses it again: it is not an old document any more
@@ -80,8 +83,19 @@ def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict
             if not failed:  # hidden at last: from now on it is a replaced document, erased by the purge
                 entries = [{"rd": document_id, "sup": utc_stamp()} if e.get("hd") == document_id else e
                            for e in entries]
+        pictures = False
+        for record in replaced_pictures(entries):
+            if record.get("sup"):
+                continue
+            if record["rp"] in in_use_media:  # the file uses it again
+                entries = [e for e in entries if e is not record]
+            elif hide_picture_id(store, record["rp"]):
+                record["sup"] = utc_stamp()
+            else:
+                failures_here += 1
+            pictures = True
         failures += failures_here
-        if stale or waiting:
+        if stale or waiting or pictures:
             store.put_file(source["source_id"], row["relpath"], entries=entries)
         if row["state"] == "tombstoned" and _document_visible(store, row):
             failures += hide_document(store, runtime, source, row)
@@ -134,14 +148,22 @@ def hide_rows(host: SourceHost, store: SourceStore, runtime: Any, source: dict) 
     return failures + retry_hides(host, store, runtime, source)
 
 
-def hide_picture(store: SourceStore, row: dict[str, Any]) -> None:
-    """Take the picture a file owns out of the library's view, so the same bytes can be saved afresh."""
+def hide_picture(store: SourceStore, row: dict[str, Any]) -> bool:
+    """Take the picture a file owns out of the library's view, so the same bytes can be saved afresh.
+
+    True when there is nothing (left) to hide; False when the picture could not be tombstoned."""
     if not row.get("media_id") or row.get("reason") == "shared":
-        return
+        return True
+    return hide_picture_id(store, row["media_id"])
+
+
+def hide_picture_id(store: SourceStore, media_id: str) -> bool:
     try:
-        store._m.set_state(row["media_id"], "tombstoned")
+        store._m.set_state(media_id, "tombstoned")
     except Exception as exc:  # noqa: BLE001
         logger.warning("a folder picture could not be hidden (%s)", type(exc).__name__)
+        return False
+    return True
 
 
 def release_copies(store: SourceStore, source: dict, row: dict[str, Any]) -> None:
@@ -204,8 +226,28 @@ def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     old_ids = [*pending_documents(entries), *(e["rd"] for e in replaced_documents(entries))]
     if not _erase_replaced(host, store, runtime, source, old_ids, except_row=own):
         return False
+    for record in replaced_pictures(entries):
+        if store.media_users(record["rp"], except_row=own) or record["rp"] == row.get("media_id"):
+            continue
+        if not _erase_picture(store, record["rp"]):
+            return False
     store.delete_file(source["source_id"], row["relpath"])
     return True
+
+
+def _erase_picture(store: SourceStore, media_id: str) -> bool:
+    """Hard-erase one picture (row, vectors, thumbnail, original unless another row uses it, cached text)
+    the way ``slm media gc`` does; True when it is gone, False if anything was left behind."""
+    from superlocalmemory.media import erasure
+
+    try:
+        if store._m.get_item(media_id) is None:
+            return True
+        out = erasure.erase_items(store._m, Path(store._m.path).parent, [media_id])
+    except Exception as exc:  # noqa: BLE001 - retried on the next pass
+        logger.warning("a folder picture erasure failed (%s)", type(exc).__name__)
+        return False
+    return not out["residue"] and store._m.get_item(media_id) is None
 
 
 def _erase_replaced(host: SourceHost, store: SourceStore, runtime: Any, source: dict, document_ids: list[str],
@@ -264,6 +306,15 @@ def _purge_replaced(host: SourceHost, store: SourceStore, runtime: Any, source: 
         if store.document_users(record["rd"], except_row=own):
             continue  # another file borrows it: kept, and recorded until nobody does
         if _erase_document(host, store, runtime, source, record["rd"]):
+            gone.append(record)
+    for record in replaced_pictures(entries):
+        if not record.get("sup") or record["sup"] > cutoff:
+            continue
+        if record["rp"] == row.get("media_id"):
+            dropped.append(record)  # the file uses it again: never erased, and not a replaced picture
+        elif store.media_users(record["rp"], except_row=own):
+            continue  # another file owns it: kept, and recorded until nobody does
+        elif _erase_picture(store, record["rp"]):
             gone.append(record)
     if gone or dropped:
         store.put_file(source["source_id"], row["relpath"],
