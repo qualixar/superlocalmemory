@@ -568,7 +568,7 @@ class RetrievalEngine:
                 fused = windowed_candidates(
                     fused, lambda fid: in_window(etimes.get(fid), bounds),
                     explicit=_explicit_window,
-                    min_semantic=getattr(self._config, "min_semantic_evidence", 0.60),
+                    min_semantic=self._text_floor(),
                     min_media=self._media_floor(),
                 )
                 _em("time_window")
@@ -641,7 +641,7 @@ class RetrievalEngine:
             and _os_floor.environ.get("SLM_RECALL_NO_FLOOR", "0") != "1"
         )
         if floor_enabled:
-            min_sem = getattr(self._config, "min_semantic_evidence", 0.60)
+            min_sem = self._text_floor()
             # Qualify the rerank pool BEFORE applying the caller's limit.  RRF
             # can rank associative-only hits above an exact BM25 match; slicing
             # first allowed those hits to occupy every output slot and then be
@@ -768,6 +768,13 @@ class RetrievalEngine:
 
     # -- Evidence floor (v3.6.6) -------------------------------------------
 
+    def _text_floor(self) -> float:
+        """Text evidence floor: the live text model's own, else the configured one."""
+        from superlocalmemory.retrieval.text_floor import text_semantic_floor
+
+        return text_semantic_floor(
+            getattr(self, "_embedder", None), getattr(self._config, "min_semantic_evidence", 0.60))
+
     def _media_floor(self) -> float:
         """Picture evidence floor: the live paired plan's, else the configured one."""
         default = getattr(self._config, "media_min_score", 0.30)
@@ -791,14 +798,17 @@ class RetrievalEngine:
         spreading_activation and hopfield do NOT count as primary evidence.
         Empty result after filtering is a success (no_confident_match=True).
         """
+        from superlocalmemory.retrieval import media_rerank
+
         kept: list[FusionResult] = []
         for fr in final_top:
-            if has_primary_evidence(fr.channel_scores, min_semantic, min_media):
-                kept.append(fr)
-                continue
-            # Pinned fact bypass — always pass regardless of channel scores
             fact = facts.get(fr.fact_id)
-            if fact is not None and getattr(fact, "pinned", False):
+            if fact is not None and media_rerank.is_wordless_picture(getattr(fact, "content", "") or ""):
+                evident = media_rerank.wordless_picture_evidence(fr.channel_scores or {}, min_media)
+            else:
+                evident = has_primary_evidence(fr.channel_scores, min_semantic, min_media)
+            # Pinned fact bypass — always pass regardless of channel scores
+            if evident or (fact is not None and getattr(fact, "pinned", False)):
                 kept.append(fr)
         return kept
 

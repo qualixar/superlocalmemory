@@ -10,6 +10,7 @@ const MEDIA = (state, extra = {}) => ({ enabled: true, env_state: state, ...extr
 function setup(initial, extraRoutes = []) {
     const state = { media: initial };
     const routes = [
+        ...extraRoutes,  // first, so a test can answer a route differently
         ['GET', '/api/v3/features', () => ({ json: features(state.media) })],
         ['POST', '/api/v3/features/media/enable', () => {
             state.media = { ...state.media, enabled: true, env_state: 'installing', progress: 0.1, step: 'Starting' };
@@ -19,7 +20,6 @@ function setup(initial, extraRoutes = []) {
             state.media = { ...state.media, enabled: false, env_state: 'not_installed' };
             return { json: { media: state.media } };
         }],
-        ...extraRoutes,
     ];
     const h = makeEnv(routes, { modules: ['od-features.js'] });
     h.state = state;
@@ -131,5 +131,52 @@ describe('turn-on card', () => {
         await h.window.odFeatures.mountMediaCard(host, {});
         await flushPromises();
         assert.match(host.textContent, /not available in this build/);
+    });
+});
+
+describe('the 16 GB gate on the turn-on card', () => {
+    const MESSAGE = 'Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. '
+        + 'Your text memories keep working.';
+    const SMALL = { enabled: false, ram_ok: false, ram_message: MESSAGE };
+
+    it('shows the message, keeps the rest of the card, and disables Turn on', async () => {
+        const h = setup(SMALL);
+        await h.mount();
+        assert.ok(h.host.textContent.includes(MESSAGE));
+        assert.match(h.host.textContent, /Turn on images and documents/);
+        assert.match(h.host.textContent, /1\.5 GB/);
+        assert.equal(btn(h, 'Turn on').disabled, true);
+    });
+
+    it('a click on the disabled button asks and sends nothing', async () => {
+        const h = setup(SMALL);
+        await h.mount();
+        btn(h, 'Turn on').click();
+        await flushPromises();
+        assert.equal(h.confirms.length, 0);
+        assert.equal(writes(h).length, 0);
+    });
+
+    it('a machine with enough memory (or an older daemon that says nothing) can turn it on', async () => {
+        for (const media of [{ enabled: false, ram_ok: true, ram_message: '' }, { enabled: false }]) {
+            const h = setup(media);
+            await h.mount();
+            assert.equal(btn(h, 'Turn on').disabled, false);
+            btn(h, 'Turn on').click();
+            await flushPromises();
+            assert.equal(h.confirms.length, 1);
+            assert.ok(!/16 GB of memory/.test(h.host.textContent));
+        }
+    });
+
+    it('a refusal from the daemon (409) puts the message on the card instead of an error', async () => {
+        const refusal = { enabled: false, ram_ok: false, ram_message: MESSAGE, error: MESSAGE, refused: 'low_ram' };
+        const h = setup({ enabled: false }, [['POST', '/api/v3/features/media/enable',
+            () => ({ status: 409, json: { media: features(refusal).media, detail: MESSAGE } })]]);
+        await h.mount();
+        btn(h, 'Turn on').click();
+        await flushPromises();
+        assert.ok(h.host.textContent.includes(MESSAGE));
+        assert.equal(btn(h, 'Turn on').disabled, true);
     });
 });

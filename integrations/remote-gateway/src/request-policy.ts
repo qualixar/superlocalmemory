@@ -9,6 +9,7 @@ export const TOOL_SCOPES: ReadonlyMap<string, readonly Scope[]> = new Map<string
   ["mesh_peers", ["slm:mesh"]], ["mesh_send", ["slm:mesh"]], ["mesh_inbox", ["slm:mesh"]], ["mesh_wait", ["slm:mesh"]], ["mesh_state", ["slm:mesh"]],
   ["get_media", ["slm:media"]], ["media_status", ["slm:media"]],
   ["remember_media", ["slm:write", "slm:media"]], ["remember_document", ["slm:write", "slm:media"]],
+  ["media_upload_link", ["slm:write", "slm:media"]],
 ]);
 /** Mesh and media tools are limited by the laptop (its remote key must opt in), not by the connection's tool list: that list is fixed
  * when the computer is linked and cannot grow later without a conflict. The consent and the token scopes are still checked here. */

@@ -55,6 +55,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, field_validator
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.core.process_role import clear_daemon_process, mark_daemon_process
 from superlocalmemory.daemon.materializer import (
     PassHooks,
     PendingMaterializer,
@@ -2093,6 +2094,23 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover - startup remains fail-soft
         logger.warning("install-token bootstrap failed: %s", exc)
 
+    # Pictures of a profile deleted in an earlier run that did not finish moving.
+    try:
+        from superlocalmemory.server.routes.helpers import DB_PATH as _memory_db
+        from superlocalmemory.storage.pending_media_moves import retry as _retry_picture_moves
+
+        await asyncio.to_thread(_retry_picture_moves, Path(_memory_db).parent)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("pending picture moves not retried: %s", exc)
+
+    # Scratch files of upload links that never finished before the last stop.
+    try:
+        from superlocalmemory.media.upload_links import default_links
+
+        await asyncio.to_thread(default_links().cleanup)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("upload scratch files not cleaned: %s", exc)
+
     # Register the SSE bridge inside the application lifespan.  FastAPI's
     # legacy ``on_event`` hook is deprecated and, more importantly, made a
     # second startup mechanism compete with the daemon's existing lifespan.
@@ -3351,6 +3369,15 @@ async def lifespan(application: FastAPI):
             _consolidation_timer_loop(application)
         )
 
+    # Abandoned half-uploads from one-time upload links are removed at least hourly.
+    _upload_task = getattr(application.state, "_upload_housekeeping_task", None)
+    if _upload_task is None or _upload_task.done():
+        from superlocalmemory.server import upload_housekeeping
+
+        application.state._upload_housekeeping_task = asyncio.create_task(
+            upload_housekeeping.run(), name="upload-housekeeping"
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3402,6 +3429,10 @@ async def lifespan(application: FastAPI):
         from superlocalmemory.runtimes import features as _features
         _features.apply_requested(source="npm")
         _features.note_started()
+        # "Upgrade memory engine" recorded by the installer: queued once the media
+        # environment is ready, otherwise left for the next start. Never raises.
+        from superlocalmemory.core import engine_upgrade as _engine_upgrade
+        _engine_upgrade.apply_on_start(application.state, config)
         # Saved PDFs are read page by page in the background; idle while images and documents are off.
         try:
             from superlocalmemory.documents import start_document_jobs
@@ -3498,6 +3529,13 @@ async def lifespan(application: FastAPI):
         _consol = getattr(application.state, "_consolidation_task", None)
         if _consol is not None and not _consol.done():
             _consol.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
+        if _upload_hk is not None and not _upload_hk.done():
+            _upload_hk.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 
@@ -3923,6 +3961,8 @@ def create_app() -> FastAPI:
     try:
         from superlocalmemory.server.routes.media import router as media_router
         application.include_router(media_router)
+        from superlocalmemory.server.routes.media_upload import router as media_upload_router
+        application.include_router(media_upload_router)
     except ImportError:
         pass
 
@@ -4969,6 +5009,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # for a SHORTER wait before the keyword fallback; it never lengthens
         # the default. Read leniently: an unusable value is ignored.
         budget_s: str = "",
+        # How a remote caller came in (set by the MCP side for remote keys);
+        # it can only hide more, so a local caller sending it hurts only itself.
+        caller_view: str = "",
     ):
         _update_activity()
         search_query = q or query  # Accept both ?q= and ?query= for compatibility
@@ -5097,6 +5140,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         include_global, include_shared = enforce_read_scope(include_global, include_shared)
         # Everything from here to the response body is shared with saved views
         # (server/recall_core.py), so a view and this route cannot drift apart.
+        from superlocalmemory.retrieval.remote_view import parse_view
         from superlocalmemory.server.recall_core import (
             RecallCall,
             parse_budget_s,
@@ -5117,6 +5161,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             full=full, include_source=include_source,
             include_marker=bool(session_id),
             budget_s=parse_budget_s(budget_s),
+            caller_view=parse_view(caller_view),
         )
         try:
             return await run_recall(engine, call, app_state=application.state)
@@ -5165,8 +5210,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # v3.6.15 multi-scope: resolve the write scope. ``None`` (not specified
         # by the caller) → the configured default_scope (personal). Shared
         # memory is opt-in, so the default keeps every write private.
-        _scope_cfg = getattr(engine._config, "scope", None)
-        scope = req.scope or getattr(_scope_cfg, "default_scope", "personal")
+        from superlocalmemory.memory_core.save_scope import default_scope as _default_scope
+
+        scope = req.scope or _default_scope(engine._config)
         shared_with = req.shared_with
 
         # Keep the daemon compatibility route behind the exact RBAC/session
@@ -6301,12 +6347,37 @@ def _worker_limit_mb(cmdline: list[str], default: int) -> int:
     return default
 
 
+def _watchdog_pass(parent_pid: int, max_worker_mb: int) -> None:
+    """One sweep: kill each child of ``parent_pid`` that holds more than its limit.
+
+    Memory is the physical footprint on macOS (RSS under-reports there), via
+    ``infra.proc_memory``.
+    """
+    import psutil
+
+    from superlocalmemory.infra import proc_memory
+
+    for child in psutil.Process(parent_pid).children(recursive=True):
+        try:
+            held_mb = proc_memory.process_memory_mb(child.pid)
+            limit_mb = _worker_limit_mb(child.cmdline(), max_worker_mb)
+            if 0 < limit_mb < held_mb:
+                logger.warning(
+                    "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
+                    child.name(), child.pid, held_mb, limit_mb,
+                )
+                child.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
 def _start_memory_watchdog() -> None:
     """v3.4.7: Background watchdog that kills child workers exceeding memory limit.
 
     Prevents the orphan worker memory explosion that caused 16GB+ RAM usage.
-    Checks every 60 seconds. Kills workers over 2GB RSS. Auto-restarts them
-    on next request (workers are lazy-spawned).
+    Checks every 15 seconds. Kills workers over their memory limit (2.5 GB, more
+    for the picture worker). Auto-restarts them on next request (workers are
+    lazy-spawned).
     """
     import threading
 
@@ -6316,20 +6387,7 @@ def _start_memory_watchdog() -> None:
         while True:
             time.sleep(15)  # V3.4.37: 15s (was 60s) — catch spikes faster
             try:
-                import psutil
-                parent = psutil.Process(os.getpid())
-                for child in parent.children(recursive=True):
-                    try:
-                        rss_mb = child.memory_info().rss / (1024 * 1024)
-                        limit_mb = _worker_limit_mb(child.cmdline(), MAX_WORKER_MB)
-                        if 0 < limit_mb < rss_mb:
-                            logger.warning(
-                                "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
-                                child.name(), child.pid, rss_mb, limit_mb,
-                            )
-                            child.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                _watchdog_pass(os.getpid(), MAX_WORKER_MB)
             except ImportError:
                 pass  # psutil not available — watchdog disabled
             except Exception as exc:
@@ -6900,6 +6958,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         _stop_record_guardian()
         _cleanup_process_descriptor(_ACTIVE_DAEMON_DESCRIPTOR)
         instance_lock.release()
+        clear_daemon_process()
 
 
 def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
@@ -6907,6 +6966,9 @@ def _serve_owned(port: int, bind_host: str, listener, instance_lock) -> None:
     global _start_time
     import uvicorn
 
+    # From here this process is the daemon: it alone runs the managed text model
+    # (core/process_role.py), and it says so before any engine is built.
+    mark_daemon_process()
     _start_time = time.monotonic()
 
     try:

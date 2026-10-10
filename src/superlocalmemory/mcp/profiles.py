@@ -81,7 +81,7 @@ _PROFILE_FULL_MESH: frozenset[str] = frozenset({  # 9
 })
 
 _MEDIA_TOOLS: frozenset[str] = frozenset({
-    "remember_media", "get_media", "remember_document", "media_status",
+    "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
 })
 
 

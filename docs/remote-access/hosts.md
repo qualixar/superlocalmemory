@@ -66,6 +66,30 @@ Three things to know:
   the skill somewhere else on its own, for example into Composio's skill
   library, ChatGPT chats do not use that copy; paste it yourself.
 
+### Saving pictures and PDFs from ChatGPT
+
+Attach the picture or PDF in the chat and ask ChatGPT to save it to
+SuperLocalMemory. ChatGPT hands the plugin a temporary link to the attachment
+and your computer downloads it, so the file never has to be typed out by the
+model. This needs three things on your side: the approval ticked **Allow images
+and documents** (and saving), the remote key allowed for media
+(`slm remote keys allow <key> media`) and a write key. The file is saved to the
+key's own profile, as with every remote save.
+
+SuperLocalMemory only downloads from hosts it trusts. For an attachment, those
+are ChatGPT's own file hosts plus any host in `SLM_MEDIA_URL_HOSTS`. This
+release has not yet confirmed ChatGPT's file host names in a live test, so the
+built-in list is empty: until it is filled in, add the host of the attachment
+link to `SLM_MEDIA_URL_HOSTS` yourself. If a save is refused with "Links are not
+accepted from remote callers until a host list is set" or "That host is not on
+the allowed list", that is the reason. A link the model types out by itself
+never gets the built-in hosts; it always needs your list.
+
+Pictures can be up to 25 MB and PDFs up to 100 MB. ChatGPT on a phone may not
+pass the attachment to the plugin at all; if ChatGPT says it has no file to
+send, attach the file in ChatGPT on the web instead, or ask ChatGPT for an
+upload link (see "Adding a picture or PDF from a chat" below).
+
 ## ChatGPT dots
 
 Dots are ChatGPT's always-on agents. You create them in ChatGPT on the desktop,
@@ -143,6 +167,17 @@ only when the app asks for them.
   512 KB of pasted data, and image links work only from hosts on your allowed
   list (`SLM_MEDIA_URL_HOSTS`, empty by default, which refuses every link).
   Saving also needs a write key.
+
+**Adding a picture or PDF from a chat.** A chat cannot hand a file to the tool
+directly. Ask the app to make an upload link ("add a picture to my memory"). It
+answers with a link that works once and expires in 10 minutes. Open the link in
+any browser, pick the file and press Save; the page says "Saved to your memory"
+when your computer has it. The file goes from your browser to your computer
+over the connection that is already open, and nothing is kept in the cloud on
+the way. Your computer must be awake and running SuperLocalMemory, and the app
+needs both boxes above and the `media` key permission. Pictures can be up to
+25 MB (PNG, JPEG or WebP) and PDFs up to 100 MB; each connection can make 3
+open links at a time and 20 uploads a day.
 
 Ticking a box is not enough. You must also allow it for the connection on your
 computer. Each connection has a remote key named `web-<connection id>`. Find it

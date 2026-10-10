@@ -221,7 +221,9 @@ class AutoInvoker:
         # Primary: VectorStore KNN (Phase 1)
         if self._vector_store is not None and self._embedder is not None:
             try:
-                query_embedding = self._embedder.embed(query)
+                from superlocalmemory.retrieval.query_embedding import embed_as_query
+
+                query_embedding = embed_as_query(self._embedder, query)
                 if query_embedding:
                     return self._vector_store.search(
                         query_embedding, top_k=top_k, profile_id=profile_id,

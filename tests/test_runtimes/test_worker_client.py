@@ -102,6 +102,18 @@ def test_rss_over_the_limit_stops_the_worker(client_factory):
     assert len(c.embed_texts(["a"], prompt="Document")) == 1  # restarts lazily
 
 
+def test_the_cap_is_judged_on_the_shared_memory_reader(client_factory, monkeypatch):
+    from superlocalmemory.infra import proc_memory
+
+    c = client_factory(rss_limit_mb=5000)
+    monkeypatch.setattr(proc_memory, "process_memory_mb", lambda pid: 3650.0)  # footprint, not the 215 MB RSS
+    c.embed_texts(["a"], prompt="Document")
+    assert c.pid is not None  # under its cap: stays up
+    monkeypatch.setattr(proc_memory, "process_memory_mb", lambda pid: 5200.0)
+    c.embed_texts(["a"], prompt="Document")
+    assert c.pid is None  # over its cap: stopped
+
+
 def test_rss_limit_comes_from_env(stub_env, monkeypatch):
     monkeypatch.setenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", "77")
     assert worker_client.MediaWorkerClient(stub_env, model_id="fake:768", revision="").rss_limit_mb == 77

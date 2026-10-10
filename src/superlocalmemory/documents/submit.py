@@ -153,14 +153,44 @@ def _stage_data(inp: MediaInput, out: Any) -> tuple[str, int]:
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _stage_link(inp: MediaInput, out: Any) -> tuple[str, int]:
+    """Stream a document link into ``out`` through the shared fetch guards (the hosts, public
+    addresses, redirects and size cap are checked there); the bytes are never all in memory."""
+    from superlocalmemory.core import media_fetch
+
+    digest, head, size = hashlib.sha256(), bytearray(), 0
+
+    def take(chunk: bytes) -> None:
+        nonlocal size
+        if len(head) < 8:
+            head.extend(chunk[:8 - len(head)])
+            if len(head) == 8:
+                _check_head(bytes(head))  # stop early on a link that is not a PDF
+        digest.update(chunk)
+        out.write(chunk)
+        size += len(chunk)
+
+    try:
+        media_fetch.fetch_media_to_file(
+            inp.download_url or "", take, remote=inp.remote, max_bytes=_max_bytes(),
+            file_param=inp.file_param, noun="document")
+    except media_fetch.MediaFetchRefused as refused:
+        raise _refuse(refused.reason) from None
+    _check_head(bytes(head))
+    return digest.hexdigest(), size
+
+
 def _stage(inp: MediaInput, root: Path) -> tuple[Path, str, int]:
-    if inp.data is None and (inp.base64 is None) == (inp.path is None):
+    given = sum(x is not None for x in (inp.base64, inp.path, inp.download_url or None))
+    if inp.data is None and given != 1:
         raise _refuse("Give a document file or document data.")
     tmp, out = _new_tmp(files.tmp_dir(root))
     try:
         with out:
             if inp.data is not None:
                 sha, size = _stage_data(inp, out)
+            elif inp.download_url:
+                sha, size = _stage_link(inp, out)
             else:
                 sha, size = _stage_base64(inp, out) if inp.base64 is not None else _stage_path(inp, out)
         return tmp, sha, size
@@ -206,17 +236,16 @@ def _queue(store: Any, doc_id: str, profile_id: str, payload: dict[str, Any]) ->
     return store.enqueue_job(profile_id, "document", 0, {**payload, "document_id": doc_id})
 
 
-def _place(root: Path, tmp: Path, sha: str) -> tuple[str, bool]:
-    new = not files.original_path(root, sha, "pdf").exists()
+def _place(root: Path, tmp: Path, profile_id: str) -> tuple[str, bool]:
     try:
-        return files.place_original(root, tmp, sha, "pdf"), new
+        return files.place_original_noting_new(root, tmp, profile_id, "pdf")
     except (OSError, ValueError):
         raise _refuse("The document could not be saved.") from None
 
 
 def _create(store: Any, root: Path, tmp: Path, sha: str, size: int, doc_id: str, profile_id: str,
             title: str, payload: dict[str, Any]) -> DocumentReceipt:
-    relpath, placed_new = _place(root, tmp, sha)
+    relpath, placed_new = _place(root, tmp, profile_id)
     try:
         store.insert_document(document_id=doc_id, profile_id=profile_id, sha256=sha, title=title,
                               mime="application/pdf", bytes=size, source_relpath=relpath,
@@ -255,7 +284,7 @@ def _submit(store: Any, inp: MediaInput, root: Path, profile_id: str, payload: d
 def submit_document(
     inp: MediaInput, *, content: str = "", profile_id: str, actor_id: str, config: Any,
     tags: str = "", session_date: str = "", idempotency_key: str = "", store: Any = None,
-    folder: dict[str, Any] | None = None,
+    folder: dict[str, Any] | None = None, scope: str | None = None, shared_with: tuple[str, ...] = (),
 ) -> DocumentReceipt:
     """Queue a PDF for page-by-page saving; see ``DocumentReceipt`` for the outcomes.
 
@@ -266,6 +295,9 @@ def submit_document(
         store_ref, opened = _resolve(store)
         words = prepare_user_text(config, content).text if content.strip() else ""
         payload = {"user_words": words, "tags": tags, "session_date": session_date, "actor_id": actor_id}
+        if scope:
+            payload["scope"] = scope
+            payload["shared_with"] = list(shared_with)
         if folder:
             payload["folder"] = dict(folder)
         receipt = _submit(store_ref, inp, Path(store_ref.path).parent, profile_id, payload, idempotency_key)

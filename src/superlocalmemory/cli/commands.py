@@ -2806,6 +2806,8 @@ def cmd_status(args: Namespace) -> None:
     if daemon_status:
         print(_admission_status_text(daemon_status), end="")
         print(__import__("superlocalmemory.cli.embedder_cmd", fromlist=["x"]).status_line(), end="")
+    else:
+        print(__import__("superlocalmemory.cli.embedder_cmd", fromlist=["x"]).text_provider_note(config), end="")
 
     # S9-UX-07 / S9-UX-13: --verbose surfaces the disabled marker,
     # last-version marker, and daemon port so users who are debugging

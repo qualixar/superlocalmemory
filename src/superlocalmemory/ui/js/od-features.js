@@ -80,7 +80,8 @@
   // the pane, and the pane's next "off" card starts that flow (with its confirmation).
   var enableRequested = false;
 
-  function startEnable(host, opts, msg) {
+  function startEnable(host, opts, msg, m) {
+    if (lowRam(m)) return;
     confirmThen({
       title: 'Turn on images and documents', target: 'Images and documents',
       consequence: 'Downloads ' + SIZE_NOTE + ' of models. Everything stays on this computer.',
@@ -94,17 +95,24 @@
     });
   }
 
+  // The daemon decides (one function, 16 GB) and says so in ram_ok / ram_message; an
+  // older daemon says nothing, which counts as fine.
+  function lowRam(m) {
+    return !!m && m.ram_ok === false;
+  }
+
   function offCard(host, m, opts) {
     var card = cardShell('Turn on images and documents',
       'Remember pictures and read PDFs: ' + SIZE_NOTE + ' of models, and it stays on this computer.');
     var msg = messageLine(card);
     if (m.env_state === 'unsupported' && m.step) msg.textContent = m.step;
-    var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg); });
-    go.disabled = m.env_state === 'unsupported';
+    if (lowRam(m) && m.ram_message) card.insertBefore(el('p', null, m.ram_message), msg);
+    var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg, m); });
+    go.disabled = m.env_state === 'unsupported' || lowRam(m);
     card.appendChild(go);
     if (enableRequested && !go.disabled) {
       enableRequested = false;
-      window.setTimeout(function () { startEnable(host, opts, msg); }, 0);
+      window.setTimeout(function () { startEnable(host, opts, msg, m); }, 0);
     }
     return card;
   }
@@ -133,7 +141,7 @@
     var card = cardShell('Setup did not finish');
     card.appendChild(el('p', null, m.step || m.error || 'Setup did not finish.'));
     var msg = messageLine(card);
-    card.appendChild(button('Try again', 'btn sm primary', function () { startEnable(host, opts, msg); }));
+    card.appendChild(button('Try again', 'btn sm primary', function () { startEnable(host, opts, msg, m); }));
     return card;
   }
 
@@ -220,11 +228,11 @@
   }
 
   // ------------------------------------------------------------- what's new
+  // Two equal tiles that say what is on and what is not, so the card never offers
+  // something that is already done. The state comes from the same features read the
+  // Documents & Images pane makes.
   var WHATSNEW_KEY = 'slm.whatsnew.4.1.25';
-  var WHATSNEW_CHIPS = [
-    { chip: 'Now remembers images and documents', go: 'Turn on images & documents', act: 'media' },
-    { chip: 'Your bots can talk to each other', go: 'Set up bot messages', act: 'apps' },
-  ];
+  var OPEN_MEDIA = 'Open Documents & Images';
 
   // Storage can be missing or throw (private windows, blocked site data).
   function seenWhatsNew() {
@@ -239,28 +247,108 @@
     if (typeof window.slmNavigate === 'function') window.slmNavigate(pane);
   }
 
-  function whatsNewAction(act) {
-    if (act === 'media') { enableRequested = true; goTo('media-pane'); }
-    else goTo('apps-pane');
+  function requestEnable() { enableRequested = true; goTo('media-pane'); }
+
+  function tile(title, chip) {
+    var t = el('div', 'od-whatsnew-tile');
+    var head = el('div', 'od-whatsnew-tile-head');
+    head.appendChild(el('h4', null, title));
+    if (chip) head.appendChild(el('span', 'badge ok', chip));
+    t.appendChild(head);
+    return t;
   }
 
-  function mountWhatsNew(host) {
+  function percentText(m) {
+    var pct = Math.max(0, Math.min(100, Math.round((Number(m.progress) || 0) * 100)));
+    return pct + '%';
+  }
+
+  // Which of the five situations the images tile is in.
+  function mediaTile(m) {
+    var on = isOn(m);
+    var t = tile('Images & documents', on ? 'On' : '');
+    if (on) {
+      t.appendChild(el('p', 'muted', 'Pictures and PDFs are remembered, and they stay on this computer.'));
+      t.appendChild(button(OPEN_MEDIA, 'btn sm primary', function () { goTo('media-pane'); }));
+    } else if (m.enabled && m.env_state === 'installing') {
+      t.appendChild(el('p', 'muted', 'Setting up: ' + (m.step || 'working') + ' (' + percentText(m) + ').'));
+      t.appendChild(button(OPEN_MEDIA, 'btn sm', function () { goTo('media-pane'); }));
+    } else if (m.enabled && m.env_state === 'ready') {
+      t.appendChild(el('p', 'muted', 'Almost done. Restart SuperLocalMemory to finish; the button is on the next page.'));
+      t.appendChild(button(OPEN_MEDIA, 'btn sm primary', function () { goTo('media-pane'); }));
+    } else {
+      t.appendChild(el('p', 'muted', 'Remember pictures and read PDFs. It downloads ' + SIZE_NOTE +
+        ' of models once, and nothing leaves this computer.'));
+      if (lowRam(m) && m.ram_message) t.appendChild(el('p', null, m.ram_message));
+      else if (m.env_state === 'unsupported' && m.step) t.appendChild(el('p', null, m.step));
+      var go = button('Turn on images & documents', 'btn sm primary', requestEnable);
+      go.disabled = m.env_state === 'unsupported' || lowRam(m);
+      t.appendChild(go);
+    }
+    return t;
+  }
+
+  function botsTile(apps) {
+    var t = tile('Bot messages');
+    if (apps > 0) {
+      var line = apps === 1 ? '1 app is ready to message your other bots.' : apps + ' apps can message each other.';
+      t.appendChild(el('p', 'muted', line));
+      t.appendChild(button('Open Bot messages', 'btn sm primary', function () { goTo('botmsg-pane'); }));
+    } else {
+      t.appendChild(el('p', 'muted', 'Let the AI apps you connect leave each other messages. You choose which apps may.'));
+      t.appendChild(button('Set up bot messages', 'btn sm primary', function () { goTo('apps-pane'); }));
+    }
+    return t;
+  }
+
+  function developerLine(m) {
+    return !m.enabled || m.env_state === 'failed';
+  }
+
+  function drawWhatsNew(host, data, token) {
+    var m = (data && data.media) || {};
+    var apps = Number(data && data.mesh && data.mesh.apps_with_mesh) || 0;
     host.textContent = '';
-    if (seenWhatsNew()) return;
-    var card = cardShell('New in SuperLocalMemory 4.1.25');
-    WHATSNEW_CHIPS.forEach(function (c) {
-      var row = el('div', 'od-whatsnew-row');
-      row.appendChild(el('span', 'badge', c.chip));
-      row.appendChild(button(c.go, 'btn sm primary', function () { whatsNewAction(c.act); }));
-      card.appendChild(row);
-    });
-    var link = button('Dismiss', 'btn sm', function () {
+    var card = el('div', 'card card-pad od-whatsnew');
+    var close = button('×', 'btn sm ghost od-whatsnew-close', function () {
+      host.__odWnToken = token + 1;           // a poll still in flight must not redraw it
       rememberWhatsNew();
       host.textContent = '';
     });
-    card.appendChild(link);
-    card.appendChild(el('p', 'muted', 'For developers: slm media enable'));
+    close.setAttribute('aria-label', 'Dismiss');
+    card.appendChild(close);
+    card.appendChild(el('h3', null, 'New in SuperLocalMemory'));
+    var tiles = el('div', 'od-whatsnew-tiles');
+    tiles.appendChild(mediaTile(m));
+    tiles.appendChild(botsTile(apps));
+    card.appendChild(tiles);
+    if (developerLine(m)) card.appendChild(el('p', 'muted od-whatsnew-dev', 'For developers: slm media enable'));
     host.appendChild(card);
+    if (m.enabled && m.env_state === 'installing') pollWhatsNew(host, token);
+  }
+
+  function pollWhatsNew(host, token) {
+    window.setTimeout(function () {
+      if (host.__odWnToken !== token || !host.isConnected) return;
+      api('GET', '/api/v3/features').then(function (res) {
+        if (host.__odWnToken !== token) return;
+        if (res.ok && res.data.media) drawWhatsNew(host, res.data, token);
+        else pollWhatsNew(host, token);
+      });
+    }, POLL_MS);
+  }
+
+  // Resolves once drawn. A card the person dismissed costs no request. If the status
+  // cannot be read, the card still shows its two starting offers.
+  function mountWhatsNew(host) {
+    host.textContent = '';
+    var token = (host.__odWnToken || 0) + 1;
+    host.__odWnToken = token;
+    if (seenWhatsNew()) return Promise.resolve();
+    return api('GET', '/api/v3/features').then(function (res) {
+      if (host.__odWnToken !== token) return;
+      drawWhatsNew(host, res.ok ? res.data : {}, token);
+    });
   }
 
   function autoMountWhatsNew() {

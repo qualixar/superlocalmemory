@@ -18,6 +18,10 @@ const MODULE = path.join(REPO_ROOT, 'scripts', 'postinstall', 'media-request.js'
 const PREUNINSTALL = path.join(REPO_ROOT, 'scripts', 'preuninstall.js');
 const media = require(MODULE);
 
+const GIB = 1024 ** 3;
+// These tests are about recording a request, not about this machine's memory (the gate has its own tests below).
+const ROOMY = { SLM_MEDIA_ALLOW_LOW_RAM: '1' };
+
 function tmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'slm-media-'));
 }
@@ -28,6 +32,7 @@ function runInstaller(home, extraArgs = [], extraEnv = {}) {
     SLM_INSTALL_FREE_RAM_MB: '8192',
     SLM_INSTALL_COLD_START_MS: '150',
     SLM_INSTALL_DISK_FREE_GB: '250',
+    SLM_MEDIA_ALLOW_LOW_RAM: '1',
   }, extraEnv);
   delete env.SLM_ENABLE_MEDIA;
   delete env.SLM_DATA_DIR;
@@ -106,11 +111,11 @@ test('the terminal question defaults to No and only a yes records', async () => 
   const asked = [];
   const no = async (q) => { asked.push(q); return false; };
   const yes = async () => true;
-  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: true, ask: no, log: quiet }), false);
+  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: true, ask: no, log: quiet, totalMem: 32 * GIB }), false);
   assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
   assert.match(asked[0], /\[y\/N\]/);
-  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: false, ask: yes, log: quiet }), false);
-  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: true, ask: yes, log: quiet }), true);
+  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: false, ask: yes, log: quiet, totalMem: 32 * GIB }), false);
+  assert.equal(await media.handleMediaChoice({ args: {}, env: {}, slmDir: dir, interactive: true, ask: yes, log: quiet, totalMem: 32 * GIB }), true);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
 });
 
@@ -164,7 +169,7 @@ test('the npm hook records a request for SLM_ENABLE_MEDIA=1, and for npm_config_
   for (const env of [{ SLM_ENABLE_MEDIA: '1' }, { npm_config_media: 'true' }]) {
     const dir = tmp();
     const out = [];
-    const ok = await hook.runMediaStep({ argv: [], env: Object.assign({ SLM_DATA_DIR: dir }, env), tty: false, log: (l) => out.push(l) });
+    const ok = await hook.runMediaStep({ argv: [], env: Object.assign({ SLM_DATA_DIR: dir }, ROOMY, env), tty: false, log: (l) => out.push(l) });
     assert.equal(ok, true);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
   }
@@ -172,7 +177,7 @@ test('the npm hook records a request for SLM_ENABLE_MEDIA=1, and for npm_config_
 
 test('the npm hook honours --media in argv', async () => {
   const dir = tmp();
-  const ok = await require(NPM_HOOK).runMediaStep({ argv: ['--media'], env: { SLM_DATA_DIR: dir }, tty: false, log: () => {} });
+  const ok = await require(NPM_HOOK).runMediaStep({ argv: ['--media'], env: Object.assign({ SLM_DATA_DIR: dir }, ROOMY), tty: false, log: () => {} });
   assert.equal(ok, true);
 });
 
@@ -193,7 +198,7 @@ test('the npm hook asks on a terminal, default No', async () => {
   const hook = require(NPM_HOOK);
   assert.equal(await hook.runMediaStep({ argv: [], env: { SLM_DATA_DIR: dir }, tty: true, ask: async () => false, log: () => {} }), false);
   assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
-  assert.equal(await hook.runMediaStep({ argv: [], env: { SLM_DATA_DIR: dir }, tty: true, ask: async () => true, log: () => {} }), true);
+  assert.equal(await hook.runMediaStep({ argv: [], env: Object.assign({ SLM_DATA_DIR: dir }, ROOMY), tty: true, ask: async () => true, log: () => {} }), true);
 });
 
 test('the npm hook prints the what is new banner, from the shared module', () => {
@@ -201,4 +206,71 @@ test('the npm hook prints the what is new banner, from the shared module', () =>
   assert.match(source, /printWhatsNew\(\)/);
   assert.match(source, /require\('\.\/postinstall\/media-request\.js'\)/);
   assert.equal(require(INSTALLER).printWhatsNew, media.printWhatsNew);
+});
+
+const REFUSAL_4 = 'Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. '
+  + 'Your text memories keep working.';
+
+test('a small machine is told once, is not asked, and nothing is recorded', async () => {
+  const dir = tmp();
+  const lines = [];
+  let asked = 0;
+  const ok = await media.handleMediaChoice({
+    args: {}, env: {}, slmDir: dir, interactive: true, ask: async () => { asked += 1; return true; },
+    log: (l) => lines.push(l), totalMem: 4 * GIB,
+  });
+  assert.equal(ok, false);
+  assert.equal(asked, 0, 'a machine that will be refused is never asked');
+  assert.equal(lines.filter((l) => l.includes(REFUSAL_4)).length, 1);
+  assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+});
+
+test('a flag or the environment on a small machine records nothing and says why', async () => {
+  const dir = tmp();
+  const lines = [];
+  const ok = await media.handleMediaChoice({
+    args: { media: true }, env: { SLM_ENABLE_MEDIA: '1' }, slmDir: dir, interactive: false,
+    log: (l) => lines.push(l), totalMem: 6 * GIB,
+  });
+  assert.equal(ok, false);
+  assert.equal(lines.filter((l) => /at least 16 GB of memory; this one has 6\.0 GB/.test(l)).length, 1);
+  assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+});
+
+test('a machine with enough memory is not refused, and nothing is shown when nobody asked', async () => {
+  const lines = [];
+  const dir = tmp();
+  const ok = await media.handleMediaChoice({
+    args: { media: true }, env: {}, slmDir: dir, interactive: false, log: (l) => lines.push(l), totalMem: 16 * GIB,
+  });
+  assert.equal(ok, true);
+  assert.ok(!lines.some((l) => /GB of memory/.test(l)));
+  const quiet = [];
+  await media.handleMediaChoice({
+    args: {}, env: {}, slmDir: tmp(), interactive: false, log: (l) => quiet.push(l), totalMem: 4 * GIB,
+  });
+  assert.deepEqual(quiet, []);
+});
+
+test('the developer override lets a small machine ask and record, with a warning', async () => {
+  const dir = tmp();
+  const lines = [];
+  const ok = await media.handleMediaChoice({
+    args: { media: true }, env: { SLM_MEDIA_ALLOW_LOW_RAM: '1' }, slmDir: dir, interactive: false,
+    log: (l) => lines.push(l), totalMem: 4 * GIB,
+  });
+  assert.equal(ok, true);
+  assert.ok(lines.some((l) => /SLM_MEDIA_ALLOW_LOW_RAM/.test(l)));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
+});
+
+test('ramRefusal mirrors the Python gate: 15 GiB threshold, unknown allowed, only "1" overrides', () => {
+  assert.equal(media.MIN_RAM_BYTES, 15 * GIB);
+  assert.equal(media.ramRefusal(0, {}), '');
+  assert.equal(media.ramRefusal(15 * GIB, {}), '');
+  assert.equal(media.ramRefusal(Math.floor(15.6 * GIB), {}), '');
+  assert.equal(media.ramRefusal(15 * GIB - 1, {}).includes('at least 16 GB'), true);
+  assert.equal(media.ramRefusal(4 * GIB, {}), REFUSAL_4);
+  assert.equal(media.ramRefusal(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: '1' }), '');
+  assert.notEqual(media.ramRefusal(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: 'true' }), '');
 });

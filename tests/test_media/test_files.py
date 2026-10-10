@@ -42,28 +42,28 @@ def test_tmp_dir_is_private_and_clears_stale_files_once(tmp_path):
 
 
 def test_place_original_is_atomic_private_and_idempotent(tmp_path):
-    src, sha = _tmp_file(tmp_path)
-    rel = files.place_original(tmp_path, src, sha, "png")
+    src, _ = _tmp_file(tmp_path)
+    rel = files.place_original(tmp_path, src, "p1", "png")
     dest = tmp_path / "media" / rel
     assert dest.read_bytes() == b"abc" and stat.S_IMODE(dest.stat().st_mode) == 0o600
     assert not src.exists()
     again, _ = _tmp_file(tmp_path)
-    assert files.place_original(tmp_path, again, sha, "png") == rel
+    assert files.place_original(tmp_path, again, "p1", "png") == rel
 
 
 def test_place_original_never_overwrites_a_different_file(tmp_path):
-    src, sha = _tmp_file(tmp_path)
-    dest = files.original_path(tmp_path, sha, "png")
+    src, _ = _tmp_file(tmp_path)
+    dest = files.planned_path(tmp_path, "p1", src, "png")
     dest.parent.mkdir(parents=True)
     dest.write_bytes(b"something else")
     with pytest.raises(FileExistsError):
-        files.place_original(tmp_path, src, sha, "png")
+        files.place_original(tmp_path, src, "p1", "png")
     assert dest.read_bytes() == b"something else"
 
 
 def test_remove_original_stays_inside_the_media_folder(tmp_path):
-    src, sha = _tmp_file(tmp_path)
-    rel = files.place_original(tmp_path, src, sha, "png")
+    src, _ = _tmp_file(tmp_path)
+    rel = files.place_original(tmp_path, src, "p1", "png")
     outside = tmp_path / "keep.txt"
     outside.write_text("x")
     assert files.remove_original(tmp_path, "../keep.txt") is False
@@ -77,3 +77,16 @@ def test_remove_original_stays_inside_the_media_folder(tmp_path):
     assert files.remove_original(tmp_path, rel) is True
     assert not (tmp_path / "media" / rel).exists()
     assert files.remove_original(tmp_path, rel) is False
+
+
+def test_placing_a_file_reads_its_content_once(tmp_path, monkeypatch):
+    src = tmp_path / "scratch"
+    src.write_bytes(b"x" * 100)
+    calls = []
+    real = files.content_address
+    monkeypatch.setattr(files, "content_address", lambda *a: calls.append(a) or real(*a))
+    rel, new = files.place_original_noting_new(tmp_path, src, "p1", "png")
+    assert new is True and len(calls) == 1
+    again = tmp_path / "again"
+    again.write_bytes(b"x" * 100)
+    assert files.place_original_noting_new(tmp_path, again, "p1", "png") == (rel, False)

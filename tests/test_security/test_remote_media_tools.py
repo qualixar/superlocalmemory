@@ -25,7 +25,7 @@ from tests.test_security.test_remote_tool_policy import (
 )
 
 MEDIA = sorted(policy.MEDIA_TOOLS)
-SAVE = ("remember_media", "remember_document")
+SAVE = ("remember_media", "remember_document", "media_upload_link")
 
 
 class _Probe(_StubMcp):
@@ -107,6 +107,8 @@ def test_media_arguments_are_accepted_and_the_key_profile_is_forced(tool, args) 
     assert len(probe.reached) == 1, tool
     sent = probe.args[0]
     assert sent["profile_id"] == "default"
+    if tool in ("remember_media", "remember_document"):
+        assert sent.pop("scope") == "personal"  # a remote save is always the key's own
     assert {k: v for k, v in sent.items() if k != "profile_id"} == args
 
 

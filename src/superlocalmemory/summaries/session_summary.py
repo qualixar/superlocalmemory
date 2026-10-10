@@ -50,7 +50,9 @@ from .base import (
     GENERATED_BY_EXTRACTIVE,
     GENERATED_BY_LLM_B,
     GENERATED_BY_LLM_C,
+    HiddenOf,
     SummaryResult,
+    without_hidden,
     get_mode_str,
 )
 
@@ -72,6 +74,8 @@ def generate_session_summary(
     session_id: str,
     profile_id: str = "default",
     config: object | None = None,
+    *,
+    hidden_of: HiddenOf | None = None,
 ) -> SummaryResult:
     """Generate a Session Summary for a specific session.
 
@@ -132,6 +136,8 @@ def generate_session_summary(
             generated_by=GENERATED_BY_EXTRACTIVE,
             metadata={"session_id": session_id, "error": str(exc)},
         )
+
+    rows = without_hidden([dict(r) for r in rows], hidden_of)
 
     # ── coverage decision ─────────────────────────────────────────────────────
     if not rows:

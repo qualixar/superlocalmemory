@@ -72,3 +72,30 @@ def test_a_remote_link_reaches_the_fetcher_with_the_remote_rules(monkeypatch):
     assert "until a host list is set" in refused.value.receipt.reason and seen["remote"] is True
     monkeypatch.setenv(media_fetch.HOSTS_ENV, "files.example")
     assert ingest._download(ingest.MediaInput(download_url=link, remote=True)) == b"\x89PNG"
+
+
+def test_a_file_object_reaches_the_fetcher_with_the_default_file_hosts(monkeypatch):
+    """``file_param`` on the input is what makes the fetcher add DEFAULT_FILE_HOSTS; a plain link does not."""
+    from superlocalmemory.core import media_fetch
+    from superlocalmemory.media import ingest
+
+    seen = []
+
+    def spy(link, **kw):
+        seen.append(kw)
+        return media_fetch.FetchedMedia(b"\x89PNG", link, "image/png")
+
+    monkeypatch.setattr(media_fetch, "fetch_media", spy)
+    link = "https://files.example/a.png"
+    ingest._download(ingest.MediaInput(download_url=link, remote=True, file_param=True))
+    ingest._download(ingest.MediaInput(download_url=link, remote=True))
+    assert seen[0]["file_param"] is True and seen[1]["file_param"] is False
+
+
+def test_the_images_route_passes_the_file_flag_through(monkeypatch):
+    c, calls = make(monkeypatch)
+    body = {"download_url": "https://files.example/a.png", "origin": "remote", "from_file": True}
+    assert c.post("/api/v3/media/remember", json=body).status_code == 200
+    assert calls[0][0].file_param is True and calls[0][0].remote is True
+    c.post("/api/v3/media/remember", json={"download_url": "https://files.example/a.png", "origin": "remote"})
+    assert calls[1][0].file_param is False

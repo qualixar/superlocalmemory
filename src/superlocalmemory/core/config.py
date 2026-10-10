@@ -94,7 +94,8 @@ class EmbeddingConfig:
     model_name: str = "nomic-ai/nomic-embed-text-v1.5"
     dimension: int = 768
     # Provider: "" = auto-detect, "sentence-transformers", "ollama", "cloud",
-    # "openai" (V3.4.24: any OpenAI-compatible /v1/embeddings endpoint)
+    # "openai" (V3.4.24: any OpenAI-compatible /v1/embeddings endpoint),
+    # "slm-media" (the managed model environment's worker; see core/text_provider.py)
     provider: str = ""
     # Ollama settings (used when provider="ollama" or auto-detected)
     ollama_model: str = "nomic-embed-text"
@@ -2360,6 +2361,9 @@ class SLMConfig:
             # non-interactive path) is Mode A; this one now matches them.
             from superlocalmemory.storage.models import Mode as _M
             _def = cls.for_mode(_M.A, base_dir=_base)
+            # First run only, off until the memory check passes (core/one_model_default.py).
+            from superlocalmemory.core.one_model_default import apply_first_run_default
+            _one_model = apply_first_run_default(_def, _base)
             _def.save(legacy)
             cls.write_current_mode("a", _base)
             for _m in (_M.A, _M.B, _M.C):
@@ -2367,6 +2371,8 @@ class SLMConfig:
                 if not _mp.exists():
                     try:
                         _mc = cls.for_mode(_m, base_dir=_base)
+                        if _one_model and _m == _M.A:
+                            _mc.embedding = _def.embedding
                         _mc.save(_mp)
                     except Exception:
                         pass

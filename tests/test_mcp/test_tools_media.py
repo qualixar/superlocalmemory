@@ -199,9 +199,14 @@ def test_remember_document_needs_exactly_one_source_before_any_call(srv, monkeyp
     assert spy.calls == []
 
 
-def test_remember_document_has_no_link_argument(srv):
+def test_remember_document_takes_a_link_and_posts_it(srv, monkeypatch):
     names = {t.name: t for t in run(srv.list_tools())}
-    assert "download_url" not in names["remember_document"].input_schema["properties"]
+    assert "download_url" in names["remember_document"].input_schema["properties"]
+    spy = Spy({"status": "processing", "document_id": "d" * 32, "job_id": "j" * 32})
+    monkeypatch.setattr(daemon, "daemon_request", spy)
+    res = call(srv, "remember_document", {"download_url": LINK})
+    assert spy.calls[0][1] == "/api/v3/documents" and spy.calls[0][2]["download_url"] == LINK
+    assert res["status"] == "processing" and "SECRET123" not in str(res)
 
 
 def test_remember_document_error_never_echoes_a_link(srv, monkeypatch):
@@ -256,3 +261,15 @@ def test_remote_document_calls_are_refused_with_zero_daemon_calls(srv, monkeypat
     assert spy.calls == []
     assert res["code"] == "not_for_remote" and "not available to remote apps" in res["error"]
     assert "secret.pdf" not in str(res)
+
+
+@pytest.mark.parametrize("tool,url", [("remember_media", "/api/v3/media/remember"),
+                                      ("remember_document", "/api/v3/documents")])
+def test_save_tools_pass_scope_and_the_sharing_list(srv, monkeypatch, tool, url):
+    spy = Spy({"status": "stored", "media_id": MID})
+    monkeypatch.setattr(daemon, "daemon_request", spy)
+    call(srv, tool, {"base64": "QUJD", "scope": "shared", "shared_with": "p2, p3"})
+    _, path, body, _ = spy.calls[0]
+    assert path == url and body["scope"] == "shared" and body["shared_with"] == ["p2", "p3"]
+    call(srv, tool, {"base64": "QUJD"})
+    assert "scope" not in spy.calls[1][2] and "shared_with" not in spy.calls[1][2]

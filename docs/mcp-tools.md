@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-SuperLocalMemory exposes 108 tools and 7 resources through the Model Context
+SuperLocalMemory exposes 109 tools and 7 resources through the Model Context
 Protocol (MCP). A client sees only the tools its tool set allows (see
 [Which tools a client sees](#which-tools-a-client-sees)); the registered
 function signatures are the source of truth for names and parameters, and a
@@ -50,11 +50,11 @@ changes. The tool set is fixed when the MCP server starts.
 | `full` | 57 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
 | `power` | 69 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | 9 | the mesh tools only |
-| `whole` | 108 | every registered tool |
+| `whole` | 109 | every registered tool |
 
 With no `SLM_MCP_PROFILE`, a client gets the same 57 tools as `full` (the mesh
 tools are included while mesh is enabled, which is the default).
-`SLM_MCP_ALL_TOOLS=1` exposes all 108. `SLM_MCP_TOOLS=name1,name2` exposes
+`SLM_MCP_ALL_TOOLS=1` exposes all 109. `SLM_MCP_TOOLS=name1,name2` exposes
 exactly the names listed. An unknown `SLM_MCP_PROFILE` value is an error, not a
 silent fallback.
 
@@ -480,15 +480,29 @@ tool set. They work for AI apps on this computer. An app on another computer can
 use them only when its approval ticked **Allow images and documents** and its
 remote key allows `media` (`slm remote keys allow <key> media`); saving also
 needs a write key. A remote app cannot name a file (`path`), can paste at most
-512 KB, and its image links must come from a host on the allowed list
+512 KB, and its links must come from a host on the allowed list
 (`SLM_MEDIA_URL_HOSTS`; an empty list refuses every link).
+
+`remember_media` and `remember_document` also take a `file` argument for a
+picture or PDF attached in a ChatGPT chat. ChatGPT fills it in (the tools carry
+`_meta["openai/fileParams"] = ["file"]`, which is how ChatGPT knows to do that);
+you do not write it by hand. It holds a temporary `download_url` and a
+`file_id`, and may hold `mime_type` and `file_name`. SuperLocalMemory downloads
+the file from that link with the same safety checks as any other link (https
+only, public addresses only, redirects re-checked, size limit, file type checked
+by its content). Hosts of ChatGPT's own attachment links are trusted for a call
+that came with a `file` object, together with your `SLM_MEDIA_URL_HOSTS` list;
+a link the model types into `download_url` still needs your list. A remote
+save still needs the media permission, the write permission and a write key, and
+is saved to the key's own profile only.
 
 | Tool | Parameters | Notes |
 |------|-----------|-------|
-| `remember_media` | exactly one of `path`, `download_url` (https) or `base64`; `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
+| `remember_media` | exactly one of `path`, `download_url` (https), `base64` or `file` (a ChatGPT attachment); `content`, `tags`, `profile_id`, `idempotency_key` | Saves the image as a memory; returns the status and `slm://media/<id>` |
 | `get_media` | `media_id`, `variant` (`thumb`), `profile_id` | Returns the thumbnail as an image, never as text data |
-| `remember_document` | exactly one of `path` or `base64` (a PDF); `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF; returns `status`, `document_id` and `job_id`. Links are not accepted |
+| `remember_document` | exactly one of `path`, `download_url` (https), `base64` or `file` (a ChatGPT attachment), all of them a PDF; `file_name`, `content`, `tags`, `profile_id`, `idempotency_key` | Queues the PDF (a linked one is streamed to disk, up to 100 MB); returns `status`, `document_id` and `job_id` |
 | `media_status` | `job_id` (32 hex characters), `profile_id` | Progress of a document's background work |
+| `media_upload_link` | `kind` (`image` or `document`), `note` | For apps on other computers only. Returns a one-time link (`url`, `expires_at`, `max_mb`) the person opens in any browser to pick the file; it works once, expires in 10 minutes, and the file goes straight to this computer. Needs the same two permissions as saving. An app on this computer passes a `path` instead |
 
 ---
 

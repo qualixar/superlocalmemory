@@ -48,6 +48,7 @@ __all__ = [
     "DISABLED",
     "EMPTY",
     "ERROR",
+    "NEEDS_SERVICE",
     "NOT_CONFIGURED",
     "NO_CANDIDATES",
     "NO_EMBEDDING",
@@ -67,6 +68,7 @@ ChannelStatus = Literal[
     "no_embedding",
     "no_candidates",
     "warming",
+    "needs_service",
 ]
 
 #: Ran and contributed candidates.
@@ -96,10 +98,14 @@ NO_CANDIDATES: ChannelStatus = "no_candidates"
 #: afterwards gets this channel back. Reported as incomplete, never as
 #: "found nothing".
 WARMING: ChannelStatus = "warming"
+#: Needed the query embedding, but the SLM service that makes text vectors for this
+#: process is not running (not loading: not running). It stays so until the service
+#: is started, so the answer says to start it.
+NEEDS_SERVICE: ChannelStatus = "needs_service"
 
 ALL_STATUSES: frozenset[str] = frozenset({
     OK, EMPTY, ERROR, TIMEOUT, DISABLED, NOT_CONFIGURED, NO_EMBEDDING,
-    NO_CANDIDATES, WARMING,
+    NO_CANDIDATES, WARMING, NEEDS_SERVICE,
 })
 
 #: Every channel a recall can report on, so a caller can tell "this channel had
@@ -118,7 +124,7 @@ CHANNEL_NAMES: tuple[str, ...] = (
 #: Statuses that mean the answer is worse than it should have been. ``empty``,
 #: ``disabled`` and ``not_configured`` are deliberately absent: the first is a
 #: valid finding and the other two are somebody's decision.
-_FAULTS: frozenset[str] = frozenset({ERROR, TIMEOUT, NO_EMBEDDING, WARMING})
+_FAULTS: frozenset[str] = frozenset({ERROR, TIMEOUT, NO_EMBEDDING, WARMING, NEEDS_SERVICE})
 
 
 def is_fault(status: str | None) -> bool:

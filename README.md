@@ -5,6 +5,8 @@
   <img src="assets/branding/slm-wordmark-light.svg" alt="SuperLocalMemory" width="380">
 </picture>
 
+<p align="center"><img src="assets/mascot/slm-mascot-hero.png" width="180" alt="SuperLocalMemory mascot, a fluffy caped helper with the SLM logo, arms open"></p>
+
 ### The governed memory system for AI agents. On your computer, honest when it doesn't know.
 
 Claude Code, Codex, Cursor, ChatGPT, Grok Bot and other MCP clients share one memory that lives on your machine. It learns from use, controls who may read and erase what, and says "I don't have that" instead of guessing. It now remembers **pictures and documents** you can find by describing them, and lets **your bots talk to each other** through the same governed memory.
@@ -131,7 +133,7 @@ SLM is part of Qualixar's AI Reliability Engineering work: agent memory that is 
 | Editor plugins | Claude Code, Codex, VS Code / Copilot, Antigravity, Hermes. Each ships 15 skills, 4 sub-agents and session hooks; the npm package carries every plugin folder | [Plugins](docs/plugins.md), [IDE setup](docs/ide-setup.md), [Hermes](docs/hermes.md) |
 | Any other agent | The universal agent rules: one file that teaches any agent when to recall, what to save and how to keep memory clean. Paste it into `AGENTS.md`, `CLAUDE.md`, `.cursorrules` or the agent's system prompt | [Universal agent rules](plugin-src/rules/AGENTS.md) |
 | `slm connect <ide>` | Writes the MCP config for 12 IDEs, including Cursor, Windsurf, Zed, JetBrains, Gemini CLI and Claude Desktop | [IDE setup](docs/ide-setup.md) |
-| MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 9 to 108 tools | [MCP tools](docs/mcp-tools.md) |
+| MCP | stdio (`slm mcp`) or HTTP at `http://127.0.0.1:8765/mcp/`; profiles from 9 to 109 tools | [MCP tools](docs/mcp-tools.md) |
 | Framework adapters | LangGraph, LangChain, LlamaIndex, CrewAI, AutoGen, Semantic Kernel, Microsoft Agent Framework, Google ADK, OpenAI Agents | [Framework adapters](docs/framework-adapters.md) |
 | Python SDK and HTTP API | `MemoryEngine` in your code; the local REST API | [API reference](docs/api-reference.md) |
 | Auto-capture hooks | `slm hooks install` for Claude Code, `--agent codex` for Codex | [Auto-memory](docs/auto-memory.md) |
@@ -249,6 +251,7 @@ Recalled text is untrusted evidence: before it reaches a prompt, secrets are red
 | Turn on in one step | Off by default. The npm installer and upgrader ask once; the dashboard **Documents & Images** pane has **Turn on** with progress and a restart button; or `slm media enable`, `status`, `disable` (memories kept; `--remove-files` deletes the downloaded models). Refused on computers under 16 GB of memory, with a plain reason; text memory keeps working | [CLI reference](docs/cli-reference.md) |
 | Pictures | `remember_media` saves a PNG, JPEG or WebP. Location data is never read; OCR (Apple Vision on a Mac, RapidOCR elsewhere) makes the text in a picture searchable; a thumbnail is kept for the dashboard and your agent | [MCP tools](docs/mcp-tools.md) |
 | PDFs | `remember_document` processes a PDF in the background, page by page; each page is indexed by its picture and its text layer, and `media_status` follows the job | [MCP tools](docs/mcp-tools.md) |
+| From web apps | In ChatGPT, attach the picture or PDF and ask it to save it to SuperLocalMemory. In Claude on the web, Grok, Muse or ChatGPT on a phone, ask for an upload link (`media_upload_link`), open it and pick the file: it works once, expires in 10 minutes, and streams to your computer without being stored on the way. Both need the app's picture permission (`slm:media`) and save permission | [Host guides](docs/remote-access/hosts.md) |
 | Recall | A normal `slm recall` searches pictures and pages beside text memories. Results carry a thumbnail and a source record (document, page, how the text was read) | [Recall](docs/recall.md) |
 | Folders and Obsidian | `slm sources add ~/Notes --kind obsidian` (or `--kind folder`) mirrors Markdown, text, canvas files, PDFs and images into memory, read-only, after showing what it would read. **Choose folder** in the dashboard opens your computer's own folder picker | [CLI reference](docs/cli-reference.md) |
 | Your data stays yours | Pictures live in their own database (`media.db`); turning this on never rewrites existing memories or embeddings. Erasing a memory erases its picture. SLM's own data folder can never be added as a source or a path, and reading a file by path needs the owner or admin role | [Compliance](docs/compliance.md) |
@@ -332,9 +335,9 @@ Pick how many tools your agent sees with `SLM_MCP_PROFILE`.
 | `core` | 18 | Remember, recall, sessions, optimize, correction review |
 | `code` | 38 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
 | `mesh` | 9 | SLM-Mesh coordination only |
-| `full` (and unset) | 57 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries (61 with pictures and documents on) |
-| `power` | 69 | Full plus administration, lifecycle and diagnostics (73 with pictures and documents on) |
-| `whole` | 108 | Every registered tool |
+| `full` (and unset) | 57 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries (62 with pictures and documents on) |
+| `power` | 69 | Full plus administration, lifecycle and diagnostics (74 with pictures and documents on) |
+| `whole` | 109 | Every registered tool |
 
 ```json
 { "mcpServers": { "superlocalmemory": { "type": "http", "url": "http://127.0.0.1:8765/mcp/" } } }
@@ -344,7 +347,7 @@ For stdio clients use `{"command": "slm", "args": ["mcp"]}`.
 
 ## Privacy and security
 
-What leaves your machine, and when:
+<img align="right" width="120" src="assets/mascot/slm-mascot-shield.png" alt="SuperLocalMemory mascot holding a shield with the SLM logo: privacy and governance">What leaves your machine, and when:
 
 | Data | Leaves only when |
 |---|---|
@@ -353,6 +356,7 @@ What leaves your machine, and when:
 | Memory text | You choose Mode C, a cloud embedder or reranker, an Ollama on another computer, or Jev kind typing (its own consent) |
 | Encrypted backup files | You connect GitHub or Google Drive backup. Files are encrypted before upload |
 | Mesh messages | You configure SLM-Mesh peers, or allow a connected web app to message your bots (`slm:mesh`); its messages pass through the connection gateway |
+| Files from web apps | You attach a file in ChatGPT (fetched by your computer from ChatGPT's file link) or open an upload link (streamed through SLM's connection gateway to your computer; the gateway keeps no copy) |
 | Pictures and documents | Never, for saving and recall: the picture model, OCR and `media.db` are on your computer. A web app gets picture results only with `slm:media` |
 | Remote tool requests and their results | You turn on Web access and add an app. They pass through SLM's connection gateway and that app; the memory database stays on your laptop |
 
@@ -420,6 +424,9 @@ Upgrades never move or delete memory; an update that changes the store takes a r
 | Intel Mac, 32-bit Windows | No prebuilt install | — | — |
 
 Python 3.12+, and Node 18+ for npm. Intel Mac and 32-bit Windows lack a build of the pinned security library (`cryptography` 50); older versions have high-severity advisories. The default embedding model (about 500 MB) downloads on first use or with `slm warmup`. Pictures and documents need 16 GB of memory and macOS 14 or newer on a Mac, and download about 1.5 GB when you turn them on.
+
+<p align="center"><img src="assets/mascot/slm-mascot-pointing.png" width="140" alt="SuperLocalMemory mascot pointing to the demo video and website"><br>
+See it work: <a href="https://www.youtube.com/watch?v=pyAu_vaIYZQ">the four-minute product film</a> · <a href="https://www.superlocalmemory.com">superlocalmemory.com</a></p>
 
 ## Contributing and license
 

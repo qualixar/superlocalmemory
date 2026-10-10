@@ -13,9 +13,9 @@ const MB = 1024 * 1024;
 import { readFileSync } from 'node:fs';
 const require_sources = () => readFileSync(new URL('../../src/superlocalmemory/ui/js/od-sources.js', import.meta.url), 'utf8');
 
-function setup({ on = true, routes = [], docs = [] } = {}) {
-    const media = on ? { enabled: true, env_state: 'ready', restart_required: false }
-                     : { enabled: false, env_state: 'not_installed' };
+function setup({ on = true, routes = [], docs = [], ram, offExtra = {} } = {}) {
+    const media = on ? { enabled: true, env_state: 'ready', restart_required: false, ...(ram ? { ram } : {}) }
+                     : { enabled: false, env_state: 'not_installed', ...offExtra };
     const state = { docs, jobs: [] };
     const base = [
         ['GET', '/api/v3/features', () => ({ json: features(media) })],
@@ -52,6 +52,17 @@ describe('Documents & Images pane', () => {
         assert.match(h.pane.textContent, /Turn on images and documents/);
         assert.equal(h.pane.querySelectorAll('input[type=file]').length, 0);
         assert.equal(h.calls.filter(c => c.url.startsWith('/api/v3/documents')).length, 0);
+    });
+
+    it('off on a computer with under 16 GB: the message shows and Turn on is disabled', async () => {
+        const message = 'Images and documents need a computer with at least 16 GB of memory; this one has 8.0 GB. '
+            + 'Your text memories keep working.';
+        const h = setup({ on: false, offExtra: { ram_ok: false, ram_message: message } });
+        await h.open();
+        assert.ok(h.pane.textContent.includes(message));
+        assert.match(h.pane.textContent, /Turn on images and documents/);
+        const turnOn = Array.from(h.pane.querySelectorAll('button')).find(b => b.textContent === 'Turn on');
+        assert.equal(turnOn.disabled, true);
     });
 
     it('on: upload control, documents and lint are requested', async () => {
@@ -274,5 +285,35 @@ describe('Saved images grid', () => {
         assert.equal(thumbs(h).length, 0);
         assert.equal(h.window.__pwn, undefined);
         assert.ok(!h.pane.innerHTML.includes('onerror'));
+    });
+});
+
+describe('Documents & Images pane: picture model memory line', () => {
+    const line = h => h.pane.querySelector('[data-od-ram]');
+
+    it('shows what the picture model uses and its limit', async () => {
+        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: 2400, worker_cap_mb: 4500, model: 'google/embeddinggemma-2' } });
+        await h.open();
+        assert.equal(line(h).textContent, 'Picture model: 2.4 GB in use, limit 4.5 GB');
+        assert.ok(line(h).className.includes('muted'));
+    });
+
+    it('says not running when the worker is idle', async () => {
+        const h = setup({ ram: { system_total_mb: 16000, worker_rss_mb: null, worker_cap_mb: 4500, model: 'google/embeddinggemma-2' } });
+        await h.open();
+        assert.equal(line(h).textContent, 'Picture model: not running');
+    });
+
+    it('shows no line when the daemon sends no memory block', async () => {
+        const h = setup({});
+        await h.open();
+        assert.equal(line(h).textContent, '');
+        assert.equal(line(h).hidden, true);
+    });
+
+    it('asks nothing extra: one features read to draw the pane', async () => {
+        const h = setup({ ram: { system_total_mb: 1, worker_rss_mb: null, worker_cap_mb: 1, model: '' } });
+        await h.open();
+        assert.equal(h.calls.filter(c => c.url === '/api/v3/features').length, 1);
     });
 });

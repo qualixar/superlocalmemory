@@ -204,17 +204,6 @@ def test_hard_delete_of_an_unknown_or_unerased_document_is_404(monkeypatch):
     assert c.delete("/api/v3/documents/" + "a" * 32 + "?hard=true").status_code == 404
 
 
-def test_a_download_link_is_refused_for_documents_with_a_422(monkeypatch):
-    c = make(monkeypatch)
-    for body in ({"download_url": "https://x.example.com/a.pdf?token=SECRET123"},
-                 {"download_url": "https://x.example.com/a.pdf", "content": "x"}):
-        r = c.post("/api/v3/documents", json=body)
-        assert r.status_code == 422
-        assert "SECRET123" not in r.text
-    assert "images only" in r.text
-    assert c.calls == []
-
-
 def test_a_refused_document_receipt_carries_its_reason_as_detail(monkeypatch):
     c = make(monkeypatch)
     monkeypatch.setattr(routes, "submit_document", lambda inp, **kw: DocumentReceipt("refused", reason="Not a PDF."))
@@ -222,3 +211,36 @@ def test_a_refused_document_receipt_carries_its_reason_as_detail(monkeypatch):
     assert r.status_code == 422 and r.json()["detail"] == "Not a PDF." and r.json()["reason"] == "Not a PDF."
     monkeypatch.setattr(routes, "submit_document", lambda inp, **kw: DocumentReceipt("processing", job_id="j" * 32))
     assert "detail" not in c.post("/api/v3/documents", json=BODY).json()
+
+
+LINK = "https://files.example/doc.pdf?sig=SECRET"
+
+
+def test_a_document_link_is_accepted_and_handed_to_the_submit(monkeypatch):
+    c = make(monkeypatch)
+    r = c.post("/api/v3/documents", json={"download_url": LINK, "file_name": "Scan.pdf"})
+    assert r.status_code == 202
+    inp, _ = c.calls[0]
+    assert inp.download_url == LINK and inp.file_name == "Scan.pdf"
+    assert inp.remote is False and inp.file_param is False and inp.path is None and inp.base64 is None
+
+
+def test_a_remote_document_link_gets_the_remote_rules_and_the_file_flag(monkeypatch):
+    c = make(monkeypatch)
+    body = {"download_url": LINK, "origin": "remote", "from_file": True, "scope": "global"}
+    assert c.post("/api/v3/documents", json=body).status_code == 202
+    inp, kw = c.calls[0]
+    assert inp.remote is True and inp.file_param is True
+    assert kw["scope"] == "personal" and kw["shared_with"] == ()  # a remote save is pinned to personal
+
+
+def test_a_document_link_with_another_source_is_refused_before_saving(monkeypatch):
+    c = make(monkeypatch)
+    assert c.post("/api/v3/documents", json={**BODY, "download_url": LINK}).status_code == 422
+    assert c.calls == []
+
+
+def test_a_remote_document_link_still_cannot_carry_a_path_or_a_big_paste(monkeypatch):
+    c = make(monkeypatch)
+    assert c.post("/api/v3/documents", json={"path": "/etc/hosts", "origin": "remote"}).status_code == 422
+    assert c.calls == []

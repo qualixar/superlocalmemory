@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.core import ram_lock
-from superlocalmemory.runtimes import media_models
+from superlocalmemory.infra import proc_memory
+from superlocalmemory.runtimes import media_models, worker_log
 from superlocalmemory.runtimes.features import media_enabled, register_media_stop_hook
 from superlocalmemory.runtimes.ports import MediaEmbedderPort
 
@@ -34,7 +35,6 @@ DEFAULT_IDLE_S = 1800.0
 DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0
-_LOAD_RAM_MB = 1500
 
 
 class MediaWorkerError(RuntimeError):
@@ -60,6 +60,11 @@ def _test_mode() -> bool:
     return os.environ.get("SLM_TEST_ISOLATION") == "1"
 
 
+#: Library chatter the worker's stderr would otherwise put in the daemon log as warnings.
+_QUIET_LIBRARIES = {"HF_HUB_DISABLE_PROGRESS_BARS": "1", "TQDM_DISABLE": "1",
+                    "TRANSFORMERS_VERBOSITY": "error", "TRANSFORMERS_NO_ADVISORY_WARNINGS": "1"}
+
+
 class MediaWorkerClient(MediaEmbedderPort):
     def __init__(self, env: Any, *, model_id: str, revision: str, idle_s: float | None = None,
                  rss_limit_mb: int | None = None, request_timeout_s: float = 120.0,
@@ -82,8 +87,14 @@ class MediaWorkerClient(MediaEmbedderPort):
         self._timer: threading.Timer | None = None
         self._warming = threading.Event()
         self._halted = False
+        self._drain: threading.Thread | None = None  # carries the worker's stderr into the log
 
     # -- state ----------------------------------------------------------------
+    @property
+    def root(self) -> Path:
+        """The managed environment this client's worker runs from."""
+        return Path(self._env.root)
+
     @property
     def pid(self) -> int | None:
         proc = self._proc
@@ -105,6 +116,8 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     def _worker_env(self) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+        for key, value in _QUIET_LIBRARIES.items():  # progress bars are not problems for the daemon log
+            env.setdefault(key, value)
         if not _test_mode():
             env.pop("SLM_MEDIA_WORKER_FAKE", None)
         return env
@@ -112,7 +125,7 @@ class MediaWorkerClient(MediaEmbedderPort):
     def _spawn(self) -> None:
         root = Path(self._env.root)
         proc = subprocess.Popen([str(self._env.python()), "-I", str(WORKER_PATH)], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                                 cwd=str(root) if root.is_dir() else None, env=self._worker_env())
         replies: queue.Queue = queue.Queue()
 
@@ -125,6 +138,7 @@ class MediaWorkerClient(MediaEmbedderPort):
             replies.put(None)
 
         threading.Thread(target=pump, daemon=True, name="media-worker-reader").start()
+        self._drain = worker_log.start_drain(proc.stderr)  # type: ignore[arg-type]
         self._proc, self._replies, self._loaded = proc, replies, False
 
     def _kill(self) -> None:
@@ -144,6 +158,8 @@ class MediaWorkerClient(MediaEmbedderPort):
             proc.wait(timeout=5)
         except Exception:  # noqa: BLE001 - nothing more can be done
             pass
+        drain, self._drain = self._drain, None
+        worker_log.stop_drain(drain, proc.stderr)
 
     def _roundtrip(self, payload: dict, timeout_s: float) -> dict:
         proc = self._proc
@@ -176,7 +192,7 @@ class MediaWorkerClient(MediaEmbedderPort):
         if self.pid is not None and self._loaded:
             return
         self._kill()
-        need = 0 if self.model_id.startswith("fake:") else _LOAD_RAM_MB
+        need = 0 if self.model_id.startswith("fake:") else media_models.load_mb_for(self.model_id)
         try:
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
@@ -232,12 +248,8 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     @staticmethod
     def _rss_mb(pid: int) -> float:
-        try:
-            import psutil
-
-            return psutil.Process(pid).memory_info().rss / (1024 * 1024)
-        except Exception:  # noqa: BLE001 - unknown size is treated as fine
-            return 0.0
+        """What the worker holds (physical footprint on macOS, where RSS under-reports); 0.0 = unknown."""
+        return proc_memory.process_memory_mb(pid)
 
     def _cancel_timer(self) -> None:
         timer, self._timer = self._timer, None
@@ -343,8 +355,27 @@ class MediaWorkerClient(MediaEmbedderPort):
 
 # -- factory --------------------------------------------------------------------
 
-_CLIENTS: dict[tuple[str, str, str], MediaWorkerClient] = {}
+_CLIENTS: dict[tuple[str, str, str, str], MediaWorkerClient] = {}
 _CLIENTS_LOCK = threading.Lock()
+
+
+def live_clients() -> list[MediaWorkerClient]:
+    """The clients that already exist in this process; creates nothing and starts nothing."""
+    with _CLIENTS_LOCK:
+        return list(_CLIENTS.values())
+
+
+def _shared_client(managed: Any, model_id: str, revision: str, role: str, *,
+                   stop_hook: bool = True) -> MediaWorkerClient:
+    """The one client per (folder, model, revision, role) in this process."""
+    key = (str(managed.root), model_id, revision, role)
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is None:
+            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=model_id, revision=revision, role=role)
+            if stop_hook:
+                register_media_stop_hook(client.stop)
+        return client
 
 
 def media_embedder(*, env: Any = None, data_root: str | Path | None = None, model_id: str | None = None,
@@ -366,13 +397,27 @@ def media_embedder(*, env: Any = None, data_root: str | Path | None = None, mode
         plan = current_space_plan(data_root)
         model_id, revision = plan.image_model, plan.image_revision if revision is None else revision
         role = "image" if plan.mode == "paired" else ""
-    key = (str(managed.root), model_id, "" if revision is None else revision)
-    with _CLIENTS_LOCK:
-        client = _CLIENTS.get(key)
-        if client is None:
-            client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=key[1], revision=key[2], role=role)
-            register_media_stop_hook(client.stop)
-        return client
+    return _shared_client(managed, model_id, "" if revision is None else revision, role)
 
 
-__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "media_embedder"]
+def text_loadout_role(data_root: str | Path | None = None) -> str:
+    """``""`` (the full model) while pictures are on, so text and pictures share one process; else ``"text"``."""
+    return "" if media_enabled(data_root) else "text"
+
+
+def text_embedder(*, env: Any, data_root: str | Path | None, model_id: str,
+                  revision: str = "") -> MediaWorkerClient | None:
+    """The shared client that makes text vectors, or None unless the environment is ready.
+
+    Not gated on the pictures switch: the text provider is chosen in the embedding settings. The
+    text-only loadout is used when pictures are off. It never registers the stop hook: the picture
+    channel owns that single slot. Starts nothing.
+    """
+    if env.status().state != "ready":
+        return None
+    role = text_loadout_role(data_root)
+    return _shared_client(env, model_id, revision, role, stop_hook=False)
+
+
+__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder",
+           "text_embedder", "text_loadout_role"]

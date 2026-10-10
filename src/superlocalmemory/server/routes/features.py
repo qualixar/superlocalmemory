@@ -37,6 +37,19 @@ def _media_env():
     return media_env(root=_data_root() / "runtimes" / "media")
 
 
+def _ram_view() -> dict[str, Any]:
+    from superlocalmemory.runtimes.media_ram import ram_view
+
+    return ram_view()
+
+
+def _ram_refusal(precheck: dict[str, Any]) -> str:
+    """Why this computer cannot turn images and documents on ("" when it can); decided in one place."""
+    from superlocalmemory.runtimes.media_env import media_ram_refusal
+
+    return media_ram_refusal(int(precheck.get("ram_bytes") or 0))
+
+
 def _media_view(status: dict[str, Any], root: Path) -> dict[str, Any]:
     env = status.get("env") or {}
     view = {
@@ -48,10 +61,15 @@ def _media_view(status: dict[str, Any], root: Path) -> dict[str, Any]:
         "restart_required": feat.restart_required(status),
         "precheck": status.get("precheck", {}),
     }
+    view["ram"] = _ram_view()
+    refusal = _ram_refusal(status.get("precheck") or {})
+    view["ram_ok"], view["ram_message"] = not refusal, refusal
     if env.get("error_kind"):
         view["error"] = env["error_kind"]
     if status.get("error"):
         view["error"] = status["error"]
+    if status.get("refused"):
+        view["refused"] = status["refused"]
     return view
 
 
@@ -115,8 +133,11 @@ async def enable_media_route(request: Request):
         raise HTTPException(400, detail="source must be one of: cli, dashboard, api.")
     root = _data_root()
     status = feat.enable_media(source=source, env=_media_env(), data_root=root)
+    view = _media_view(status, root)
+    if status.get("refused"):  # this computer cannot run it: a state conflict, not a server fault
+        return JSONResponse({"media": view, "detail": status.get("error", "")}, status_code=409)
     code = 500 if status.get("error") else 202
-    return JSONResponse({"media": _media_view(status, root)}, status_code=code)
+    return JSONResponse({"media": view}, status_code=code)
 
 
 @router.post("/media/disable")

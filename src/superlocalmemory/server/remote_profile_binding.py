@@ -83,7 +83,7 @@ WRITE_SCOPE_ARGUMENTS: frozenset[str] = frozenset({"scope", "shared_with"})
 
 #: The remote-callable tools that take ``scope``; each remote save through them
 #: is pinned to ``personal``. The registry test keeps this list complete.
-SCOPED_WRITE_TOOLS: frozenset[str] = frozenset({"remember"})
+SCOPED_WRITE_TOOLS: frozenset[str] = frozenset({"remember", "remember_media", "remember_document"})
 
 #: Served for the key's profile by the per-request profile path (4.1.19), with
 #: the host's active profile untouched.
@@ -101,7 +101,7 @@ ROUTED_TOOLS: frozenset[str] = frozenset({
     "confirm_memory_kinds", "run_view", "manage_view", "skill_health", "skill_lineage",
     "slm_loop_history", "slm_loop_show", "get_brain_evidence_status",
     # 4.1.25: images and documents, for a key that opted in (remote_tool_policy.MEDIA_TOOLS).
-    "remember_media", "get_media", "remember_document", "media_status",
+    "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
     "record_agent_experience", "record_cognitive_turn", "finalize_cognitive_turn",
 })
 
@@ -131,7 +131,7 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     "finalize", "idempotency_key", "importance", "include_history", "include_unknown",
     "input_summary", "items", "key", "kind", "known_as_of", "limit", "max_age_days",
     "max_results", "memory_ids", "message", "metadata", "min_confidence", "mode", "name",
-    "new_name", "offset", "outcome",
+    "new_name", "note", "offset", "outcome",
     "output_summary", "pattern_id", "pattern_type", "payload", "prefer_project", "project",
     "project_strict",
     "project_path", "query", "recall_query_id", "receipt_id", "refs", "replaces",
@@ -143,8 +143,10 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
 #: Arguments only the image and document tools take. Accepted for those tools alone, so a
 #: later tool with a ``path`` argument is never let through by accident.
 MEDIA_ARGUMENTS: frozenset[str] = frozenset({
-    "base64", "download_url", "file_name", "job_id", "media_id", "path", "variant",
+    "base64", "download_url", "file", "file_name", "job_id", "media_id", "path", "variant",
 })
+#: ``file`` is a chat app's attachment object (``openai/fileParams``). Only the two saving tools take it.
+MEDIA_FILE_ARGUMENT_TOOLS: frozenset[str] = frozenset({"remember_media", "remember_document"})
 MEDIA_ARGUMENT_TOOLS: frozenset[str] = frozenset({
     "remember_media", "get_media", "remember_document", "media_status",
 })
@@ -213,6 +215,20 @@ def _check_media_argument(tool: str, name: str, value: Any) -> None:
     if name == "path" and value not in (None, ""):
         raise BindingRefusal(
             ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
+    if name == "file":
+        _check_file_argument(tool, value)
+
+
+def _check_file_argument(tool: str, value: Any) -> None:
+    """A ``file`` is an object that carries a link, never a path, for the two saving tools only."""
+    if tool not in MEDIA_FILE_ARGUMENT_TOOLS:
+        raise BindingRefusal(ARGUMENT_DENIAL, "Argument 'file' is not accepted over remote access.")
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise BindingRefusal(ARGUMENT_DENIAL, "The attached file must be an object.")
+    if "path" in value:
+        raise BindingRefusal(ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
 
 
 def _check_mesh_state(arguments: Mapping[str, Any]) -> None:

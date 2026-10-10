@@ -517,6 +517,16 @@ class NativeConnectionRuntime:
         except Exception:
             logger.debug("grant key unavailable for %s", row.connection_id[:6])
 
+    async def _end_upload_links(self, connection_id: str) -> None:
+        """Consent, grant key or connection changed: no unfinished upload link of it may complete.
+        Never fails the change that called it."""
+        try:
+            from superlocalmemory.media.upload_links import default_links
+
+            await asyncio.to_thread(default_links().fail_open_links, connection_id)
+        except Exception:
+            logger.warning("upload links of %s were not closed", connection_id[:6])
+
     async def rotate_grant_key(self, owner: str, profile: str, connection_id: str) -> int:
         """Owner action: replace this connection's grant key. Returns the new version."""
         async with self._locks.setdefault(connection_id, asyncio.Lock()):
@@ -524,6 +534,7 @@ class NativeConnectionRuntime:
             fetched = await self.provider.grant_key(latest)
             await asyncio.to_thread(
                 self.grant_keys.store_new, connection_id, fetched["version"], fetched["key"])
+        await self._end_upload_links(connection_id)
         return fetched["version"]
 
     def request_grant_refresh(self, connection_id: str) -> bool:
@@ -559,6 +570,7 @@ class NativeConnectionRuntime:
         value = await self.provider.revoke_app(latest, authorization_id, expected_version)
         if not isinstance(value, dict) or value.get("revoked") is not True:
             raise ValueError("apps_unavailable")
+        await self._end_upload_links(connection_id)
         return {"revoked": True}
 
     async def resume(self, owner: str, profile: str) -> None:
@@ -623,6 +635,7 @@ class NativeConnectionRuntime:
         for key in await asyncio.to_thread(self.keys.list):
             if key.name == "web-" + connection and key.active:
                 await mutate(self.keys.revoke, key.key_id)
+        await self._end_upload_links(connection)
         if row is None:
             await self._sync_peers_quietly(connection, [], [], peer_sync.started_at())
             return False

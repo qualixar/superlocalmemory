@@ -177,64 +177,23 @@ def init_embedder(config: SLMConfig) -> Any | None:
     """Initialize the best available embedding provider.
 
     Priority order:
-    1. Explicit provider in config (ollama / cloud / sentence-transformers)
+    1. Explicit provider in config (ollama / cloud / sentence-transformers / slm-media)
     2. Auto-detect: Ollama first (lightweight), then sentence-transformers
        subprocess (NEVER in-process for Mode A/B)
     3. If nothing works -> None (BM25-only mode)
 
     Memory safety: Mode A/B NEVER load sentence-transformers in-process.
-    EmbeddingService uses subprocess isolation — the main process stays
-    at ~60MB and never imports torch.
+    EmbeddingService uses subprocess isolation, so the main process stays
+    at ~60MB and never imports torch. The routing is in core/text_provider.py.
     """
     from superlocalmemory.core.embeddings import EmbeddingService
-    from superlocalmemory.storage.models import Mode
+    from superlocalmemory.core.text_provider import route_embedder
 
-    emb_cfg = config.embedding
-    provider = emb_cfg.provider
-
-    # v3.4.55: When provider is ollama, use Ollama's embedding API as
-    # PRIMARY. The stored vectors were created by Ollama's nomic-embed-text;
-    # sentence-transformers' nomic-embed-text-v1.5 produces different vectors.
-    # Mixing them degrades semantic recall. ST subprocess is the fallback,
-    # not the primary — this also eliminates the 2-3 minute cold-start
-    # where the ST model loads from disk (~2.1 GB) on every daemon restart.
-    if provider == "ollama":
-        result = _try_ollama_embedder(emb_cfg)
-        if result is not None:
-            logger.info("Using Ollama embeddings (nomic-embed-text, local)")
-            return result
-        st_emb = _try_service_embedder(EmbeddingService, emb_cfg)
-        if st_emb is not None:
-            logger.warning("Ollama unavailable; falling back to sentence-transformers subprocess")
-            return st_emb
-        return None
-
-    # --- V3.4.24: Explicit OpenAI-compatible provider ---
-    if provider == "openai" and emb_cfg.is_openai_compatible:
-        logger.info(
-            "Using OpenAI-compatible embedding endpoint: %s (model=%s, dim=%d)",
-            emb_cfg.api_endpoint, emb_cfg.model_name, emb_cfg.dimension,
-        )
-        return _try_service_embedder(EmbeddingService, emb_cfg)
-
-    # --- Explicit cloud provider ---
-    if provider == "cloud" or emb_cfg.is_cloud:
-        return _try_service_embedder(EmbeddingService, emb_cfg)
-
-    # --- Explicit sentence-transformers (subprocess-isolated) ---
-    if provider == "sentence-transformers":
-        return _try_service_embedder(EmbeddingService, emb_cfg)
-
-    # --- Auto-detect: try Ollama first (lightweight, <1s) ---
-    ollama_emb = _try_ollama_embedder(emb_cfg)
-    if ollama_emb is not None:
-        logger.info("Auto-detected Ollama embeddings (fast path)")
-        return ollama_emb
-
-    # --- Fallback: sentence-transformers subprocess ---
-    # EmbeddingService ALWAYS uses subprocess isolation (see embeddings.py).
-    # The main process never imports torch — safe for Mode A/B.
-    return _try_service_embedder(EmbeddingService, emb_cfg)
+    return route_embedder(
+        config,
+        try_ollama=_try_ollama_embedder,
+        try_service=lambda emb_cfg: _try_service_embedder(EmbeddingService, emb_cfg),
+    )
 
 
 # ---------------------------------------------------------------------------

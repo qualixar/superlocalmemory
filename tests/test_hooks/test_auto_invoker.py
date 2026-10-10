@@ -285,3 +285,30 @@ def _mock_fact_row(fact_id: str, lifecycle: str = "active") -> dict:
         "fact_type": "semantic",
         "lifecycle": lifecycle,
     }
+
+
+class TestCandidateQuestionPrompt:
+    """The user's message is a question: embedders with a question prompt use it."""
+
+    def test_uses_question_prompt_when_the_embedder_has_one(self):
+        class _TwoPromptEmbedder:
+            def embed(self, text):
+                raise AssertionError("memory prompt used for a question")
+
+            def embed_query(self, text):
+                return [0.5, 0.5]
+
+        vs = MagicMock()
+        vs.search.return_value = [("f1", 0.9)]
+        inv = _make_invoker(vector_store=vs, embedder=_TwoPromptEmbedder())
+        assert inv._get_candidates("where is the key", "p") == [("f1", 0.9)]
+        vs.search.assert_called_once_with([0.5, 0.5], top_k=30, profile_id="p")
+
+    def test_plain_embedder_called_as_before(self):
+        embedder = MagicMock()
+        embedder.embed.return_value = [0.1, 0.2]
+        vs = MagicMock()
+        vs.search.return_value = []
+        inv = _make_invoker(vector_store=vs, embedder=embedder)
+        inv._get_candidates("q", "p")
+        embedder.embed.assert_called_once_with("q")

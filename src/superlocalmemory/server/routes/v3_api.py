@@ -555,8 +555,10 @@ async def set_full_config(request: Request):
                        "embedding_model", "embedding_dimension")
         if any(k in body for k in _emb_fields):
             _old_emb = config.embedding
-            _new_provider = body.get("embedding_provider", "")
             _new_model = body.get("embedding_model", "")
+            from superlocalmemory.core.embedding_providers import resolve_embedding_provider
+            _new_provider = resolve_embedding_provider(  # ValueError -> 400 below
+                body.get("embedding_provider", ""), _new_model)
             _new_dim = int(body.get("embedding_dimension", 0) or 0)
             # The same range the other save route enforces. Without it a
             # dashboard save with no dimension field stored a width of zero.
@@ -762,8 +764,13 @@ async def set_embedding_config(request: Request):
         from superlocalmemory.core.config import SLMConfig, EmbeddingConfig
         config = getattr(request.app.state, "config", None) or SLMConfig.load()
 
-        new_provider = body.get("provider", config.embedding.provider)
         new_model = body.get("model_name", config.embedding.model_name)
+        from superlocalmemory.core.embedding_providers import resolve_embedding_provider
+        try:
+            new_provider = resolve_embedding_provider(
+                body.get("provider", ""), new_model, config.embedding.provider)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         new_dim = int(body.get("dimension", config.embedding.dimension) or 768)
         if not (64 <= new_dim <= 8192):
             return JSONResponse({"error": f"Dimension must be 64-8192, got {new_dim}"}, status_code=400)
@@ -931,13 +938,18 @@ async def test_embedding_endpoint(request: Request):
 
 
 @router.get("/embed/ping")
-async def embed_ping():
+async def embed_ping(request: Request):
     """V3.5.9: Liveness probe for McpEmbedderProxy. Returns 200 when daemon
-    embedder is ready so the proxy knows the daemon is reachable."""
+    embedder is ready so the proxy knows the daemon is reachable.
+
+    ``embedder`` says which model the daemon embeds with (never builds the engine),
+    so another process can refuse a daemon that is not on its own embedding space.
+    """
     try:
-        from .helpers import get_engine_lazy
-        # We just need to confirm the route is alive — engine check is optional
-        return {"ok": True}
+        from superlocalmemory.core.daemon_text_embedder import describe_embedder
+
+        engine = getattr(request.app.state, "engine", None)
+        return {"ok": True, "embedder": describe_embedder(getattr(engine, "_embedder", None))}
     except Exception:
         logger.exception("embedder liveness probe failed")
         return JSONResponse({"ok": False, "error": "Internal server error"}, status_code=503)
@@ -955,6 +967,9 @@ async def embed_texts(request: Request):
     try:
         body = await request.json()
         texts = body.get("texts", [])
+        prompt = body.get("prompt", "document")
+        if prompt not in ("document", "query"):
+            return JSONResponse({"error": "prompt must be 'document' or 'query'"}, status_code=400)
         if not texts:
             return {"embeddings": []}
 
@@ -965,11 +980,19 @@ async def embed_texts(request: Request):
                 {"error": "Embedder not available in daemon"},
                 status_code=503,
             )
+        # A caller that names its model and vector size gets vectors only from that model.
+        if body.get("model") and body.get("dimension"):
+            from superlocalmemory.core.daemon_text_embedder import embedder_identity
+
+            if (str(body["model"]), int(body["dimension"])) != embedder_identity(engine._embedder):
+                return JSONResponse({"error": "model_mismatch"}, status_code=409)
 
         loop = asyncio.get_event_loop()
+        from superlocalmemory.core.daemon_text_embedder import embed_with_prompt
+
         embeddings = await loop.run_in_executor(
             None,
-            lambda: engine._embedder.embed_batch(texts),
+            lambda: embed_with_prompt(engine._embedder, texts, prompt),
         )
         return {"embeddings": embeddings}
     except Exception as e:

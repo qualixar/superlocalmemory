@@ -57,6 +57,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 MAX_TEXTS = 64
 MAX_TEXT_CHARS = 8_000
 MAX_PATHS = 16
+# One forward pass holds at most this much: measured on a 24 GB Mac, batch-16 long texts
+# peaked at 12 GB and batch-16 pictures at 7.3 GB, against ~3.9 GB for one picture.
+TEXT_PASS_CHARS = 4_000
+TEXT_PASS_MAX = 8
+IMAGE_PASS = 2
 MAX_FILE_BYTES = 25 * 1024 * 1024
 PROMPTS = ("SearchQuery", "Document")
 FAKE_DIM = 768
@@ -159,6 +164,38 @@ def _encode_vision(paths: list[str]) -> list[list[float]]:
             img.close()
 
 
+def _passes(sizes: list[int], budget: int, max_items: int) -> list[tuple[int, int]]:
+    """Consecutive ``(start, end)`` groups whose sizes sum to at most ``budget`` (one item may
+    exceed it alone) and that hold at most ``max_items`` each."""
+    groups: list[tuple[int, int]] = []
+    start, used = 0, 0
+    for i, size in enumerate(sizes):
+        if i > start and (used + size > budget or i - start >= max_items):
+            groups.append((start, i))
+            start, used = i, 0
+        used += size
+    if sizes:
+        groups.append((start, len(sizes)))
+    return groups
+
+
+def _release_memory() -> None:
+    """Hand cached accelerator memory back after a request, so the peak does not stay resident."""
+    import gc
+
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    try:
+        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001 - freeing a cache is best effort
+        pass
+
+
 def _normalise(rows) -> list[list[float]]:
     out = []
     for row in rows:
@@ -181,15 +218,19 @@ def _encode_images(paths: list[str]) -> list[list[float]]:
     from PIL import Image
 
     Image.MAX_IMAGE_PIXELS = 100_000_000
-    images = []
-    try:
-        for path in paths:
-            with Image.open(path) as img:
-                images.append(_shrunk(img.convert("RGB"), int(_STATE.get("max_pixels") or 0)))
-        return _normalise(_STATE["model"].encode(images, normalize_embeddings=True, show_progress_bar=False))
-    finally:
-        for img in images:
-            img.close()
+    out: list[list[float]] = []
+    for start, end in _passes([1] * len(paths), IMAGE_PASS, IMAGE_PASS):
+        images = []
+        try:
+            for path in paths[start:end]:
+                with Image.open(path) as img:
+                    images.append(_shrunk(img.convert("RGB"), int(_STATE.get("max_pixels") or 0)))
+            out.extend(_normalise(_STATE["model"].encode(images, normalize_embeddings=True,
+                                                         show_progress_bar=False)))
+        finally:
+            for img in images:
+                img.close()
+    return out
 
 
 # -- commands ------------------------------------------------------------------
@@ -245,8 +286,13 @@ def _cmd_embed_text(req: dict) -> dict:
         return {"vectors": [_fake_vector(t.encode("utf-8"), _STATE["dim"]) for t in texts]}
     if _STATE.get("vision"):
         raise _Invalid("this model embeds images only")
-    rows = _STATE["model"].encode(texts, prompt_name=prompt, normalize_embeddings=True, show_progress_bar=False)
-    return {"vectors": _normalise(rows)}
+    vectors: list[list[float]] = []
+    for start, end in _passes([len(t) for t in texts], TEXT_PASS_CHARS, TEXT_PASS_MAX):
+        rows = _STATE["model"].encode(texts[start:end], prompt_name=prompt, normalize_embeddings=True,
+                                      show_progress_bar=False)
+        vectors.extend(_normalise(rows))
+    _release_memory()
+    return {"vectors": vectors}
 
 
 def _check_paths(paths) -> list[str]:
@@ -272,7 +318,13 @@ def _cmd_embed_image(req: dict) -> dict:
         return {"vectors": vectors}
     if _STATE.get("text_only"):
         raise _Invalid("this model embeds text only")
-    return {"vectors": _encode_vision(paths) if _STATE.get("vision") else _encode_images(paths)}
+    if _STATE.get("vision"):
+        vectors = [v for s, e in _passes([1] * len(paths), IMAGE_PASS, IMAGE_PASS)
+                   for v in _encode_vision(paths[s:e])]
+    else:
+        vectors = _encode_images(paths)
+    _release_memory()
+    return {"vectors": vectors}
 
 
 def _image_ops():
@@ -355,6 +407,11 @@ def _watch_parent() -> None:
 
 
 def main() -> int:
+    import warnings
+
+    # Library deprecation notices are for their developers; on stderr they read as daemon warnings.
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         threading.Thread(target=_watch_parent, daemon=True, name="parent-watchdog").start()

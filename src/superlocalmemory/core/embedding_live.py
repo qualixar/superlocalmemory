@@ -78,7 +78,7 @@ def _infer_live(desired: Any, live_sig: str) -> Any:
 
     model, _sep, dim = live_sig.partition("::")
     entry = model_catalog.find(model)
-    if entry is not None and entry.provider in ("ollama", "sentence-transformers"):
+    if entry is not None and entry.provider in ("ollama", "sentence-transformers", "slm-media"):
         provider = entry.provider
     elif "/" in model:
         provider = "sentence-transformers"

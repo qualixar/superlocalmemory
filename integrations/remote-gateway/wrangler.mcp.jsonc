@@ -22,6 +22,24 @@
       "service": "slm-remote-auth"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "UPLOAD_IP",
+      "namespace_id": "423003",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    {
+      "name": "UPLOAD_CONN",
+      "namespace_id": "423004",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

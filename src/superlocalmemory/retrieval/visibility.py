@@ -31,14 +31,19 @@ _IN_CHUNK = 500
 @dataclass(frozen=True)
 class VisibilityContext:
     """``hidden_fact_ids`` are never shown; ``hide_media`` also hides pictures and pages;
-    ``hide_sources`` also hides everything that came from a connected folder."""
+    ``hide_sources`` also hides everything that came from a connected folder.
+
+    ``vetted_media``, when not ``None``, lets only the pictures and pages it names show
+    (see :func:`media_token`); every other picture or page is hidden."""
 
     hidden_fact_ids: frozenset[str] = frozenset()
     hide_media: bool = False
     hide_sources: bool = False
+    vetted_media: frozenset[str] | None = None
 
 
 _EMPTY = VisibilityContext()
+_BAD = object()  # metadata that could not be read
 _current: contextvars.ContextVar[VisibilityContext] = contextvars.ContextVar(
     "slm_recall_visibility", default=_EMPTY)
 
@@ -49,7 +54,24 @@ def current() -> VisibilityContext:
 
 def is_empty() -> bool:
     ctx = _current.get()
-    return not ctx.hidden_fact_ids and not ctx.hide_media and not ctx.hide_sources
+    return (not ctx.hidden_fact_ids and not ctx.hide_media and not ctx.hide_sources
+            and ctx.vetted_media is None)
+
+
+def media_token(source: Any) -> str:
+    """The name a picture, page or document memory goes by in ``vetted_media``.
+
+    ``m:<media id>`` for a picture, ``p:<document id>:<page>`` for a page and
+    ``d:<document id>`` for a memory of the whole document. ``""`` when the marker names none.
+    """
+    if not isinstance(source, dict):
+        return ""
+    if source.get("media_id"):
+        return f"m:{source['media_id']}"
+    if source.get("document_id"):
+        page = source.get("page")
+        return f"p:{source['document_id']}:{page}" if page is not None else f"d:{source['document_id']}"
+    return ""
 
 
 def hides_media() -> bool:
@@ -72,6 +94,10 @@ def _is_hidden_source(source: Any, ctx: VisibilityContext) -> bool:
 
     if ctx.hide_media and source.get("type") in MEDIA_SOURCE_TYPES:
         return True
+    if ctx.vetted_media is not None and (
+            source.get("type") in MEDIA_SOURCE_TYPES or source.get("media_id")):
+        if media_token(source) not in ctx.vetted_media:
+            return True
     return ctx.hide_sources and (source.get("type") == "folder" or source.get("origin") == "folder")
 
 
@@ -85,12 +111,17 @@ def _hidden_source_memories(db: Any, memory_ids: Iterable[str], ctx: VisibilityC
         rows = db.execute(
             "SELECT memory_id, metadata_json FROM memories WHERE memory_id IN ("
             + ",".join("?" * len(part)) + ")", tuple(part))
+        parsed: list[tuple[Any, Any]] = []
         for row in rows:
             try:
-                source = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
-                hidden = _is_hidden_source(source, ctx)
+                parsed.append((row, (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")))
             except (ValueError, AttributeError):
-                hidden = True
+                parsed.append((row, _BAD))
+        prime = getattr(ctx.vetted_media, "prime", None)
+        if callable(prime):  # ask the media store about these candidates only, in one go
+            prime(media_token(src) for _, src in parsed if src is not _BAD)
+        for row, source in parsed:
+            hidden = True if source is _BAD else _is_hidden_source(source, ctx)
             if hidden:
                 found.add(row["memory_id"])
     return found
@@ -114,6 +145,10 @@ def _hidden_source_facts(db: Any, profile_id: str, fact_ids: Sequence[str],
     return {fid for fid, mem in memory_of.items() if mem in hidden}
 
 
+def _asks_sources(ctx: VisibilityContext) -> bool:
+    return ctx.hide_media or ctx.hide_sources or ctx.vetted_media is not None
+
+
 def drop_hidden_results(fused: list, db: Any, profile_id: str) -> list:
     """``fused`` without the hidden facts. The same list when nothing is hidden.
     If the media lookup fails, nothing is shown."""
@@ -121,7 +156,7 @@ def drop_hidden_results(fused: list, db: Any, profile_id: str) -> list:
         return fused
     ctx = current()
     hidden = {fr.fact_id for fr in fused if fr.fact_id in ctx.hidden_fact_ids}
-    if ctx.hide_media or ctx.hide_sources:
+    if _asks_sources(ctx):
         try:
             hidden |= _hidden_source_facts(
                 db, profile_id, [fr.fact_id for fr in fused if fr.fact_id not in hidden], ctx)
@@ -138,7 +173,7 @@ def drop_hidden_facts(facts: dict, db: Any) -> dict:
         return facts
     ctx = current()
     hidden = {fid for fid in facts if fid in ctx.hidden_fact_ids}
-    if ctx.hide_media or ctx.hide_sources:
+    if _asks_sources(ctx):
         try:
             media = _hidden_source_memories(db, {f.memory_id for f in facts.values()}, ctx)
         except Exception as exc:  # noqa: BLE001 - fail closed
@@ -146,6 +181,22 @@ def drop_hidden_facts(facts: dict, db: Any) -> dict:
             return {}
         hidden |= {fid for fid, f in facts.items() if f.memory_id in media}
     return {fid: f for fid, f in facts.items() if fid not in hidden} if hidden else facts
+
+
+def hidden_among(db: Any, profile_id: str, fact_ids: Sequence[str]) -> set[str]:
+    """Which of ``fact_ids`` the current context hides (all of them if the lookup fails)."""
+    if is_empty():
+        return set()
+    ctx = current()
+    hidden = {fid for fid in fact_ids if fid in ctx.hidden_fact_ids}
+    if _asks_sources(ctx):
+        try:
+            rest = [fid for fid in fact_ids if fid not in hidden]
+            hidden |= _hidden_source_facts(db, profile_id, rest, ctx)
+        except Exception as exc:  # noqa: BLE001 - fail closed
+            logger.warning("visibility lookup failed, hiding all (%s)", type(exc).__name__)
+            return set(fact_ids)
+    return hidden
 
 
 def keep_loaded(final_top: list, facts: dict) -> list:
@@ -156,4 +207,4 @@ def keep_loaded(final_top: list, facts: dict) -> list:
 
 
 __all__ = ["VisibilityContext", "current", "drop_hidden_facts", "drop_hidden_results",
-           "hides_media", "is_empty", "keep_loaded", "use"]
+           "hidden_among", "hides_media", "is_empty", "keep_loaded", "media_token", "use"]

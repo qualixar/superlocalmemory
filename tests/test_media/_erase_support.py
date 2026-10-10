@@ -51,8 +51,8 @@ def add_image(root, store, *, media_id, profile="p1", memory_id, data=b"img", ag
     sha = hashlib.sha256(data).hexdigest()
     tmp = files.tmp_dir(root) / f"{media_id}.bin"
     tmp.write_bytes(data)
-    rel = files.place_original(root, tmp, sha, "png")
-    path = files.original_path(root, sha, "png")
+    rel = files.place_original(root, tmp, profile, "png")
+    path = files.media_root(root) / rel
     old = time.time() - age_s
     os.utime(path, (old, old))
     store.insert_item(media_id=media_id, profile_id=profile, kind="image", source_sha256=media_id * 2 if False else

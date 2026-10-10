@@ -9,7 +9,14 @@ export interface RelayBinding {
  * missed heartbeats means it is asleep or its network dropped without closing. */
 export const CONNECTOR_SILENCE_MS = 45000;
 interface StoredState { binding: RelayBinding | null; generation: number; revoked: boolean; }
-interface Attachment { generation: number; connectionId: string; connectedAt?: number; grants?: boolean; }
+interface Attachment { generation: number; connectionId: string; connectedAt?: number; grants?: boolean; upload?: boolean; }
+/** Connector abilities the gateway knows. A connector is sent a signed grant only if it said grant-v1, and an upload frame only if it said upload-v1. */
+function connectorFeatures(header: string | null): { grants?: boolean; upload?: boolean } {
+  // Exact lists only, as the connect Worker forwards them: a near-miss counts as nothing.
+  if (header === "grant-v1") return { grants: true };
+  if (header === "grant-v1,upload-v1") return { grants: true, upload: true };
+  return {};
+}
 /** What the resource Worker passes with a forwarded call: who is calling (signed for the laptop) and whether it parks on the laptop. */
 export interface ForwardContext { grant?: GrantInput; wait?: boolean; }
 /** A laptop holds one slot per long wait; more than this many at once would starve ordinary calls. */
@@ -153,7 +160,7 @@ export class RelayDO extends DurableObject {
       for(const old of this.ctx.getWebSockets("connector"))this.closeSocket(old,503,"connector_replaced");
       const pair=new WebSocketPair();const [client,server]=Object.values(pair);
       this.ctx.acceptWebSocket(server,["connector"]);
-      server.serializeAttachment({generation:next.generation,connectionId:binding.connectionId,connectedAt:Date.now(),...(request.headers.get("x-slm-connector-features")==="grant-v1"?{grants:true}:{})} satisfies Attachment);
+      server.serializeAttachment({generation:next.generation,connectionId:binding.connectionId,connectedAt:Date.now(),...connectorFeatures(request.headers.get("x-slm-connector-features"))} satisfies Attachment);
       server.send(JSON.stringify({v:1,kind:"ready",generation:next.generation}));
       return new Response(null,{status:101,webSocket:client});
     });
@@ -173,6 +180,8 @@ export class RelayDO extends DurableObject {
     if(!socket)return failure(503,"connector_offline");
     if(frame.generation!==this.state.generation)return failure(409,"stale_generation");
     if(Date.now()-this.lastHeard(socket)>CONNECTOR_SILENCE_MS)return failure(503,"connector_asleep");
+    // An older connector would treat an upload frame as an MCP call. It never sees one.
+    if(frame.headers.some(pair=>pair[0].toLowerCase()==="x-slm-upload")&&(socket.deserializeAttachment() as Attachment|null)?.upload!==true)return failure(503,"upload_unsupported");
     // Fresh wire nonce even if a caller reuses its ID after timeout. A late reply
     // can never complete a later operation that happens to reuse that caller ID.
     const wireId=crypto.randomUUID();

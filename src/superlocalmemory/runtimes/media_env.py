@@ -6,13 +6,18 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 
 from superlocalmemory.runtimes import managed_env as _env
 from superlocalmemory.runtimes import media_models
 from superlocalmemory.runtimes.managed_env import EnvSpec, HuggingFaceSource, ManagedEnv
 from superlocalmemory.runtimes.media_canary import media_canary
+
+logger = logging.getLogger(__name__)
 
 #: Top-level packages. The installed set is the hashed lock for the platform
 #: (runtimes/locks/), generated from these by scripts/lock_media_env.py.
@@ -36,7 +41,37 @@ MEDIA_MODEL_REVISION = media_models.EG2_REVISION  # 914f7f89142e33e77833254d9c9b
 
 GIB = 1024 ** 3
 MEDIA_DOWNLOAD_BYTES = int(1.5 * GIB)
-MEDIA_RAM_WARN_BYTES = int(7.5 * GIB)
+#: Below this much physical memory, images and documents are refused. 15 GiB, not 16:
+#: machines sold as 16 GB report a little less (a Linux VM shows about 15.6 GiB).
+MEDIA_MIN_RAM_BYTES = int(15 * GIB)
+LOW_RAM_OVERRIDE_ENV = "SLM_MEDIA_ALLOW_LOW_RAM"
+_OVERRIDE_LOGGED = False
+
+
+def media_ram_refusal(ram_bytes: int, env: Mapping[str, str] | None = None) -> str:
+    """Why images and documents cannot be turned on here, or "" when they can.
+
+    The one place that decides, for every entry point (daemon, dashboard, terminal,
+    installer). Unknown memory (0) is allowed. ``SLM_MEDIA_ALLOW_LOW_RAM=1`` is a
+    developer override: it allows a small machine and warns once per process. The
+    installer script mirrors the threshold and the override.
+    """
+    global _OVERRIDE_LOGGED
+    if not 0 < ram_bytes < MEDIA_MIN_RAM_BYTES:
+        return ""
+    if (os.environ if env is None else env).get(LOW_RAM_OVERRIDE_ENV) == "1":
+        if not _OVERRIDE_LOGGED:
+            _OVERRIDE_LOGGED = True
+            logger.warning("%s=1: images and documents allowed on %.1f GB of memory (16 GB needed)",
+                           LOW_RAM_OVERRIDE_ENV, ram_bytes / GIB)
+        return ""
+    return (f"Images and documents need a computer with at least 16 GB of memory; this one has "
+            f"{ram_bytes / GIB:.1f} GB. Your text memories keep working.")
+
+
+def media_ram_message() -> str:
+    """``media_ram_refusal`` for this computer right now."""
+    return media_ram_refusal(_env._ram_bytes())
 
 
 def _min_free_disk() -> int:
@@ -49,7 +84,6 @@ MEDIA_ENV = EnvSpec(
     requirements=MEDIA_REQUIREMENTS,
     model_source=HuggingFaceSource(MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION, MEDIA_DOWNLOAD_BYTES),
     min_free_disk_bytes=_min_free_disk(),
-    min_ram_bytes_warn=MEDIA_RAM_WARN_BYTES,
     canary=media_canary,
     expected_download_bytes=MEDIA_DOWNLOAD_BYTES,
 )

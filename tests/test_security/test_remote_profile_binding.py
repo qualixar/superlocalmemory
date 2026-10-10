@@ -62,7 +62,8 @@ def test_every_argument_of_every_remote_tool_is_classified(registry) -> None:
     groups = (binding.PROFILE_ARGUMENTS, binding.READ_SCOPE_ARGUMENTS,
               binding.WRITE_SCOPE_ARGUMENTS, binding.NEUTRAL_ARGUMENTS, binding.MEDIA_ARGUMENTS)
     assert sum(len(g) for g in groups) == len(binding.CLASSIFIED_ARGUMENTS)
-    assert binding.MEDIA_ARGUMENT_TOOLS == policy.MEDIA_TOOLS
+    # media_upload_link takes no file arguments: it is a media tool, but not one that may carry them.
+    assert binding.MEDIA_ARGUMENT_TOOLS | {"media_upload_link"} == policy.MEDIA_TOOLS
     media_seen = {a for t, args in remote.items() if t in policy.MEDIA_TOOLS for a in args}
     assert binding.MEDIA_ARGUMENTS <= media_seen, sorted(binding.MEDIA_ARGUMENTS - media_seen)
     assert binding.NEUTRAL_ARGUMENTS <= seen, sorted(binding.NEUTRAL_ARGUMENTS - seen)
@@ -75,7 +76,7 @@ def test_no_profile_or_scope_like_argument_is_filed_as_neutral(registry) -> None
 
 def test_every_remote_tool_that_takes_scope_is_pinned_to_personal(registry) -> None:
     takes_scope = {t for t, args in registry.items()
-                   if t in policy.WRITE_TOOLS and "scope" in args}
+                   if t in policy.WRITE_TOOLS | policy.MEDIA_TOOLS and "scope" in args}
     assert takes_scope == binding.SCOPED_WRITE_TOOLS
 
 
@@ -471,3 +472,45 @@ def test_a_remote_app_cannot_name_a_file_even_for_a_media_tool():
         with pytest.raises(BindingRefusal):
             bind_arguments(tool, {"path": "/Users/me/photo.jpg"}, key_name="k", bound="default")
         assert "path" in bind_arguments(tool, {"path": ""}, key_name="k", bound="default")
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "remember_document"])
+def test_a_remote_picture_or_document_save_without_scope_is_pinned_to_personal(tool) -> None:
+    out = binding.bind_arguments(tool, {"base64": "x"}, key_name="k", bound="p")
+    assert out["scope"] == "personal"
+
+
+_ATTACHMENT = {"download_url": "https://files.chat.example/f1?sig=x", "file_id": "file_1",
+               "mime_type": "image/png", "file_name": "a.png"}
+
+
+@pytest.mark.parametrize("tool", ["remember_media", "remember_document"])
+def test_a_remote_app_may_send_a_file_object_and_the_save_stays_personal(tool) -> None:
+    out = binding.bind_arguments(tool, {"file": _ATTACHMENT}, key_name="k", bound="p")
+    assert out["file"] == _ATTACHMENT and out["scope"] == "personal" and out["profile_id"] == "p"
+
+
+@pytest.mark.parametrize("tool", ["remember", "recall", "mesh_send", "get_media", "media_status"])
+def test_the_file_argument_belongs_to_the_two_saving_tools_only(tool) -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments(tool, {"file": _ATTACHMENT}, key_name="k", bound="p")
+
+
+@pytest.mark.parametrize("bad", ["https://x.example/a.png", ["a"], 5, True])
+def test_a_file_argument_must_be_an_object(bad) -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": bad}, key_name="k", bound="p")
+
+
+def test_a_file_object_cannot_smuggle_another_profile_or_a_path() -> None:
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": {**_ATTACHMENT, "profile_id": "other"}},
+                               key_name="k", bound="p")
+    with pytest.raises(binding.BindingRefusal):
+        binding.bind_arguments("remember_media", {"file": {**_ATTACHMENT, "path": "/etc/hosts"}},
+                               key_name="k", bound="p")
+
+
+def test_an_empty_or_missing_file_argument_is_fine() -> None:
+    assert "file" in binding.bind_arguments("remember_media", {"file": None, "base64": "x"},
+                                            key_name="k", bound="p")

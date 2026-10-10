@@ -9,6 +9,8 @@
     POST /api/v3/embedding/reindex/rollback         back to the previous model -> 202
     POST /api/v3/embedding/reindex/cancel           stop a running switch
     POST /api/v3/embedding/reindex/forget-previous  free the previous vectors
+    GET  /api/v3/embedding/reindex/upgrade          "Upgrade memory engine": the plan
+    POST /api/v3/embedding/reindex/upgrade          start it (a switch to the managed model) -> 202
 
 The dashboard's two save routes (PUT /embedding/config, POST /mode/set) call
 :func:`queue_if_new_space` too: a save that changes the embedding space
@@ -70,8 +72,10 @@ def target_config(live: Any, body: dict) -> Any:
     """The embedding config a request asks for, starting from the live one."""
     from dataclasses import replace
 
-    provider = str(body.get("provider", live.provider) or "")
+    from superlocalmemory.core.embedding_providers import resolve_embedding_provider
+
     model = str(body.get("model_name") or body.get("model") or live.model_name).strip()
+    provider = resolve_embedding_provider(str(body.get("provider") or ""), model, live.provider)
     dim = int(body.get("dimension") or 0) or (live.dimension if model == live.model_name else 0)
     if not model:
         raise ValueError("a model name is required")
@@ -206,6 +210,63 @@ async def _call(request: Request, method: str, accepted: bool) -> JSONResponse:
     if accepted:
         return _accepted(result)
     return JSONResponse({"success": True, **({"job": result} if "job_id" in result else result)})
+
+
+def _upgrade_plan(request: Request, runner: Any) -> dict:
+    from superlocalmemory.core import engine_upgrade
+
+    return engine_upgrade.current_plan(_live_config(request), runner.db_path,
+                                       data_root=getattr(runner, "data_root", None))
+
+
+@router.get("/upgrade")
+async def upgrade_plan(request: Request):
+    """What "Upgrade memory engine" would do and whether it can start now (read only)."""
+    runner = _runner(request)
+    if runner is None:
+        return _no_runner()
+    return await asyncio.to_thread(_upgrade_plan, request, runner)
+
+
+def _upgrade_accepted(job: dict, plan: dict) -> JSONResponse:
+    return JSONResponse({"success": True, "accepted": True, "label": "upgrade", "job": job,
+                         "detail": (f"Upgrading your memory engine: {job['total']} memories are being "
+                                    "re-read with the new engine in the background. Recall keeps working "
+                                    f"on {plan['from']['model']} until it finishes, and you can roll back "
+                                    "afterwards (slm embedder rollback).")},
+                        status_code=202)
+
+
+def _start_upgrade(request: Request, runner: Any) -> JSONResponse:
+    from superlocalmemory.core import engine_upgrade
+    from superlocalmemory.core.embedding_reindex import NoChange, Refused
+    from superlocalmemory.storage.embedding_reindex_jobs import JobConflict
+
+    live = _live_config(request)
+    plan = engine_upgrade.current_plan(live, runner.db_path, data_root=getattr(runner, "data_root", None))
+    if not plan["available"]:
+        return JSONResponse({"error": "upgrade_unavailable", "detail": plan["reason"], "plan": plan},
+                            status_code=409)
+    try:
+        job = runner.request_switch(engine_upgrade.upgrade_target(live))
+    except JobConflict as exc:
+        return _conflict(exc)
+    except (NoChange, Refused) as exc:
+        return JSONResponse({"error": "upgrade_unavailable", "detail": str(exc), "plan": plan},
+                            status_code=409)
+    return _upgrade_accepted(job, plan)
+
+
+@router.post("/upgrade")
+async def start_upgrade(request: Request):
+    """Start "Upgrade memory engine": the ordinary background switch to the managed model."""
+    from superlocalmemory.server.rbac_enforce import require_manage
+
+    require_manage(request)
+    runner = _runner(request)
+    if runner is None:
+        return _no_runner()
+    return await asyncio.to_thread(_start_upgrade, request, runner)
 
 
 @router.post("/rollback")

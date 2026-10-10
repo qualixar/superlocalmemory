@@ -47,6 +47,8 @@ _PURGE_EVERY_S = 30.0
 _CATCH_UP_ROUNDS = 50
 _QUIET_WAIT_S = 600.0  # background is paused meanwhile; requests are served
 _MAX_BACKOFF_S = 60.0
+#: How long a model load waits for another heavy job (a picture-model load, a document parse).
+LOAD_WAIT_S = 600.0
 
 
 class NoChange(ValueError):
@@ -331,7 +333,7 @@ class ReindexRunner:
         handed_over = False
         try:
             if embedder is None:
-                embedder = steps.build_embedder(target)
+                embedder = self._load_embedder(target)
             if embedder is None:
                 raise steps.StepFailed(f"the model {target.model_name} could not be started")
             job = self._prepare(job, embedder, target.dimension)
@@ -352,6 +354,30 @@ class ReindexRunner:
         finally:
             if embedder is not None and not handed_over:
                 steps.close_embedder(embedder)
+
+    def _load_embedder(self, target: Any) -> Any | None:
+        """Start the model, and ask it one question so it is really in memory, under the RAM reservation.
+
+        Only one heavy job runs at a time across the daemon, the picture worker and the
+        command line: a second one waits here. The reservation covers the load only, so a
+        long re-index does not shut other model loads out for hours.
+        """
+        from superlocalmemory.core.ram_lock import ram_reservation
+        from superlocalmemory.runtimes.media_models import load_mb_for
+
+        try:
+            with ram_reservation("embedding-reindex-load", required_mb=load_mb_for(target.model_name),
+                                 timeout_s=LOAD_WAIT_S):
+                embedder = steps.build_embedder(target)
+                if embedder is not None:
+                    steps.probe(embedder, target.dimension)
+                return embedder
+        except steps.StepFailed:
+            raise
+        except RuntimeError as exc:
+            raise steps.StepFailed(
+                "there was not enough free memory to load the model right now "
+                f"(another large job may be running); try again later ({exc})") from exc
 
     def _activate(self, job: dict, embedder: Any, target: Any) -> tuple[dict, bool]:
         from superlocalmemory.core.embedding_reindex_activate import activate_job

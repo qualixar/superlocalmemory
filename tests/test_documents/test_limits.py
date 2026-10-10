@@ -122,3 +122,12 @@ def test_a_lost_lease_stops_the_run_without_finishing(store, tmp_path):
     job = store.get_job(receipt.job_id)
     assert job["state"] == "running" and job["lease_owner"] == "someone-else"
     assert store.get_document(receipt.document_id)["state"] == "processing"
+
+
+def test_parse_memory_is_read_through_the_shared_reader(monkeypatch):
+    from superlocalmemory.documents import parse_proc
+    from superlocalmemory.infra import proc_memory
+
+    seen = []
+    monkeypatch.setattr(proc_memory, "tree_memory_mb", lambda pid: seen.append(pid) or 321.0)
+    assert parse_proc._process_mb(4242) == 321.0 and seen == [4242]

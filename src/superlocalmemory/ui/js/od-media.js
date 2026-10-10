@@ -147,11 +147,31 @@
     }).catch(function (e) { setStatus(row, e && e.message ? e.message : 'Could not send the file.'); });
   }
 
-  function onPick(ui, input) {
-    var files = Array.prototype.slice.call(input.files || []);
+  // One at a time, in order; each file gets its own result line.
+  function uploadAll(ui, list) {
+    var files = Array.prototype.slice.call(list || []);
     return files.reduce(function (p, f) {
       return p.then(function () { return uploadFile(ui, f); });
     }, Promise.resolve());
+  }
+
+  function onPick(ui, input) { return uploadAll(ui, input.files); }
+
+  // The dashed area people drop files on, with a real button for those who would rather
+  // choose. Both end in the same upload as the native input does.
+  function dropZone(ui, input) {
+    var zone = el('div', 'od-dropzone');
+    zone.appendChild(el('p', null, 'Drop pictures or PDFs here, or choose files'));
+    zone.appendChild(F().button('Choose files', 'btn sm primary', function () { input.click(); }));
+    zone.appendChild(el('p', 'muted', 'Images up to 25 MB and PDFs up to 100 MB. They stay on this computer.'));
+    zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('is-over'); });
+    zone.addEventListener('dragleave', function () { zone.classList.remove('is-over'); });
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('is-over');
+      uploadAll(ui, e.dataTransfer && e.dataTransfer.files);
+    });
+    return zone;
   }
 
   // ------------------------------------------------------------------- jobs
@@ -244,22 +264,37 @@
     ui.gridWrap.appendChild(ui.grid);
     var input = el('input');
     input.type = 'file';
+    input.hidden = true;                      // the drop zone's button opens it
     input.setAttribute('accept', 'image/*,application/pdf,.pdf');
     input.multiple = true;
     input.addEventListener('change', function () { onPick(ui, input); });
     var up = el('div', 'card card-pad od-media-section');
     up.appendChild(el('h3', null, 'Add images or PDFs'));
-    up.appendChild(el('p', 'muted', 'Images up to 25 MB and PDFs up to 100 MB. They stay on this computer.'));
+    up.appendChild(dropZone(ui, input));
     [input, ui.results, ui.gridWrap].forEach(function (n) { up.appendChild(n); });
     var docs = el('div', 'od-media-section');
     docs.appendChild(el('h3', null, 'Documents'));
     docs.appendChild(ui.lint);
     docs.appendChild(ui.docs);
+    if (window.odMediaFind) window.odMediaFind.mount(host);
     host.appendChild(up);
     host.appendChild(docs);
     loadDocuments(ui);
     loadLint(ui);
     loadImages(ui, '');
+  }
+
+  var GB = 1000; // MB per GB in the memory line
+
+  function gb(mb) { return (mb / GB).toFixed(1) + ' GB'; }
+
+  // One muted line: what the picture model uses right now. Drawn from the features read
+  // the pane already makes, so it adds no polling.
+  function ramText(ram) {
+    if (!ram) return '';
+    if (ram.worker_rss_mb == null) return 'Picture model: not running';
+    return 'Picture model: ' + gb(ram.worker_rss_mb) + ' in use'
+      + (ram.worker_cap_mb ? ', limit ' + gb(ram.worker_cap_mb) : '');
   }
 
   function odRenderMedia(pane) {
@@ -268,14 +303,22 @@
     head.appendChild(el('h2', null, 'Documents & Images'));
     head.appendChild(el('p', 'muted', 'Remember pictures and read PDFs on this computer.'));
     var cardHost = el('div');
+    var ramLine = el('p', 'muted');
+    ramLine.setAttribute('data-od-ram', '');
+    ramLine.hidden = true;
     var body = el('div');
     var folders = el('div', 'od-media-section');
-    [head, cardHost, body, folders].forEach(function (n) { pane.appendChild(n); });
+    [head, cardHost, ramLine, body, folders].forEach(function (n) { pane.appendChild(n); });
     // Folders have their own switch, so they show whether or not images are on; drawn once.
     if (typeof window.odRenderSources === 'function') window.odRenderSources(folders);
     F().mountMediaCard(cardHost, {
-      onReady: function () { if (!body.firstChild) buildBody(body); },
-      onNotReady: function () { body.textContent = ''; },
+      onReady: function (m) {
+        var text = ramText(m && m.ram);
+        ramLine.textContent = text;
+        ramLine.hidden = !text;
+        if (!body.firstChild) buildBody(body);
+      },
+      onNotReady: function () { body.textContent = ''; ramLine.hidden = true; },
     });
   }
 

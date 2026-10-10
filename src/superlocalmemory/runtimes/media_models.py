@@ -17,6 +17,8 @@ from typing import Mapping
 
 #: Cap for models without a profile (the fake models used in tests).
 DEFAULT_RSS_LIMIT_MB = 1600
+#: Free memory wanted before loading a model that has no profile (text models).
+DEFAULT_LOAD_MB = 1500
 
 #: Commit of google/embeddinggemma-2 on the hub, verified on 2026-10-10.
 EG2_REPO = "google/embeddinggemma-2"
@@ -31,15 +33,32 @@ class ModelProfile:
     rss_limit_mb: int        # the worker is stopped above this resident size
     media_min_score: float   # picture similarity that counts as evidence
     image_max_pixels: int    # larger pictures are shrunk before embedding; 0 = no cap
+    load_mb: int = 1500      # free memory wanted before this model loads (peak while loading)
+    text_min_semantic: float | None = None  # text similarity that counts as evidence; None = not a text model
 
 
 #: The EG2 numbers are provisional until the Mac memory check; the floor comes from
-#: n=7 unanswerable test queries.
+#: n=7 unanswerable test queries. The text floor is provisional too: it equals the
+#: configured default until the text split is measured. The other text cutoffs
+#: (consolidator 0.85 / 0.95, scene builder 0.6, sufficiency 0.6, contradiction 0.45) are
+#: still global and were tuned on the built-in text model: they need the same calibration
+#: for this model before they are made per model.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
-    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
+    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000, 0.60),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
-        "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0),
+        "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0, 1500),
 })
+
+
+#: Seconds to embed one memory with the managed model on a CPU. PROVISIONAL: the cloud RAM check
+#: measured ~0.5 s per text (p50, mixed short and long); BENCH calibrates it on the Mac.
+PROVISIONAL_SECONDS_PER_MEMORY = 0.5
+
+#: First run only: new users get the managed model for text and pictures. Off until the Mac
+#: memory check passes; flipping it is the release decision. Existing users never switch by themselves.
+ONE_MODEL_DEFAULT_ENABLED = False
+#: Smallest machine (GB of memory) the first-run default is picked for (owner decision: 16, not 8).
+ONE_MODEL_MIN_RAM_GB = 16
 
 
 def profile_for(model: str) -> ModelProfile | None:
@@ -52,10 +71,30 @@ def rss_limit_mb_for(model: str) -> int:
     return profile.rss_limit_mb if profile is not None else DEFAULT_RSS_LIMIT_MB
 
 
+def effective_rss_limit_mb(model: str) -> int:
+    """The cap the worker applies to ``model``: the environment override, else the table."""
+    try:
+        return int(float(os.environ["SLM_MEDIA_WORKER_RSS_LIMIT_MB"]))
+    except (KeyError, ValueError):
+        return rss_limit_mb_for(model)
+
+
+def load_mb_for(model: str) -> int:
+    """Free memory to ask for before loading ``model`` (the default covers text and fake models)."""
+    profile = profile_for(model)
+    return profile.load_mb if profile is not None else DEFAULT_LOAD_MB
+
+
 def min_score_for(model: str) -> float | None:
     """The model's own picture evidence floor, or None to keep the configured one."""
     profile = profile_for(model)
     return profile.media_min_score if profile is not None else None
+
+
+def text_min_semantic_for(model: str) -> float | None:
+    """The model's own text evidence floor, or None to keep the configured ``min_semantic_evidence``."""
+    profile = profile_for(model)
+    return profile.text_min_semantic if profile is not None else None
 
 
 def watchdog_limit_mb(default: int) -> int:
@@ -71,5 +110,5 @@ def watchdog_limit_mb(default: int) -> int:
     return max(wanted, 0)
 
 
-__all__ = ["DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "MODEL_PROFILES", "ModelProfile",
-           "min_score_for", "profile_for", "rss_limit_mb_for", "watchdog_limit_mb"]
+__all__ = ["DEFAULT_LOAD_MB", "ONE_MODEL_DEFAULT_ENABLED", "ONE_MODEL_MIN_RAM_GB", "PROVISIONAL_SECONDS_PER_MEMORY", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
+           "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "text_min_semantic_for", "watchdog_limit_mb"]

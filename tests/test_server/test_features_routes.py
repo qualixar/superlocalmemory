@@ -139,3 +139,101 @@ def test_restart_required_follows_the_env_and_the_loaded_flag(ctx):
     feat.mark_media_loaded()
     assert client.get("/api/v3/features").json()["media"]["restart_required"] is False
     feat._reset_media_loaded()
+
+
+# -- memory: the warning on small machines and the picture model's use -------------
+
+class _Worker:
+    """Stands in for a running picture worker: this very process is the 'worker'."""
+
+    def __init__(self, pid, model="google/embeddinggemma-2", cap=4500):
+        self.pid, self.model_id, self.rss_limit_mb = pid, model, cap
+
+
+def test_ram_block_shape_when_the_worker_is_not_running(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert set(ram) == {"system_total_mb", "worker_rss_mb", "worker_cap_mb", "model"}
+    assert ram["system_total_mb"] > 0 and ram["worker_rss_mb"] is None
+
+
+def test_ram_block_with_a_running_worker_reports_its_size_and_cap(ctx, monkeypatch):
+    import os
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {("r", "m", ""): _Worker(os.getpid())})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert ram["worker_rss_mb"] > 0
+    assert ram["worker_cap_mb"] == 4500 and ram["model"] == "google/embeddinggemma-2"
+
+
+def test_ram_block_with_a_dead_pid_counts_as_not_running(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, _root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {("r", "m", ""): _Worker(None)})
+    ram = client.get("/api/v3/features").json()["media"]["ram"]
+    assert ram["worker_rss_mb"] is None and ram["worker_cap_mb"] == 4500
+
+
+def test_reading_the_ram_block_creates_nothing(ctx, monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    client, root, _env, _calls = ctx
+    monkeypatch.setattr(worker_client, "_CLIENTS", {})
+    client.get("/api/v3/features")
+    assert list(root.iterdir()) == [] and worker_client._CLIENTS == {}
+
+
+LOW_RAM_MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. "
+                   "Your text memories keep working.")
+
+
+def _machine_with(env, monkeypatch, gib):
+    monkeypatch.delenv("SLM_MEDIA_ALLOW_LOW_RAM", raising=False)
+    monkeypatch.setattr(env, "precheck", lambda: {"disk_ok": True, "free_bytes": 10 * 1024 ** 3,
+                                                   "ram_bytes": int(gib * 1024 ** 3)})
+
+
+def test_a_small_machine_reports_not_ok_with_the_message_in_the_features_reply(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    _machine_with(env, monkeypatch, 4)
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["ram_ok"] is False and media["ram_message"] == LOW_RAM_MESSAGE
+    assert "ram_warning" not in media
+
+
+def test_a_big_machine_is_ok_with_no_message(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    _machine_with(env, monkeypatch, 16)
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["ram_ok"] is True and media["ram_message"] == ""
+
+
+def test_the_developer_override_makes_a_small_machine_ok(ctx, monkeypatch):
+    client, _root, env, _calls = ctx
+    _machine_with(env, monkeypatch, 4)
+    monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["ram_ok"] is True and media["ram_message"] == ""
+
+
+def test_a_refused_enable_is_409_with_the_view_carrying_the_reason(ctx, monkeypatch):
+    client, _root, env, calls = ctx
+
+    def refuse(**kw):
+        calls["enable"].append(kw)
+        return {"enabled": False, "env": env.status().to_dict(), "precheck": env.precheck(), "media_db": False,
+                "error": LOW_RAM_MESSAGE, "refused": "low_ram"}
+
+    monkeypatch.setattr(feat, "enable_media", refuse)
+    response = client.post("/api/v3/features/media/enable", json={"yes": True}, headers=AUTH)
+    assert response.status_code == 409
+    media = response.json()["media"]
+    assert media["error"] == LOW_RAM_MESSAGE and media["refused"] == "low_ram" and media["enabled"] is False
+    assert response.json()["detail"] == LOW_RAM_MESSAGE
+

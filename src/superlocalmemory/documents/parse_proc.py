@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from superlocalmemory.infra import proc_memory
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,19 +48,8 @@ class ParseStopped(Exception):
 
 
 def _process_mb(pid: int) -> float:
-    try:
-        import psutil
-
-        proc = psutil.Process(pid)
-        total = proc.memory_info().rss
-        for child in proc.children(recursive=True):
-            try:
-                total += child.memory_info().rss
-            except psutil.Error:
-                continue
-        return total / (1024 * 1024)
-    except Exception:  # noqa: BLE001 - an unreadable size counts as fine
-        return 0.0
+    """The parse process and its children together, in MB (physical footprint on macOS); 0.0 = unknown."""
+    return proc_memory.tree_memory_mb(pid)
 
 
 class ParseSession:

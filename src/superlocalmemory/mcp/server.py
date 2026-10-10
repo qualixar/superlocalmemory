@@ -166,7 +166,7 @@ except Exception:
 
 if _media_tools_enabled:
     _ESSENTIAL_TOOLS.update({
-        "remember_media", "get_media", "remember_document", "media_status",
+        "remember_media", "get_media", "remember_document", "media_status", "media_upload_link",
     })
 
 _ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
@@ -323,6 +323,8 @@ from superlocalmemory.mcp.tools_media import (
 )
 register_media_tools(_target)  # image tools for local AI apps (host-only)
 register_document_tools(_target)  # document tools for local AI apps (host-only)
+from superlocalmemory.mcp.tools_media_upload import register_upload_link_tool
+register_upload_link_tool(_target)  # one-time upload link for web apps (remote-only)
 register_media_resources(server)
 from superlocalmemory.mcp.tools_context import register_prestage_tool
 
@@ -362,7 +364,16 @@ def _prestage_recall(query: str, limit: int, profile_id: str, as_of: str | None 
     kwargs = {"profile_id": target, "limit": limit}
     if as_of is not None:
         kwargs["as_of"] = as_of
-    return _memories_from(engine.recall(query, **kwargs))
+    # A remote caller never gets what it may not see (pictures, pages, folder files).
+    from superlocalmemory.mcp.remote_visibility import current_view
+    from superlocalmemory.retrieval import remote_view, visibility
+
+    ctx = remote_view.context_for(current_view(), getattr(engine, "_db", None),
+                                  target or getattr(engine, "profile_id", "default"))
+    if ctx is None:
+        return _memories_from(engine.recall(query, **kwargs))
+    with visibility.use(ctx):
+        return _memories_from(engine.recall(query, **kwargs))
 
 
 register_prestage_tool(_target, _prestage_recall)
