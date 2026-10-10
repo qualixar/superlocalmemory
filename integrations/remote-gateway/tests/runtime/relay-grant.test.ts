@@ -16,8 +16,8 @@ async function setup(namespace: DurableObjectNamespace<RelayDO> = env.RELAYS) {
   await stub.configureBinding(binding); return { stub, token, binding };
 }
 /** Connects a laptop socket and queues every request frame it receives. */
-async function laptop(stub: DurableObjectStub<RelayDO>, token: string) {
-  const response = await stub.fetch(new Request('https://private.invalid/connector', { headers: { Upgrade: 'websocket', Authorization: 'Bearer ' + token } }));
+async function laptop(stub: DurableObjectStub<RelayDO>, token: string, features: string | null = 'grant-v1') {
+  const response = await stub.fetch(new Request('https://private.invalid/connector', { headers: { Upgrade: 'websocket', Authorization: 'Bearer ' + token, ...(features === null ? {} : { 'x-slm-connector-features': features }) } }));
   expect(response.status).toBe(101); const ws = response.webSocket!; sockets.push(ws);
   const ready = new Promise<{ generation: number }>(resolve => ws.addEventListener('message', e => resolve(JSON.parse(String(e.data))), { once: true })); ws.accept();
   const { generation } = await ready; const queue: RequestFrame[] = []; const waiters: Array<(f: RequestFrame) => void> = [];
@@ -48,6 +48,36 @@ describe('per-request grant', () => {
     expect(claims).toEqual({ v: 1, kid: 1, cid: binding.connectionId, aid: 'auth-1', ver: 3, app: 'client-1', scp: ['slm:read', 'slm:mesh'], fv: false, fid: seen.id, gen: generation, dl: f.deadlineAt });
     expect(Object.keys(claims)).toEqual(['v', 'kid', 'cid', 'aid', 'ver', 'app', 'scp', 'fv', 'fid', 'gen', 'dl']);
     reply(seen); expect((await result).status).toBe(200);
+  });
+  test('a laptop that did not say it reads grants gets none, even when a key exists', async () => {
+    const { stub, token } = await setup(); await stub.rotateGrantKey('owner-a'); const { generation, next, reply } = await laptop(stub, token, null);
+    const result = stub.forward(frame(generation), {}, { grant }); const seen = await next(); expect(header(seen)).toHaveLength(0); reply(seen); expect((await result).status).toBe(200);
+  });
+  test('only the exact grant-v1 feature value counts', async () => {
+    for (const value of ['grant-v2', 'grant-v1,x', 'GRANT-V1', 'grant-v1;x', '']) {
+      const { stub, token } = await setup(); await stub.rotateGrantKey('owner-a'); const { generation, next, reply } = await laptop(stub, token, value);
+      const result = stub.forward(frame(generation), {}, { grant }); const seen = await next(); expect(header(seen), value).toHaveLength(0); reply(seen); await result;
+    }
+  });
+  test('a laptop that sends the feature value gets signed frames, also after a restart', async () => {
+    const { stub, token } = await setup(); const rotated = await stub.rotateGrantKey('owner-a'); const { generation, next, reply } = await laptop(stub, token, 'grant-v1');
+    await evictDurableObject(stub);
+    const result = stub.forward(frame(generation), {}, { grant }); const seen = await next(); await verify(header(seen)[0][1], rotated.key); reply(seen); await result;
+  });
+  test('a rotation that lands while the first key is being unwrapped is not overwritten', async () => {
+    const { stub, token } = await setup(); await stub.rotateGrantKey('owner-a'); const { generation } = await laptop(stub, token);
+    await evictDurableObject(stub);
+    const outcome = await runInDurableObject(stub, async instance => {
+      const subtle = crypto.subtle; const realDecrypt = subtle.decrypt.bind(subtle); let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+      (subtle as { decrypt: unknown }).decrypt = async (...args: Parameters<typeof realDecrypt>) => { await gate; return realDecrypt(...args); };
+      try {
+        const reading = (instance as unknown as { signingKey(): Promise<{ version: number }|null> }).signingKey();
+        const second = await instance.rotateGrantKey('owner-a'); release(); const seen = await reading;
+        const after = await (instance as unknown as { signingKey(): Promise<{ version: number }|null> }).signingKey();
+        return { rotated: second.version, seen: seen?.version, after: after?.version };
+      } finally { (subtle as { decrypt: unknown }).decrypt = realDecrypt; release(); }
+    });
+    expect(generation).toBeGreaterThan(0); expect(outcome).toEqual({ rotated: 2, seen: 2, after: 2 });
   });
   test('every forward gets its own frame id and its own mac', async () => {
     const { stub, token } = await setup(); const { generation, next, reply } = await laptop(stub, token); await stub.rotateGrantKey('owner-a');
