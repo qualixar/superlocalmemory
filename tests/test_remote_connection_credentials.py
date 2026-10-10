@@ -115,8 +115,11 @@ def test_a_vault_held_by_another_process_is_reported_busy(tmp_path):
     from superlocalmemory.remote_connections.credentials import CredentialError
     store = CredentialVault(tmp_path, backend=Backend(), clock=lambda: 1000)
     held = credential()
-    ready, release = multiprocessing.Event(), multiprocessing.Event()
-    holder = multiprocessing.get_context("spawn").Process(
+    # Events from the same start method as the process: Linux defaults to fork
+    # before 3.14, and a fork-context lock cannot be handed to a spawned child.
+    spawn = multiprocessing.get_context("spawn")
+    ready, release = spawn.Event(), spawn.Event()
+    holder = spawn.Process(
         target=_hold_lock, args=(str(tmp_path / "credential.lock"), ready, release))
     holder.start()
     try:

@@ -692,6 +692,10 @@ def sync_to_github(backup_files: list[Path] | Path, dest_config: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 
+#: Backup files that are kept locally and never uploaded to a cloud destination.
+LOCAL_ONLY_BACKUP_PREFIXES = ("media-",)
+
+
 def _find_latest_backup_set(backup_dir: Path) -> list[Path]:
     """Find the latest complete backup set (all DBs from the same timestamp).
 
@@ -716,6 +720,8 @@ def _find_latest_backup_set(backup_dir: Path) -> list[Path]:
     for f in backup_dir.iterdir():
         if f == latest or not f.name.endswith(".db"):
             continue
+        if f.name.startswith(LOCAL_ONLY_BACKUP_PREFIXES):
+            continue  # images and documents stay on this machine
         if ts_suffix in f.name:
             backup_set.append(f)
 

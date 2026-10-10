@@ -893,6 +893,67 @@ def cmd_serve(args: Namespace) -> None:
 # -- Ingestion Adapters (V3.4.3) ------------------------------------------
 
 
+def _write_restart_record(started_at: float, steps: list[dict]) -> None:
+    """Leave ``logs/restart-last.json`` behind, atomically, on every exit path.
+
+    A restart can be started by something with no terminal (the dashboard
+    button); this file is how anyone finds out afterwards what happened.
+    """
+    import json
+    import os
+    import time
+
+    from superlocalmemory.infra.daemon_identity import canonical_data_root
+
+    try:
+        logs = canonical_data_root() / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "started_at": started_at,
+            "finished_at": time.time(),
+            "success": bool(steps) and all(s["status"] == "ok" for s in steps),
+            "steps": steps,
+        }
+        tmp = logs / f".restart-last.{os.getpid()}.tmp"
+        tmp.unlink(missing_ok=True)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload))
+            os.replace(tmp, logs / "restart-last.json")
+        finally:
+            tmp.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 - a record must never fail the restart
+        pass
+
+
+_RESTART_STEPS: list[dict] = []
+
+
+def _begin_restart_steps() -> list[dict]:
+    """The step log of the restart now running (read by the record writer)."""
+    _RESTART_STEPS.clear()
+    return _RESTART_STEPS
+
+
+def _records_restart_outcome(func):
+    """Write ``restart-last.json`` however the restart ends, even by exception."""
+    import functools
+    import time
+
+    @functools.wraps(func)
+    def wrapper(args: Namespace) -> None:
+        started_at = time.time()
+        _RESTART_STEPS.clear()
+        try:
+            func(args)
+        finally:
+            _write_restart_record(started_at, list(_RESTART_STEPS))
+
+    return wrapper
+
+
+@_records_restart_outcome
 def cmd_restart(args: Namespace) -> None:
     """Restart the one daemon owned by the current SLM data namespace.
 
@@ -909,7 +970,7 @@ def cmd_restart(args: Namespace) -> None:
     use_json = getattr(args, "json", False)
     open_dashboard = getattr(args, "dashboard", False)
     slm_dir = canonical_data_root()
-    steps: list[dict] = []
+    steps = _begin_restart_steps()
 
     def _log(step: int, name: str, status: str, detail: str = ""):
         entry = {"step": step, "name": name, "status": status, "detail": detail}
@@ -982,6 +1043,32 @@ def cmd_restart(args: Namespace) -> None:
             )
         else:
             print("\n  Restart FAILED at step 1. The owned daemon was not stopped.")
+        return
+
+    # Step 1b: the old daemon is gone from view, but the data folder is free
+    # only once the operating system has dropped its instance lock.
+    from superlocalmemory.infra import instance_lock as _instance_lock
+
+    if _instance_lock.wait_until_instance_lock_free(timeout_s=30):
+        _log("1b", "Wait for the data-folder lock", "ok")
+    else:
+        _log("1b", "Wait for the data-folder lock", "fail",
+             "the previous daemon still holds the data folder")
+        if restart_lock_fd:
+            restart_lock_fd.close()
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "restart",
+                data={"steps": steps, "success": False},
+                next_actions=[{
+                    "command": "slm doctor",
+                    "description": "Diagnose the owned daemon",
+                }],
+            )
+        else:
+            print("\n  Restart FAILED at step 1b. The previous daemon still holds "
+                  "the data folder.")
         return
 
     # Step 2: the namespace lock was acquired before shutdown so hooks cannot
@@ -3567,8 +3654,9 @@ def cmd_doctor(args: Namespace) -> None:
             elif depth:
                 _check(
                     "Projection queue", "PASS",
-                    f"{depth} memory/memories queued — the worker drains these "
-                    "in the background",
+                    f"{depth} memory/memories queued for the graph/vector "
+                    "projections — drained in the background once one is open "
+                    "(until then they are the catch-up record for a promotion)",
                 )
             else:
                 _check("Projection queue", "PASS", "empty (graph is up to date)")
@@ -3584,6 +3672,20 @@ def cmd_doctor(args: Namespace) -> None:
 
         _check("PEP 668 / Install method", *_dh.install_method_finding())
         _check("SQLite extensions (vector search)", *_dh.sqlite_extension_finding())
+    except Exception:
+        pass  # advisory only — never fail doctor on this check
+
+    # 11b. Images & documents: a read-only line, "off" until someone turns it on.
+    try:
+        from superlocalmemory.runtimes import media_feature_status
+
+        _mf = media_feature_status()
+        if not _mf["enabled"]:
+            _check("Images & documents", "PASS", "off")
+        elif _mf["env"]["state"] == "ready":
+            _check("Images & documents", "PASS", "on")
+        else:
+            _check("Images & documents", "WARN", f"on, but not ready ({_mf['env']['state']})")
     except Exception:
         pass  # advisory only — never fail doctor on this check
 

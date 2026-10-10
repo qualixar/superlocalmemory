@@ -83,7 +83,7 @@ def reset_engine():
 # Antigravity, Windsurf) and a maximal SLM registration crowds out
 # other MCP servers the user may have installed.
 # Admin/diagnostics tools remain available via CLI (`slm <command>`).
-# Set SLM_MCP_ALL_TOOLS=1 to enable all 103 tools (power users).
+# Set SLM_MCP_ALL_TOOLS=1 to enable all 107 tools (power users).
 
 import os as _os_reg
 
@@ -154,6 +154,19 @@ if _mesh_tools_enabled:
     _ESSENTIAL_TOOLS.update({
         "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
         "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
+    })
+
+# Image and document tools: listed by default only while images are on. Read
+# once at start (like mesh); any error means off. Mirrors ``full`` in profiles.py.
+try:
+    from superlocalmemory.runtimes import features as _features
+    _media_tools_enabled = bool(_features.media_enabled())
+except Exception:
+    _media_tools_enabled = False
+
+if _media_tools_enabled:
+    _ESSENTIAL_TOOLS.update({
+        "remember_media", "get_media", "remember_document", "media_status",
     })
 
 _ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
@@ -305,6 +318,12 @@ from superlocalmemory.mcp.tools_views import register_view_tools
 register_view_tools(_target, get_engine)  # 4.1.21 issue #113 saved views
 from superlocalmemory.mcp.tools_kinds import register_kind_tools
 register_kind_tools(_target, get_engine)  # 4.1.19 WP8: memory-kind management (ships in every profile, not only power)
+from superlocalmemory.mcp.tools_media import (
+    register_document_tools, register_media_resources, register_media_tools,
+)
+register_media_tools(_target)  # image tools for local AI apps (host-only)
+register_document_tools(_target)  # document tools for local AI apps (host-only)
+register_media_resources(server)
 from superlocalmemory.mcp.tools_context import register_prestage_tool
 
 
