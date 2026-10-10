@@ -53,7 +53,7 @@ saving if the app should save.
 5. Sign in with GitHub on the approval page and tick **Allow saving memories**.
 6. In a chat, open the tools picker and enable the plugin.
 
-Two things to know:
+Three things to know:
 
 - ChatGPT keeps the scopes it discovered at the moment the plugin was created.
   A plugin created before saving was fixed stays read-only. Uninstall it and
@@ -61,6 +61,10 @@ Two things to know:
 - An uninstalled plugin's name stays taken. If ChatGPT says "An app with this
   name already exists", pick another name, for example **SuperLocalMemory
   Brain**.
+- ChatGPT keeps the SuperLocalMemory skill only where you paste it: a
+  project's instructions or your custom instructions. If ChatGPT says it saved
+  the skill somewhere else on its own, for example into Composio's skill
+  library, ChatGPT chats do not use that copy; paste it yourself.
 
 ## ChatGPT dots
 
@@ -78,6 +82,9 @@ dot.
 
 We have not confirmed whether dots can use custom MCP plugins directly. The
 `get_status` test is how you find out on your plan.
+
+A dot uses only the instructions pasted into it. A skill saved anywhere else is
+not read, so paste the full block into the dot yourself.
 
 ## Grok Bot
 
