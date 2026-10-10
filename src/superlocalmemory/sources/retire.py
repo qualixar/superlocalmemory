@@ -54,7 +54,8 @@ def hide_entries(host: SourceHost, runtime: Any, source: dict, entries: list[dic
 
 
 def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:
-    """Hide again the replaced or deleted memories that could not be hidden earlier."""
+    """Hide again what an earlier attempt could not hide: memories flagged ``old``, and the PDF of a
+    deleted file whose document is still not removed (the row is tombstoned either way)."""
     failures = 0
     for row in store.files(source["source_id"]):
         entries = entries_of(row)
@@ -62,7 +63,21 @@ def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict
         if stale:
             failures += hide_entries(host, runtime, source, stale, row["relpath"])
             store.put_file(source["source_id"], row["relpath"], entries=entries)
+        if row["state"] == "tombstoned" and _document_visible(store, row):
+            failures += hide_document(store, runtime, source, row)
     return failures
+
+
+def _document_visible(store: SourceStore, row: dict[str, Any]) -> bool:
+    """True when the row owns a document that has not been removed (its pages may still be recalled)."""
+    if not row.get("document_id") or row.get("reason") == "shared":
+        return False
+    try:
+        document = store._m.get_document(row["document_id"])
+    except Exception as exc:  # noqa: BLE001 - not knowing is treated as "still to do"
+        logger.warning("a folder document could not be looked up (%s)", type(exc).__name__)
+        return True
+    return bool(document) and document["state"] != "tombstoned"
 
 
 def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str, Any]) -> int:
@@ -81,6 +96,18 @@ def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str,
         logger.warning("a folder document could not be hidden (%s)", type(exc).__name__)
     document = store._m.get_document(row["document_id"])
     return int(bool(document) and document["state"] != "tombstoned")
+
+
+def hide_rows(host: SourceHost, store: SourceStore, runtime: Any, source: dict) -> int:
+    """Hide every file of a source that is not already deleted, then finish earlier unfinished hides.
+
+    Returns the failures; a source with failures must stay listed so the person can try again.
+    """
+    failures = 0
+    for row in store.files(source["source_id"]):
+        if row["state"] != "tombstoned":
+            failures += hide_file(host, store, runtime, source, row, tombstone=True)
+    return failures + retry_hides(host, store, runtime, source)
 
 
 def hide_picture(store: SourceStore, row: dict[str, Any]) -> None:
