@@ -35,6 +35,8 @@ def resolve_embedding_provider(explicit: str | None, model: str, inherited: str 
         if named not in ("", "slm-media"):
             raise ValueError(f"{model} runs only with the slm-media provider, not {named}")
         return "slm-media"
+    if not named and inherited == "slm-media":
+        return ""  # leaving the managed model: back to the automatic provider, not a refusal
     provider = named or inherited
     if provider == "slm-media":
         raise ValueError(f"slm-media serves only: {', '.join(managed)}")

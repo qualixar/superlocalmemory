@@ -45,6 +45,14 @@ def test_leaving_the_managed_provider_for_a_plain_provider_keeps_the_model_check
     assert other.provider == "ollama"
 
 
+
+def test_going_back_to_a_plain_model_from_the_managed_one_needs_no_provider():
+    """After an upgrade, `slm embedder switch nomic-ai/...` alone must work: the automatic provider."""
+    live = EmbeddingConfig(model_name=EG2, dimension=768, provider="slm-media")
+    back = target_config(live, {"model_name": "nomic-ai/nomic-embed-text-v1.5", "dimension": 768})
+    assert back.provider == "" and back.model_name == "nomic-ai/nomic-embed-text-v1.5"
+
+
 class _Request:
     def __init__(self, body) -> None:
         self._body = body
