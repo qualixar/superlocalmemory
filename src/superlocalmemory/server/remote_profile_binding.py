@@ -124,8 +124,7 @@ ACTIVE_ONLY_TOOLS: dict[str, str] = {}
 
 #: Every other argument of a remote-callable tool. None selects a profile.
 NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
-    "about", "action", "agent_id", "as_of", "assertion_id", "base64", "download_url",
-    "file_name", "job_id", "media_id", "path", "variant", "case_id", "category",
+    "about", "action", "agent_id", "as_of", "assertion_id", "case_id", "category",
     "ccr_id", "content", "context", "correction", "duration_ms", "event_type",
     "event_valid_until", "expected_version", "fact_id", "fact_ids", "fast", "feedback",
     "filters",
@@ -141,8 +140,18 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     "timeout_s", "to", "tool_name", "ttl_seconds", "valid_at", "value", "window",
 })
 
+#: Arguments only the image and document tools take. Accepted for those tools alone, so a
+#: later tool with a ``path`` argument is never let through by accident.
+MEDIA_ARGUMENTS: frozenset[str] = frozenset({
+    "base64", "download_url", "file_name", "job_id", "media_id", "path", "variant",
+})
+MEDIA_ARGUMENT_TOOLS: frozenset[str] = frozenset({
+    "remember_media", "get_media", "remember_document", "media_status",
+})
+
 CLASSIFIED_ARGUMENTS: frozenset[str] = (
     PROFILE_ARGUMENTS | READ_SCOPE_ARGUMENTS | WRITE_SCOPE_ARGUMENTS | NEUTRAL_ARGUMENTS
+    | MEDIA_ARGUMENTS
 )
 
 PROFILE_DENIAL = "remote_profile_not_allowed"
@@ -193,6 +202,19 @@ def _profile_refusal(key_name: str, bound: str) -> BindingRefusal:
         "another profile.")
 
 
+def _check_media_argument(tool: str, name: str, value: Any) -> None:
+    """Image and document arguments belong to those tools only, and a remote app can
+    never name a file on this computer."""
+    if name not in MEDIA_ARGUMENTS:
+        return
+    if tool not in MEDIA_ARGUMENT_TOOLS:
+        raise BindingRefusal(
+            ARGUMENT_DENIAL, f"Argument '{name}' is not accepted over remote access.")
+    if name == "path" and value not in (None, ""):
+        raise BindingRefusal(
+            ARGUMENT_DENIAL, "Remote apps cannot name a file on this computer.")
+
+
 def _check_mesh_state(arguments: Mapping[str, Any]) -> None:
     """A remote caller may only read a shared key, never write or delete one."""
     key = arguments.get("key")
@@ -218,6 +240,7 @@ def bind_arguments(tool: str, arguments: object, *, key_name: str,
         if name not in CLASSIFIED_ARGUMENTS:
             raise BindingRefusal(
                 ARGUMENT_DENIAL, f"Argument '{name}' is not accepted over remote access.")
+        _check_media_argument(tool, name, value)
         if name in PROFILE_ARGUMENTS and not _names_bound_profile(value, bound):
             raise _profile_refusal(key_name, bound)
         if name == "scope" and value not in (None, "", "personal"):
