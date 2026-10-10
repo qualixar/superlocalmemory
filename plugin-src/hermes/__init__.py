@@ -399,6 +399,10 @@ def _register_all_skills(ctx: Any) -> None:
     ctx.register_skill("slm-scope", ROOT / "skills" / "slm-scope" / "SKILL.md")
     ctx.register_skill("slm-session", ROOT / "skills" / "slm-session" / "SKILL.md")
     ctx.register_skill("slm-status", ROOT / "skills" / "slm-status" / "SKILL.md")
+    ctx.register_skill("slm-bot-memory", ROOT / "skills" / "slm-bot-memory" / "SKILL.md")
+    ctx.register_skill("slm-getting-started-bot", ROOT / "skills" / "slm-getting-started-bot" / "SKILL.md")
+    ctx.register_skill("slm-media", ROOT / "skills" / "slm-media" / "SKILL.md")
+    ctx.register_skill("slm-web-access", ROOT / "skills" / "slm-web-access" / "SKILL.md")
 
 
 def _register_runtime(ctx: Any, plugin: SlmHermesPlugin) -> None:
