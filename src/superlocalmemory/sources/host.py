@@ -33,6 +33,9 @@ class SourceHost:
     purge_after_s: float = PURGE_AFTER_S
     #: The second look at a changed file waits this long (once per pass).
     stability_s: float = 2.0
+    #: True while a model swap asks background work to stand aside: no new scan, and a scan
+    #: in flight goes back to the queue at its next file.
+    background_paused: Callable[[], bool] = field(default=lambda: False)
 
     def remote_on(self) -> bool:
         try:
