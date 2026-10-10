@@ -85,6 +85,12 @@ def test_the_plan_promises_recall_and_rollback_in_plain_words():
     assert p["rollback"] is True
 
 
+def test_the_plan_carries_the_media_state_the_dashboard_polls():
+    p = _plan(state="installing", media_enabled=True)
+    assert p["media_enabled"] is True and p["env_state"] == "installing"
+    assert _plan(media_enabled=False, state="not_installed")["media_enabled"] is False
+
+
 # -- reasons ------------------------------------------------------------------
 
 def test_already_upgraded():

@@ -105,6 +105,7 @@ def plan(live: Any, fact_count: int, env_state: str, *, media_enabled: bool = Tr
         "ram_mb": media_models.load_mb_for(target.model_name),
         "disk_new_mb": new_mb, "disk_kept_mb": kept_mb, "disk_mb": new_mb + kept_mb,
         "minutes": minutes, "minutes_label": _minutes_label(minutes),
+        "media_enabled": bool(media_enabled), "env_state": env_state,
         "explain": EXPLAIN, "rollback": True, "label": "upgrade",
     }
 

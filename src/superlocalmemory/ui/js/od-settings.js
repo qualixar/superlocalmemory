@@ -505,7 +505,9 @@
       makeRow('Info', '', '', infoEl),
       makeRow('Actions', '', '', bRow(saveBtn, testBtn, st)),
       makeRow('Re-index', 'A model change re-embeds every memory in the background', '',
-              window.odReindex ? window.odReindex.panel(authPost) : el('span'))
+              window.odReindex ? window.odReindex.panel(authPost) : el('span')),
+      makeRow('Upgrade', 'Move your memories to the newer memory engine', '',
+              window.odEngineUpgrade ? window.odEngineUpgrade.panel(authPost) : el('span'))
     ]);
   }
   function loadEmb() {
@@ -527,6 +529,7 @@
         if (inf) inf.textContent = 'Embedding configuration unavailable. Check daemon health and retry.';
       }).then(fillModelSuggestions);
     if (window.odReindex) window.odReindex.refresh();
+    if (window.odEngineUpgrade) window.odEngineUpgrade.refresh();
   }
   function saveEmb() {
     setSt('emb', 'Saving…', null);
