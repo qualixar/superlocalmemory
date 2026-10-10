@@ -1,6 +1,9 @@
 name: Tests
 on:
+  # Pull requests run on pull_request; a push runs only on the long-lived
+  # branches, so a PR branch push no longer queues a second, duplicate run.
   push:
+    branches: [main, "release/**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -14,6 +17,12 @@ on:
         required: true
         type: string
         default: '["3.12", "3.13", "3.14"]'
+concurrency:
+  # A newer commit on the same PR or branch supersedes the older run; without
+  # this, superseded runs and duplicate push runs queued for hours.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   architecture:
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
