@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 let api;try{api=await import('../src/upload-protocol.ts');}catch{api=null;}
-const TOKEN='A'.repeat(43);const CONN='a'.repeat(32);
+const TOKEN='A'.repeat(43);const CONN='a'.repeat(32);const NONCE='n'.repeat(22);
 
 test('the upload path is exactly /u/<32 hex>/<43 url-safe characters>',()=>{
   assert.ok(api);
@@ -11,13 +11,29 @@ test('the upload path is exactly /u/<32 hex>/<43 url-safe characters>',()=>{
 
 test('the frame header is "<op> <token> <index> <total>" and refuses anything else',()=>{
   assert.ok(api);
-  assert.equal(api.uploadHeader('chunk',TOKEN,3,2500000),`chunk ${TOKEN} 3 2500000`);
-  assert.equal(api.uploadHeader('info',TOKEN,0,0),`info ${TOKEN} 0 0`);
-  assert.throws(()=>api.uploadHeader('other',TOKEN,0,0));
-  assert.throws(()=>api.uploadHeader('chunk','short',0,0));
-  assert.throws(()=>api.uploadHeader('chunk',TOKEN,-1,0));
-  assert.throws(()=>api.uploadHeader('chunk',TOKEN,0.5,0));
-  assert.throws(()=>api.uploadHeader('chunk',TOKEN,0,2**40));
+  assert.equal(api.uploadHeader('chunk',TOKEN,3,2500000,NONCE),`chunk ${TOKEN} 3 2500000 ${NONCE}`);
+  assert.equal(api.uploadHeader('info',TOKEN,0,0,NONCE),`info ${TOKEN} 0 0 ${NONCE}`);
+  assert.throws(()=>api.uploadHeader('other',TOKEN,0,0,NONCE));
+  assert.throws(()=>api.uploadHeader('chunk','short',0,0,NONCE));
+  assert.throws(()=>api.uploadHeader('chunk',TOKEN,-1,0,NONCE));
+  assert.throws(()=>api.uploadHeader('chunk',TOKEN,0.5,0,NONCE));
+  assert.throws(()=>api.uploadHeader('chunk',TOKEN,0,2**40,NONCE));
+  for(const bad of ['','short','n'.repeat(21),'n'.repeat(23),'n'.repeat(21)+'!','n'.repeat(21)+' ',undefined])assert.throws(()=>api.uploadHeader('chunk',TOKEN,0,5,bad),String(bad));
+});
+
+test('every upload gets its own unguessable nonce of 22 url-safe characters',()=>{
+  assert.ok(api);
+  const seen=new Set();
+  for(let i=0;i<200;i++){const nonce=api.newNonce();assert.match(nonce,/^[A-Za-z0-9_-]{22}$/);seen.add(nonce);}
+  assert.equal(seen.size,200);
+});
+
+test('the per-connection limit is keyed on the connection and a hash of the token, never the token',async()=>{
+  assert.ok(api);
+  const a=await api.limitKey(CONN,TOKEN),b=await api.limitKey(CONN,'B'.repeat(43)),c=await api.limitKey('c'.repeat(32),TOKEN);
+  assert.match(a,/^[a-f0-9]{32}:[a-f0-9]{64}$/);
+  assert.ok(a.startsWith(CONN+':'));assert.ok(!a.includes(TOKEN));
+  assert.notEqual(a,b);assert.notEqual(a,c);assert.equal(a,await api.limitKey(CONN,TOKEN));
 });
 
 test('the chunk size stays below the relay request cap with room to spare',()=>{
@@ -51,9 +67,11 @@ test('refusal codes map to honest HTTP statuses',()=>{
 
 test('relay failures become plain sentences and never raw codes',()=>{
   assert.ok(api);
-  for(const code of ['connector_offline','connector_asleep','connector_unavailable','connector_closed','relay_timeout','relay_busy','connection_revoked','origin_unavailable','weird'])
+  for(const code of ['connector_offline','connector_asleep','connector_unavailable','connector_closed','relay_timeout','relay_busy','connection_revoked','origin_unavailable','upload_unsupported','weird'])
     assert.match(api.relayProblem(code).message,/\S/);
   assert.match(api.relayProblem('connector_asleep').message,/asleep|not running/i);
+  assert.match(api.relayProblem('upload_unsupported').message,/update/i);
+  assert.equal(api.relayProblem('upload_unsupported').status,503);
   assert.equal(api.relayProblem('connector_asleep').status,503);
   assert.equal(api.relayProblem('relay_busy').status,429);
   assert.doesNotMatch(api.relayProblem('weird').message,/weird/);

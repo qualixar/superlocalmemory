@@ -27,7 +27,7 @@ async function connectWithFeatures(features:string|undefined){
  const response=await connectFetch(new Request(endpoint,{headers}),{...env,RELAYS:relays} as unknown as ConnectEnv,createExecutionContext());
  return {response,seen:seen as Request|null};
 }
-test('the connector feature header reaches the relay only when it is exactly grant-v1',async()=>{
- const ok=await connectWithFeatures('grant-v1');expect(ok.response.status).toBe(200);expect(ok.seen!.headers.get('x-slm-connector-features')).toBe('grant-v1');
- for(const value of [undefined,'grant-v2','grant-v1,x','GRANT-V1','']){const r=await connectWithFeatures(value);expect(r.response.status,String(value)).toBe(200);expect(r.seen!.headers.get('x-slm-connector-features'),String(value)).toBeNull();}
+test('the connector feature header reaches the relay only as one of the exact values we know',async()=>{
+ for(const known of ['grant-v1','grant-v1,upload-v1']){const ok=await connectWithFeatures(known);expect(ok.response.status).toBe(200);expect(ok.seen!.headers.get('x-slm-connector-features')).toBe(known);}
+ for(const value of [undefined,'grant-v2','grant-v1,x','GRANT-V1','','upload-v1','grant-v1,upload-v1,x','upload-v1,grant-v1','grant-v1, upload-v1']){const r=await connectWithFeatures(value);expect(r.response.status,String(value)).toBe(200);expect(r.seen!.headers.get('x-slm-connector-features'),String(value)).toBeNull();}
 });

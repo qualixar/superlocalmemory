@@ -8,6 +8,7 @@ export const HARD_MAX_BYTES = 1024 * 1024 * 1024;
 const OPS = new Set(["info", "chunk", "finish"]);
 const PATH = /^\/u\/([a-f0-9]{32})\/([A-Za-z0-9_-]{43})$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+const NONCE = /^[A-Za-z0-9_-]{22}$/;
 const CODE = /^[a-z_]{1,40}$/;
 const MESSAGE_CHARS = 300;
 
@@ -27,10 +28,22 @@ export function parseUploadPath(pathname: string): { connection: string; token: 
   return found ? { connection: found[1]!, token: found[2]! } : null;
 }
 
-export function uploadHeader(op: string, token: string, index: number, total: number): string {
-  if (!OPS.has(op) || !TOKEN.test(token) || !Number.isSafeInteger(index) || index < 0 || index > 9_999_999_999 ||
+/** One per upload (one POST). The laptop binds it on the first chunk and requires it on the rest, so a second holder of the link cannot swap the file. */
+export function newNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** The key the per-connection rate limit counts under: the connection and a hash of the token, so guessing links cannot use up a real link's allowance. The hash is never logged. */
+export async function limitKey(connection: string, token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return `${connection}:${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function uploadHeader(op: string, token: string, index: number, total: number, nonce: string): string {
+  if (!OPS.has(op) || !TOKEN.test(token) || typeof nonce !== "string" || !NONCE.test(nonce) || !Number.isSafeInteger(index) || index < 0 || index > 9_999_999_999 ||
       !Number.isSafeInteger(total) || total < 0 || total > 999_999_999_999) throw new Error("invalid_upload_header");
-  return `${op} ${token} ${index} ${total}`;
+  return `${op} ${token} ${index} ${total} ${nonce}`;
 }
 
 function natural(value: unknown): number | undefined {
@@ -62,6 +75,7 @@ const PROBLEMS: Record<string, { status: number; message: string }> = {
   origin_timeout: { status: 504, message: "Your computer took too long to answer. Try again in a moment." },
   relay_busy: { status: 429, message: "Your computer is busy with other requests. Try again in a moment." },
   connection_revoked: { status: 403, message: "This computer is no longer connected to this app." },
+  upload_unsupported: { status: 503, message: "SuperLocalMemory on your computer needs an update before it can take uploads. Update it, then ask the app for a new link." },
 };
 export function relayProblem(code: string): { status: number; message: string } {
   return PROBLEMS[code] ?? { status: 502, message: "Your computer could not be reached. Try again in a moment." };

@@ -5,19 +5,21 @@ let api;try{api=await import('../src/upload-gateway.ts');}catch{api=null;}
 const CONN='a'.repeat(32);const TOKEN='B'.repeat(43);const URL_=`https://mcp.superlocalmemory.com/u/${CONN}/${TOKEN}`;
 const MAX=25*1024*1024;
 
-function laptop(script){
+function laptop(script,{consent=()=>true}={}){
   const frames=[];
   const relay={async forwardCurrent(frame,options,context){
     frames.push(frame);
     const header=frame.headers.find(h=>h[0]==='x-slm-upload')[1];
-    const [op,,index,total]=header.split(' ');
-    const out=await script({op,index:Number(index),total:Number(total),frame,body:Buffer.from(frame.bodyBase64,'base64')});
+    const [op,,index,total,nonce]=header.split(' ');
+    const out=await script({op,index:Number(index),total:Number(total),nonce,frame,body:Buffer.from(frame.bodyBase64,'base64')});
     if(out instanceof Response)return out;
     return Response.json(out,{status:200});
   }};
-  const names=[];
-  const env={RELAYS:{getByName(name){names.push(name);return relay;}},UPLOAD_IP:{async limit(){return {success:true};}},UPLOAD_CONN:{async limit(){return {success:true};}}};
-  return {env,frames,names};
+  const names=[],limits=[],checks=[];
+  const env={RELAYS:{getByName(name){names.push(name);return relay;}},
+    REGISTRIES:{getByName(name){return {async uploadsAllowed(){checks.push(name);const v=consent();if(v instanceof Error)throw v;return v;}};}},
+    UPLOAD_IP:{async limit(){return {success:true};}},UPLOAD_CONN:{async limit({key}){limits.push(key);return {success:true};}}};
+  return {env,frames,names,limits,checks};
 }
 const live=(extra={})=>laptop(({op,body})=>{
   if(op==='info')return {ok:true,kind:'image',max_bytes:MAX,expires_at:1};
@@ -60,7 +62,7 @@ test('GET asks the laptop about the link, then serves the picker for that kind',
   assert.equal(frames.length,1);
   const f=frames[0];
   assert.equal(f.kind,'request');assert.equal(f.bodyBase64,'');
-  assert.deepEqual(f.headers,[['content-type','application/octet-stream'],['x-slm-upload',`info ${TOKEN} 0 0`]]);
+  assert.match(f.headers[1][1],new RegExp(`^info ${TOKEN} 0 0 [A-Za-z0-9_-]{22}$`));assert.equal(f.headers[0][0],'content-type');
   assert.ok(f.deadlineAt-Date.now()<=25000&&f.deadlineAt>Date.now());
   assert.equal(encodeRelayFrame({...f,generation:1}).ok,true);
 });
@@ -93,7 +95,7 @@ test('POST relays a file as ordered chunks of at most 700000 bytes, then finishe
   const ops=frames.map(f=>f.headers[1][1].split(' '));
   assert.deepEqual(ops.map(o=>o[0]),['info','chunk','chunk','chunk','finish']);
   assert.deepEqual(ops.filter(o=>o[0]==='chunk').map(o=>[Number(o[2]),Number(o[3])]),[[0,1500001],[1,1500001],[2,1500001]]);
-  assert.deepEqual(ops[4].slice(2),['0','1500001']);
+  assert.deepEqual(ops[4].slice(2,4),['0','1500001']);
   const sent=Buffer.concat(frames.filter(f=>f.headers[1][1].startsWith('chunk')).map(f=>Buffer.from(f.bodyBase64,'base64')));
   assert.deepEqual(new Uint8Array(sent),bytes);
   for(const f of frames){assert.ok(Buffer.from(f.bodyBase64,'base64').length<=700000);assert.ok(Buffer.from(f.bodyBase64,'base64').length<=MAX_REQUEST_BYTES);assert.equal(encodeRelayFrame({...f,generation:1}).ok,true);assert.equal(f.headers.length,2);}
@@ -189,7 +191,7 @@ test('both rate limits apply per address and per connection; a missing limiter f
   assert.equal(base.frames.length,0);
   const conn={...base.env,UPLOAD_CONN:{async limit({key}){keys.push(['conn',key]);return {success:false};}}};
   assert.equal((await api.handleUpload(req(),conn)).status,429);
-  assert.deepEqual(keys.at(-1),['conn',CONN]);
+  assert.equal(keys.at(-1)[0],'conn');assert.match(keys.at(-1)[1],new RegExp(`^${CONN}:[a-f0-9]{64}$`));
   for(const missing of [{UPLOAD_IP:undefined},{UPLOAD_CONN:undefined},{UPLOAD_IP:{async limit(){throw new Error('down');}}}]){
     assert.equal((await api.handleUpload(req(),{...base.env,...missing})).status,503);
   }
@@ -204,4 +206,55 @@ test('nothing from the laptop or the link reaches a response unescaped, and noth
   assert.equal(page.headers.get('cache-control'),'no-store');
   const up=await api.handleUpload(post(png(10)),env);
   assert.equal(up.headers.get('cache-control'),'no-store');assert.equal((await up.json()).code,'error');
+});
+
+
+test('every frame of one upload carries the same fresh nonce; the next upload gets another',async()=>{
+  assert.ok(api);
+  const nonces=[];
+  const first=laptop(({op,nonce})=>{if(op!=='info')nonces.push(nonce);return okReply(op);});
+  await api.handleUpload(post(png(1_500_001)),first.env);
+  assert.equal(nonces.length,4);assert.equal(new Set(nonces).size,1);assert.match(nonces[0],/^[A-Za-z0-9_-]{22}$/);
+  const second=laptop(({op,nonce})=>{if(op!=='info')nonces.push(nonce);return okReply(op);});
+  await api.handleUpload(post(png(10)),second.env);
+  assert.notEqual(nonces.at(-1),nonces[0]);
+});
+function okReply(op){return op==='info'?{ok:true,kind:'image',max_bytes:MAX,expires_at:1}:op==='chunk'?{ok:true,received:1}:{ok:true,done:true,message:'Saved to your memory.'};}
+
+test('the per-connection limit counts under the connection and a token hash, never the bare connection or the token',async()=>{
+  assert.ok(api);
+  const l=live();
+  await api.handleUpload(req(),l.env);
+  assert.equal(l.limits.length,1);
+  assert.match(l.limits[0],new RegExp(`^${CONN}:[a-f0-9]{64}$`));assert.ok(!l.limits[0].includes(TOKEN));
+});
+
+test('a link whose consent was taken away is refused before any frame is sent',async()=>{
+  assert.ok(api);
+  for(const consent of [()=>false,()=>new Error('registry down')]){
+    const l=laptop(okReply2,{consent});
+    const page=await api.handleUpload(req(),l.env);
+    assert.equal(page.status,410);assert.match(await page.text(),/no longer works/i);
+    const up=await api.handleUpload(post(png(10)),l.env);
+    assert.equal(up.status,410);const body=await up.json();assert.equal(body.ok,false);assert.match(body.message,/no longer works/i);
+    assert.equal(l.frames.length,0);
+    assert.deepEqual(l.checks,[CONN,CONN]);
+  }
+});
+function okReply2({op}){return okReply(op);}
+
+test('consent is checked again before the file is finished: revoking mid-upload stops the save',async()=>{
+  assert.ok(api);
+  let allowed=true;
+  const l=laptop(({op})=>{if(op==='chunk')allowed=false;return okReply(op);},{consent:()=>allowed});
+  const r=await api.handleUpload(post(png(100)),l.env);
+  assert.equal(r.status,410);assert.match((await r.json()).message,/no longer works/i);
+  assert.ok(!l.frames.some(f=>f.headers[1][1].startsWith('finish')));
+});
+
+test('a laptop whose connector cannot take uploads gets a plain "update" message',async()=>{
+  assert.ok(api);
+  const l=laptop(()=>Response.json({error:'upload_unsupported'},{status:503}));
+  const page=await api.handleUpload(req(),l.env);
+  assert.equal(page.status,503);assert.match(await page.text(),/update/i);
 });

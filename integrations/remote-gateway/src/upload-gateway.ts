@@ -1,25 +1,27 @@
 import type {RelayDO} from './relay-do.ts';
+import type {RegistryDO} from './registry-do.ts';
 import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
 import {publicRelayCode} from './relay-errors.ts';
-import {CHUNK_BYTES,HARD_MAX_BYTES,UPLOAD_HEADER,UploadAbort,chunksOf,cleanReply,parseUploadPath,relayProblem,statusFor,toBase64,uploadHeader,type UploadReply} from './upload-protocol.ts';
+import {CHUNK_BYTES,HARD_MAX_BYTES,UPLOAD_HEADER,UploadAbort,chunksOf,cleanReply,limitKey,newNonce,parseUploadPath,relayProblem,statusFor,toBase64,uploadHeader,type UploadReply} from './upload-protocol.ts';
 import {jsonReply,messagePage,uploadPage} from './upload-page.ts';
 
 /** The public one-time upload link: `GET /u/<connection>/<token>` serves a picker, `POST` streams the file to that connection's
  * laptop as relay request frames. The gateway keeps no copy of the file and never decides whether the token is good: the laptop does. */
-export interface UploadEnv {RELAYS:DurableObjectNamespace<RelayDO>;UPLOAD_IP?:RateLimit;UPLOAD_CONN?:RateLimit;}
+export interface UploadEnv {RELAYS:DurableObjectNamespace<RelayDO>;REGISTRIES:DurableObjectNamespace<RegistryDO>;UPLOAD_IP?:RateLimit;UPLOAD_CONN?:RateLimit;}
 export const SELF_ORIGIN='https://mcp.superlocalmemory.com';
 /** One finish frame waits up to 15 s on the laptop; asking this many times covers a slow first-time picture model. */
 export const FINISH_TRIES=8;
 const STILL_SAVING='Your computer is still saving this file. You can close this page; it will appear in your memory shortly.';
 
 type Hop={kind:'reply';reply:UploadReply}|{kind:'problem';status:number;message:string};
-type Link={connection:string;token:string};
+type Link={connection:string;token:string;nonce:string};
+const REVOKED='This upload link no longer works. Ask the app for a new one.';
 
 async function hop(env:UploadEnv,link:Link,op:'info'|'chunk'|'finish',index:number,total:number,body:Uint8Array=new Uint8Array()):Promise<Hop> {
   let response:Response;
   try {
     response=await env.RELAYS.getByName(link.connection).forwardCurrent({v:1,kind:'request',id:crypto.randomUUID(),deadlineAt:Date.now()+RELAY_DEADLINE_MS,
-      headers:[['content-type','application/octet-stream'],[UPLOAD_HEADER,uploadHeader(op,link.token,index,total)]],bodyBase64:toBase64(body)});
+      headers:[['content-type','application/octet-stream'],[UPLOAD_HEADER,uploadHeader(op,link.token,index,total,link.nonce)]],bodyBase64:toBase64(body)});
   } catch { return {kind:'problem',...relayProblem('origin_unavailable')}; }
   if(response.status!==200){
     let code='origin_unavailable';
@@ -30,14 +32,19 @@ async function hop(env:UploadEnv,link:Link,op:'info'|'chunk'|'finish',index:numb
   catch{return {kind:'reply',reply:cleanReply(null)};}
 }
 
-/** Per address and per connection; a missing or broken limiter refuses rather than lets everything through. */
-async function admission(request:Request,env:UploadEnv,connection:string):Promise<{status:number;code:string;message:string}|null> {
+/** The app's consent for this connection is still on record (not revoked, access not ended, saving pictures allowed). Anything unclear counts as no. */
+async function consentActive(env:UploadEnv,connection:string):Promise<boolean> {
+  try{return (await env.REGISTRIES.getByName(connection).uploadsAllowed())===true;}catch{return false;}
+}
+
+/** Per address and per link (connection plus a hash of the token); a missing or broken limiter refuses rather than lets everything through. */
+async function admission(request:Request,env:UploadEnv,link:Link):Promise<{status:number;code:string;message:string}|null> {
   if(!env.UPLOAD_IP||!env.UPLOAD_CONN)return {status:503,code:'upload_unavailable',message:'Uploads are not available right now. Try again in a minute.'};
   try {
     const address=request.headers.get('CF-Connecting-IP')??'unknown';
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(address));
     const key=Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,'0')).join('');
-    if(!(await env.UPLOAD_IP.limit({key})).success||!(await env.UPLOAD_CONN.limit({key:connection})).success)return {status:429,code:'rate_limited',message:'Too many tries. Wait a minute and try again.'};
+    if(!(await env.UPLOAD_IP.limit({key})).success||!(await env.UPLOAD_CONN.limit({key:await limitKey(link.connection,link.token)})).success)return {status:429,code:'rate_limited',message:'Too many tries. Wait a minute and try again.'};
     return null;
   } catch { return {status:503,code:'upload_unavailable',message:'Uploads are not available right now. Try again in a minute.'}; }
 }
@@ -49,6 +56,7 @@ function refusal(page:boolean,status:number,code:string,message:string):Response
 }
 
 async function showPicker(env:UploadEnv,link:Link):Promise<Response> {
+  if(!(await consentActive(env,link.connection)))return messagePage(410,REVOKED);
   const answer=await hop(env,link,'info',0,0);
   if(answer.kind==='problem')return messagePage(answer.status,answer.message);
   const {reply}=answer;
@@ -85,6 +93,7 @@ async function sendChunks(env:UploadEnv,link:Link,body:ReadableStream<Uint8Array
 }
 
 async function finish(env:UploadEnv,link:Link,declared:number):Promise<Response> {
+  if(!(await consentActive(env,link.connection)))return refusal(false,410,'revoked',REVOKED);
   for(let attempt=0;attempt<FINISH_TRIES;attempt++){
     const answer=await hop(env,link,'finish',0,declared);
     if(answer.kind==='problem')return refusal(false,answer.status,'unreachable',answer.message);
@@ -101,6 +110,7 @@ async function receive(request:Request,env:UploadEnv,link:Link):Promise<Response
   const length=declaredLength(request);
   if('status' in length)return refusal(false,length.status,length.code,length.message);
   if(request.body===null)return refusal(false,400,'empty','That file is empty.');
+  if(!(await consentActive(env,link.connection)))return refusal(false,410,'revoked',REVOKED);
   const info=await hop(env,link,'info',0,0);
   if(info.kind==='problem')return refusal(false,info.status,'unreachable',info.message);
   if(!info.reply.ok)return refusal(false,statusFor(info.reply.code??'error'),info.reply.code??'error',info.reply.message??'This upload link cannot be used.');
@@ -116,14 +126,15 @@ export async function handleUpload(request:Request,env:UploadEnv):Promise<Respon
   const path=new URL(request.url).pathname;
   if(!path.startsWith('/u/'))return null;
   const page=request.method==='GET';
-  const link=parseUploadPath(path);
-  if(!link)return refusal(true,404,'invalid_link','This upload link is not valid.');
+  const parsed=parseUploadPath(path);
+  if(!parsed)return refusal(true,404,'invalid_link','This upload link is not valid.');
+  const link:Link={...parsed,nonce:newNonce()};
   if(request.method!=='GET'&&request.method!=='POST'){
     const response=refusal(true,405,'method_not_allowed','This address only takes a file picked on its page.');
     response.headers.set('Allow','GET, POST');
     return response;
   }
-  const blocked=await admission(request,env,link.connection);
+  const blocked=await admission(request,env,link);
   if(blocked)return refusal(page,blocked.status,blocked.code,blocked.message);
   return page?showPicker(env,link):receive(request,env,link);
 }
