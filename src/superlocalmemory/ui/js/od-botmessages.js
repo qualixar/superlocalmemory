@@ -49,11 +49,30 @@
     if (typeof window.slmNavigate === 'function') window.slmNavigate('apps-pane');
   }
 
+  // The same three steps as docs/remote-access/hosts.md: the tick on the approval page
+  // is not enough, the key on this computer must allow it too.
+  function howItWorks() {
+    var wrap = el('div');
+    wrap.appendChild(el('h4', null, 'How it works'));
+    var ol = el('ol', 'od-botmsg-steps');
+    ol.appendChild(el('li', null, 'Connect an app in Connected apps.'));
+    ol.appendChild(el('li', null, 'Tick "Allow talking to your other bots" when you approve it.'));
+    var third = el('li', null, 'On this computer, allow it for that connection: ');
+    third.appendChild(el('code', null, 'slm remote keys allow web-<connection id> mesh'));
+    third.appendChild(el('span', null, ' (find the name with '));
+    third.appendChild(el('code', null, 'slm remote keys list'));
+    third.appendChild(el('span', null, ').'));
+    ol.appendChild(third);
+    wrap.appendChild(ol);
+    return wrap;
+  }
+
   function emptyState(ui) {
     var box = el('div', 'od-botmsg-empty');
     if (ui.peer) { box.appendChild(el('p', 'muted', 'No messages from this peer yet.')); return box; }
     box.appendChild(el('p', 'muted', 'Bots you connect can leave each other messages here. ' +
       'Allow it per app in Connected apps.'));
+    box.appendChild(howItWorks());
     box.appendChild(F().button('Open Connected apps', 'btn sm primary', openConnectedApps));
     return box;
   }

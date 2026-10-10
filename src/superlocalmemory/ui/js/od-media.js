@@ -147,11 +147,31 @@
     }).catch(function (e) { setStatus(row, e && e.message ? e.message : 'Could not send the file.'); });
   }
 
-  function onPick(ui, input) {
-    var files = Array.prototype.slice.call(input.files || []);
+  // One at a time, in order; each file gets its own result line.
+  function uploadAll(ui, list) {
+    var files = Array.prototype.slice.call(list || []);
     return files.reduce(function (p, f) {
       return p.then(function () { return uploadFile(ui, f); });
     }, Promise.resolve());
+  }
+
+  function onPick(ui, input) { return uploadAll(ui, input.files); }
+
+  // The dashed area people drop files on, with a real button for those who would rather
+  // choose. Both end in the same upload as the native input does.
+  function dropZone(ui, input) {
+    var zone = el('div', 'od-dropzone');
+    zone.appendChild(el('p', null, 'Drop pictures or PDFs here, or choose files'));
+    zone.appendChild(F().button('Choose files', 'btn sm primary', function () { input.click(); }));
+    zone.appendChild(el('p', 'muted', 'Images up to 25 MB and PDFs up to 100 MB. They stay on this computer.'));
+    zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('is-over'); });
+    zone.addEventListener('dragleave', function () { zone.classList.remove('is-over'); });
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('is-over');
+      uploadAll(ui, e.dataTransfer && e.dataTransfer.files);
+    });
+    return zone;
   }
 
   // ------------------------------------------------------------------- jobs
@@ -244,17 +264,19 @@
     ui.gridWrap.appendChild(ui.grid);
     var input = el('input');
     input.type = 'file';
+    input.hidden = true;                      // the drop zone's button opens it
     input.setAttribute('accept', 'image/*,application/pdf,.pdf');
     input.multiple = true;
     input.addEventListener('change', function () { onPick(ui, input); });
     var up = el('div', 'card card-pad od-media-section');
     up.appendChild(el('h3', null, 'Add images or PDFs'));
-    up.appendChild(el('p', 'muted', 'Images up to 25 MB and PDFs up to 100 MB. They stay on this computer.'));
+    up.appendChild(dropZone(ui, input));
     [input, ui.results, ui.gridWrap].forEach(function (n) { up.appendChild(n); });
     var docs = el('div', 'od-media-section');
     docs.appendChild(el('h3', null, 'Documents'));
     docs.appendChild(ui.lint);
     docs.appendChild(ui.docs);
+    if (window.odMediaFind) window.odMediaFind.mount(host);
     host.appendChild(up);
     host.appendChild(docs);
     loadDocuments(ui);

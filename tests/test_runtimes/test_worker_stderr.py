@@ -132,3 +132,13 @@ def test_the_window_rolls_over_and_reports_what_it_held_back(caplog):
     assert sum(t.startswith("image worker: l") and t != "image worker: late" for t in texts) == 50
     assert any("10 more" in t and "not logged" in t for t in texts)
     assert texts.index("image worker: late") > next(i for i, t in enumerate(texts) if "not logged" in t)
+
+
+def test_the_worker_starts_with_library_progress_bars_off(monkeypatch):
+    from superlocalmemory.runtimes import worker_client
+
+    monkeypatch.delenv("TQDM_DISABLE", raising=False)
+    client = worker_client.MediaWorkerClient.__new__(worker_client.MediaWorkerClient)
+    env = worker_client.MediaWorkerClient._worker_env(client)
+    assert env["HF_HUB_DISABLE_PROGRESS_BARS"] == "1" and env["TQDM_DISABLE"] == "1"
+    assert env["TRANSFORMERS_VERBOSITY"] == "error"

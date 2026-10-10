@@ -152,6 +152,35 @@ describe('Bot messages pane', () => {
         assert.deepEqual(seen, ['apps-pane']);
     });
 
+    it('with no messages: a numbered "How it works" that matches the approval page and the CLI', async () => {
+        const h = setup({ messages: [] });
+        await h.open();
+        assert.ok([...h.pane.querySelectorAll('h3, h4')].some(x => x.textContent === 'How it works'));
+        const steps = [...h.pane.querySelectorAll('ol.od-botmsg-steps > li')].map(li => li.textContent);
+        assert.equal(steps.length, 3);
+        assert.equal(steps[0], 'Connect an app in Connected apps.');
+        assert.equal(steps[1], 'Tick "Allow talking to your other bots" when you approve it.');
+        assert.match(steps[2], /^On this computer, allow it for that connection: slm remote keys allow web-<connection id> mesh/);
+        assert.match(steps[2], /slm remote keys list/);
+        const code = [...h.pane.querySelectorAll('ol.od-botmsg-steps code')].map(c => c.textContent);
+        assert.deepEqual(code, ['slm remote keys allow web-<connection id> mesh', 'slm remote keys list']);
+        assert.ok(h.btn('Open Connected apps'), 'the button stays');
+    });
+
+    it('the steps show only when there are no messages, and not for a filtered peer with none', async () => {
+        const h = setup();
+        await h.open();
+        assert.equal(h.pane.querySelectorAll('ol.od-botmsg-steps').length, 0);
+        const peerOnly = setup({ messages: [], peers: [{ peer_id: 'p-x', app: 'x', kind: 'local' }] });
+        await peerOnly.open();
+        const filter = peerOnly.pane.querySelector('select');
+        filter.value = 'p-x';
+        filter.dispatchEvent(new peerOnly.window.Event('change', { bubbles: true }));
+        await flushPromises();
+        assert.match(peerOnly.pane.textContent, /No messages from this peer yet/);
+        assert.equal(peerOnly.pane.querySelectorAll('ol.od-botmsg-steps').length, 0);
+    });
+
     it('peers show display name, then app, then a short id, with a kind chip; heading appears with peers', async () => {
         const a = msg(3, 'p-web', 'web', 'x'); a.from.display_name = 'Kitchen bot';
         const b = msg(2, 'p-loc', 'local', 'y');

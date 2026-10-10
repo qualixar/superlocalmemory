@@ -18,7 +18,6 @@
   'use strict';
 
   var API = '/api/v3/embedding/reindex';
-  var MEDIA_ENABLE = '/api/v3/features/media/enable';
   var NEW_MODEL = 'google/embeddinggemma-2';
   var POLL_MS = 2000;
 
@@ -95,20 +94,18 @@
     });
   }
 
-  function turnOnMedia(note) {
-    confirmThen({
-      title: 'Turn on images and documents', target: 'Images and documents',
-      consequence: 'Downloads about 1.5 GB of models. Everything stays on this computer. '
-        + 'Then the memory engine can be upgraded.', confirmLabel: 'Turn on',
-    }, function () {
-      note.textContent = 'Starting…';
-      _post(MEDIA_ENABLE, { yes: true, source: 'dashboard' }).then(function () {
-        note.textContent = 'Setting up images and documents. This can take several minutes.';
-        return refresh();
-      }).catch(function (e) {
-        note.textContent = failText(e, 'Could not turn on images and documents.');
-      });
-    });
+  // The Documents & Images pane owns the turn-on flow (memory check, confirmation, progress).
+  function openMediaPane() {
+    if (typeof window.slmNavigate === 'function') window.slmNavigate('media-pane');
+  }
+
+  // The reason as a person reads it: the server appends the command for developers.
+  function plainReason(plan) {
+    var text = String(plan.reason || '');
+    var cmd = plan.turn_on_command;
+    if (!cmd || text.indexOf(cmd) < 0) return text;
+    text = text.split(cmd).join('').replace(/\s*(Run)?\s*:\s*$/, '').trim();
+    return /[.!?]$/.test(text) ? text : text + '.';
   }
 
   function rollBack(note) {
@@ -159,7 +156,7 @@
       row.appendChild(go);
     }
     if (plan.needs_media) {
-      row.appendChild(button('Turn on images and documents', 'btn sm', function () { turnOnMedia(note); }));
+      row.appendChild(button('Turn on images & documents first', 'btn sm', openMediaPane));
     }
     if (onNewEngine(status)) {
       row.appendChild(button('Roll back', 'btn sm', function () { rollBack(note); }));
@@ -176,7 +173,7 @@
     if (!plan.already) {
       _body.appendChild(el('p', 'muted', 'From ' + plan.from.model + ' to ' + plan.to.model + '. ' + costText(plan)));
     }
-    if (plan.reason) _body.appendChild(message(plan.reason, false));
+    if (plan.reason) _body.appendChild(message(plainReason(plan), false));
     var note = message('', false);
     _body.appendChild(actions(plan, status, note));
     _body.appendChild(note);

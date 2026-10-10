@@ -60,6 +60,11 @@ def _test_mode() -> bool:
     return os.environ.get("SLM_TEST_ISOLATION") == "1"
 
 
+#: Library chatter the worker's stderr would otherwise put in the daemon log as warnings.
+_QUIET_LIBRARIES = {"HF_HUB_DISABLE_PROGRESS_BARS": "1", "TQDM_DISABLE": "1",
+                    "TRANSFORMERS_VERBOSITY": "error", "TRANSFORMERS_NO_ADVISORY_WARNINGS": "1"}
+
+
 class MediaWorkerClient(MediaEmbedderPort):
     def __init__(self, env: Any, *, model_id: str, revision: str, idle_s: float | None = None,
                  rss_limit_mb: int | None = None, request_timeout_s: float = 120.0,
@@ -111,6 +116,8 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     def _worker_env(self) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+        for key, value in _QUIET_LIBRARIES.items():  # progress bars are not problems for the daemon log
+            env.setdefault(key, value)
         if not _test_mode():
             env.pop("SLM_MEDIA_WORKER_FAKE", None)
         return env
