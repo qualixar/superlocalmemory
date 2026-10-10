@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 from superlocalmemory.core.security_primitives import SecretHit, detect_secrets
 from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.memory_core import ContentOrigin
+from superlocalmemory.memory_core import submit as _submit
 from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ignore import size_cap
@@ -50,6 +52,13 @@ class PartialSave(RuntimeError):
     def __init__(self, entries: list[dict[str, Any]]):
         super().__init__("a folder file was saved only in part")
         self.entries = entries
+
+
+class SaveBudgetSpent(PartialSave):
+    """The file's settle budget ran out while a part was still queued.
+
+    The parts sent so far (the queued one by its key) stay owned by the row; the rest of the file
+    is sent on the next pass under the same keys. A deferral, not a failure."""
 
 
 def screen(data: bytes) -> list[SecretHit]:
@@ -103,9 +112,15 @@ def ingest_text(host: SourceHost, runtime: Any, source: dict, relpath: str, data
 
 def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts: list[str], version: str,
                n: int, *, tags: str = "", session_date: str = "",
-               extra: dict[str, Any] | None = None) -> Ingested:
-    """One memory per part; ``extra`` is server-prepared metadata added beside the provenance."""
+               extra: dict[str, Any] | None = None, settle_until: float | None = None) -> Ingested:
+    """One memory per part; ``extra`` is server-prepared metadata added beside the provenance.
+
+    Waiting for queued saves to commit has one budget per file (``settle_until``, a
+    ``time.monotonic`` deadline; by default the settle wait from now). When it runs out on a part
+    that is still queued, the rest of the file is deferred (``SaveBudgetSpent``).
+    """
     out = Ingested()
+    until = settle_until if settle_until is not None else time.monotonic() + _submit.SETTLE_WAIT_S
     for number, part in enumerate(parts, 1):
         key = _key(source["source_id"], relpath, n, number)
         request = SaveRequest(
@@ -114,10 +129,13 @@ def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts
             trusted_metadata={**(extra or {}), "_slm_source": provenance(source["source_id"], relpath, version)},
             idempotency_key=key)
         try:
-            saved = submit_memory_settled(runtime, request, config=host.config())
+            saved = submit_memory_settled(runtime, request, config=host.config(),
+                                          wait_s=max(0.0, until - time.monotonic()))
         except SavePending:
             # Durable and queued: owned by its key until it commits (see ``facts_of_keys``).
             out.entries.append({"m": None, "f": [], "v": version, "k": key})
+            if number < len(parts):
+                raise SaveBudgetSpent(out.entries) from None
             continue
         except Exception as exc:
             raise PartialSave(out.entries) from exc
@@ -287,5 +305,5 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
     return len(rows) > 0
 
 
-__all__ = ["Ingested", "KeyFacts", "SCREEN_BYTES", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
+__all__ = ["Ingested", "KeyFacts", "SCREEN_BYTES", "SaveBudgetSpent", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
            "load_verified", "provenance", "resolve_keys", "save_parts", "screen", "split_markdown", "split_text"]

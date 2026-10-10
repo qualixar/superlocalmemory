@@ -269,3 +269,70 @@ def test_a_retry_that_fails_again_keeps_the_same_keys(env):
     keys = [r["key"] for r in env.runtime.saved]
     assert env.files(sid)["long.txt"]["state"] == "indexed" and len({k.split(":")[-2] for k in keys}) == 1
     assert env.runtime.archived == [] and len(_live(env, sid, "long.txt")) == len(keys)
+
+
+# -- CX1 residual: the settle budget is per file, not per part ------------------------------------
+
+def _writer_that_only_queues(env):
+    sent = []
+
+    def remember(admission, actor, deadline_ms=0, accept_after_ms=0):
+        sent.append(admission.idempotency_key)
+        return SimpleNamespace(payload={"status": "accepted", "operation_id": None, "fact_ids": []})
+
+    env.runtime.remember = remember
+    return sent
+
+
+def test_a_busy_writer_costs_a_file_one_settle_wait_not_one_per_part(env, monkeypatch):
+    """A 100-part note under contention used to hold the scan for 100 x 20 s."""
+    from superlocalmemory.memory_core import submit as submit_mod
+
+    monkeypatch.setattr(submit_mod, "SETTLE_WAIT_S", 0.0)
+    sent = _writer_that_only_queues(env)
+    env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    stats = env.scan(sid)
+    parts = len(sent)  # what was sent before the budget ran out
+    assert parts == 1 and stats.deferred == 1 and stats.errors == 0
+    row = env.files(sid)["long.txt"]
+    entries = json.loads(row["memory_ids_json"])
+    assert row["state"] == "error" and row["reason"] == "save_queued"
+    assert [e["k"] for e in entries] == sent  # the queued part stays owned by its key
+
+
+def test_the_rest_of_a_deferred_file_is_saved_under_the_same_keys_once_the_writer_catches_up(env, monkeypatch):
+    from superlocalmemory.memory_core import submit as submit_mod
+
+    monkeypatch.setattr(submit_mod, "SETTLE_WAIT_S", 0.0)
+    real = env.runtime.remember
+    sent = _writer_that_only_queues(env)
+    env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    env.runtime.remember = real  # the writer catches up; the queued part has committed under its key
+    env.scan(sid)
+    keys = [r["key"] for r in env.runtime.saved]
+    assert env.files(sid)["long.txt"]["state"] == "indexed" and len(keys) > 1
+    assert len({k.split(":")[-2] for k in keys}) == 1 and keys[0] == sent[0]
+    assert env.runtime.archived == []
+
+
+def test_a_slow_file_still_gets_the_whole_budget_across_its_parts(env, monkeypatch):
+    """The budget is shared by the parts of a file: time spent on part 1 is not given again to part 2."""
+    from superlocalmemory.memory_core import submit as submit_mod
+    from superlocalmemory.sources import ingest as ingest_mod
+
+    waits = []
+    real = submit_mod.submit_memory_settled
+
+    def spy(runtime, request, *, config, wait_s=None, **kw):
+        waits.append(wait_s)
+        return real(runtime, request, config=config, wait_s=wait_s, **kw)
+
+    monkeypatch.setattr(ingest_mod, "submit_memory_settled", spy)
+    env.write("long.txt", LONG)
+    sid = env.add_and_confirm()
+    env.scan(sid)
+    assert len(waits) > 1 and all(w is not None for w in waits)
+    assert waits == sorted(waits, reverse=True) and waits[0] <= submit_mod.SETTLE_WAIT_S

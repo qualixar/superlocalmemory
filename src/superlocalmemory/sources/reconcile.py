@@ -355,15 +355,19 @@ def _work(p: _Pass, walked: WalkResult, progress: Callable[[int, int], None] | N
             _process(p, e, sha)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the pass
             cause = exc.__cause__ if isinstance(exc, ingest.PartialSave) and exc.__cause__ else exc
-            logger.warning("a folder file could not be saved (%s)", type(cause).__name__)
-            p.stats.errors += 1
+            if isinstance(exc, ingest.SaveBudgetSpent):
+                p.stats.deferred += 1  # the writer is busy: the rest of the file waits, nothing failed
+            else:
+                logger.warning("a folder file could not be saved (%s)", type(cause).__name__)
+                p.stats.errors += 1
             fields: dict[str, Any] = {}
             if isinstance(exc, ingest.PartialSave) and exc.entries:
                 # The parts saved before the failure stay owned by the row, so the next save
                 # (which supersedes the row) and any removal or purge also reach them.
                 kept = p.store.get_file(p.sid, e.relpath)
                 fields["entries"] = (entries_of(kept) if kept else []) + exc.entries
-            p.store.put_file(p.sid, e.relpath, state="error", reason=type(cause).__name__[:60],
+            reason = "save_queued" if isinstance(exc, ingest.SaveBudgetSpent) else type(cause).__name__[:60]
+            p.store.put_file(p.sid, e.relpath, state="error", reason=reason,
                              sha256=sha, **_stat_fields(e), **fields)
         if progress:
             progress(i + 1, len(hashed))
