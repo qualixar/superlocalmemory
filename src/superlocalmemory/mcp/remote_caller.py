@@ -22,7 +22,7 @@ import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # the grant type lives with the connection code; no runtime import
     from superlocalmemory.remote_connections.grant import RemoteGrant
@@ -54,8 +54,9 @@ class RemotePeer:
     """A web app calling through a remote connection, as the mesh sees it.
 
     Set around a mesh tool call that arrives with a verified grant. The mesh
-    tools still refuse a caller for whom it is set (they cannot serve a web app
-    over the daemon's HTTP interface); a later change will serve it in process.
+    tools then serve it in process (see :class:`RemoteMeshTarget`) and never
+    over the daemon's HTTP interface, where it could not be told from a session
+    on this computer.
 
     ``peer_ref`` is a stable, opaque reference for the app (never a secret);
     ``app`` is its short name and ``display_name`` what the owner sees.
@@ -86,6 +87,40 @@ def remote_peer(peer: RemotePeer | None) -> Iterator[None]:
         _current_remote_peer.reset(token)
 
 
+@dataclass(frozen=True)
+class RemoteMeshTarget:
+    """Where a web app's mesh calls run: the daemon's own broker, in process.
+
+    ``broker`` is the instance the daemon's mesh routes use (``None`` when the
+    mesh is not running or is switched off), ``profile`` the profile of the
+    remote key and ``connection_id`` the connection the app came in on.
+    """
+
+    broker: Any
+    profile: str
+    connection_id: str
+
+
+_current_remote_mesh: contextvars.ContextVar[RemoteMeshTarget | None] = contextvars.ContextVar(
+    "slm_remote_mesh", default=None,
+)
+
+
+def current_remote_mesh() -> RemoteMeshTarget | None:
+    """The in-process mesh a web app's call runs in, or ``None``."""
+    return _current_remote_mesh.get()
+
+
+@contextmanager
+def remote_mesh(target: RemoteMeshTarget | None) -> Iterator[None]:
+    """Run everything inside against the given in-process mesh."""
+    token = _current_remote_mesh.set(target)
+    try:
+        yield
+    finally:
+        _current_remote_mesh.reset(token)
+
+
 _current_remote_grant: contextvars.ContextVar["RemoteGrant | None"] = contextvars.ContextVar(
     "slm_remote_grant", default=None,
 )
@@ -111,6 +146,7 @@ def remote_grant(grant: "RemoteGrant | None") -> Iterator[None]:
 
 
 __all__ = [
-    "RemotePeer", "current_remote_grant", "current_remote_key_id", "current_remote_peer",
-    "remote_caller", "remote_grant", "remote_peer",
+    "RemoteMeshTarget", "RemotePeer", "current_remote_grant", "current_remote_key_id",
+    "current_remote_mesh", "current_remote_peer", "remote_caller", "remote_grant",
+    "remote_mesh", "remote_peer",
 ]

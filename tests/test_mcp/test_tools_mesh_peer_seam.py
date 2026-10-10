@@ -1,4 +1,4 @@
-"""A mesh call made for a connected web app is refused, never run as the local session."""
+"""A mesh call made for a connected web app never runs as the local session."""
 
 from __future__ import annotations
 
@@ -66,15 +66,26 @@ ALL_TOOL_ARGS = {
     "mesh_inbox": (), "mesh_wait": (1,), "mesh_state": ("k", "v", "set"),
     "mesh_lock": ("/tmp/f", "acquire"), "mesh_events": (), "mesh_status": (),
 }
+HOST_ONLY = ("mesh_summary", "mesh_lock", "mesh_events", "mesh_status")
 
 
-@pytest.mark.parametrize("name", sorted(ALL_TOOL_ARGS))
-def test_every_tool_refuses_a_web_caller_without_calling_the_daemon(tools, name) -> None:
+@pytest.mark.parametrize("name", HOST_ONLY)
+def test_host_only_tools_refuse_a_web_caller_without_calling_the_daemon(tools, name) -> None:
     fns, calls = tools
     with remote_peer(RemotePeer("ref-1", "notes", "My Notes")):
         out = asyncio.run(fns[name](*ALL_TOOL_ARGS[name]))
     assert out == {"ok": False,
                    "error": "mesh messages for connected web apps are not available yet"}
+    assert calls == []
+
+
+@pytest.mark.parametrize("name", sorted(set(ALL_TOOL_ARGS) - set(HOST_ONLY)))
+def test_a_web_caller_without_an_in_process_broker_is_refused_and_never_uses_the_daemon(
+        tools, name) -> None:
+    fns, calls = tools
+    with remote_peer(RemotePeer("ref-1", "notes", "My Notes")):
+        out = asyncio.run(fns[name](*ALL_TOOL_ARGS[name]))
+    assert out == {"ok": False, "error": "mesh is not available"}
     assert calls == []
 
 
