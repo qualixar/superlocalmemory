@@ -1,6 +1,6 @@
 /** The only pages the upload link serves: one small picker, and a plain message. Static text, no third parties, strict CSP. */
 
-const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
 const DOC_ACCEPT = "application/pdf";
 const DEFAULT_MAX = 25 * 1024 * 1024;
 const BASE_HEADERS = {
@@ -46,7 +46,7 @@ export function uploadPage(kind: string, maxBytes: number): Response {
   const mb = Math.max(1, Math.floor(bytes / (1024 * 1024)));
   const token = nonce();
   const noun = document ? "PDF" : "picture";
-  const hint = document ? `Pick a PDF, up to ${mb} MB.` : `Pick a PNG, JPEG or WebP picture, up to ${mb} MB.`;
+  const hint = document ? `Pick a PDF, up to ${mb} MB.` : `Pick a PNG, JPEG, GIF or WebP picture, up to ${mb} MB.`;
   const csp = `default-src 'none'; script-src 'nonce-${token}'; style-src 'nonce-${token}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`;
   const body = `<h1>Add a ${noun} to your memory</h1><p>${hint}</p><p>This link works once, expires in 10 minutes, and is only for you. Do not share it with anyone.</p>` +
     `<input id="file" type="file" accept="${document ? DOC_ACCEPT : IMAGE_ACCEPT}"><button id="save" type="button" disabled>Save</button><p id="status" role="status"></p>` +

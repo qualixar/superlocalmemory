@@ -170,11 +170,11 @@ def max_bytes_for(kind: str) -> int:
 
 
 def looks_like(kind: str, head: bytes) -> bool:
-    """Whether the first bytes are a PNG, JPEG or WebP picture, or a PDF, as ``kind`` says."""
+    """Whether the first bytes are a PNG, JPEG, GIF or WebP picture, or a PDF, as ``kind`` says."""
     if kind == "document":
         return head.startswith(b"%PDF-")
     return (head.startswith(b"\x89PNG\r\n\x1a\n") or head.startswith(b"\xff\xd8\xff")
-            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
+            or head[:6] in (b"GIF87a", b"GIF89a") or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
 
 
 def _hash(token: str) -> str:

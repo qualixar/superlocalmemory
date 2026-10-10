@@ -449,3 +449,19 @@ def test_an_expired_link_still_expires_after_a_warming_save(links, clock):
     links.finish_retry(plan.row.upload_id, WARMING)
     clock.now += ul.STARTED_TTL_S + 5
     refused("expired", links.begin_finish, link.token, CONN, NONCE)
+
+
+# -- the same pictures the saver takes (audit: GIF) -------------------------------
+
+@pytest.mark.parametrize("head", [b"GIF87a" + b"0" * 10, b"GIF89a" + b"0" * 10])
+def test_gif_is_a_picture_the_link_accepts(links, head):
+    assert ul.looks_like("image", head)
+    assert not ul.looks_like("document", head)
+    link = mint(links)
+    gif = head + b"0" * 50
+    assert links.accept_chunk(link.token, CONN, 0, len(gif), gif, NONCE) == len(gif)
+
+
+def test_a_gif_header_that_is_not_one_is_still_refused():
+    assert not ul.looks_like("image", b"GIF99a" + b"0" * 10)
+    assert not ul.looks_like("image", b"GIF")

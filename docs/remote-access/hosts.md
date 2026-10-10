@@ -176,7 +176,7 @@ when your computer has it. The file goes from your browser to your computer
 over the connection that is already open, and nothing is kept in the cloud on
 the way. Your computer must be awake and running SuperLocalMemory, and the app
 needs both boxes above and the `media` key permission. Pictures can be up to
-25 MB (PNG, JPEG or WebP) and PDFs up to 100 MB; each connection can make 3
+25 MB (PNG, JPEG, GIF or WebP) and PDFs up to 100 MB; each connection can make 3
 open links at a time and 20 uploads a day.
 
 Ticking a box is not enough. You must also allow it for the connection on your

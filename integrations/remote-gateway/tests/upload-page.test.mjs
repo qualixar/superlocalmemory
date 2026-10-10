@@ -48,7 +48,7 @@ test('the page loads nothing from anywhere and has no inline handlers or links',
 test('the picker and the size hint match the kind',async()=>{
   assert.ok(api);
   const image=await page('image',26214400);
-  assert.match(image.html,/accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.match(image.html,/accept="image\/png,image\/jpeg,image\/gif,image\/webp"/);
   assert.match(image.html,/up to 25 MB/);
   const doc=await page('document',104857600);
   assert.match(doc.html,/accept="application\/pdf"/);
@@ -154,4 +154,10 @@ test('the picker says plainly: works once, expires in 10 minutes, do not share i
   assert.ok(api);
   const {html}=await page('image');
   assert.match(html,/works once/i);assert.match(html,/10 minutes/i);assert.match(html,/not share it with anyone/i);
+});
+
+test('the picker offers GIF as well, as the laptop accepts it',async()=>{
+  assert.ok(api);
+  const {html}=await page('image');
+  assert.match(html,/image\/gif/);assert.match(html,/PNG, JPEG, GIF or WebP/);
 });
