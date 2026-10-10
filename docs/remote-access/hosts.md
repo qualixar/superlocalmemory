@@ -131,9 +131,11 @@ only when the app asks for them.
 
 - **Allow talking to your other bots** lets the app list your other bots, send
   them messages and read the replies.
-- **Allow images and documents** is prepared for a later release. No image or
-  document tools work over Web access yet. When they do, image links from a web
-  app will be limited to known file hosts.
+- **Allow images and documents** lets the app save images and PDFs and read
+  image thumbnails. It cannot name a file on your computer, can send at most
+  512 KB of pasted data, and image links work only from hosts on your allowed
+  list (`SLM_MEDIA_URL_HOSTS`, empty by default, which refuses every link).
+  Saving also needs a write key.
 
 Ticking a box is not enough. You must also allow it for the connection on your
 computer. Each connection has a remote key named `web-<connection id>`. Find it

@@ -39,6 +39,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 25 * 1024 * 1024
+#: The most pasted (base64) data a remote app may send, measured after decoding.
+MAX_REMOTE_BASE64_BYTES = 512 * 1024
 TIMEOUT_S = 10.0
 MAX_REDIRECTS = 3
 HOSTS_ENV = "SLM_MEDIA_URL_HOSTS"
@@ -261,3 +263,13 @@ def fetch_media(
         logger.info("image link refused for host %s", url.raw_host.decode("ascii", "replace"))
         raise refused
     raise _refuse("That link redirected too many times.")
+
+
+def base64_decoded_size(data: str) -> int:
+    """How many bytes ``data`` (base64 text) decodes to, without decoding it."""
+    text = data.rstrip("=")
+    return len(text) * 3 // 4
+
+
+def too_large_for_remote(data: str | None) -> bool:
+    return bool(data) and base64_decoded_size(data) > MAX_REMOTE_BASE64_BYTES

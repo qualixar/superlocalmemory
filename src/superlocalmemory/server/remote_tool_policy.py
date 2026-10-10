@@ -118,6 +118,12 @@ def _grant_allows(scope: str, name: str, grant: Any, extras: frozenset[str]) -> 
     return True
 
 
+def media_granted(grant: Any, extras: frozenset[str]) -> bool:
+    """The grant carries the media scope AND the key allows media: the same
+    two conditions :func:`tool_allowed` asks of every media tool."""
+    return grant is not None and "slm:media" in grant.scopes and "media" in extras
+
+
 def tool_allowed(scope: str, name: object, grant: Any = None,
                  extras: frozenset[str] = frozenset()) -> bool:
     """Exact-name membership; anything unexpected is a no.
@@ -546,11 +552,16 @@ class RemoteToolScopeASGI:
                     message, denial_message(tool, principal.name, principal.scope)))
                 return
         downstream_send = _downstream(send, message, tool, principal.scope, grant, extras)
-        from superlocalmemory.mcp.remote_caller import remote_caller, remote_peer
+        from superlocalmemory.mcp.remote_caller import (
+            remote_caller,
+            remote_media_allowed,
+            remote_peer,
+        )
 
         # Per-agent stores (cache, reversible compression) are keyed by this
         # key as well as by the caller-chosen /mcp/<agent> segment.
-        with remote_caller(principal.key_id), remote_peer(_peer_for(grant, tool)):
+        with (remote_caller(principal.key_id), remote_peer(_peer_for(grant, tool)),
+              remote_media_allowed(media_granted(grant, extras))):
             if tool is None:
                 await self.app(scope, _replay(body, receive), downstream_send)
             else:
@@ -618,6 +629,7 @@ __all__ = [
     "MAX_BODY_BYTES",
     "MEDIA_TOOLS",
     "MESH_TOOLS",
+    "media_granted",
     "METHOD_NOT_ALLOWED",
     "PolicyViolation",
     "READ_ONLY_TAG",

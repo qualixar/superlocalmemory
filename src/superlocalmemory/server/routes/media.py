@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
+from superlocalmemory.core.media_fetch import too_large_for_remote
 from superlocalmemory.documents import (
     document_index, document_lint, job_status, remove_document, submit_document,
 )
@@ -44,6 +45,7 @@ class MediaRememberRequest(BaseModel):
     profile_id: str = ""
     idempotency_key: str = ""
     session_date: str = ""
+    origin: str = Field(default="", max_length=16)
 
     @model_validator(mode="after")
     def _one_source(self) -> "MediaRememberRequest":
@@ -56,6 +58,18 @@ def _require_local(request: Request) -> None:
     host = request.client.host if request.client else ""
     if not is_loopback(host):
         raise HTTPException(403, detail="Images are available to local callers only.")
+
+
+def _stricter_for_remote(req: "MediaRememberRequest") -> bool:
+    """True when the body says it came from a remote app. Only the in-process tool
+    sends that, and a caller that sets it on its own just gets the remote rules."""
+    if req.origin != "remote":
+        return False
+    if req.path:
+        raise HTTPException(422, detail="Remote apps cannot name a file on this computer.")
+    if too_large_for_remote(req.base64):
+        raise HTTPException(422, detail="Pasted data from a remote app is limited to 512 KB.")
+    return True
 
 
 def _profile(engine, requested: str) -> str:
@@ -75,6 +89,7 @@ async def remember(req: MediaRememberRequest, request: Request):
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
     _require_local(request)
+    remote = _stricter_for_remote(req)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id)
@@ -88,7 +103,7 @@ async def remember(req: MediaRememberRequest, request: Request):
     if runtime is None:
         raise HTTPException(503, detail="The memory writer is not ready; retry shortly.")
     inp = MediaInput(path=Path(req.path) if req.path else None, base64=req.base64,
-                     download_url=req.download_url or None, remote=False)
+                     download_url=req.download_url or None, remote=remote)
     receipt = await asyncio.to_thread(
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key)
@@ -171,6 +186,7 @@ async def submit(req: DocumentSubmitRequest, request: Request):
     _require_local(request)
     if req.download_url:
         raise HTTPException(422, detail="Links are accepted for images only.")
+    _stricter_for_remote(req)
     actor_id = authenticated_request_actor(request, actor_kind="http-media")
     engine = require_engine(request)
     profile = _profile(engine, req.profile_id)

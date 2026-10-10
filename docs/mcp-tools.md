@@ -475,8 +475,13 @@ MCP resources are read-only data a client can read passively.
 
 ## Image and document tools
 
-Only registered in the `whole` tool set. They work for AI apps on this computer
-and are refused for any app on another computer.
+Listed by default only while images are turned on, and always in the `whole`
+tool set. They work for AI apps on this computer. An app on another computer can
+use them only when its approval ticked **Allow images and documents** and its
+remote key allows `media` (`slm remote keys allow <key> media`); saving also
+needs a write key. A remote app cannot name a file (`path`), can paste at most
+512 KB, and its image links must come from a host on the allowed list
+(`SLM_MEDIA_URL_HOSTS`; an empty list refuses every link).
 
 | Tool | Parameters | Notes |
 |------|-----------|-------|

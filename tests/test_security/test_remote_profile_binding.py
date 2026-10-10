@@ -50,10 +50,10 @@ def registry() -> dict[str, list[str]]:
 
 
 def test_every_argument_of_every_remote_tool_is_classified(registry) -> None:
-    callable_remotely = policy.WRITE_TOOLS | policy.MESH_TOOLS
+    callable_remotely = policy.WRITE_TOOLS | policy.MESH_TOOLS | policy.MEDIA_TOOLS
     remote = {name: args for name, args in registry.items() if name in callable_remotely}
     assert remote, "the registry returned no remote-callable tools"
-    assert policy.MESH_TOOLS <= set(remote)
+    assert policy.MESH_TOOLS | policy.MEDIA_TOOLS <= set(remote)
     seen = {arg for args in remote.values() for arg in args}
     unclassified = {f"{t}.{a}" for t, args in remote.items() for a in args
                     if a not in binding.CLASSIFIED_ARGUMENTS}
@@ -78,7 +78,8 @@ def test_every_remote_tool_that_takes_scope_is_pinned_to_personal(registry) -> N
 
 def test_every_remote_tool_that_names_a_profile_is_told_the_keys_profile(registry) -> None:
     named = {t for t, args in registry.items()
-             if t in policy.WRITE_TOOLS and set(args) & binding.PROFILE_ARGUMENTS}
+             if t in policy.WRITE_TOOLS | policy.MEDIA_TOOLS
+             and set(args) & binding.PROFILE_ARGUMENTS}
     assert named == binding.PROFILE_ARGUMENT_TOOLS
     assert binding.ROUTED_TOOLS <= binding.PROFILE_ARGUMENT_TOOLS
 
@@ -94,7 +95,7 @@ def test_every_remote_tool_is_routed_profile_free_or_active_only_with_a_reason(
         registry) -> None:
     """4.1.21: a key bound to one profile can use every remote tool while the
     computer is on another profile. A tool that cannot be routed must say why."""
-    remote = set(policy.WRITE_TOOLS)
+    remote = set(policy.WRITE_TOOLS | policy.MEDIA_TOOLS)
     routed, free = binding.ROUTED_TOOLS, binding.PROFILE_FREE_TOOLS
     active_only = set(binding.ACTIVE_ONLY_TOOLS)
     assert routed | free | active_only == remote, sorted(remote - routed - free - active_only)
@@ -325,7 +326,9 @@ def test_an_active_only_tool_is_refused_while_another_profile_is_active(active_o
         assert runtime._active_operations == 0
 
 
-_ROUTED = sorted(binding.ROUTED_TOOLS)
+# The media tools need a signed grant to be reached at all; their profile binding
+# is exercised with one in test_remote_media_tools.py.
+_ROUTED = sorted(binding.ROUTED_TOOLS - policy.MEDIA_TOOLS)
 
 
 def _key_for(tool: str) -> RemotePrincipal:

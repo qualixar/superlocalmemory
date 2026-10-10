@@ -100,6 +100,8 @@ ROUTED_TOOLS: frozenset[str] = frozenset({
     "set_memory_kind", "memory_kinds_status", "review_memory_kinds",
     "confirm_memory_kinds", "run_view", "manage_view", "skill_health", "skill_lineage",
     "slm_loop_history", "slm_loop_show", "get_brain_evidence_status",
+    # 4.1.25: images and documents, for a key that opted in (remote_tool_policy.MEDIA_TOOLS).
+    "remember_media", "get_media", "remember_document", "media_status",
     "record_agent_experience", "record_cognitive_turn", "finalize_cognitive_turn",
 })
 
@@ -122,7 +124,8 @@ ACTIVE_ONLY_TOOLS: dict[str, str] = {}
 
 #: Every other argument of a remote-callable tool. None selects a profile.
 NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
-    "about", "action", "agent_id", "as_of", "assertion_id", "case_id", "category",
+    "about", "action", "agent_id", "as_of", "assertion_id", "base64", "download_url",
+    "file_name", "job_id", "media_id", "path", "variant", "case_id", "category",
     "ccr_id", "content", "context", "correction", "duration_ms", "event_type",
     "event_valid_until", "expected_version", "fact_id", "fact_ids", "fast", "feedback",
     "filters",

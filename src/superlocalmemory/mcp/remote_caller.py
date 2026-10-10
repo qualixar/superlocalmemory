@@ -145,8 +145,29 @@ def remote_grant(grant: "RemoteGrant | None") -> Iterator[None]:
         _current_remote_grant.reset(token)
 
 
+_current_remote_media_allowed: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "slm_remote_media_allowed", default=False,
+)
+
+
+def current_remote_media_allowed() -> bool:
+    """True only inside a remote call whose grant has the media scope and whose
+    key allows media. False for every other caller, local ones included."""
+    return _current_remote_media_allowed.get()
+
+
+@contextmanager
+def remote_media_allowed(flag: bool) -> Iterator[None]:
+    """Run everything inside with the remote-media decision ``flag``."""
+    token = _current_remote_media_allowed.set(bool(flag))
+    try:
+        yield
+    finally:
+        _current_remote_media_allowed.reset(token)
+
+
 __all__ = [
     "RemoteMeshTarget", "RemotePeer", "current_remote_grant", "current_remote_key_id",
-    "current_remote_mesh", "current_remote_peer", "remote_caller", "remote_grant",
-    "remote_mesh", "remote_peer",
+    "current_remote_media_allowed", "current_remote_mesh", "current_remote_peer",
+    "remote_caller", "remote_grant", "remote_media_allowed", "remote_mesh", "remote_peer",
 ]

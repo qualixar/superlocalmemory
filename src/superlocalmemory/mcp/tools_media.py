@@ -6,9 +6,11 @@
 ``remember_document`` and ``media_status``.
 
 All go through the local daemon's routes, so the profile, permission and
-governance checks live in one place. All are host-only: a caller on another
+governance checks live in one place. Apps on this computer always work; a caller on another
 computer is refused here, before any daemon call, as well as by the remote tool
-policy. A thumbnail goes back only as an MCP ``image`` content block, never
+policy, unless the remote app has the signed media grant and its key allows media; such an app
+cannot name a file on this computer, sends at most 512 KB of pasted data, and its links go through
+the remote fetch rules (the daemon is told, so it can only become stricter). A thumbnail goes back only as an MCP ``image`` content block, never
 inside ``structuredContent``. An error never repeats a link's query string.
 """
 
@@ -26,7 +28,8 @@ from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
-from superlocalmemory.mcp.remote_caller import current_remote_key_id
+from superlocalmemory.core.media_fetch import MAX_REMOTE_BASE64_BYTES, too_large_for_remote
+from superlocalmemory.mcp.remote_caller import current_remote_key_id, current_remote_media_allowed
 
 logger = logging.getLogger("slm.mcp.tools_media")
 
@@ -37,6 +40,26 @@ _ID = re.compile(r"[0-9a-f]{32}")
 _LINK = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
 _SOURCES = ("path", "download_url", "base64")
 _DOC_SOURCES = ("path", "base64")
+
+
+def _remote_refused() -> bool:
+    """A remote caller that is not allowed images and documents."""
+    return current_remote_key_id() is not None and not current_remote_media_allowed()
+
+
+def _is_remote() -> bool:
+    return current_remote_key_id() is not None
+
+
+def _remote_source_refusal(args: dict[str, Any]) -> dict[str, Any] | None:
+    """The refusal for a source an allowed remote app may not use, else ``None``."""
+    if args.get("path"):
+        return _fail("path_not_for_remote",
+                     "Remote apps cannot name a file on this computer. Send the data or a link.")
+    if too_large_for_remote(args.get("base64")):
+        return _fail("too_large_for_remote",
+                     f"Pasted data from a remote app is limited to {MAX_REMOTE_BASE64_BYTES // 1024} KB.")
+    return None
 
 
 def _clean(text: object) -> str:
@@ -178,7 +201,7 @@ async def with_recall_images(payload: dict[str, Any], profile_id: str = "") -> A
     framework would have made from ``payload``, followed by up to three image blocks. The
     payload (and so ``structuredContent``) never carries a thumbnail. A remote caller gets
     the payload without any ``media`` block: picture ids and links are not for remote apps."""
-    if current_remote_key_id() is not None:
+    if _remote_refused():
         return _without_media(payload)
     try:
         ids = _recall_media_ids(payload)
@@ -202,11 +225,15 @@ async def with_recall_images(payload: dict[str, Any], profile_id: str = "") -> A
 
 
 async def _remember(args: dict[str, Any]) -> dict[str, Any]:
-    if current_remote_key_id() is not None:
+    if _remote_refused():
         return _fail("not_for_remote", NOT_FOR_REMOTE)
     if sum(bool(args[k]) for k in _SOURCES) != 1:
         return _fail("invalid_request", "Give exactly one of path, download_url or base64.")
     body = {k: v for k, v in args.items() if v}
+    if _is_remote():
+        if (refusal := _remote_source_refusal(args)) is not None:
+            return refusal
+        body["origin"] = "remote"
     try:
         return await asyncio.to_thread(_remember_via_daemon, body)
     except Exception as exc:  # noqa: BLE001 - a tool answer, never a traceback
@@ -215,11 +242,15 @@ async def _remember(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _remember_document(args: dict[str, Any]) -> dict[str, Any]:
-    if current_remote_key_id() is not None:
+    if _remote_refused():
         return _fail("not_for_remote", NOT_FOR_REMOTE_DOCS)
     if sum(bool(args[k]) for k in _DOC_SOURCES) != 1:
         return _fail("invalid_request", "Give exactly one of path or base64.")
     body = {k: v for k, v in args.items() if v}
+    if _is_remote():
+        if (refusal := _remote_source_refusal(args)) is not None:
+            return refusal
+        body["origin"] = "remote"
     try:
         return await asyncio.to_thread(_document_via_daemon, body)
     except Exception as exc:  # noqa: BLE001 - a tool answer, never a traceback
@@ -228,7 +259,7 @@ async def _remember_document(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _status(job_id: str, profile_id: str) -> dict[str, Any]:
-    if current_remote_key_id() is not None:
+    if _remote_refused():
         return _fail("not_for_remote", NOT_FOR_REMOTE_DOCS)
     if not _ID.fullmatch(job_id or ""):
         return _fail("invalid_request", "That is not a valid job id.")
@@ -240,7 +271,7 @@ async def _status(job_id: str, profile_id: str) -> dict[str, Any]:
 
 
 async def _get(media_id: str, variant: str, profile_id: str) -> CallToolResult:
-    if current_remote_key_id() is not None:
+    if _remote_refused():
         return _error_result(NOT_FOR_REMOTE)
     if variant != "thumb":
         return _error_result("Only the thumb variant is available.")
@@ -266,7 +297,7 @@ def register_media_tools(server: Any) -> None:
     ) -> dict:
         """Save an image as a memory, from a file on this computer, an https link or base64.
 
-        Give exactly one of path, download_url or base64. Only for apps on this computer.
+        Give exactly one of path, download_url or base64. Apps on other computers need the owner's permission.
         """
         return await _remember({
             "path": path, "download_url": download_url, "base64": base64, "content": content,
@@ -275,7 +306,7 @@ def register_media_tools(server: Any) -> None:
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
     @admits(OperationKind.RECALL)
     async def get_media(media_id: str, variant: str = "thumb", profile_id: str = "") -> CallToolResult:
-        """Show the thumbnail of a saved image as an image. Only for apps on this computer."""
+        """Show the thumbnail of a saved image as an image. Apps on other computers need the owner's permission."""
         return await _get(media_id, variant, profile_id)
 
 
@@ -292,7 +323,7 @@ def register_document_tools(server: Any) -> None:
         """Save a PDF as a memory, from a file on this computer or base64. Work continues in the
         background: the answer has a job_id to follow with media_status.
 
-        Give exactly one of path or base64. Only for apps on this computer.
+        Give exactly one of path or base64. Apps on other computers need the owner's permission.
         """
         return await _remember_document({
             "path": path, "base64": base64, "file_name": file_name, "content": content,
@@ -301,7 +332,7 @@ def register_document_tools(server: Any) -> None:
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
     @admits(OperationKind.RECALL)
     async def media_status(job_id: str, profile_id: str = "") -> dict:
-        """How far a saved document's background work has got. Only for apps on this computer."""
+        """How far a saved document's background work has got. Apps on other computers need the owner's permission."""
         return await _status(job_id, profile_id)
 
 
