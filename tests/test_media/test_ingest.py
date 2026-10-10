@@ -68,11 +68,13 @@ class FakeClient:
 
 class Runtime:
     def __init__(self, fail=False):
-        self.requests, self.fail = [], fail
+        self.requests, self.fail, self.on_remember = [], fail, None
 
     def remember(self, admission, actor, *, deadline_ms, accept_after_ms):
         if self.fail:
             raise RuntimeError("writer down")
+        if self.on_remember:
+            self.on_remember(admission)
         self.requests.append(admission)
         n = len(self.requests)
         return SimpleNamespace(payload={"status": "queryable", "operation_id": f"op{n}",
@@ -425,3 +427,22 @@ def test_off_still_says_turned_off(root):
 def test_bad_input_is_reported_as_bad_input_while_off(root, tmp_path):
     assert "could not be found" in _bare(MediaInput(path=tmp_path / "nope.png")).reason
     assert "not supported" in _bare(MediaInput(base64=base64.b64encode(b"%PDF-1.4" + b"x" * 30).decode())).reason
+
+
+def _admitting(request):
+    from superlocalmemory.core.engine_ingestion import content_passes_admission
+
+    if not content_passes_admission(request.content):
+        raise AssertionError("ingestion produced no queryable facts")
+
+
+def test_a_one_word_file_name_without_words_or_text_still_saves(env):
+    env.runtime.on_remember = _admitting
+    r = save(env, inp=MediaInput(base64=base64.b64encode(png()).decode(), file_name="photo.png"))
+    assert r.status == "stored"
+
+
+def test_a_one_word_note_without_image_text_still_saves(env):
+    env.runtime.on_remember = _admitting
+    r = save(env, content="cat")
+    assert r.status == "stored" and env.runtime.requests[0].content.startswith("cat")

@@ -302,8 +302,9 @@ def _segments(content: str, ocr_text: str) -> tuple[tuple[str, ContentOrigin], .
     if ocr_text.strip():
         lead = "\n\n" if parts else ""
         parts.append((f"{lead}{MARKER}{ocr_text}", ContentOrigin.DERIVED_TEXT))
-    if not parts:
-        parts.append((NO_TEXT, ContentOrigin.DERIVED_TEXT))
+    if not ocr_text.strip():
+        # The label also keeps a one-word note long enough to be saved as a fact.
+        parts.append((("\n\n" if parts else "") + NO_TEXT, ContentOrigin.DERIVED_TEXT))
     return tuple(parts)
 
 
