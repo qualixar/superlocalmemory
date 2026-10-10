@@ -14,10 +14,10 @@ source_modules =
     superlocalmemory.mesh
     superlocalmemory.daemon
     superlocalmemory.cache
+    superlocalmemory.memory_core
     superlocalmemory.media
     superlocalmemory.documents
     superlocalmemory.runtimes
-    superlocalmemory.memory_core
     superlocalmemory.tagging
 forbidden_modules =
     torch

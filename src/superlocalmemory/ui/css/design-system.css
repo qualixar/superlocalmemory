@@ -796,3 +796,18 @@ button { font-family: inherit; }
 
 .od-ai-journey [aria-current="step"] { font-weight: 700; color: var(--fg-1); }
 #od-ai-connections select[hidden] { display: none !important; }
+
+/* 4.1.25: images and documents card and pane, bot messages pane */
+.od-media-progress { height: 8px; border-radius: 4px; background: var(--card-2); border: 1px solid var(--border); overflow: hidden; margin: 8px 0; }
+.od-media-progress-fill { height: 100%; background: var(--violet-fill, var(--violet)); transition: width .3s; }
+.od-media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 12px 0; }
+.od-media-grid figure { margin: 0; }
+.od-media-grid img { width: 100%; height: 96px; object-fit: cover; border-radius: 6px; background: var(--card-2); }
+.od-media-grid figcaption { font-size: 11px; color: var(--fg-2); overflow-wrap: anywhere; }
+.od-media-section { margin-top: 16px; }
+.od-media-list { list-style: none; padding: 0; margin: 8px 0; }
+.od-media-list li { padding: 8px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.od-msg { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.od-msg.untrusted { border-style: dashed; background: var(--warn-soft); }
+.od-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.od-peer-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; }

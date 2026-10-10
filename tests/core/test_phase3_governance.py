@@ -697,6 +697,17 @@ def test_signing_key_fail_closed_on_unreadable(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(_mk, "_signing_key_path", lambda: bad_path / "key")
     # Make the parent unwritable so os.open fails
     os.chmod(str(bad_path), 0o444)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        # root ignores mode bits, so the chmod alone cannot make os.open
+        # fail; deny it for this directory the way the kernel would.
+        real_open = os.open
+
+        def denied(path, *args, **kwargs):
+            if str(path).startswith(str(bad_path)):
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(_mk.os, "open", denied)
 
     try:
         import pytest

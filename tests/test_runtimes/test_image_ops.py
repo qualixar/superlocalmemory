@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -206,7 +207,9 @@ def test_written_files_are_private_with_random_names(real, samples, out_dir):
     assert len(set(paths)) == 4
     for p in paths:
         assert stat.S_IMODE(os.stat(p).st_mode) == 0o600 and Path(p).parent == out_dir
-        assert "a.png" not in Path(p).name
+        # The name is random hex, never the original: a substring check failed
+        # whenever the hex happened to end in "a" ("...a.png").
+        assert re.fullmatch(r"[0-9a-f]{32}", Path(p).stem)
 
 
 def test_fake_ocr_reads_the_sidecar(real, samples, tmp_path):
