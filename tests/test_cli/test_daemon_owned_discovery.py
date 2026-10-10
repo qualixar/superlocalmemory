@@ -151,9 +151,10 @@ def test_reused_pid_with_wrong_process_identity_is_rejected() -> None:
     )
     write_descriptor(descriptor, data_root=root)
 
-    with patch_urlopen() as request:
+    # The stale record is rejected; the only probe allowed is the same-account
+    # health fallback, and an unanswered port cannot rescue it.
+    with patch_urlopen(side_effect=OSError("closed")):
         assert not daemon.is_daemon_running()
-    request.assert_not_called()
 
 
 def test_legacy_descriptor_with_wrong_creation_time_needs_identity_proof() -> None:
@@ -193,7 +194,7 @@ def test_get_port_uses_only_valid_owned_descriptor() -> None:
     assert daemon._get_port() == daemon._DEFAULT_PORT
 
 
-def test_launcher_passes_and_publishes_one_process_identity() -> None:
+def test_launcher_passes_one_process_identity_and_leaves_the_record_to_the_child() -> None:
     from superlocalmemory.cli import daemon
 
     fake_process = MagicMock(pid=54321)
@@ -209,12 +210,10 @@ def test_launcher_passes_and_publishes_one_process_identity() -> None:
     [launch] = [c for c in popen.call_args_list
                 if "superlocalmemory.server.unified_daemon" in c.args[0]]
     child_env = launch.kwargs["env"]
-    descriptor = read_descriptor()
-    assert descriptor is not None
-    assert descriptor.pid == 54321
-    assert descriptor.state == "starting"
-    assert child_env["SLM_DAEMON_INSTANCE_ID"] == descriptor.instance_id
-    assert child_env["SLM_DAEMON_CAPABILITY"] == descriptor.capability
+    # Only the daemon that owns the data folder writes the record.
+    assert read_descriptor() is None
+    assert child_env["SLM_DAEMON_INSTANCE_ID"]
+    assert child_env["SLM_DAEMON_CAPABILITY"]
 
 
 def test_wait_requires_matching_health_not_only_a_live_starting_pid() -> None:

@@ -24,6 +24,7 @@ import secrets as _secrets
 import stat
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -240,6 +241,17 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"-----BEGIN [A-Z ]+-----"), "PRIVATE_KEY"),
 )
 
+#: Shapes ``detect_secrets`` adds to the replaced ones above; ``redact_secrets`` does not use them.
+#: The two ``sk-`` shapes are anchored copies, so a word like ``risk-assessment-for-review`` is no key;
+#: ``detect_secrets`` uses these instead of the unanchored ones in ``_SECRET_PATTERNS``.
+_DETECT_ONLY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<![A-Za-z0-9-])sk-ant-[A-Za-z0-9_\-]{20,}"), "ANTHROPIC"),
+    (re.compile(r"(?<![A-Za-z0-9-])sk-[A-Za-z0-9_\-]{20,}"), "OPENAI"),
+    (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"), "AWS"),
+    (re.compile(r"(?i)\baws_secret_access_key\s*[=:]\s*\S{40}"), "AWS_SECRET"),
+    (credential_shapes._URL_PASSWORD, "URL_PASSWORD"),
+)
+
 # LLD-00 §5 high-aggression patterns (P0.3). Stricter than the defaults:
 # they match concrete, well-known secret shapes only, and are tried FIRST
 # so their specific labels win over the broader 'OPENAI'/'ANTHROPIC' fallbacks.
@@ -276,6 +288,36 @@ _HIGH_AGGRESSION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _VALID_AGGRESSION = frozenset({"normal", "high"})
+
+
+@dataclass(frozen=True)
+class SecretHit:
+    """One credential-shaped span: ``text[start:end]`` is the match."""
+
+    kind: str
+    start: int
+    end: int
+
+
+def detect_secrets(text: str) -> list[SecretHit]:
+    """The credential shapes found in ``text``, in order, without overlaps.
+
+    Detection only. It uses the named key shapes (the ones ``redact_secrets`` replaces,
+    plus the vendor token shapes of ``credential_shapes``) and never an entropy test, so a sha256 hex string or any other long
+    random-looking word is not a hit.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    found: list[SecretHit] = []
+    plain = tuple(item for item in _SECRET_PATTERNS if item[1] not in ("ANTHROPIC", "OPENAI"))
+    for pattern, kind in (*plain, *credential_shapes.TOKEN_SHAPES, *_DETECT_ONLY_PATTERNS):
+        found.extend(SecretHit(kind, m.start(), m.end()) for m in pattern.finditer(text))
+    found.sort(key=lambda h: (h.start, -(h.end - h.start)))
+    hits: list[SecretHit] = []
+    for hit in found:
+        if not hits or hit.start >= hits[-1].end:
+            hits.append(hit)
+    return hits
 
 
 def _shannon_entropy(s: str) -> float:
@@ -697,6 +739,8 @@ __all__ = (
     "safe_resolve_identifier",
     "verify_sha256",
     "redact_secrets",
+    "SecretHit",
+    "detect_secrets",
     "ensure_install_token",
     "verify_install_token",
     "run_subprocess_safe",

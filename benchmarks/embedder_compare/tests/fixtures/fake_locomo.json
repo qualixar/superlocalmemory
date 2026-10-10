@@ -1,0 +1,340 @@
+[
+ {
+  "sample_id": "fake-1",
+  "conversation": {
+   "speaker_a": "Mira",
+   "speaker_b": "Tobias",
+   "session_1_date_time": "1:10 pm on 8 May, 2023",
+   "session_1": [
+    {
+     "speaker": "Mira",
+     "dia_id": "D1:1",
+     "text": "Tobias, I finally planted basil and thyme on my balcony."
+    },
+    {
+     "speaker": "Tobias",
+     "dia_id": "D1:2",
+     "text": "Nice! I repaired my old tandem bicycle yesterday."
+    },
+    {
+     "speaker": "Mira",
+     "dia_id": "D1:3",
+     "text": "Does the tandem have a bell? Mine would need a red one."
+    },
+    {
+     "speaker": "Tobias",
+     "dia_id": "D1:4",
+     "text": "It has a green bell shaped like a frog."
+    },
+    {
+     "speaker": "Mira",
+     "dia_id": "D1:5",
+     "text": "I will water the thyme every morning at seven."
+    },
+    {
+     "speaker": "Tobias",
+     "dia_id": "D1:6",
+     "text": "I will test the bicycle on Sunday near the river."
+    }
+   ],
+   "session_2_date_time": "4:30 pm on 15 June, 2023",
+   "session_2": [
+    {
+     "speaker": "Tobias",
+     "dia_id": "D2:1",
+     "text": "The river ride was great, we passed a lighthouse."
+    },
+    {
+     "speaker": "Mira",
+     "dia_id": "D2:2",
+     "text": "My basil grew tall, but the thyme turned yellow."
+    },
+    {
+     "speaker": "Tobias",
+     "dia_id": "D2:3",
+     "text": "Maybe it needs more sun. I bought a lamp for my workshop."
+    },
+    {
+     "speaker": "Mira",
+     "dia_id": "D2:4",
+     "text": "I am planning a trip to Lisbon in September."
+    },
+    {
+     "speaker": "Tobias",
+     "dia_id": "D2:5",
+     "text": "Bring a camera, the tiles there are famous."
+    },
+    {
+     "speaker": "Mira",
+     "dia_id": "D2:6",
+     "text": "I will pack my blue camera bag."
+    }
+   ]
+  },
+  "qa": [
+   {
+    "question": "When did Mira plant basil and thyme?",
+    "evidence": [
+     "D1:1"
+    ],
+    "category": 2,
+    "answer": "8 May 2023"
+   },
+   {
+    "question": "What did Tobias repair?",
+    "evidence": [
+     "D1:2"
+    ],
+    "category": 4,
+    "answer": "tandem bicycle"
+   },
+   {
+    "question": "What shape is the bell on the tandem?",
+    "evidence": [
+     "D1:4"
+    ],
+    "category": 4,
+    "answer": "frog"
+   },
+   {
+    "question": "What time will Mira water the thyme?",
+    "evidence": [
+     "D1:5"
+    ],
+    "category": 4,
+    "answer": "seven"
+   },
+   {
+    "question": "Which herbs did Mira plant, and what happened to them later?",
+    "evidence": [
+     "D1:1",
+     "D2:2"
+    ],
+    "category": 1,
+    "answer": "basil tall, thyme yellow"
+   },
+   {
+    "question": "Where did Tobias ride on Sunday?",
+    "evidence": [
+     "D1:6",
+     "D2:1"
+    ],
+    "category": 1,
+    "answer": "river"
+   },
+   {
+    "question": "Where does Mira plan to travel in September?",
+    "evidence": [
+     "D2:4"
+    ],
+    "category": 4,
+    "answer": "Lisbon"
+   },
+   {
+    "question": "When did Tobias take the river ride?",
+    "evidence": [
+     "D2:1"
+    ],
+    "category": 2,
+    "answer": "before 15 June 2023"
+   },
+   {
+    "question": "What colour is Mira's camera bag?",
+    "evidence": [
+     "D2:6"
+    ],
+    "category": 4,
+    "answer": "blue"
+   },
+   {
+    "question": "Who bought a lamp for the workshop?",
+    "evidence": [
+     "D2:3"
+    ],
+    "category": 4,
+    "answer": "Tobias"
+   },
+   {
+    "question": "What colour is the hat that Mira wears?",
+    "evidence": [
+     "D1:3"
+    ],
+    "category": 5,
+    "adversarial_answer": "none"
+   },
+   {
+    "question": "Which city does Tobias want to visit in winter?",
+    "evidence": [
+     "D2:5"
+    ],
+    "category": 5,
+    "adversarial_answer": "none"
+   }
+  ]
+ },
+ {
+  "sample_id": "fake-2",
+  "conversation": {
+   "speaker_a": "Odile",
+   "speaker_b": "Ravi",
+   "session_1_date_time": "10:05 am on 3 March, 2024",
+   "session_1": [
+    {
+     "speaker": "Odile",
+     "dia_id": "D1:1",
+     "text": "Ravi, my first pottery class is on Tuesday."
+    },
+    {
+     "speaker": "Ravi",
+     "dia_id": "D1:2",
+     "text": "I threw a lopsided bowl last week, it was glazed teal."
+    },
+    {
+     "speaker": "Odile",
+     "dia_id": "D1:3",
+     "text": "I want to make mugs with a wide handle."
+    },
+    {
+     "speaker": "Ravi",
+     "dia_id": "D1:4",
+     "text": "My kiln firing takes nine hours."
+    },
+    {
+     "speaker": "Odile",
+     "dia_id": "D1:5",
+     "text": "The studio is on Maple Street."
+    },
+    {
+     "speaker": "Ravi",
+     "dia_id": "D1:6",
+     "text": "I will bring you the teal bowl as a gift."
+    }
+   ],
+   "session_2_date_time": "6:45 pm on 20 April, 2024",
+   "session_2": [
+    {
+     "speaker": "Ravi",
+     "dia_id": "D2:1",
+     "text": "Your mug turned out beautiful, the handle is perfect."
+    },
+    {
+     "speaker": "Odile",
+     "dia_id": "D2:2",
+     "text": "Thank you! I signed up for the advanced class."
+    },
+    {
+     "speaker": "Ravi",
+     "dia_id": "D2:3",
+     "text": "I am going to a ceramics fair in Porto next month."
+    },
+    {
+     "speaker": "Odile",
+     "dia_id": "D2:4",
+     "text": "Please buy me a small ocarina made of clay."
+    },
+    {
+     "speaker": "Ravi",
+     "dia_id": "D2:5",
+     "text": "Sure, I will look for a yellow one."
+    },
+    {
+     "speaker": "Odile",
+     "dia_id": "D2:6",
+     "text": "The advanced class starts in June."
+    }
+   ]
+  },
+  "qa": [
+   {
+    "question": "When is Odile's first pottery class?",
+    "evidence": [
+     "D1:1"
+    ],
+    "category": 2,
+    "answer": "Tuesday"
+   },
+   {
+    "question": "What colour was the bowl Ravi glazed?",
+    "evidence": [
+     "D1:2"
+    ],
+    "category": 4,
+    "answer": "teal"
+   },
+   {
+    "question": "How long does the kiln firing take?",
+    "evidence": [
+     "D1:4"
+    ],
+    "category": 4,
+    "answer": "nine hours"
+   },
+   {
+    "question": "Where is the studio located?",
+    "evidence": [
+     "D1:5"
+    ],
+    "category": 4,
+    "answer": "Maple Street"
+   },
+   {
+    "question": "What did Odile sign up for and when does it start?",
+    "evidence": [
+     "D2:2",
+     "D2:6"
+    ],
+    "category": 1,
+    "answer": "advanced class in June"
+   },
+   {
+    "question": "Where is the ceramics fair that Ravi will attend?",
+    "evidence": [
+     "D2:3"
+    ],
+    "category": 4,
+    "answer": "Porto"
+   },
+   {
+    "question": "When did Ravi say the mug turned out beautiful?",
+    "evidence": [
+     "D2:1"
+    ],
+    "category": 2,
+    "answer": "20 April 2024"
+   },
+   {
+    "question": "What did Odile ask Ravi to buy?",
+    "evidence": [
+     "D2:4",
+     "D2:5"
+    ],
+    "category": 1,
+    "answer": "clay ocarina"
+   },
+   {
+    "question": "Who wants to make mugs with a wide handle?",
+    "evidence": [
+     "D1:3"
+    ],
+    "category": 4,
+    "answer": "Odile"
+   },
+   {
+    "question": "What does Ravi plan to give Odile as a present?",
+    "evidence": [
+     "D1:6"
+    ],
+    "category": 5,
+    "adversarial_answer": "none"
+   },
+   {
+    "question": "Which instrument does Odile play in the studio?",
+    "evidence": [
+     "D2:4"
+    ],
+    "category": 5,
+    "adversarial_answer": "none"
+   }
+  ]
+ }
+]

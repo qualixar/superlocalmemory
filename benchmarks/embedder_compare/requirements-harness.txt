@@ -1,0 +1,12 @@
+# Harness venv (python 3.11). Models run in separate venvs, see README.
+ranx==0.3.21
+numpy==2.4.6
+pillow==12.3.0
+rank-bm25==0.2.2
+psutil==7.2.2
+pypdfium2==5.14.0
+reportlab==5.0.1
+rapidocr==3.10.0
+onnxruntime==1.31.0
+imagehash==4.3.2
+pytest==9.1.1

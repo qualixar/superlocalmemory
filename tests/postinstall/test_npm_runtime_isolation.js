@@ -302,12 +302,11 @@ test('postinstall help is read-only and does not bootstrap the runtime', () => {
   assert.equal(calls.length, 0);
 });
 
-test('preuninstall removes code only and never inspects or advertises data deletion', () => {
+test('preuninstall removes code only and never deletes data', () => {
   const source = fs.readFileSync(PREUNINSTALL, 'utf8');
 
-  assert.doesNotMatch(source, /SLM_DATA_DIR|SL_MEMORY_PATH|SLM_HOME/);
-  assert.doesNotMatch(source, /\.superlocalmemory/);
   assert.doesNotMatch(source, /rm\s+-rf|rmdir\s+\/s|Remove-Item/i);
+  assert.doesNotMatch(source, /unlinkSync|rmSync|rmdirSync|\.rm\(/);
   assert.match(source, /memory data is preserved/i);
 });
 

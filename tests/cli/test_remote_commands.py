@@ -217,3 +217,25 @@ def test_keys_list_binds_a_pre_4_1_20_key_and_tells_the_user(tmp_path) -> None:
     again = _slm(tmp_path, "remote", "keys", "list")
     assert "bound to profile" not in again.stderr  # told once, recorded for good
     assert json.loads(store.read_text(encoding="utf-8"))["keys"][0]["profile"] == "work"
+
+
+def test_keys_allow_and_disallow_mesh_and_media(tmp_path) -> None:
+    assert _slm(tmp_path, "remote", "keys", "add", "web-x").returncode == 0
+    allowed = _slm(tmp_path, "remote", "keys", "allow", "web-x", "mesh")
+    assert allowed.returncode == 0, allowed.stderr
+    again = _slm(tmp_path, "remote", "keys", "allow", "web-x", "media", "--json")
+    assert again.returncode == 0, again.stderr
+    assert json.loads(again.stdout)["data"]["key"]["extras"] == ["media", "mesh"]
+    rows = json.loads(_slm(tmp_path, "remote", "keys", "list", "--json").stdout)["data"]["keys"]
+    assert rows[0]["extras"] == ["media", "mesh"]
+    gone = _slm(tmp_path, "remote", "keys", "disallow", "web-x", "mesh")
+    assert gone.returncode == 0, gone.stderr
+    rows = json.loads(_slm(tmp_path, "remote", "keys", "list", "--json").stdout)["data"]["keys"]
+    assert rows[0]["extras"] == ["media"]
+
+
+def test_keys_allow_rejects_unknown_extra_and_unknown_key(tmp_path) -> None:
+    assert _slm(tmp_path, "remote", "keys", "add", "web-x").returncode == 0
+    assert _slm(tmp_path, "remote", "keys", "allow", "web-x", "admin").returncode != 0
+    missing = _slm(tmp_path, "remote", "keys", "allow", "nope", "mesh")
+    assert missing.returncode != 0 and "nope" in (missing.stderr + missing.stdout)

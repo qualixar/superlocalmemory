@@ -76,6 +76,7 @@
     "scripts/postinstall.js",
     "scripts/postinstall-interactive.js",
     "scripts/postinstall/validation.js",
+    "scripts/postinstall/media-request.js",
     "scripts/preuninstall.js",
     ".claude-plugin/",
     "plugin/",
@@ -92,7 +93,10 @@
     "LICENSE",
     "NOTICE",
     "ATTRIBUTION.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!**/*.pyo"
   ],
   "preferGlobal": true,
   "funding": {

@@ -83,7 +83,7 @@ _ALL_MCP_TOOLS: frozenset[str] = frozenset({
     "apply_refactor", "code_memory_search", "code_entity_history",
     "enrich_blast_radius",
     # tools_mesh.py (8)
-    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox",
+    "mesh_summary", "mesh_peers", "mesh_send", "mesh_inbox", "mesh_wait",
     "mesh_state", "mesh_lock", "mesh_events", "mesh_status",
     # tools_learning.py (4)
     "log_tool_event", "get_assertions", "reinforce_assertion", "contradict_assertion",

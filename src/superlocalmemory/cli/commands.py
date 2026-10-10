@@ -527,6 +527,25 @@ def _cmd_kinds_dispatch(args: Namespace) -> None:
     cmd_kinds(args)
 
 
+def _cmd_sources_dispatch(args: Namespace) -> None:
+    """4.1.25: folder sources through the daemon (cli/sources_cmd.py)."""
+    from superlocalmemory.cli.sources_cmd import cmd_sources
+    rc = cmd_sources(args)
+    if rc:
+        sys.exit(rc)
+
+
+def _cmd_media_dispatch(args: Namespace) -> None:
+    """4.1.25: images and documents through the daemon (cli/media_cmd.py)."""
+    from superlocalmemory.cli.media_cmd import cmd_media
+    cmd_media(args)
+
+
+def _cmd_features_dispatch(args: Namespace) -> None:
+    from superlocalmemory.cli.features_cmd import cmd_features
+    cmd_features(args)
+
+
 def _cmd_corrections_dispatch(args: Namespace) -> None:
     """4.1.22: corrections a user action overtook (cli/corrections_cmd.py)."""
     from superlocalmemory.cli.corrections_cmd import run
@@ -687,6 +706,9 @@ def dispatch(args: Namespace) -> None:
         "backup": _cmd_backup_dispatch,
         "summary": _cmd_summary_dispatch,
         "kinds": _cmd_kinds_dispatch,
+        "sources": _cmd_sources_dispatch,
+        "media": _cmd_media_dispatch,
+        "features": _cmd_features_dispatch,
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "models": _cmd_models_dispatch,
@@ -893,6 +915,67 @@ def cmd_serve(args: Namespace) -> None:
 # -- Ingestion Adapters (V3.4.3) ------------------------------------------
 
 
+def _write_restart_record(started_at: float, steps: list[dict]) -> None:
+    """Leave ``logs/restart-last.json`` behind, atomically, on every exit path.
+
+    A restart can be started by something with no terminal (the dashboard
+    button); this file is how anyone finds out afterwards what happened.
+    """
+    import json
+    import os
+    import time
+
+    from superlocalmemory.infra.daemon_identity import canonical_data_root
+
+    try:
+        logs = canonical_data_root() / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "started_at": started_at,
+            "finished_at": time.time(),
+            "success": bool(steps) and all(s["status"] == "ok" for s in steps),
+            "steps": steps,
+        }
+        tmp = logs / f".restart-last.{os.getpid()}.tmp"
+        tmp.unlink(missing_ok=True)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload))
+            os.replace(tmp, logs / "restart-last.json")
+        finally:
+            tmp.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 - a record must never fail the restart
+        pass
+
+
+_RESTART_STEPS: list[dict] = []
+
+
+def _begin_restart_steps() -> list[dict]:
+    """The step log of the restart now running (read by the record writer)."""
+    _RESTART_STEPS.clear()
+    return _RESTART_STEPS
+
+
+def _records_restart_outcome(func):
+    """Write ``restart-last.json`` however the restart ends, even by exception."""
+    import functools
+    import time
+
+    @functools.wraps(func)
+    def wrapper(args: Namespace) -> None:
+        started_at = time.time()
+        _RESTART_STEPS.clear()
+        try:
+            func(args)
+        finally:
+            _write_restart_record(started_at, list(_RESTART_STEPS))
+
+    return wrapper
+
+
+@_records_restart_outcome
 def cmd_restart(args: Namespace) -> None:
     """Restart the one daemon owned by the current SLM data namespace.
 
@@ -909,7 +992,7 @@ def cmd_restart(args: Namespace) -> None:
     use_json = getattr(args, "json", False)
     open_dashboard = getattr(args, "dashboard", False)
     slm_dir = canonical_data_root()
-    steps: list[dict] = []
+    steps = _begin_restart_steps()
 
     def _log(step: int, name: str, status: str, detail: str = ""):
         entry = {"step": step, "name": name, "status": status, "detail": detail}
@@ -982,6 +1065,32 @@ def cmd_restart(args: Namespace) -> None:
             )
         else:
             print("\n  Restart FAILED at step 1. The owned daemon was not stopped.")
+        return
+
+    # Step 1b: the old daemon is gone from view, but the data folder is free
+    # only once the operating system has dropped its instance lock.
+    from superlocalmemory.infra import instance_lock as _instance_lock
+
+    if _instance_lock.wait_until_instance_lock_free(timeout_s=30):
+        _log("1b", "Wait for the data-folder lock", "ok")
+    else:
+        _log("1b", "Wait for the data-folder lock", "fail",
+             "the previous daemon still holds the data folder")
+        if restart_lock_fd:
+            restart_lock_fd.close()
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print(
+                "restart",
+                data={"steps": steps, "success": False},
+                next_actions=[{
+                    "command": "slm doctor",
+                    "description": "Diagnose the owned daemon",
+                }],
+            )
+        else:
+            print("\n  Restart FAILED at step 1b. The previous daemon still holds "
+                  "the data folder.")
         return
 
     # Step 2: the namespace lock was acquired before shutdown so hooks cannot
@@ -2928,6 +3037,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("summary", "Readable summaries: session, day, or project"),
         ("view", "Saved views: named recall queries you can re-run"),
         ("kinds", "Memory kinds: status, settings, classify (undoable)"),
+        ("sources", "Connect folders and notes vaults: add, list, report, rescan, remove, forget-empty"),
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
@@ -2996,6 +3106,10 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Automation", [
         ("loop", "Run gate-verified bounded agent loops"),
+    ]),
+    ("Images, documents & bots", [
+        ("features", "See what is on: images & documents, bot mesh"),
+        ("media", "Images & documents: enable | disable | status"),
     ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),
@@ -3567,8 +3681,9 @@ def cmd_doctor(args: Namespace) -> None:
             elif depth:
                 _check(
                     "Projection queue", "PASS",
-                    f"{depth} memory/memories queued — the worker drains these "
-                    "in the background",
+                    f"{depth} memory/memories queued for the graph/vector "
+                    "projections — drained in the background once one is open "
+                    "(until then they are the catch-up record for a promotion)",
                 )
             else:
                 _check("Projection queue", "PASS", "empty (graph is up to date)")
@@ -3584,6 +3699,26 @@ def cmd_doctor(args: Namespace) -> None:
 
         _check("PEP 668 / Install method", *_dh.install_method_finding())
         _check("SQLite extensions (vector search)", *_dh.sqlite_extension_finding())
+    except Exception:
+        pass  # advisory only — never fail doctor on this check
+
+    # 11b. Images & documents: a read-only line, "off" until someone turns it on.
+    try:
+        from superlocalmemory.runtimes import media_feature_status
+        from superlocalmemory.cli.features_cmd import running_daemon_media
+        from superlocalmemory.runtimes.features import media_requested
+
+        _mf = media_feature_status()
+        _live = running_daemon_media()  # only the running daemon knows if it loaded the feature
+        if not _mf["enabled"]:
+            _check("Images & documents", "PASS",
+                   "requested by the installer, starts with the daemon" if media_requested() else "off")
+        elif _live.get("restart_required"):
+            _check("Images & documents", "WARN", "on and ready - run `slm restart` to start using it")
+        elif _mf["env"]["state"] == "ready":
+            _check("Images & documents", "PASS", "on")
+        else:
+            _check("Images & documents", "WARN", f"on, but not ready ({_mf['env']['state']})")
     except Exception:
         pass  # advisory only — never fail doctor on this check
 

@@ -2249,6 +2249,13 @@ async def update_core_memory_block(block_id: str, request: Request):
         from superlocalmemory.server.routes.helpers import DB_PATH, get_active_profile
         from superlocalmemory.storage.memory_write import memory_write
         from datetime import datetime, timezone
+        from superlocalmemory.memory_core import prepare_user_text
+
+        # An edited block is user text: prepared like a save.
+        content = prepare_user_text(
+            getattr(getattr(request.app.state, "engine", None), "_config", None),
+            str(content),
+        ).text
 
         if not DB_PATH.exists():
             return JSONResponse(
@@ -3045,7 +3052,7 @@ async def get_mcp_profiles(request: Request):
             # docstring above).
             current = "full"
         elif canonical == "whole" or canonical not in _PROFILE_DEFINITIONS:
-            # "whole" (all 103 tools) and any unrecognized value have no
+            # "whole" (all 107 tools) and any unrecognized value have no
             # single named profile that represents them exactly; fall back
             # to the smallest, safest documented profile for UI display.
             current = "core"

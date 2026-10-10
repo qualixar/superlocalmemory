@@ -9,6 +9,7 @@
     slm remote disable
     slm remote keys add <name> [--read-only] [--profile <profile>]
     slm remote keys list [--json]
+    slm remote keys allow|disallow <name|key_id> mesh|media
     slm remote keys revoke <name|key_id>
     slm remote check [--json]
 
@@ -437,7 +438,7 @@ def _cmd_keys(args: Namespace) -> None:
 
     store = default_store()
     sub = getattr(args, "keys_command", None)
-    if sub in ("add", "list", "revoke"):
+    if sub in ("add", "list", "revoke", "allow", "disallow"):
         _bind_unbound_keys(store)
     if sub == "add":
         chosen = getattr(args, "profile", None)
@@ -467,12 +468,34 @@ def _cmd_keys(args: Namespace) -> None:
             print(f"{row['name']:<24} {row['key_id']:<12} {row['scope']:<5} "
                   f"profile {profile:<28} created {row['created_at']}  {state}")
         return
+    if sub in ("allow", "disallow"):
+        _change_extra(store, args, allow=sub == "allow")
+        return
     if sub == "revoke":
         record = store.revoke(args.key_ref)
         print(f"Revoked '{record.name}' ({record.key_id}). It stops working on its next request.")
         return
-    print("Usage: slm remote keys {add,list,revoke}")
+    print("Usage: slm remote keys {add,list,allow,disallow,revoke}")
     sys.exit(2)
+
+
+def _change_extra(store, args: Namespace, *, allow: bool) -> None:
+    """Opt a key in to (or out of) mesh or media, keeping its other opt-ins."""
+    current = next((k for k in store.list()
+                    if k.active and args.key_ref in (k.name, k.key_id)), None)
+    if current is None:
+        raise ValueError(f"No active remote key is named '{args.key_ref}'.")
+    extras = set(current.extras)
+    (extras.add if allow else extras.discard)(args.extra)
+    record = store.set_extras(args.key_ref, extras)
+    if getattr(args, "json", False):
+        from superlocalmemory.cli.json_output import json_print
+
+        json_print("remote keys " + ("allow" if allow else "disallow"),
+                   data={"key": record.public()})
+        return
+    verb = "may now use" if allow else "may no longer use"
+    print(f"Remote key '{record.name}' {verb} {args.extra}. Takes effect on its next request.")
 
 
 def add_parser(sub) -> None:
@@ -505,6 +528,12 @@ def add_parser(sub) -> None:
                      help="The one profile this key may reach (default: the active profile)")
     lst = ksub.add_parser("list", help="List keys (never shows secrets)")
     lst.add_argument("--json", action="store_true")
+    for verb, text in (("allow", "Let a key use mesh (other bots) or media (images and documents)"),
+                       ("disallow", "Stop a key using mesh or media")):
+        extra = ksub.add_parser(verb, help=text)
+        extra.add_argument("key_ref", help="Key name or key id")
+        extra.add_argument("extra", choices=("mesh", "media"))
+        extra.add_argument("--json", action="store_true")
     rev = ksub.add_parser("revoke", help="Revoke a key; effective on its next request")
     rev.add_argument("key_ref", help="Key name or key id")
     chk = rsub.add_parser("check", help="Check remote access; exit 1 on any failure")
