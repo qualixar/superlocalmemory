@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.core.ingestion_command import is_terminal_failure
 from superlocalmemory.core.security_primitives import SecretHit, detect_secrets
 from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.memory_core import ContentOrigin
@@ -155,11 +156,15 @@ class KeyFacts:
 
 
 def resolve_keys(runtime: Any, profile_id: str, keys: list[str]) -> KeyFacts:
-    """Resolve folder saves recorded only by their key through ``ingestion_operations``.
+    """Resolve folder saves recorded only by their key.
 
-    A key is committed once its operation holds fact ids (or finished with none). A key whose
-    operation row is absent, still ``raw``, or has no facts yet is *pending*: the save may still
-    land, so callers must treat hiding or erasing it as not done, never as "nothing to hide".
+    A key is *settled* when it can no longer gain facts: its operation holds fact ids, finished,
+    or failed for good; or, with no operation row, the admission journal says the request was
+    rejected, committed (the receipt names the facts) or never admitted. Only a key that may still
+    commit is *pending*: an operation that is raw, queued, enriching or retryable, or a journal
+    entry still prepared or dispatched, or a journal that cannot be read. Callers treat hiding or
+    erasing a pending key as not done, never as "nothing to hide".
+
     Text parts are written as ``folder`` saves and pictures as ``media`` saves; folder keys
     (``src:...``) are unique to the folder either way.
     """
@@ -169,23 +174,58 @@ def resolve_keys(runtime: Any, profile_id: str, keys: list[str]) -> KeyFacts:
     if db is None:
         return KeyFacts(pending=list(keys))
     found: list[str] = []
-    committed: set[str] = set()
+    settled: set[str] = set()
+    live: set[str] = set()  # an operation exists and may still gain facts: the journal has no say
     try:
         for i in range(0, len(keys), 400):
             part = keys[i:i + 400]
             rows = db.execute(
-                "SELECT idempotency_key, state, queryable_fact_ids_json, final_fact_ids_json FROM"
-                " ingestion_operations WHERE profile_id = ? AND source_type IN ('folder', 'media')"
-                " AND idempotency_key IN (" + ",".join("?" * len(part)) + ")", (profile_id, *part))
+                "SELECT idempotency_key, state, attempt_count, next_retry_at, queryable_fact_ids_json,"
+                " final_fact_ids_json FROM ingestion_operations WHERE profile_id = ?"
+                " AND source_type IN ('folder', 'media') AND idempotency_key IN ("
+                + ",".join("?" * len(part)) + ")", (profile_id, *part))
             for row in rows:
-                ids = [str(f) for column in (row[2], row[3]) for f in json.loads(column or "[]")]
-                if ids or row[1] == "complete":
-                    committed.add(str(row[0]))
+                ids = [str(f) for column in (row[4], row[5]) for f in json.loads(column or "[]")]
+                done = bool(ids) or row[1] == "complete" or is_terminal_failure(row[1], row[2], row[3])
+                (settled if done else live).add(str(row[0]))
                 found += ids
     except Exception as exc:  # noqa: BLE001 - what cannot be looked up is not known to be hidden
         logger.warning("could not look up queued folder saves (%s)", type(exc).__name__)
         return KeyFacts(facts=found, pending=list(keys))
-    return KeyFacts(facts=found, pending=[k for k in keys if k not in committed])
+    pending: list[str] = []
+    for key in keys:
+        if key in settled:
+            continue
+        if key in live:
+            pending.append(key)
+            continue
+        verdict = _journal_verdict(runtime, profile_id, key)
+        if verdict is None:
+            pending.append(key)
+        else:
+            found += verdict
+    return KeyFacts(facts=found, pending=pending)
+
+
+def _journal_verdict(runtime: Any, profile_id: str, key: str) -> list[str] | None:
+    """For a key with no operation row: the fact ids it saved (possibly none) once the admission
+    journal says it can no longer commit, or None while it may still commit or is unknown."""
+    journal = getattr(runtime, "journal", None)
+    if journal is None:
+        return None
+    try:
+        entry = journal.get_by_idempotency_key(profile_id, key)
+    except Exception as exc:  # noqa: BLE001 - unknown is not settled
+        logger.warning("could not look up the admission journal (%s)", type(exc).__name__)
+        return None
+    if entry is None:  # never durably admitted: nothing was saved
+        return []
+    if entry.state == "rejected":
+        return []
+    if entry.state == "committed":
+        receipt = entry.original_receipt or {}
+        return [str(f) for f in receipt.get("fact_ids") or []]
+    return None  # prepared / dispatched: the request is still queued
 
 
 def facts_of_keys(runtime: Any, profile_id: str, keys: list[str]) -> list[str]:

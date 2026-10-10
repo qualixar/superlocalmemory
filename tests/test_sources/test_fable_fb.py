@@ -138,14 +138,15 @@ class _Operations:
         self.conn.row_factory = _sqlite3.Row
         self.conn.execute(
             "CREATE TABLE ingestion_operations (profile_id TEXT, source_type TEXT, idempotency_key TEXT,"
-            " state TEXT, next_retry_at REAL DEFAULT 0, queryable_fact_ids_json TEXT DEFAULT '[]',"
-            " final_fact_ids_json TEXT DEFAULT '[]')")
+            " state TEXT, next_retry_at REAL DEFAULT 0, attempt_count INTEGER DEFAULT 0,"
+            " queryable_fact_ids_json TEXT DEFAULT '[]', final_fact_ids_json TEXT DEFAULT '[]')")
         env.runtime._db = _ListDb(self.conn)
 
-    def put(self, key, state, facts=(), source_type="folder"):
+    def put(self, key, state, facts=(), source_type="folder", attempts=0, retry_at=0.0):
         self.conn.execute(
             "INSERT INTO ingestion_operations(profile_id, source_type, idempotency_key, state,"
-            " queryable_fact_ids_json) VALUES ('default', ?, ?, ?, ?)", (source_type, key, state, json.dumps(list(facts))))
+            " queryable_fact_ids_json, attempt_count, next_retry_at) VALUES ('default', ?, ?, ?, ?, ?, ?)",
+            (source_type, key, state, json.dumps(list(facts)), attempts, retry_at))
 
 
 def _queued_folder_file(env, monkeypatch):
@@ -336,3 +337,80 @@ def test_a_slow_file_still_gets_the_whole_budget_across_its_parts(env, monkeypat
     env.scan(sid)
     assert len(waits) > 1 and all(w is not None for w in waits)
     assert waits == sorted(waits, reverse=True) and waits[0] <= submit_mod.SETTLE_WAIT_S
+
+
+# -- a queued save that can never commit is not a dead end ---------------------------------------
+
+class _PlainCodec:
+    def encrypt(self, plaintext: bytes) -> bytes:
+        return plaintext
+
+    def decrypt(self, ciphertext: bytes) -> bytes:
+        return ciphertext
+
+
+def _journal(env, tmp_path, key, final_state=None):
+    """The real admission journal holding the queued request (and, optionally, how it ended)."""
+    from superlocalmemory.storage.admission_journal import Actor, AdmissionJournal, RememberRequest
+
+    journal = AdmissionJournal(tmp_path / "admission_journal.db", codec=_PlainCodec())
+    entry = journal.prepare(
+        RememberRequest(content="one", profile_id="default", source_type="folder", idempotency_key=key,
+                        trusted_actor_id="test-actor"),
+        Actor(principal_id="test-actor", allowed_profiles=frozenset({"default"}),
+              allowed_scopes=frozenset({"personal"})))
+    if final_state == "rejected":
+        journal.mark_rejected(entry.journal_id, "COMMAND_REJECTED")
+    elif final_state == "dispatched":
+        journal.mark_dispatched(entry.journal_id)
+    env.runtime.journal = journal
+    return journal
+
+
+def test_a_queued_save_the_journal_rejected_no_longer_blocks_removal(env, monkeypatch, tmp_path):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    _journal(env, tmp_path, key, "rejected")
+    sources.remove_source(sid)  # nothing was ever saved under that key: nothing to hide
+    assert env.runtime.archived == [] and sources.list_sources("default") == []
+
+
+def test_a_queued_save_the_journal_still_holds_as_pending_blocks_removal(env, monkeypatch, tmp_path):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    for state in (None, "dispatched"):
+        _journal(env, tmp_path / (state or "prepared"), key, state)
+        with pytest.raises(SourceRefused) as refused:
+            sources.remove_source(sid)
+        assert refused.value.code == "removal_incomplete"
+
+
+def test_a_purge_of_a_rejected_queued_save_completes(env, monkeypatch, tmp_path):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    _journal(env, tmp_path, key, "rejected")
+    sources.remove_source(sid, purge=True)
+    assert env.files(sid) == {}
+
+
+def test_an_operation_that_failed_for_good_with_no_facts_saved_nothing(env, monkeypatch):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    ops.put(key, "failed", attempts=1, retry_at=1.0)  # failed, but a retry is still scheduled
+    with pytest.raises(SourceRefused):
+        sources.remove_source(sid)
+    ops.conn.execute("UPDATE ingestion_operations SET attempt_count = 10, next_retry_at = 0")  # attempts used up
+    sources.remove_source(sid)
+    assert env.runtime.archived == []
+
+
+def test_an_operation_the_reaper_gave_up_on_saved_nothing(env, monkeypatch):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    ops.put(key, "failed", attempts=3, retry_at=9_999_999_999.0)
+    sources.remove_source(sid)
+    assert env.runtime.archived == []
+
+
+def test_a_journal_entry_that_committed_names_its_facts_in_the_receipt(env, monkeypatch, tmp_path):
+    sid, key, ops = _queued_folder_file(env, monkeypatch)
+    journal = _journal(env, tmp_path, key)
+    journal.mark_committed(journal.get_by_idempotency_key("default", key).journal_id,
+                           {"status": "queryable", "fact_ids": ["r1"], "operation_id": None})
+    sources.remove_source(sid)  # the operations table has no row, but the receipt knows the facts
+    assert env.runtime.archived == ["r1"]

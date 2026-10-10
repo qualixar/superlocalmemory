@@ -118,8 +118,9 @@ def test_a_queued_folder_save_is_owned_by_its_key_and_resolves_to_its_facts(env,
     assert len(entries) == 1 and entries[0]["m"] is None and entries[0]["k"].startswith("src:")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE ingestion_operations (profile_id TEXT, source_type TEXT, idempotency_key TEXT,"
-               " state TEXT, queryable_fact_ids_json TEXT, final_fact_ids_json TEXT)")
-    db.execute("INSERT INTO ingestion_operations VALUES ('default', 'folder', ?, 'complete', '[\"q1\"]',"
+               " state TEXT, next_retry_at REAL, attempt_count INTEGER, queryable_fact_ids_json TEXT,"
+               " final_fact_ids_json TEXT)")
+    db.execute("INSERT INTO ingestion_operations VALUES ('default', 'folder', ?, 'complete', 0, 0, '[\"q1\"]',"
                " '[\"q1\", \"q2\"]')",
                (entries[0]["k"],))
     runtime = types.SimpleNamespace(_db=db)
