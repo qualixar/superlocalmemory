@@ -61,6 +61,13 @@ class RetentionEngine:
     """
 
     def __init__(self, db: sqlite3.Connection, *, autocommit: bool = True) -> None:
+        if not isinstance(db, sqlite3.Connection):
+            # DatabaseManager.execute returns a list of rows, not a cursor, and it has no
+            # commit/savepoint/lastrowid: every read here would fail one call later.
+            raise TypeError(
+                "RetentionEngine needs a sqlite3 connection (for example from memory_write()), "
+                f"not {type(db).__name__}"
+            )
         self._db = db
         self._autocommit = autocommit
         self._ensure_table()
