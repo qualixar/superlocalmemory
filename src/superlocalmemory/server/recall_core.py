@@ -135,6 +135,8 @@ def effective_budget_s(call: RecallCall) -> float:
 
 def _visibility_for(engine: Any, call: RecallCall) -> Any:
     """What this caller may not see, for the thread that runs the recall (nothing for a local caller)."""
+    if not call.caller_view:
+        return nullcontext()
     from superlocalmemory.retrieval import remote_view, visibility
 
     ctx = remote_view.context_for(call.caller_view, engine._db, call.profile_id or engine.profile_id)
