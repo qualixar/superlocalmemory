@@ -56,3 +56,11 @@ test('a request frame may carry the per-request grant header', () => { const f={
 test('a response frame cannot carry the grant header', () => reject({v:1,kind:'response',id:'response-a',generation:1,status:200,headers:[['x-slm-grant','v1.abc.def']],bodyBase64:''}));
 test('only one grant header per request frame', () => reject({...request(),headers:[['x-slm-grant','a'],['X-SLM-Grant','b']]}));
 test('other x-slm headers stay refused on request frames', () => reject({...request(),headers:[['x-slm-peer','a']]}));
+
+test('the upload marker is a request header only, one value, printable ASCII', () => {
+  const marker = ['x-slm-upload', 'chunk ' + 'A'.repeat(43) + ' 0 700001'];
+  assert.equal(decode({ ...request(), headers: [['content-type', 'application/octet-stream'], marker] }).ok, true);
+  reject({ ...request(), headers: [marker, ['X-SLM-Upload', 'info']] });
+  reject({ ...request(), headers: [['x-slm-upload', 'chunk\n']] });
+  reject({ v: 1, kind: 'response', id: 'response-a', generation: 1, status: 200, headers: [marker], bodyBase64: '' });
+});

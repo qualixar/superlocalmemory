@@ -6,6 +6,7 @@ import {RELAY_DEADLINE_MS} from './relay-protocol.ts';
 import {publicRelayCode} from './relay-errors.ts';
 import {secondsUntilUtcMidnight} from './usage-limit.ts';
 import {GatewayInputError,filterMcpResponse,parseMcpRequest} from './mcp-http.ts';
+import {handleUpload} from './upload-gateway.ts';
 
 export {RegistryDO,RelayDO};
 export const RESOURCE='https://mcp.superlocalmemory.com/mcp';
@@ -14,6 +15,8 @@ export interface ResourceEnv {
   AUTH_SERVER:{validateToken(resource:string,token:string):Promise<OAuthResourceTokenValidation<AuthProps>|null>};
   REGISTRIES:DurableObjectNamespace<RegistryDO>;
   RELAYS:DurableObjectNamespace<RelayDO>;
+  /** Rate limits for the public one-time upload link (per address, per connection). */
+  UPLOAD_IP?:RateLimit;UPLOAD_CONN?:RateLimit;
 }
 function failure(status:number,error:string):Response {return Response.json({error},{status,headers:{'Cache-Control':'no-store'}});}
 function actor(context:OAuthResourceContext<AuthProps>):VerifiedActor|null {
@@ -83,6 +86,9 @@ const protectedResource=new OAuthResourceServer<ResourceEnv,AuthProps>({
 export const resourceGateway={
   async fetch(request:Request,env:ResourceEnv,context:ExecutionContext):Promise<Response>{
     if(new URL(request.url).origin!==new URL(RESOURCE).origin)return failure(403,'host_denied');
+    // The one-time upload link is public: its token, checked on the laptop, is the only credential.
+    const upload=await handleUpload(request,env);
+    if(upload)return upload;
     return protectedResource.fetch(request,env,context);
   },
 };

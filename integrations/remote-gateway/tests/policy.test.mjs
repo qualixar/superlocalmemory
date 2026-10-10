@@ -73,10 +73,10 @@ test('tool scope table lists every tool with all the scopes it needs', () => {
   assert.deepEqual([...TOOL_SCOPES.get('recall')], ['slm:read']); assert.deepEqual([...TOOL_SCOPES.get('remember')], ['slm:write']); assert.deepEqual([...TOOL_SCOPES.get('session_init')], ['slm:session']);
   for (const t of ['mesh_peers', 'mesh_send', 'mesh_inbox', 'mesh_wait', 'mesh_state']) assert.deepEqual([...TOOL_SCOPES.get(t)], ['slm:mesh']);
   for (const t of ['get_media', 'media_status']) assert.deepEqual([...TOOL_SCOPES.get(t)], ['slm:media']);
-  for (const t of ['remember_media', 'remember_document']) assert.deepEqual([...TOOL_SCOPES.get(t)], ['slm:write', 'slm:media']);
-  assert.equal(TOOL_SCOPES.size, 9 + 5 + 2 + 2);
+  for (const t of ['remember_media', 'remember_document', 'media_upload_link']) assert.deepEqual([...TOOL_SCOPES.get(t)], ['slm:write', 'slm:media']);
+  assert.equal(TOOL_SCOPES.size, 9 + 5 + 2 + 3);
 });
-test('only mesh and media tools are laptop gated', () => { assert.deepEqual([...LAPTOP_GATED_TOOLS].sort(), ['get_media', 'media_status', 'mesh_inbox', 'mesh_peers', 'mesh_send', 'mesh_state', 'mesh_wait', 'remember_document', 'remember_media']); });
+test('only mesh and media tools are laptop gated', () => { assert.deepEqual([...LAPTOP_GATED_TOOLS].sort(), ['get_media', 'media_status', 'media_upload_link', 'mesh_inbox', 'mesh_peers', 'mesh_send', 'mesh_state', 'mesh_wait', 'remember_document', 'remember_media']); });
 test('a mesh tool needs the mesh scope on the token and in the consent', () => {
   for (const tool of ['mesh_peers', 'mesh_send', 'mesh_inbox', 'mesh_wait', 'mesh_state']) {
     const args = tool === 'mesh_state' ? { key: 'k' } : {};
@@ -89,7 +89,7 @@ test('a mesh tool needs the mesh scope on the token and in the consent', () => {
 test('media tools need the media scope and remember_* also needs write', () => {
   assert.equal(run(gated('get_media', ['slm:media'])).allowed, true); assert.equal(run(gated('media_status', ['slm:media'])).allowed, true);
   assert.equal(run(gated('get_media', ['slm:mesh'])).code, 'INSUFFICIENT_SCOPE');
-  for (const tool of ['remember_media', 'remember_document']) {
+  for (const tool of ['remember_media', 'remember_document', 'media_upload_link']) {
     assert.equal(run(gated(tool, ['slm:write', 'slm:media'])).allowed, true, tool);
     assert.equal(run(gated(tool, ['slm:media'])).code, 'INSUFFICIENT_SCOPE', tool);
     assert.equal(run(gated(tool, ['slm:write'])).code, 'INSUFFICIENT_SCOPE', tool);
@@ -122,5 +122,8 @@ test('the consent tool list comes from the same table', () => {
   assert.deepEqual(toolsForScopes(['slm:read', 'slm:mesh']), ['recall', 'search', 'fetch', 'get_status', 'mesh_peers', 'mesh_send', 'mesh_inbox', 'mesh_wait', 'mesh_state']);
   assert.deepEqual(toolsForScopes(['slm:read', 'slm:media']), ['recall', 'search', 'fetch', 'get_status', 'get_media', 'media_status']);
   assert.ok(toolsForScopes(['slm:read', 'slm:write', 'slm:media']).includes('remember_media'));
+  assert.ok(toolsForScopes(['slm:read', 'slm:write', 'slm:media']).includes('media_upload_link'));
+  assert.ok(!toolsForScopes(['slm:read', 'slm:media']).includes('media_upload_link'));
+  assert.ok(!toolsForScopes(['slm:read', 'slm:write']).includes('media_upload_link'));
   assert.ok(!toolsForScopes(['slm:read', 'slm:media']).includes('remember_media'));
 });

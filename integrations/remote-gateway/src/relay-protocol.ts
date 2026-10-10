@@ -16,7 +16,9 @@ export const RELAY_DEADLINE_MS = 25000;
 export const CLOCK_SKEW_TOLERANCE_MS = 5000;
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const requestHeaders = new Set(["content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name", "x-slm-grant"]);
+// x-slm-upload marks a frame of a one-time upload link (see upload-gateway.ts). Public MCP callers can never
+// set it: parseMcpRequest refuses every x-slm-* header, so only the upload route builds such a frame.
+const requestHeaders = new Set(["content-type", "accept", "mcp-protocol-version", "mcp-method", "mcp-name", "x-slm-grant", "x-slm-upload"]);
 const responseHeaders = new Set(["content-type", "mcp-protocol-version", "retry-after"]);
 const identityKeys = ["v", "kind", "id", "generation"];
 function refused(code = "INVALID_FRAME"): { ok: false; code: string } { return { ok: false, code }; }
