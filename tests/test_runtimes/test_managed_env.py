@@ -56,6 +56,9 @@ def lock(tmp_path, monkeypatch):
     path = d / me.lock_name()
     path.write_text(LOCK_TEXT)
     monkeypatch.setattr(me, "LOCKS_DIR", d)
+    # Install-flow tests are about the install, not about this Python's sqlite3;
+    # the no-extension case has its own test.
+    monkeypatch.setattr(me, "_sqlite_vec_ok", lambda: True)
     return path
 
 
@@ -155,6 +158,7 @@ def test_unsupported_python(tmp_path, src, lock, monkeypatch):
 
 def test_missing_lock_is_unsupported(tmp_path, src, monkeypatch):
     monkeypatch.setattr(me, "LOCKS_DIR", tmp_path / "nolocks")
+    monkeypatch.setattr(me, "_sqlite_vec_ok", lambda: True)
     runner = Runner()
     st = make(tmp_path, src, runner).install()
     assert st.state == "unsupported" and "package list" in st.step

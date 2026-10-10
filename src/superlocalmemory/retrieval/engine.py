@@ -33,6 +33,7 @@ from superlocalmemory.core.config import (
 )
 from superlocalmemory.retrieval import (channel_status as chstat, entity_graph_warmup,
                                       kind_scope, project_search)
+from superlocalmemory.retrieval import visibility
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 from superlocalmemory.retrieval.rerank_pool import rerank_pool
 from superlocalmemory.retrieval.strategy import QueryStrategy, QueryStrategyClassifier
@@ -543,6 +544,7 @@ class RetrievalEngine:
             include_global=include_global, include_shared=include_shared,
             lifecycle_cache=correction_admission,
         )
+        fused = visibility.drop_hidden_results(fused, self._db, profile_id)  # hidden: never a candidate
 
         _em("expand+entity_enh")
 
@@ -704,6 +706,7 @@ class RetrievalEngine:
                 include_shared=include_shared,
             ))
 
+        final_top = visibility.keep_loaded(final_top, facts)  # promotions from pre-admission channels
         # Trim facts to the selected, qualified result set.
         selected_ids = {fr.fact_id for fr in final_top}
         facts = {fid: f for fid, f in facts.items() if fid in selected_ids}
@@ -1146,7 +1149,7 @@ class RetrievalEngine:
                     (_time_e.monotonic() - _t_embed) * 1000.0, 1)
 
         media_vec = None  # pictures: one bounded embed, before dispatch (media_channel)
-        if "media" not in disabled:
+        if "media" not in disabled and not visibility.hides_media():
             from superlocalmemory.retrieval import media_channel
             self._media_channel = self._media_channel or media_channel.for_engine(self._db)
             media_vec, _media_state = self._media_channel.prepare(query, profile_id)
@@ -1358,7 +1361,7 @@ class RetrievalEngine:
             include_global=include_global,
             include_shared=include_shared,
         )
-        return {f.fact_id: f for f in facts}
+        return visibility.drop_hidden_facts({f.fact_id: f for f in facts}, self._db)
 
     # -- Cross-encoder rerank -----------------------------------------------
 

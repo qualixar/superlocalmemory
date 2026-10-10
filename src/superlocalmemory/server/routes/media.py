@@ -4,10 +4,10 @@
 
 """Image and document routes (local only).
 
-``POST /api/v3/media/remember`` saves an image (a file path on this machine, base64 data or an
-https download link) and ``POST /api/v3/documents`` queues a PDF (a file path or base64 data); neither is part of any
-remote tool list. The thumbnail, job-status and document-removal routes answer only for the profile the item
-belongs to.
+``POST /api/v3/media/remember`` saves an image from a file path on this machine,
+base64 data or an https download link, and ``POST /api/v3/documents`` queues a
+PDF; neither is part of any remote tool list. The thumbnail, job-status and
+document-removal routes answer only for the profile the item belongs to.
 """
 
 from __future__ import annotations
@@ -257,10 +257,6 @@ async def remove(document_id: str, request: Request, profile_id: str = "", hard:
     if not _ID.fullmatch(document_id):
         raise HTTPException(404, detail="Not found.")
     enforce_forget_governance(request, engine, actor_id=actor_id, profile=profile, target=document_id)
-    if hard:
-        if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
-            raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")
-        return {"removed": True, "document_id": document_id, "erased": True}
     if hard:
         if not await asyncio.to_thread(remove_document, document_id, profile, hard=True, eraser=_eraser(engine)):
             raise HTTPException(404, detail="Not found, or the erasure was not complete; retry.")

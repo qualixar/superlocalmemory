@@ -142,7 +142,10 @@ def test_repair_fixes_what_is_proven_keeps_history_and_is_idempotent(damaged):
     conn.close()
 
     again = Repair(damaged["db"], limits=Limits(pause_s=0)).apply()
-    assert {k: v for k, v in again["done"].items() if not k.startswith("vectors.")} == {}
+    # Notes of work NOT done ("vector_parity.skipped_no_extension" where the
+    # interpreter cannot load sqlite-vec) are not a second repair.
+    assert {k: v for k, v in again["done"].items()
+            if not k.startswith("vectors.") and ".skipped_" not in k} == {}
 
 
 def test_undo_puts_back_exactly_what_the_run_removed(damaged):
