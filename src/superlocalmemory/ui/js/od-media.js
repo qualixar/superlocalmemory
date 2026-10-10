@@ -3,6 +3,7 @@
 // XSS-safe: file names, OCR previews, titles and server messages are untrusted and
 // are set with textContent only. Writes go through the page's fetch, which core.js
 // wraps with the local write credential.
+// The Folders section (od-sources.js) is rendered below the documents list.
 // Routes: POST /api/v3/media/remember   POST /api/v3/documents
 //         GET /api/v3/media/{id}/thumb  GET /api/v3/jobs/{id}
 //         GET /api/v3/documents         GET /api/v3/documents/lint
@@ -222,6 +223,11 @@
     docs.appendChild(ui.docs);
     host.appendChild(up);
     host.appendChild(docs);
+    if (typeof window.odRenderSources === 'function') {
+      var folders = el('div', 'od-media-section');
+      host.appendChild(folders);
+      window.odRenderSources(folders);
+    }
     loadDocuments(ui);
     loadLint(ui);
   }

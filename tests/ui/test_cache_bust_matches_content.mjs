@@ -73,7 +73,9 @@ const HASHED = ['od-brain.js', 'od-graph.js', 'fact-detail.js', 'od-memories.js'
                 'od-store-check.js',
                 // 4.1.25: images and documents card; the restart function moved to be shared.
                 'od-features.js', 'od-operations.js', 'od-media.js',
-                'od-botmessages.js'];
+                'od-botmessages.js',
+                // 4.1.25: the Folders section inside the Documents & Images pane.
+                'od-sources.js'];
 //: Stylesheets stamped the same way (static/css/<name>?v=<sha256[:8]>).
 const HASHED_CSS = ['od-apps.css'];
 
