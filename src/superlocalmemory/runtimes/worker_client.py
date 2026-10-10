@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.core import ram_lock
+from superlocalmemory.infra import proc_memory
 from superlocalmemory.runtimes import media_models
 from superlocalmemory.runtimes.features import media_enabled, register_media_stop_hook
 from superlocalmemory.runtimes.ports import MediaEmbedderPort
@@ -231,12 +232,8 @@ class MediaWorkerClient(MediaEmbedderPort):
 
     @staticmethod
     def _rss_mb(pid: int) -> float:
-        try:
-            import psutil
-
-            return psutil.Process(pid).memory_info().rss / (1024 * 1024)
-        except Exception:  # noqa: BLE001 - unknown size is treated as fine
-            return 0.0
+        """What the worker holds (physical footprint on macOS, where RSS under-reports); 0.0 = unknown."""
+        return proc_memory.process_memory_mb(pid)
 
     def _cancel_timer(self) -> None:
         timer, self._timer = self._timer, None

@@ -84,3 +84,24 @@ def test_watchdog_leaves_the_picture_worker_its_own_larger_cap(monkeypatch):
     assert _worker_limit_mb(media, 2500) == 6000
     monkeypatch.setenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", "0")
     assert _worker_limit_mb(media, 2500) == 0
+
+
+def test_watchdog_judges_children_on_the_shared_memory_reader(monkeypatch):
+    import os
+    import subprocess
+    import sys
+
+    from superlocalmemory.infra import proc_memory
+    from superlocalmemory.server.unified_daemon import _watchdog_pass
+
+    kids = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]) for _ in range(2)]
+    try:
+        big, small = kids
+        monkeypatch.setattr(proc_memory, "process_memory_mb",
+                            lambda pid: 9000.0 if pid == big.pid else 10.0)
+        _watchdog_pass(os.getpid(), 2500)
+        assert big.wait(timeout=10) is not None and small.poll() is None
+    finally:
+        for kid in kids:
+            kid.kill()
+            kid.wait()

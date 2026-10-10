@@ -5,7 +5,8 @@
 """Enterprise-grade health monitoring for the SLM Unified Daemon.
 
 Monitors:
-  - Global RSS budget (kill heaviest worker if over limit)
+  - Global memory budget (kill heaviest worker if over limit; the picture
+    worker is exempt while under its own cap)
   - Worker heartbeat (kill unresponsive workers after 60s)
   - Structured JSON logging (daemon.json.log alongside text logs)
   - Extensible health check registry (Phase C/D/E add checks)
@@ -25,9 +26,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from superlocalmemory.infra import proc_memory
 from superlocalmemory.infra.data_root import state_path
 
 logger = logging.getLogger("superlocalmemory.health_monitor")
+
+# Command-line marker of the picture worker, which has its own memory cap.
+_PICTURE_IDENTIFIER = "multimodal_worker.py"
 
 # Try psutil — graceful fallback if not available
 try:
@@ -208,28 +213,84 @@ class HealthMonitor:
 
             self._stop_event.wait(self._interval)
 
-    def _check_once(self) -> None:
-        """Single health check cycle."""
-        proc = psutil.Process(os.getpid())
-        daemon_rss_mb = proc.memory_info().rss / (1024 * 1024)
+    def _scan_workers(self, proc) -> list[dict]:
+        """The SLM worker children of ``proc`` (not adapters or other children) and what each holds.
 
-        # Find SLM worker children only (not adapters or other children)
-        children = proc.children(recursive=True)
+        ``rss_mb`` is the physical footprint on macOS, where RSS under-reports (see
+        ``infra.proc_memory``); the key keeps its old name for the log schema.
+        """
         slm_workers = []
-        for child in children:
+        for child in proc.children(recursive=True):
             try:
                 cmdline = " ".join(child.cmdline()).lower()
                 if any(ident in cmdline for ident in self._WORKER_IDENTIFIERS):
-                    rss_mb = child.memory_info().rss / (1024 * 1024)
                     slm_workers.append({
                         "pid": child.pid,
-                        "rss_mb": round(rss_mb, 1),
+                        "rss_mb": round(proc_memory.process_memory_mb(child.pid), 1),
                         "cmdline": cmdline[:200],
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
+        return slm_workers
 
-        total_rss_mb = daemon_rss_mb + sum(w["rss_mb"] for w in slm_workers)
+    def _budgeted(self, slm_workers: list[dict]) -> list[dict]:
+        """The workers the global budget counts and may kill.
+
+        The picture worker is policed by its own cap (its client and the daemon's
+        memory watchdog stop it above ``media_models.watchdog_limit_mb``), and it
+        is usually the largest process by far. While it is at or under that cap it
+        is left out of the global total, so the budget never kills a picture worker
+        that is behaving; above its cap, or with no cap (0), it counts and can be
+        killed like any other non-embedder.
+        """
+        from superlocalmemory.runtimes import media_models
+
+        cap_mb = media_models.watchdog_limit_mb(media_models.DEFAULT_RSS_LIMIT_MB)
+        return [
+            w for w in slm_workers
+            if not (_PICTURE_IDENTIFIER in w["cmdline"] and 0 < cap_mb and w["rss_mb"] <= cap_mb)
+        ]
+
+    def _enforce_budget(self, total_rss_mb: float, counted: list[dict]) -> None:
+        """Over budget: kill one worker. Spare the embedding worker (load-bearing for
+        recall quality); kill the largest other worker first (the reranker degrades
+        gracefully) and fall back to the embedder only if it is the only one left."""
+        if total_rss_mb <= self._budget_mb or not counted:
+            return
+        non_embedder = [
+            w for w in counted
+            if self._EMBEDDING_IDENTIFIER not in w["cmdline"]
+        ]
+        candidate = (
+            max(non_embedder, key=lambda w: w["rss_mb"])
+            if non_embedder
+            else max(counted, key=lambda w: w["rss_mb"])
+        )
+        logger.warning(
+            "RSS budget exceeded (%.0fMB > %dMB). Killing worker PID %d (%.0fMB)",
+            total_rss_mb, self._budget_mb, candidate["pid"], candidate["rss_mb"],
+        )
+        log_structured(
+            level="warning",
+            operation="rss_budget_kill",
+            killed_pid=candidate["pid"],
+            killed_rss_mb=candidate["rss_mb"],
+            total_rss_mb=round(total_rss_mb, 1),
+            spared_embedder=bool(non_embedder),
+        )
+        try:
+            psutil.Process(candidate["pid"]).terminate()
+        except psutil.NoSuchProcess:
+            pass
+
+    def _check_once(self) -> None:
+        """Single health check cycle."""
+        proc = psutil.Process(os.getpid())
+        daemon_rss_mb = proc_memory.process_memory_mb(os.getpid())
+
+        slm_workers = self._scan_workers(proc)
+        counted = self._budgeted(slm_workers)
+        total_rss_mb = daemon_rss_mb + sum(w["rss_mb"] for w in counted)
 
         # Structured log entry
         log_structured(
@@ -242,35 +303,7 @@ class HealthMonitor:
             budget_mb=self._budget_mb,
         )
 
-        # RSS budget enforcement — spare the embedding worker (load-bearing for
-        # recall quality). Kill the reranker first (degrades gracefully); only
-        # fall back to the embedder if it is the only worker remaining.
-        if total_rss_mb > self._budget_mb and slm_workers:
-            non_embedder = [
-                w for w in slm_workers
-                if self._EMBEDDING_IDENTIFIER not in w["cmdline"]
-            ]
-            candidate = (
-                max(non_embedder, key=lambda w: w["rss_mb"])
-                if non_embedder
-                else max(slm_workers, key=lambda w: w["rss_mb"])
-            )
-            logger.warning(
-                "RSS budget exceeded (%.0fMB > %dMB). Killing worker PID %d (%.0fMB)",
-                total_rss_mb, self._budget_mb, candidate["pid"], candidate["rss_mb"],
-            )
-            log_structured(
-                level="warning",
-                operation="rss_budget_kill",
-                killed_pid=candidate["pid"],
-                killed_rss_mb=candidate["rss_mb"],
-                total_rss_mb=round(total_rss_mb, 1),
-                spared_embedder=bool(non_embedder),
-            )
-            try:
-                psutil.Process(candidate["pid"]).terminate()
-            except psutil.NoSuchProcess:
-                pass
+        self._enforce_budget(total_rss_mb, counted)
 
         # Heartbeat checks delegated to WorkerPool (Phase B wiring)
         # WorkerPool tracks last_heartbeat per worker. HealthMonitor
@@ -303,8 +336,7 @@ class HealthMonitor:
     def _check_daemon_health(self) -> dict:
         if not PSUTIL_AVAILABLE:
             return {"name": "daemon", "status": "unknown", "detail": "psutil unavailable"}
-        proc = psutil.Process(os.getpid())
-        rss_mb = proc.memory_info().rss / (1024 * 1024)
+        rss_mb = proc_memory.process_memory_mb(os.getpid())
         return {
             "name": "daemon",
             "status": "ok" if rss_mb < 500 else "warning",
@@ -325,14 +357,7 @@ class HealthMonitor:
     def _check_memory_budget(self) -> dict:
         if not PSUTIL_AVAILABLE:
             return {"name": "memory", "status": "unknown", "detail": "psutil unavailable"}
-        proc = psutil.Process(os.getpid())
-        total_rss = proc.memory_info().rss
-        for child in proc.children(recursive=True):
-            try:
-                total_rss += child.memory_info().rss
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        total_mb = total_rss / (1024 * 1024)
+        total_mb = proc_memory.tree_memory_mb(os.getpid())
         status = "ok" if total_mb < self._budget_mb else "critical"
         return {
             "name": "memory",
