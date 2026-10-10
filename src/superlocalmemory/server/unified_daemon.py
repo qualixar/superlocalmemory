@@ -4586,7 +4586,8 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         from superlocalmemory.remote_connections.runtime import install_runtime
         install_runtime(application)
     except Exception:
-        logger.warning("remote_connections_router unavailable; local services remain enabled")
+        logger.warning("remote_connections_router unavailable; local services remain enabled",
+                       exc_info=True)
 
     # Answer-check settings (4.1.18): on-device Laya, hosted Jev, or off.
     from superlocalmemory.server.routes.answer_check import router as answer_check_router

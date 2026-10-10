@@ -248,9 +248,9 @@ def test_owner_peers_exclude_retired_and_other_profiles(client, broker) -> None:
 
 
 def test_owner_peers_hide_paths_and_hosts(client, broker) -> None:
-    broker.register_peer("p", project_path="/home/secret/proj", host="10.1.2.3")
+    broker.register_peer("p", project_path="/home/alice/proj", host="10.1.2.3")
     text = client.get(f"{OWNER}/peers").text
-    assert "project_path" not in text and "/home/secret" not in text
+    assert "project_path" not in text and "/home/alice" not in text
     assert '"host"' not in text and "10.1.2.3" not in text
 
 

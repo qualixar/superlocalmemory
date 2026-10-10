@@ -307,18 +307,18 @@ async def test_a_good_link_is_not_counted_and_a_malformed_frame_is_not_either(tm
 async def test_a_refusal_reason_loses_host_paths_and_the_account_name(tmp_path, monkeypatch):
     from superlocalmemory.server import remote_redaction
 
-    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("/Users/varun", "varunacct"))
+    monkeypatch.setattr(remote_redaction, "_host_strings", lambda: ("/Users/alice", "aliceacct"))
     links = UploadLinks(tmp_path, clock=lambda: NOW)
     reply = {"status": "refused",
-             "reason": "Cannot read /Users/varun/Pictures/a.png for varunacct (see https://x.example/a?k=1)"}
+             "reason": "Cannot read /Users/alice/Pictures/a.png for aliceacct (see https://x.example/a?k=1)"}
     relay = UploadRelay(lambda: links, keys=FakeKeys(), finisher=Finisher(reply), finish_wait_s=2.0)
     minted = links.mint(CID, "key1", "personal", "image", "")
     await call(relay, frame("chunk", minted.token, 0, len(PNG), PNG))
     out = await call(relay, frame("finish", minted.token, 0, len(PNG)))
     text = out["message"]
-    assert "/Users" not in text and "varunacct" not in text and "Pictures" not in text and "k=1" not in text
+    assert "/Users" not in text and "aliceacct" not in text and "Pictures" not in text and "k=1" not in text
     stored = links.find(minted.token, CID).result_json
-    assert "/Users" not in stored and "varunacct" not in stored
+    assert "/Users" not in stored and "aliceacct" not in stored
 
 
 @pytest.mark.asyncio
