@@ -543,6 +543,28 @@ def register_active_tools(server, get_engine: Callable) -> None:
             except Exception:
                 pinned_facts = []
             pinned_seen = set()
+            # Standing rules and the schedule are read here too, so one
+            # check against the caller's view covers all three surfaces.
+            standing_found: list = []
+            try:
+                from superlocalmemory.core import standing_rules
+
+                if standing_rules.enabled(getattr(engine, "config", None)):
+                    standing_found = list(standing_rules.standing_facts(
+                        engine.db, pid, frozenset(f.fact_id for f in pinned_facts)))
+            except Exception:  # noqa: BLE001 - session start never fails on this
+                standing_found = []
+            _upcoming_events = _upcoming_scheduled_facts(engine, _now, pid)
+            from superlocalmemory.mcp import remote_visibility
+
+            if remote_visibility.current_view():
+                _hidden = remote_visibility.hidden_fact_ids(
+                    engine._db, pid,
+                    [f.fact_id for f in pinned_facts] + [f.fact_id for f in standing_found]
+                    + [e["fact_id"] for e in _upcoming_events])
+                pinned_facts = [f for f in pinned_facts if f.fact_id not in _hidden]
+                standing_found = [f for f in standing_found if f.fact_id not in _hidden]
+                _upcoming_events = [e for e in _upcoming_events if e["fact_id"] not in _hidden]
 
             cfg_inj = getattr(getattr(engine, "config", None), "injection", None)
             # Defend against MagicMock / non-config objects in tests.
@@ -570,26 +592,19 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # Standing rules and active decisions you or your agents confirmed
             # (kind declared on save, or set by you) follow the pins, so every
             # session starts knowing them. Suggested kinds are never used here.
-            try:
-                from superlocalmemory.core import standing_rules
-
-                if standing_rules.enabled(getattr(engine, "config", None)):
-                    for sf in standing_rules.standing_facts(
-                            engine.db, pid, frozenset(pinned_seen)):
-                        if sf.fact_id in pinned_seen:
-                            continue
-                        inj_mems.append(InjectableMemory(
-                            content=sf.content,
-                            score=0.0,
-                            fact_id=sf.fact_id,
-                            importance=sf.importance,
-                            access_count=sf.access_count,
-                            pinned=True,
-                            source_type=f"standing-{sf.kind}",
-                        ))
-                        pinned_seen.add(sf.fact_id)
-            except Exception:  # noqa: BLE001 - session start never fails on this
-                pass
+            for sf in standing_found:
+                if sf.fact_id in pinned_seen:
+                    continue
+                inj_mems.append(InjectableMemory(
+                    content=sf.content,
+                    score=0.0,
+                    fact_id=sf.fact_id,
+                    importance=sf.importance,
+                    access_count=sf.access_count,
+                    pinned=True,
+                    source_type=f"standing-{sf.kind}",
+                ))
+                pinned_seen.add(sf.fact_id)
 
             # Then recall results (skip duplicates of pinned).
             for r in relevant[:max_results]:
@@ -704,8 +719,6 @@ def register_active_tools(server, get_engine: Callable) -> None:
             # shared value belongs to the active profile's callers.
             if not named:
                 engine._last_session_id = effective_session_id
-
-            _upcoming_events = _upcoming_scheduled_facts(engine, _now, pid)
 
             return {
                 "success": True,
@@ -1130,7 +1143,9 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 return {"success": True, "action": "unpin", "fact_id": fact_id}
 
             if action == "list":
-                pinned = db.get_pinned(pid)
+                from superlocalmemory.mcp.remote_visibility import visible_facts
+
+                pinned = visible_facts(db, pid, db.get_pinned(pid))
                 cfg_inj = getattr(getattr(engine, "config", None), "injection", None)
                 max_tok = getattr(cfg_inj, "per_memory_max_tokens", 600) if cfg_inj else 600
                 return {
