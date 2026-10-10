@@ -125,6 +125,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upload links made before the update stop working; ask the app for a new one.
 - Backup sets made through every backup path include picture and PDF
   originals.
+- **A damaged keyword index is repaired for good** (#204). On SQLite 3.44.0 to
+  3.46.0, `slm db repair --apply` now turns off the SQLite setting that damages
+  the index before rebuilding it, then checks it again and says plainly if it
+  is still damaged. `slm doctor` and `slm restart` show the SQLite message and
+  the exact repair command instead of "recreate the database". Your memories
+  are kept.
+- **Hermes:** the four SLM advisor tools load again (they failed with
+  "'str' object is not callable"), all 16 skills are registered, and
+  `/slm-agent` outside a chat says how to start an advisor (#155).
+- Every plugin, skill and setup text teaches 4.1.25: a new `slm-media` skill,
+  and the mesh, web access, governance and bot skills, the web agent
+  instructions, Cursor, VS Code, Continue and Cody cover pictures, upload
+  links, `mesh_wait` and the Connected apps switches.
 
 ## [4.1.24] — Connecting ChatGPT, Grok Bot, Muse and dots works the first time
 
