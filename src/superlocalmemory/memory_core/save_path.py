@@ -78,6 +78,43 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: The longest text ``scan_sensitive`` will read. Past it the scan refuses, and
+#: the caller treats the text as not scanned (never as clean).
+MAX_SCAN_CHARS = 8_000_000
+
+
+@dataclass(frozen=True)
+class SensitiveScan:
+    """How much personal data and how many credentials a text holds."""
+
+    pii: int
+    secrets: int
+
+    @property
+    def clean(self) -> bool:
+        return self.pii == 0 and self.secrets == 0
+
+
+def scan_sensitive(text: str) -> SensitiveScan:
+    """Count personal identifiers and credentials in ``text``; change nothing.
+
+    For vetting only: the count does not depend on the redaction setting, and
+    it reads the whole text, not the part that will be stored. Raises
+    ``ValueError`` when the text cannot be scanned in full (not a string, or
+    longer than ``MAX_SCAN_CHARS``): "not scanned" must never read as "clean".
+    """
+    if not isinstance(text, str):
+        raise ValueError("scan_sensitive expects str")
+    if len(text) > MAX_SCAN_CHARS:
+        raise ValueError("text is too long to scan in full")
+    if not text:
+        return SensitiveScan(0, 0)
+    pii = redact_pii(text)[1]
+    before = len(_SECRET_MARKER.findall(text))
+    redacted = redact_secrets(text, aggression="high")
+    return SensitiveScan(pii, max(0, len(_SECRET_MARKER.findall(redacted)) - before))
+
+
 def prepare_for_save(
     text: str, *, origin: ContentOrigin, pii_redaction: bool,
 ) -> PreparedContent:

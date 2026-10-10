@@ -31,7 +31,9 @@ from superlocalmemory.documents.heavy import parse_reservation
 from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, ParseSession, ParseStopped
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import DOCUMENT
-from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
+from superlocalmemory.memory_core import (
+    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+)
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.runtimes.worker_client import MediaWorkerError
 
@@ -93,12 +95,20 @@ class _Text:
     text: str = ""
     pii: int = 0
     secrets: int = 0
+    #: True only when the whole page text was scanned, whatever the redaction
+    #: setting. Unscanned is never clean.
+    scanned: bool = False
 
 
 def _derived(text: str, redact: bool) -> _Text:
     prepared = prepare_for_save(text[:MAX_PAGE_TEXT], origin=ContentOrigin.DERIVED_TEXT, pii_redaction=redact)
-    return _Text("text_layer" if prepared.text.strip() else "none", prepared.text, prepared.pii_count,
-                 prepared.secret_count)
+    origin = "text_layer" if prepared.text.strip() else "none"
+    try:  # vetting reads ALL of the text; what is stored stays the cut, redacted text
+        found = scan_sensitive(text)
+    except Exception:  # noqa: BLE001 - an unscanned page is simply not cleared for remote use
+        logger.warning("page text could not be scanned; it stays local-only")
+        return _Text(origin, prepared.text, prepared.pii_count, prepared.secret_count)
+    return _Text(origin, prepared.text, found.pii, found.secrets, scanned=True)
 
 
 class JobRunner:
@@ -328,7 +338,7 @@ class JobRunner:
             phash=phash, mime="image/png", bytes=0, width=event.get("width"), height=event.get("height"),
             anchor_memory_id=memory_ids[0] if memory_ids else None, document_id=self.doc_id, page_no=page_no,
             origin="document", thumb_webp=thumb,
-            remote_ok=int(text.origin != "none" and text.secrets == 0 and text.pii == 0))
+            remote_ok=int(text.origin != "none" and text.scanned and text.secrets == 0 and text.pii == 0))
         try:
             client = self.ctx.client
             space = self.store.ensure_active_space(client.model_id, client.revision, len(vector))

@@ -468,3 +468,56 @@ def test_an_upload_link_save_waits_out_a_cold_start(env, monkeypatch):
     save(env, inp=remote_inp())
     save(env, inp=remote_inp(), can_wait=True)
     assert seen == [True, False]
+
+
+# -- remote vetting: "not scanned" is never "clean" (audit F2) ----------------------
+
+CUT_FILLER = "menu item " * 900  # 9,000 characters, past the 8,000-character cut
+
+
+def test_email_in_picture_text_blocks_remote_even_with_redaction_off(env):
+    env.client.ocr = ("rapidocr", "call amy@example.org for the table")
+    r = save(env, png("e1"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    # what is stored is untouched: redaction is off, so the address stays
+    assert "amy@example.org" in env.runtime.requests[-1].content
+
+
+def test_credential_after_the_ocr_cut_blocks_remote(env):
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}{KEY}")
+    r = save(env, png("e2"))
+    assert len(CUT_FILLER) > ingest.MAX_OCR_CHARS
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+    assert KEY not in env.runtime.requests[-1].content  # the cut text is still what is stored
+
+
+def test_email_after_the_ocr_cut_blocks_remote_with_redaction_on(env):
+    env.config = SimpleNamespace(pii_redaction=True)
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}write to amy@example.org")
+    r = save(env, png("e3"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+
+
+def test_a_scan_that_cannot_run_is_not_clean(env, monkeypatch):
+    def boom(_text):
+        raise RuntimeError("scanner down")
+
+    monkeypatch.setattr(ingest, "scan_sensitive", boom)
+    env.client.ocr = ("rapidocr", "just a menu")
+    r = save(env, png("e4"))
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["remote_ok"] == 0
+
+
+def test_cached_ocr_keeps_the_scan_verdict(env):
+    env.client.ocr = ("rapidocr", "call amy@example.org for the table")
+    save(env, png("e5"))
+    again = save(env, png("e5"), profile_id="p2")
+    assert env.client.calls.count("ocr") == 1
+    assert env.store.get_item(again.media_id)["remote_ok"] == 0
+
+
+def test_clean_text_past_the_cut_is_still_remote_ok(env):
+    env.client.ocr = ("rapidocr", f"{CUT_FILLER}the end")
+    r = save(env, png("e6"))
+    assert env.store.get_item(r.media_id)["remote_ok"] == 1

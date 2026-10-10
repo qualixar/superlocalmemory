@@ -116,3 +116,30 @@ def test_enabled_by_env(monkeypatch, value) -> None:
 def test_env_off_values(monkeypatch, value) -> None:
     monkeypatch.setenv("SLM_PII_REDACTION", value)
     assert pii_redaction_enabled(_Cfg(False)) is False
+
+
+# -- scan_sensitive: counts for vetting, independent of redaction (audit F2) -------
+
+def test_scan_counts_email_and_credential_without_changing_anything():
+    from superlocalmemory.memory_core import scan_sensitive
+
+    text = "mail amy@example.org key sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+    found = scan_sensitive(text)
+    assert found.pii >= 1 and found.secrets >= 1 and not found.clean
+    assert text == "mail amy@example.org key sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+
+
+def test_scan_of_clean_and_empty_text_is_clean():
+    from superlocalmemory.memory_core import scan_sensitive
+
+    assert scan_sensitive("a menu with soup").clean
+    assert scan_sensitive("").clean
+
+
+def test_scan_refuses_text_it_cannot_read_in_full():
+    from superlocalmemory.memory_core import save_path, scan_sensitive
+
+    with pytest.raises(ValueError):
+        scan_sensitive("x" * (save_path.MAX_SCAN_CHARS + 1))
+    with pytest.raises(ValueError):
+        scan_sensitive(b"bytes")  # type: ignore[arg-type]

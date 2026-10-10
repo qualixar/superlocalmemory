@@ -30,7 +30,9 @@ from typing import Any, Literal
 
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
-from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
+from superlocalmemory.memory_core import (
+    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+)
 from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
@@ -93,6 +95,9 @@ class _Ocr:
     text: str = ""
     pii: int = 0
     secrets: int = 0
+    #: True only when the whole OCR text was scanned for personal data and
+    #: credentials, whatever the redaction setting. Unscanned is never clean.
+    scanned: bool = False
 
 
 @dataclass
@@ -274,7 +279,8 @@ def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
 def _ocr_key(stored_sha: str, redact: bool):
     from superlocalmemory.cache.keys import CacheKey, params_hash
 
-    return CacheKey(stored_sha, "ocr.auto", "1", params_hash=params_hash({"redaction": redact, "lang": "auto"}))
+    # "2": the entry carries the full-text scan verdict (older entries do not).
+    return CacheKey(stored_sha, "ocr.auto", "2", params_hash=params_hash({"redaction": redact, "lang": "auto"}))
 
 
 def _ocr(job: _Job, info: dict[str, Any]) -> _Ocr:
@@ -286,9 +292,14 @@ def _ocr(job: _Job, info: dict[str, Any]) -> _Ocr:
     except Exception:  # noqa: BLE001 - a cache fault only costs a recompute
         logger.debug("ocr cache read skipped")
     reply = job.client.ocr_image(info["stored_path"], wait_cold=False)
-    engine, text = str(reply.get("engine") or "none"), str(reply.get("text") or "")[:MAX_OCR_CHARS]
-    prepared = prepare_for_save(text, origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact)
+    engine, full = str(reply.get("engine") or "none"), str(reply.get("text") or "")
+    prepared = prepare_for_save(full[:MAX_OCR_CHARS], origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact)
     out = _Ocr(engine, prepared.text, prepared.pii_count, prepared.secret_count)
+    try:  # vetting reads ALL of the text; what is stored stays the cut, redacted text
+        found = scan_sensitive(full)
+        out = _Ocr(engine, prepared.text, found.pii, found.secrets, scanned=True)
+    except Exception:  # noqa: BLE001 - an unscanned picture is simply not cleared for remote use
+        logger.warning("picture text could not be scanned; it stays local-only")
     if engine != "none" and job.cache is not None:
         try:
             job.cache.put(key, json.dumps(out.__dict__).encode("utf-8"), kind="json")
@@ -387,7 +398,7 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         original_relpath=relpath, exif_json=info.get("exif") or {}, captured_at=_captured_at(info.get("exif") or {}),
         anchor_memory_id=saved.memory_id,
         origin="folder" if args.get("folder") else "tool", thumb_webp=info["thumb"],
-        remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
+        remote_ok=int(ocr.engine != "none" and ocr.scanned and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
         _write_row(job, fields, vector, profile_id, signature)
