@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from superlocalmemory.core import ram_lock
+from superlocalmemory.runtimes import media_models
 from superlocalmemory.runtimes.features import media_enabled, register_media_stop_hook
 from superlocalmemory.runtimes.ports import MediaEmbedderPort
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 WORKER_PATH = Path(__file__).resolve().parent / "multimodal_worker.py"
 DEFAULT_IDLE_S = 1800.0
-DEFAULT_RSS_LIMIT_MB = 1600
+DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0
 _LOAD_RAM_MB = 1500
@@ -69,7 +70,8 @@ class MediaWorkerClient(MediaEmbedderPort):
         self.role = role  # "image": a vision-only model that never embeds text
         self.idle_s = float(idle_s if idle_s is not None else _env_number("SLM_MEDIA_WORKER_IDLE_S", DEFAULT_IDLE_S))
         self.rss_limit_mb = int(rss_limit_mb if rss_limit_mb is not None
-                                else _env_number("SLM_MEDIA_WORKER_RSS_LIMIT_MB", DEFAULT_RSS_LIMIT_MB))
+                                else _env_number("SLM_MEDIA_WORKER_RSS_LIMIT_MB",
+                                                         media_models.rss_limit_mb_for(model_id)))
         self.request_timeout_s, self.load_timeout_s = request_timeout_s, load_timeout_s
         self.dim = 0
         self._lock = threading.Lock()
@@ -96,6 +98,10 @@ class MediaWorkerClient(MediaEmbedderPort):
         if not self.model_id.startswith("fake:") and weights.is_dir() and any(weights.iterdir()):
             return str(weights)
         return self.model_id
+
+    def _max_pixels(self) -> int:
+        profile = media_models.profile_for(self.model_id)
+        return profile.image_max_pixels if profile is not None else 0
 
     def _worker_env(self) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
@@ -175,7 +181,7 @@ class MediaWorkerClient(MediaEmbedderPort):
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
                 reply = self._roundtrip({"cmd": "load", "model": self._model_arg(), "revision": self.revision,
-                                         "role": self.role, "hf_home": str(self._env.weights_dir()), "device": "auto"},
+                                         "role": self.role, "max_pixels": self._max_pixels(), "hf_home": str(self._env.weights_dir()), "device": "auto"},
                                         self.load_timeout_s)
         except RuntimeError as exc:
             if isinstance(exc, MediaWorkerError):

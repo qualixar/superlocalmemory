@@ -14,8 +14,10 @@ from __future__ import annotations
 TEXT_MARKER = "[Text in image]\n"
 #: The whole content of an image that had neither words nor readable text.
 NO_TEXT = "[Image without text]"
+#: Follows a document's title, so a one-word title is still a saveable memory.
+DOCUMENT = "[PDF document]"
 
 #: Every label recall removes before judging whether a memory has text of its own.
-LABELS: tuple[str, ...] = (TEXT_MARKER.strip(), NO_TEXT)
+LABELS: tuple[str, ...] = (TEXT_MARKER.strip(), NO_TEXT, DOCUMENT)
 
-__all__ = ["LABELS", "NO_TEXT", "TEXT_MARKER"]
+__all__ = ["DOCUMENT", "LABELS", "NO_TEXT", "TEXT_MARKER"]

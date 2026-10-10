@@ -73,6 +73,7 @@ from superlocalmemory.storage.write_coordinator import (
     WriteCoordinator,
     WriteCoordinatorError,
     WriteResult,
+    _thaw_json,
 )
 
 QueryableWriter = Callable[[IngestionRequest, str], list[str]]
@@ -1084,7 +1085,7 @@ class CanonicalRememberRuntime:
                 profile_id=request.profile_id,
                 source_type=request.source_type,
                 idempotency_key=request.idempotency_key,
-                metadata=dict(request.metadata),
+                metadata=_thaw_json(request.metadata),  # nested records were frozen in the queue
                 scope=request.scope,
                 shared_with=request.shared_with,
                 trusted_actor_id=request.trusted_actor_id,

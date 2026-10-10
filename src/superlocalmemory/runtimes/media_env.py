@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 from superlocalmemory.runtimes import managed_env as _env
+from superlocalmemory.runtimes import media_models
 from superlocalmemory.runtimes.managed_env import EnvSpec, HuggingFaceSource, ManagedEnv
 from superlocalmemory.runtimes.media_canary import media_canary
 
@@ -28,10 +29,10 @@ MEDIA_REQUIREMENTS: tuple[str, ...] = (
     "pyobjc-framework-Vision==12.2.2; sys_platform == 'darwin'",
 )
 
-#: The model repository id still has to be confirmed against the real hub.
-MEDIA_MODEL_REPO = "google/embeddinggemma-2"
-#: Empty until the revision is pinned; installing from the hub refuses while empty.
-MEDIA_MODEL_REVISION = ""
+#: The picture model and its pinned hub commit (checked against the hub on 2026-10-10).
+#: The per-model numbers live in media_models.MODEL_PROFILES.
+MEDIA_MODEL_REPO = media_models.EG2_REPO
+MEDIA_MODEL_REVISION = media_models.EG2_REVISION  # 914f7f89142e33e77833254d9c9b90c3cef7303b
 
 GIB = 1024 ** 3
 MEDIA_DOWNLOAD_BYTES = int(1.5 * GIB)

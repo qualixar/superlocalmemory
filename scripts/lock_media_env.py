@@ -15,6 +15,7 @@ unsupported there instead of guessing.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ TARGETS = {
     "windows-amd64": "x86_64-pc-windows-msvc",
 }
 PYTHONS = ("3.12", "3.13", "3.14")
+MACOS_MIN = "14.0"
 CPU_INDEX = "https://download.pytorch.org/whl/cpu"
 
 
@@ -48,6 +50,14 @@ def build_command(platform_tag: str, python: str, requirements: Path, output: Pa
     return cmd
 
 
+def build_env(platform_tag: str) -> dict[str, str]:
+    """Environment for uv. torch ships its macOS wheels for macOS 14 and later only."""
+    env = dict(os.environ)
+    if platform_tag.startswith("darwin"):
+        env["MACOSX_DEPLOYMENT_TARGET"] = MACOS_MIN
+    return env
+
+
 def main(argv: list[str] | None = None) -> int:
     from superlocalmemory.runtimes.media_env import MEDIA_REQUIREMENTS
 
@@ -63,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             for python in args.python or PYTHONS:
                 out = LOCKS / lock_filename(tag, python)
                 print(f"locking {out.name}")
-                subprocess.run(build_command(tag, python, reqs, out), check=True)
+                subprocess.run(build_command(tag, python, reqs, out), check=True, env=build_env(tag))
     return 0
 
 

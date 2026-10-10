@@ -202,7 +202,7 @@ def test_ram_threshold_is_7_5_gib():
     from superlocalmemory.runtimes.media_env import MEDIA_ENV
 
     assert MEDIA_ENV.min_ram_bytes_warn == int(7.5 * 1024 ** 3)
-    assert MEDIA_ENV.model_source.revision == ""
+    assert len(MEDIA_ENV.model_source.revision) == 40
 
 
 def test_real_venv_and_isolated_script(tmp_path, src):

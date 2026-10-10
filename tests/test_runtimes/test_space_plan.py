@@ -113,12 +113,12 @@ def test_current_plan_with_nothing_on_disk_uses_the_shipped_text_model(tmp_path,
 FLOOR_ENV = "SLM_MEDIA_PAIRED_MIN_SCORE"
 
 
-def test_paired_plan_carries_its_own_floor_and_separate_has_none(monkeypatch):
+def test_paired_plan_carries_its_own_floor_and_separate_uses_the_model_floor(monkeypatch):
     monkeypatch.delenv(FLOOR_ENV, raising=False)
     assert sp.PAIRED_MIN_SCORE == 0.05
     assert plan(requested="paired").min_score == 0.05
-    assert plan(requested="separate").min_score is None
-    assert plan(requested="paired", text="other/model").min_score is None  # fell back to separate
+    assert plan(requested="separate").min_score == 0.69  # the picture model's own floor
+    assert plan(requested="paired", text="other/model").min_score == 0.69  # fell back to separate
 
 
 def test_floor_env_override_valid_and_invalid(monkeypatch):
@@ -130,7 +130,7 @@ def test_floor_env_override_valid_and_invalid(monkeypatch):
         monkeypatch.setenv(FLOOR_ENV, bad)
         assert plan(requested="paired").min_score == sp.PAIRED_MIN_SCORE
     monkeypatch.setenv(FLOOR_ENV, "0.9")
-    assert plan(requested="separate").min_score is None
+    assert plan(requested="separate").min_score == 0.69
 
 
 def test_floor_is_not_part_of_the_space_identity(monkeypatch):

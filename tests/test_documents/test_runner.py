@@ -190,3 +190,22 @@ def test_pages_use_the_configured_default_scope_when_none_was_sent(store, tmp_pa
     service, _client, runtime = run(store, tmp_path, ["alpha text", "beta text", "gamma text"], config=cfg)
     assert service.process_next() is True
     assert runtime.requests and all(r.scope == "global" for r in runtime.requests)
+
+
+def _admitting(request):
+    from superlocalmemory.core.engine_ingestion import content_passes_admission
+
+    if not content_passes_admission(request.content):
+        raise AssertionError("ingestion produced no queryable facts")
+
+
+def test_a_one_word_title_still_saves_its_document_memory(store, tmp_path):
+    submit(store, pdf_input(("x",), file_name="report.pdf"))
+    service, _, runtime = run(store, tmp_path, ["a" * 40], runtime=Runtime(on_remember=_admitting))
+    service.process_next()
+    anchors = [r for r in runtime.requests if "page" not in r.metadata["_slm_source"]]
+    assert len(anchors) == 1 and anchors[0].content.startswith("report")
+    from superlocalmemory.media.labels import DOCUMENT
+    from superlocalmemory.retrieval.media_rerank import strip_labels
+
+    assert DOCUMENT in anchors[0].content and strip_labels(anchors[0].content) == "report"

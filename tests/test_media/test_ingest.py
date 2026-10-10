@@ -32,6 +32,7 @@ class FakeClient:
         self.ocr, self.phash, self.warm = ocr, phash, warm
         self.calls: list[str] = []
         self.prepare_exc: Exception | None = None
+        self.ext = "png"  # the real worker answers with a leading dot (".png")
 
     def is_warm(self):
         return self.warm
@@ -51,25 +52,29 @@ class FakeClient:
         thumb.write_bytes(b"RIFFthumb")
         ph = self.phash(src) if self.phash else hashlib.sha256(src).hexdigest()[:16]
         return {"mime": "image/png", "width": 3, "height": 2, "exif": {"Make": "Cam"},
-                "phash": ph, "stored_path": str(stored), "stored_ext": "png", "thumb_path": str(thumb)}
+                "phash": ph, "stored_path": str(stored), "stored_ext": self.ext, "thumb_path": str(thumb)}
 
     def ocr_image(self, path, *, wait_cold=True):
         self.calls.append("ocr")
+        assert Path(path).is_file(), "the scratch picture must still be there when it is read"
         engine, text = self.ocr
         return {"engine": engine, "text": text}
 
     def embed_images(self, paths, *, wait_cold=True):
         self.calls.append("embed")
+        assert all(Path(p).is_file() for p in paths), "the scratch picture must still be there when it is read"
         return [[1.0] + [0.0] * (DIM - 1) for _ in paths]
 
 
 class Runtime:
     def __init__(self, fail=False):
-        self.requests, self.fail = [], fail
+        self.requests, self.fail, self.on_remember = [], fail, None
 
     def remember(self, admission, actor, *, deadline_ms, accept_after_ms):
         if self.fail:
             raise RuntimeError("writer down")
+        if self.on_remember:
+            self.on_remember(admission)
         self.requests.append(admission)
         n = len(self.requests)
         return SimpleNamespace(payload={"status": "queryable", "operation_id": f"op{n}",
@@ -138,6 +143,14 @@ def test_happy_path(env):
     assert r.extracted_text_preview == "Invoice 42 total"
     assert env.store.knn([1.0] + [0.0] * (DIM - 1), "p1", 1)[0][0] == r.media_id
     assert not list((env.root / "media" / "tmp").iterdir())
+
+
+def test_the_real_worker_extension_has_a_leading_dot(env):
+    env.client.ext = ".png"
+    r = save(env)
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["original_relpath"].endswith(".png")
+    assert ".." not in env.store.get_item(r.media_id)["original_relpath"]
 
 
 def test_image_without_words_or_text_still_gets_an_anchor(env):
@@ -415,3 +428,22 @@ def test_off_still_says_turned_off(root):
 def test_bad_input_is_reported_as_bad_input_while_off(root, tmp_path):
     assert "could not be found" in _bare(MediaInput(path=tmp_path / "nope.png")).reason
     assert "not supported" in _bare(MediaInput(base64=base64.b64encode(b"%PDF-1.4" + b"x" * 30).decode())).reason
+
+
+def _admitting(request):
+    from superlocalmemory.core.engine_ingestion import content_passes_admission
+
+    if not content_passes_admission(request.content):
+        raise AssertionError("ingestion produced no queryable facts")
+
+
+def test_a_one_word_file_name_without_words_or_text_still_saves(env):
+    env.runtime.on_remember = _admitting
+    r = save(env, inp=MediaInput(base64=base64.b64encode(png()).decode(), file_name="photo.png"))
+    assert r.status == "stored"
+
+
+def test_a_one_word_note_without_image_text_still_saves(env):
+    env.runtime.on_remember = _admitting
+    r = save(env, content="cat")
+    assert r.status == "stored" and env.runtime.requests[0].content.startswith("cat")

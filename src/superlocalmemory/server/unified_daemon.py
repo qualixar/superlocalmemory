@@ -6293,6 +6293,15 @@ _mcp_app = None
 # Server entry point
 # ---------------------------------------------------------------------------
 
+def _worker_limit_mb(cmdline: list[str], default: int) -> int:
+    """The watchdog limit for one child; the picture worker has a larger one of its own (0 = none)."""
+    if any(str(part).endswith("multimodal_worker.py") for part in cmdline):
+        from superlocalmemory.runtimes.media_models import watchdog_limit_mb
+
+        return watchdog_limit_mb(default)
+    return default
+
+
 def _start_memory_watchdog() -> None:
     """v3.4.7: Background watchdog that kills child workers exceeding memory limit.
 
@@ -6313,10 +6322,11 @@ def _start_memory_watchdog() -> None:
                 for child in parent.children(recursive=True):
                     try:
                         rss_mb = child.memory_info().rss / (1024 * 1024)
-                        if rss_mb > MAX_WORKER_MB:
+                        limit_mb = _worker_limit_mb(child.cmdline(), MAX_WORKER_MB)
+                        if 0 < limit_mb < rss_mb:
                             logger.warning(
                                 "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
-                                child.name(), child.pid, rss_mb, MAX_WORKER_MB,
+                                child.name(), child.pid, rss_mb, limit_mb,
                             )
                             child.kill()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
