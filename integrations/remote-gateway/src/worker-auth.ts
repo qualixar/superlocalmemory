@@ -8,11 +8,12 @@ import {WorkerEntrypoint} from 'cloudflare:workers';
 import type {AuthRequest} from '@cloudflare/workers-oauth-provider';
 import {calculateJwkThumbprint} from 'jose';
 import {authorizationServer,type AuthorizationEnv,type NativeAuthProps} from './authorization-server.ts';
-import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,validateAuthorizationRequest,memoryAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
+import {AUTH_ISSUER,MCP_RESOURCE,OWNER_RESOURCE,selectedScopes,ticked,validateAuthorizationRequest,memoryAuthorizationRequest,verifyGithubIdentity} from './authorization-policy.ts';
 import {escapeHtml,exchangeGithubCode,githubAuthorizationUrl,renderConsentPage,renderAuthPage,renderAuthFailure,renderSignInComplete,dashboardReturnCookie,dashboardReturnUrl} from './auth-flow.ts';
 import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
+import {toolsForScopes} from './request-policy.ts';
 export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;}
 interface ConsentContext {request:AuthRequest;bootstrapId?:string;ownerId?:string;}
 const LOOPBACK_HOSTS=['127.0.0.1','localhost','[::1]'];
@@ -79,7 +80,7 @@ async function handleConsent(request:Request,env:AuthWorkerEnv):Promise<Response
  const api=authorizationServer.getOAuthApi(env);
  if(fields.get('decision')==='deny'){const denied=await api.denyConsent(request,handle);await finishConsent(handle,env);return redirect(denied.redirectTo,denied.headers);}
  if(fields.get('decision')!=='allow')return response(400,'invalid_decision');
- const scopes=context.request.resource===OWNER_RESOURCE?['slm:connect']:context.request.scope.filter(s=>s==='slm:read'||s==='slm:write'&&fields.get('write')==='yes'||s==='slm:session'&&fields.get('session')==='yes');
+ const scopes=context.request.resource===OWNER_RESOURCE?['slm:connect']:ticked(context.request.scope,name=>fields.get(name));
  const approved=await api.approveConsent(request,handle,{scope:scopes});await finishConsent(handle,env);
  const verifier=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
  const upstream=await api.beginUpstream(approved.request,{data:{verifier,bootstrapId:context.bootstrapId},headers:approved.headers});
@@ -123,7 +124,7 @@ async function selectConnection(request:Request,env:AuthWorkerEnv):Promise<Respo
  const approved=await api.approveConsent(request,handle,{scope:scopes});await finishConsent(handle,env);
  if(approved.request.clientId!==saved.request.clientId||approved.request.resource!==MCP_RESOURCE)return response(400,'consent_unavailable');
  const authorizationId=crypto.randomUUID();const props:AuthProps={ownerId:saved.ownerId,authorizationId,connectionId};
- const tools=['recall','search','fetch','get_status',...(scopes.includes('slm:write')?['remember']:[]),...(scopes.includes('slm:session')?['session_init','close_session','report_feedback','report_outcome']:[])];
+ const tools=toolsForScopes(scopes);
  await env.REGISTRIES.getByName(connectionId).addAuthorization({authorizationId,ownerId:saved.ownerId,connectionId,clientId:approved.request.clientId,audience:MCP_RESOURCE,consentedTools:tools,consentedScopes:scopes as Scope[],consentedCorrection:false,consentedSharedRead:false,consentedGlobalRead:false,authorizationVersion:1,revokedAt:null});
  const completed=await api.completeAuthorization({request:approved.request,userId:saved.ownerId,metadata:{connectionId},scope:scopes,props,revokeExistingGrants:false});
  return request.headers.get('Accept')?.includes('text/html')?clientHandoff(completed.redirectTo,approved.headers):redirect(completed.redirectTo,approved.headers);
