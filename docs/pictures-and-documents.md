@@ -11,17 +11,17 @@ The **Upgrade memory engine (preview)** card is a separate, optional step. It re
 | Memory (RAM) | 16 GB. Computers sold as 16 GB report a little less, so the check passes from 15 GiB. |
 | Disk | About 1.5 GB for the models, plus what you save (up to 2 GB per profile). |
 | Systems | macOS on Apple Silicon, Windows x64, Linux x86_64. Python 3.12, 3.13 or 3.14. |
-| Not yet supported | Linux on ARM64 (Raspberry Pi, Graviton, Ampere) and Intel Macs. Text memory works there as before. |
+| Not yet supported | Linux on ARM64 (Raspberry Pi, Graviton, Ampere), Windows on ARM and Intel Macs. Text memory works there as before. |
 
-Below 16 GB the switch is refused with the reason, because the picture model and a large PDF together can push a smaller machine into swapping. If you understand that risk, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from and turn the feature on again; SLM logs a warning each time it allows this.
+Below 16 GB the switch is refused with the reason, because the picture model and a large PDF together can push a smaller machine into swapping. If you understand that risk, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from and turn the feature on again; SLM logs that warning once per run of the daemon (or terminal command), not on every save, so look for it near the start of the log.
 
 ## Limits
 
 | What | Limit |
 |---|---|
 | Picture formats | PNG, JPEG, GIF (first frame) and WebP |
-| One picture | 25 MB from a file, the dashboard or an upload link; 8 MB as pasted data in a tool call |
-| One PDF | 100 MB (change with `SLM_DOC_MAX_MB`); 25 MB as pasted data in a tool call |
+| One picture | 25 MB from a file, the dashboard or an upload link; 8 MB as pasted data in a tool call from an app on this computer, and 512 KB when a remote app pastes it |
+| One PDF | 100 MB (change with `SLM_DOC_MAX_MB`); 25 MB as pasted data in a tool call from an app on this computer, and 512 KB when a remote app pastes it |
 | PDF pages | 500. A longer PDF is refused as a whole, not cut short. |
 | Reading a PDF | 30 seconds per page and 20 minutes per document; the reader is stopped past 1.6 GB of memory |
 | Library | 2 GB of pictures and PDFs per profile |
@@ -36,7 +36,7 @@ A web app connected through Web access can save a picture or PDF in two ways.
 
 **One-time upload links (any web app).** The app asks SLM for a link and gives it to you; you open it and choose the file. A link:
 
-- belongs to the app that asked for it, and works for one file only;
+- belongs to the app that asked for it, and is for one file. If the upload breaks partway, it can be started again up to 3 times; once a file is saved the link is spent;
 - must be started within 10 minutes, and the upload must finish within 20 minutes of starting;
 - is limited to 3 open links per connected app and 20 uploads per app per day;
 - accepts only the kind of file it was made for (picture or PDF), checked from the file's first bytes on your computer.

@@ -96,6 +96,19 @@ def _routed_daemon_call(method: str, path: str, body: dict | None = None) -> dic
     except DaemonConflict as exc:  # e.g. a correction already open: retrying cannot help
         return {"success": False, "code": "CONFLICT", "retryable": False, "error": exc.detail}
 
+def _remember_path(replaces_id: str | None) -> str:
+    """``/remember``, marked with who is asking when a remote app replaces a memory.
+
+    The daemon then lets it replace only a memory it may see. A plain save, and any save from
+    this computer, keeps the bare path.
+    """
+    if replaces_id is None:
+        return "/remember"
+    from superlocalmemory.mcp.remote_visibility import with_view
+
+    return with_view("/remember")
+
+
 def _emit_event(event_type: str, payload: dict | None = None,
                 source_agent: str = "mcp_client") -> None:
     """Emit an event to the EventBus (best-effort, never raises)."""
@@ -304,7 +317,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     resp = None
                     try:
                         resp = await _asyncio.to_thread(
-                            daemon_request, "POST", "/remember", body,
+                            daemon_request, "POST", _remember_path(replaces_id), body,
                             **request_flags,
                         )
                     except Exception as exc:
@@ -1365,9 +1378,13 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
             named = requested_profile(profile_id)
             if await asyncio.to_thread(is_daemon_running):
+                from superlocalmemory.mcp.remote_visibility import with_view
+
                 path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
                 if named:
                     path += "?profile_id=" + urllib.parse.quote(named, safe="")
+                # A remote app is marked, so the daemon deletes only what that app may see.
+                path = with_view(path)
                 result = await asyncio.to_thread(_routed_daemon_call, "DELETE", path)
                 if isinstance(result, dict) and result.get("code"):
                     return result
@@ -1443,7 +1460,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
             named = requested_profile(profile_id)
             if await asyncio.to_thread(is_daemon_running):
-                path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+                from superlocalmemory.mcp.remote_visibility import with_view
+
+                # A remote app is marked, so the daemon changes only what that app may see.
+                path = with_view("/api/memories/" + urllib.parse.quote(fact_id, safe=""))
                 body = {"content": content.strip(), **({"profile_id": named} if named else {})}
                 # A refusal (unknown profile, a correction already open) comes back
                 # with its code and retryable False; only no answer is retryable.
@@ -1531,7 +1551,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             if (profile_id or "").strip():
                 # Only when set, so a legacy call stays byte-identical.
                 payload["profile_id"] = profile_id.strip()
-            path = "/api/corrections/" + urllib.parse.quote(case_id, safe="") + "/" + action
+            from superlocalmemory.mcp.remote_visibility import with_view
+
+            path = with_view(
+                "/api/corrections/" + urllib.parse.quote(case_id, safe="") + "/" + action)
             result = await asyncio.to_thread(daemon_request, "POST", path, payload)
             if isinstance(result, dict) and result.get("success"):
                 return result

@@ -414,7 +414,9 @@ def _stored_suggestion(engine: Any, profile_id: str, fact_id: str) -> str | None
 
 
 @router.post("/confirm")
-def post_confirm(request: Request, body: ConfirmRequest):
+def post_confirm(request: Request, body: ConfirmRequest,
+                 # How a remote caller came in; it can only hide more.
+                 caller_view: str = Query("", max_length=32)):
     """Confirm (or set) the kind of 1-200 facts at once.
 
     Permission: WRITE on the profile (``profile_id``, else the active one),
@@ -431,11 +433,16 @@ def post_confirm(request: Request, body: ConfirmRequest):
     slots: list[int] = []
     profile_id = ""
     routed = routed_profile_id(body.profile_id)
+    view = remote_view.parse_view(caller_view)
     for index, item in enumerate(body.items):
         try:
             engine, profile_id = _authorize(request, item.fact_id, routed)
         except _UnknownRoutedProfile as exc:
             return _unknown_profile(exc.profile_id)
+        if view and remote_view.hidden_among(view, engine._db, profile_id, [item.fact_id]):
+            # A memory this app may not see is answered like one that is not there.
+            results[index] = {"fact_id": item.fact_id, "ok": False, "error": "Memory not found."}
+            continue
         if item.kind is not None:
             parsed = parse_kind(item.kind)
             value = parsed.value if parsed is not None else None
@@ -459,7 +466,9 @@ def post_confirm(request: Request, body: ConfirmRequest):
 
 
 @router.patch("/fact/{fact_id}")
-def patch_fact_kind(request: Request, fact_id: str, body: KindEdit):
+def patch_fact_kind(request: Request, fact_id: str, body: KindEdit,
+                    # How a remote caller came in; it can only hide more.
+                    caller_view: str = Query("", max_length=32)):
     """Set one fact's kind.
 
     Permission: WRITE on the profile (``profile_id``, else the active one),
@@ -479,6 +488,9 @@ def patch_fact_kind(request: Request, fact_id: str, body: KindEdit):
                                              routed_profile_id(body.profile_id))
     except _UnknownRoutedProfile as exc:
         return _unknown_profile(exc.profile_id)
+    view = remote_view.parse_view(caller_view)
+    if view and remote_view.hidden_among(view, _engine_obj._db, profile_id, [fact_id]):
+        raise HTTPException(404, detail="Memory not found")
     applied = _set_kinds(request, profile_id, [(fact_id, parsed.value)])
     if not applied or not applied[0].get("ok"):
         raise HTTPException(404, detail="Memory not found")

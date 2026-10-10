@@ -41,6 +41,7 @@ def test_npm_manifest_allowlists_only_runtime_install_scripts() -> None:
         "scripts/postinstall-interactive.js",
         "scripts/postinstall/validation.js",
         "scripts/postinstall/media-request.js",
+        "scripts/postinstall/node-arch.js",
         "scripts/postinstall/engine-upgrade.js",
         "scripts/preuninstall.js",
     } <= files
@@ -66,6 +67,7 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall.js",
         "scripts/postinstall/validation.js",
         "scripts/postinstall/media-request.js",
+        "scripts/postinstall/node-arch.js",
         "scripts/postinstall/engine-upgrade.js",
         "scripts/preuninstall.js",
     }

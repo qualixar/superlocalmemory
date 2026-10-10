@@ -101,6 +101,7 @@ _MESSAGES = {
     "revoked": "This upload link no longer works. Ask the app for a new one.",
     "not_allowed": "This computer no longer lets this app add files. Ask the owner to allow it again.",
     "invalid_request": "That upload request was not understood.",
+    "disk_full": files.DISK_FULL,
 }
 
 
@@ -355,7 +356,13 @@ class UploadLinks:
             raise UploadError("too_much_data")
         path = self.temp_path(row.upload_id)
         path.unlink(missing_ok=True)
-        self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        try:
+            self._write(path, data, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except OSError as exc:
+            path.unlink(missing_ok=True)  # no half-written scratch file, and no attempt is spent
+            if files.is_disk_full(exc):
+                raise UploadError("disk_full") from None
+            raise
         conn.execute(
             "UPDATE upload_links SET state='receiving', total=?, received=?, next_index=1, attempts=attempts+1, "
             "started_at=COALESCE(started_at, ?), nonce=?, touched_at=?, result_json='' WHERE upload_id=?",
@@ -380,11 +387,23 @@ class UploadLinks:
                 raise UploadError("bad_order")
         except OSError:
             raise UploadError("bad_order") from None
-        self._write(path, data, os.O_WRONLY | os.O_APPEND)
+        try:
+            self._write(path, data, os.O_WRONLY | os.O_APPEND)
+        except OSError as exc:
+            if files.is_disk_full(exc):
+                self._trim(path, row.received)  # drop a half-written chunk; what arrived stays
+                raise UploadError("disk_full") from None
+            raise
         received = row.received + len(data)
         conn.execute("UPDATE upload_links SET received=?, next_index=next_index+1, touched_at=? WHERE upload_id=?",
                      (received, self._now(), row.upload_id))
         return received
+
+    @staticmethod
+    def _trim(path: Path, size: int) -> None:
+        """Cut the scratch file back to ``size`` bytes (best effort)."""
+        with contextlib.suppress(OSError):
+            os.truncate(path, size)
 
     @staticmethod
     def _write(path: Path, data: bytes, flags: int) -> None:

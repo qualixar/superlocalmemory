@@ -194,9 +194,15 @@ def test_no_service_and_broken_service_do_not_enable_remote(configured):
     assert client.get("/api/v3/connections/status").status_code == 503
 
 
-def test_actual_daemon_advertises_dormant_web_connection_feature():
+def test_actual_daemon_advertises_dormant_web_connection_feature(caplog, tmp_path, monkeypatch):
+    # Its own data folder: the real app must not depend on (or touch) whatever folder an
+    # earlier test left the process pointing at. It failed once in the full suite that way.
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "slm"))
     from superlocalmemory.server.unified_daemon import create_app
-    app = create_app()
+    with caplog.at_level("WARNING"):
+        app = create_app()
+    # If the optional add-on failed to install, say why (the daemon logs it with a traceback).
+    assert "remote_connections_router unavailable" not in caplog.text, caplog.text[-3000:]
     client = TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 5000))
     # No lifespan start: this tests the real app/middleware registration without
     # launching background providers, mesh or memory engine workers.

@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { printWhatsNew, runMediaStep } = require('./postinstall/media-request.js');
+const { nodeRunsTranslated } = require('./postinstall/node-arch.js');
 const { runUpgradeStep } = require('./postinstall/engine-upgrade.js');
 
 const MIN_PYTHON = Object.freeze([3, 12]);
@@ -266,12 +267,23 @@ function pythonGuidance(platform = os.platform()) {
   return lines;
 }
 
-// Machines with no build of the pinned security library (cryptography 50): an Intel
-// (x86_64) Python on macOS, including an x86_64 Python under Rosetta on Apple Silicon,
-// and a 32-bit Python on Windows. pip would fail deep in dependency resolution instead.
-function unsupportedMachine(platform, machine, is64) {
+// Machines SuperLocalMemory cannot run on: an Intel (x86_64) Python on macOS (the
+// pinned security library, cryptography 50, has no Intel Mac build), a 32-bit Python
+// on Windows or Linux, and Windows on ARM. pip would fail deep in dependency
+// resolution instead. An Intel answer on a Mac can be false: a universal2 Python
+// started by a Node that runs translated (Rosetta) reports x86_64 although the Mac
+// is Apple Silicon, so `translated` (see nodeRunsTranslated) changes the advice.
+function unsupportedMachine(platform, machine, is64, translated = false) {
   const m = String(machine || '').toLowerCase();
   if (platform === 'darwin' && m === 'x86_64') {
+    if (translated === true) {
+      return [
+        'This Node.js is running as an Intel program on an Apple Silicon Mac (translated by Rosetta),',
+        'so the Python it starts reports Intel too. SuperLocalMemory needs everything to run natively.',
+        'Install the Apple Silicon (arm64) Node.js (nodejs.org installer, or Homebrew in /opt/homebrew),',
+        'open a new terminal, and run Node natively, then: npm rebuild -g superlocalmemory',
+      ].join('\n');
+    }
     return [
       'This Python is an Intel (x86_64) build, and SuperLocalMemory needs an Apple Silicon (arm64) one.',
       'On an Apple Silicon Mac, install the arm64 Python (Homebrew in /opt/homebrew: brew install python@3.13,',
@@ -279,9 +291,17 @@ function unsupportedMachine(platform, machine, is64) {
       'Intel Macs are not supported: the security library SuperLocalMemory pins has no Intel Mac build.',
     ].join('\n');
   }
+  if (platform === 'win32' && m === 'arm64') {
+    return 'Windows on ARM is not supported yet: the security library SuperLocalMemory pins has no '
+      + 'Windows ARM build. Use a 64-bit Intel or AMD Windows computer, or WSL with an x86_64 Linux.';
+  }
   if (platform === 'win32' && is64 === false) {
     return 'This Python is 32-bit. SuperLocalMemory needs 64-bit Python 3.12-3.14 on Windows '
       + '(winget install Python.Python.3.13), then: npm rebuild -g superlocalmemory';
+  }
+  if (platform === 'linux' && (is64 === false || ['i386', 'i486', 'i586', 'i686', 'armv6l', 'armv7l'].includes(m))) {
+    return 'This computer or this Python is 32-bit. SuperLocalMemory needs a 64-bit Linux '
+      + '(x86_64 or aarch64) with 64-bit Python 3.12-3.14, then: npm rebuild -g superlocalmemory';
   }
   return null;
 }
@@ -330,7 +350,7 @@ function main(argv = process.argv.slice(2)) {
     return 1;
   }
   const machine = pythonMachine(python);
-  const refusal = unsupportedMachine(machine.platform, machine.machine, machine.is64);
+  const refusal = unsupportedMachine(machine.platform, machine.machine, machine.is64, nodeRunsTranslated());
   if (refusal) {
     console.error('');
     console.error(refusal);
@@ -341,7 +361,7 @@ function main(argv = process.argv.slice(2)) {
   if (!locationCheck.ok) {
     console.error(`SuperLocalMemory: refusing unsafe runtime location: ${locationCheck.error}.`);
     console.error('Move that path aside manually, verify it contains no needed files, then run:');
-    console.error('  npm rebuild superlocalmemory');
+    console.error('  npm rebuild -g superlocalmemory');
     return 1;
   }
 
@@ -370,7 +390,7 @@ function main(argv = process.argv.slice(2)) {
     } else {
       console.error('Repair the selected Python installation so the stdlib venv module is available, then run:');
     }
-    console.error('  npm rebuild superlocalmemory');
+    console.error('  npm rebuild -g superlocalmemory');
     return 1;
   }
 
@@ -420,10 +440,9 @@ function main(argv = process.argv.slice(2)) {
   if (installPackage.status !== 0) {
     console.error(`SuperLocalMemory: private-runtime installation failed (${failureDetail(installPackage)}).`);
     console.error(`Tried Python source: ${packageSource}`);
-    console.error('This install needs network access to PyPI, or set SLM_LOCAL_WHEEL=/path/to/superlocalmemory-<version>-py3-none-any.whl for air-gapped installs, then run:');
-    console.error('  npm rebuild superlocalmemory');
+    console.error('This install needs network access to PyPI (or set SLM_LOCAL_WHEEL=/path/to/superlocalmemory-<version>-py3-none-any.whl for air-gapped installs).');
     console.error('Check network access, available disk space, and Python build prerequisites, then run:');
-    console.error('  npm rebuild superlocalmemory');
+    console.error('  npm rebuild -g superlocalmemory');
     console.error('No system Python packages or SLM durable data were modified.');
     return 1;
   }
@@ -450,7 +469,7 @@ function main(argv = process.argv.slice(2)) {
     console.error(
       `SuperLocalMemory: runtime identity check failed (npm=${packageVersion}, python=${installedVersion || 'unavailable'}).`,
     );
-    console.error('Run `npm rebuild superlocalmemory` to repair the package-owned runtime.');
+    console.error('Run `npm rebuild -g superlocalmemory` to repair the package-owned runtime.');
     return 1;
   }
 
@@ -500,6 +519,7 @@ module.exports = {
   pythonCandidates,
   pythonGuidance,
   unsupportedMachine,
+  nodeRunsTranslated,
   runtimePythonPath,
   shouldForceCpuTorch,
   TORCH_CPU_INDEX_URL,

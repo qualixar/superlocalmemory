@@ -164,6 +164,11 @@ def _not_found(replaces: str) -> ReplacesRejected:
                    "memory_id returned by remember or recall.")
 
 
+def not_found(replaces: str) -> ReplacesRejected:
+    """The refusal for an id that names no memory; also given for one a remote app may not see."""
+    return _not_found(replaces)
+
+
 def _foreign(facts: list[_Fact], profile_id: str, replaces: str) -> ReplacesRejected:
     if any(_visible_to(f, profile_id) for f in facts):
         return ReplacesRejected(
@@ -435,6 +440,6 @@ def replace_after_save(runtime: Any, engine: Any, *, replaces: str, profile_id: 
             "cases": cases, "undo": undo}
 
 
-__all__ = ["MAX_FACTS", "ROUTED_UNDO_HINT", "ReplacementRefused", "UNDO_HINT",
+__all__ = ["MAX_FACTS", "ROUTED_UNDO_HINT", "ReplacementRefused", "UNDO_HINT", "not_found",
            "apply_replacement", "check_replaceable",
            "ledger_actor_id", "named_facts", "replace_after_save"]
