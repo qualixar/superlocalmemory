@@ -221,3 +221,24 @@ def test_cleanup_removes_expired_links_their_files_and_strays(links, clock, tmp_
 def test_the_note_travels_with_the_link(links):
     link = mint(links, note="the whiteboard from Monday")
     assert links.find(link.token, CONN).note == "the whiteboard from Monday"
+
+
+def test_housekeeping_runs_at_first_use_then_at_most_hourly(links, clock):
+    stray = links.temp_dir / "upload-old.part"
+    stray.write_bytes(b"x")
+    os.utime(stray, (clock.now - 7200, clock.now - 7200))
+    mint(links)  # first use after start cleans up
+    assert not stray.exists()
+    again = links.temp_dir / "upload-old2.part"
+    again.write_bytes(b"x")
+    os.utime(again, (clock.now - 7200, clock.now - 7200))
+    mint(links, conn=OTHER)
+    assert again.exists()  # not within the hour
+    clock.now += 3601
+    mint(links, conn=OTHER)
+    assert not again.exists()
+
+
+def test_cleanup_creates_nothing_on_a_computer_that_never_made_a_link(tmp_path):
+    assert ul.UploadLinks(tmp_path).cleanup() == 0
+    assert not (tmp_path / "media").exists()

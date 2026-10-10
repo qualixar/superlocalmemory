@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -48,9 +49,11 @@ RETENTION_S = DAY_S + 3_600
 STRAY_FILE_S = 3_600
 KINDS = ("image", "document")
 DB_NAME = "uploads.db"
+HOUSEKEEPING_S = 3_600
 #: Where a link opens: the gateway's public MCP host. The page is ``<base>/u/<connection>/<token>``.
 UPLOAD_BASE_URL = "https://mcp.superlocalmemory.com"
 
+logger = logging.getLogger(__name__)
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 _DOMAIN = b"superlocalmemory-upload-link-v1\0"
 _DDL = """CREATE TABLE IF NOT EXISTS upload_links (
@@ -171,6 +174,7 @@ class UploadLinks:
         self._clock = clock
         self._lock = threading.RLock()
         self._ready = False
+        self._last_clean: int | None = None
 
     # -- storage ------------------------------------------------------------
 
@@ -235,6 +239,7 @@ class UploadLinks:
             raise UploadError("invalid_kind")
         if len(note or "") > MAX_NOTE_CHARS:
             raise UploadError("note_too_long")
+        self._housekeep()
         now = self._now()
         with self._tx() as conn:
             open_now = conn.execute(
@@ -276,6 +281,8 @@ class UploadLinks:
             raise UploadError("empty")
         if len(data) > MAX_CHUNK_BYTES:
             raise UploadError("chunk_too_large")
+        if index == 0:
+            self._housekeep()
         with self._tx() as conn:
             row = self._by_token(conn, token, connection_id)
             self._live(row)
@@ -371,26 +378,46 @@ class UploadLinks:
 
     # -- housekeeping -------------------------------------------------------
 
-    def cleanup(self) -> int:
-        """Remove scratch files of spent or abandoned uploads and old rows; returns files removed."""
+    def _housekeep(self) -> None:
+        """Clean up at the first use after start, then at most once an hour. Never fails the caller."""
         now = self._now()
-        removed = 0
-        with self._tx() as conn:
-            rows = [self._row(r) for r in conn.execute("SELECT * FROM upload_links").fetchall()]
-            for row in rows:
-                gone = row.state in ("done", "failed") or (
-                    row.state in ("open", "receiving") and now > _deadline(row))
-                if gone and row.state in ("open", "receiving"):
-                    conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
-                                 (json.dumps({"ok": False, "code": "expired",
-                                              "message": _MESSAGES["expired"]}), row.upload_id))
-                if gone:
-                    removed += self._unlink(self.temp_path(row.upload_id))
-            conn.execute("DELETE FROM upload_links WHERE created_at < ?", (now - RETENTION_S,))
-        for entry in self.temp_dir.glob("upload-*.part"):
+        if self._last_clean is not None and now - self._last_clean < HOUSEKEEPING_S:
+            return
+        self._last_clean = now
+        try:
+            self.cleanup()
+        except Exception as exc:  # noqa: BLE001 - housekeeping must not block an upload
+            logger.warning("upload housekeeping skipped (%s)", type(exc).__name__)
+
+    def cleanup(self) -> int:
+        """Remove scratch files of spent or abandoned uploads and old rows; returns files removed.
+
+        Creates nothing: a computer that never made an upload link has nothing to clean.
+        """
+        now = self._now()
+        removed = self._expire_rows(now) if (self._root / "media" / DB_NAME).exists() else 0
+        scratch = self._root / "media" / "tmp"
+        for entry in (scratch.glob("upload-*.part") if scratch.is_dir() else ()):
             with contextlib.suppress(OSError):
                 if entry.lstat().st_mtime < now - STRAY_FILE_S:
                     removed += self._unlink(entry)
+        return removed
+
+    def _expire_rows(self, now: int) -> int:
+        removed = 0
+        with self._tx() as conn:
+            for found in conn.execute("SELECT * FROM upload_links").fetchall():
+                row = self._row(found)
+                running = row.state in ("open", "receiving")
+                if running and now <= _deadline(row):
+                    continue
+                if running:
+                    conn.execute("UPDATE upload_links SET state='failed', result_json=? WHERE upload_id=?",
+                                 (json.dumps({"ok": False, "code": "expired",
+                                              "message": _MESSAGES["expired"]}), row.upload_id))
+                if row.state != "finishing":
+                    removed += self._unlink(self.temp_path(row.upload_id))
+            conn.execute("DELETE FROM upload_links WHERE created_at < ?", (now - RETENTION_S,))
         return removed
 
     @staticmethod

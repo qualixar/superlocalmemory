@@ -2103,6 +2103,14 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover - startup remains fail-soft
         logger.warning("pending picture moves not retried: %s", exc)
 
+    # Scratch files of upload links that never finished before the last stop.
+    try:
+        from superlocalmemory.media.upload_links import default_links
+
+        await asyncio.to_thread(default_links().cleanup)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("upload scratch files not cleaned: %s", exc)
+
     # Register the SSE bridge inside the application lifespan.  FastAPI's
     # legacy ``on_event`` hook is deprecated and, more importantly, made a
     # second startup mechanism compete with the daemon's existing lifespan.
