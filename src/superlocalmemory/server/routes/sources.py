@@ -28,7 +28,7 @@ from superlocalmemory.sources.roots import RootRefused
 router = APIRouter(prefix="/api/v3/sources", tags=["sources"])
 _NO_STORE = {"Cache-Control": "no-store"}
 _STATUS = {"unknown_source": 404, "remote_access_on": 409, "writer_not_ready": 503,
-           "erasure_incomplete": 503, "cannot_save": 500}
+           "erasure_incomplete": 503, "removal_incomplete": 503, "cannot_save": 500}
 
 
 class AddRequest(BaseModel):

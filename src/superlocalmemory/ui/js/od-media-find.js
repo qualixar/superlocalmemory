@@ -62,8 +62,7 @@
     img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
     li.appendChild(img);
     li.appendChild(el('span', 'od-find-line', line));
-    var score = Number(r.score);
-    if (isFinite(score)) li.appendChild(el('span', 'muted', Math.round(score * 100) + '% match'));
+    // Results are listed best first. The score ranks; it is not a probability, so no '% match'.
     return li;
   }
 

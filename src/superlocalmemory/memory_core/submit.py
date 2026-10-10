@@ -13,8 +13,10 @@ server use this instead of building a write request themselves.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from superlocalmemory.memory_core.save_scope import resolve_scope
@@ -31,6 +33,12 @@ logger = logging.getLogger(__name__)
 #: The same bounds the HTTP remember route gives the writer.
 DEADLINE_MS = 2_000
 ACCEPT_AFTER_MS = 1_200
+#: How long an import waits for a queued save to commit before it defers its work.
+SETTLE_WAIT_S = 20.0
+
+
+class SavePending(RuntimeError):
+    """The save is durable and queued, but has no memory or fact ids yet; retry later, same key."""
 
 
 @dataclass(frozen=True)
@@ -134,3 +142,30 @@ def submit_memory(
         fact_ids=fact_ids, operation_id=str(payload.get("operation_id") or ""),
         pii_count=pii + meta_pii, secret_count=secrets,
     )
+
+
+def submit_memory_settled(
+    runtime: Any, request: SaveRequest, *, config: object | None, wait_s: float | None = None,
+    clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
+) -> SaveReceipt:
+    """Save, and wait for the ids: imports that must later find what they saved use this.
+
+    Under writer contention ``submit_memory`` answers ``accepted``: durable, but no fact ids yet.
+    Re-sending the same request under the same idempotency key returns the canonical receipt once
+    the commit lands, and never stores the memory twice. A request without a key is given one
+    first, so a re-send cannot become a second save. Still queued after ``wait_s``: SavePending,
+    and the caller defers its work (the same key on retry finds the committed save).
+    """
+    if not request.idempotency_key:
+        request = replace(request, idempotency_key=uuid.uuid4().hex)
+    end = clock() + (SETTLE_WAIT_S if wait_s is None else wait_s)
+    delay = 0.25
+    while True:
+        receipt = submit_memory(runtime, request, config=config)
+        if receipt.status != "accepted":
+            return receipt
+        left = end - clock()
+        if left <= 0:
+            raise SavePending("the save is queued and has not committed yet")
+        sleep(min(delay, left))
+        delay = min(delay * 2, 2.0)

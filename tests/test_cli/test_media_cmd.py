@@ -39,6 +39,7 @@ def daemon(monkeypatch):
 
     for mod in (media_cmd, features_cmd):
         monkeypatch.setattr(mod, "daemon_request", fake)
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: True)  # the fake daemon is up
     return seen, state
 
 
@@ -89,9 +90,31 @@ def test_enable_on_a_terminal_asks_and_defaults_to_no(daemon, monkeypatch):
     assert any(m == "POST" for m, *_ in seen)
 
 
+def test_enable_starts_slm_when_it_is_not_running(daemon, monkeypatch, capsys):
+    """First run: `slm media enable` starts the daemon itself instead of saying 'run slm restart'."""
+    seen, state = daemon
+    state["reply"] = None
+    started = []
+
+    def start():
+        started.append(True)
+        state["reply"] = STATUS
+        return True
+
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(media_cmd, "ensure_daemon", start)
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
+    assert started == [True]
+    assert "Starting SuperLocalMemory" in capsys.readouterr().out
+    assert ("POST", "/api/v3/features/media/enable", {"yes": True, "source": "cli"}) in seen
+
+
 def test_daemon_down_exits_3_with_a_restart_hint(daemon, monkeypatch, capsys):
     _, state = daemon
     state["reply"] = None
+    monkeypatch.setattr(media_cmd, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(media_cmd, "ensure_daemon", lambda: False)  # could not start it
     _tty(monkeypatch, False)
     with pytest.raises(SystemExit) as exc:
         media_cmd.cmd_media(_args(media_command="enable", yes=True))
@@ -273,3 +296,41 @@ def test_gc_parser_is_wired():
     media_cmd.register_media_parser(parser.add_subparsers(dest="command"))
     assert parser.parse_args(["media", "gc"]).apply is False
     assert parser.parse_args(["media", "gc", "--apply"]).apply is True
+
+
+REPAIR_DONE = {"dry_run": False, "missing": 3, "repaired": 2, "failed": 1, "skipped_no_file": 0,
+               "remaining": 0, "index_needs_rebuild": False, "rebuilt_index": False, "reason": ""}
+
+
+def test_repair_runs_by_default_and_says_what_it_did(daemon, capsys):
+    seen, state = daemon
+    state["reply"] = REPAIR_DONE
+    media_cmd.cmd_media(_args(media_command="repair", dry_run=False))
+    assert ("POST", "/api/v3/media/repair", {"dry_run": False}) in seen
+    out = capsys.readouterr().out
+    assert "Repaired 2 of 3 pictures" in out and "1 picture could not be repaired" in out
+
+
+def test_repair_dry_run_counts_and_points_at_the_command(daemon, capsys):
+    seen, state = daemon
+    state["reply"] = {**REPAIR_DONE, "dry_run": True, "repaired": 0, "failed": 0, "index_needs_rebuild": True}
+    media_cmd.cmd_media(_args(media_command="repair", dry_run=True))
+    assert ("POST", "/api/v3/media/repair", {"dry_run": True}) in seen
+    out = capsys.readouterr().out
+    assert "3 pictures" in out and "slm media repair" in out and "rebuilding" in out
+
+
+def test_repair_with_nothing_to_do_says_so(daemon, capsys):
+    _, state = daemon
+    state["reply"] = {**REPAIR_DONE, "missing": 0, "repaired": 0, "failed": 0}
+    media_cmd.cmd_media(_args(media_command="repair", dry_run=False))
+    assert "already be found" in capsys.readouterr().out
+
+
+def test_repair_parser_is_wired():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    media_cmd.register_media_parser(parser.add_subparsers(dest="command"))
+    assert parser.parse_args(["media", "repair"]).dry_run is False
+    assert parser.parse_args(["media", "repair", "--dry-run"]).dry_run is True

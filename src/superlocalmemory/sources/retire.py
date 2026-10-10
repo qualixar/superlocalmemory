@@ -11,16 +11,17 @@ from typing import Any
 
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
-from superlocalmemory.sources.ingest import facts_of
+from superlocalmemory.sources.ingest import facts_of, facts_of_keys
 from superlocalmemory.sources.store import SourceStore, entries_of, memory_entries
 
 logger = logging.getLogger(__name__)
 
 
-def _facts(runtime: Any, entries: list[dict[str, Any]]) -> list[str]:
+def _facts(runtime: Any, entries: list[dict[str, Any]], profile_id: str = "") -> list[str]:
     facts = [f for e in entries for f in e.get("f") or []]
     unknown = [e["m"] for e in entries if e.get("m") and not e.get("f")]
-    return sorted({*facts, *facts_of(runtime, unknown)})
+    queued = [e["k"] for e in entries if e.get("k") and not e.get("m") and not e.get("f")]
+    return sorted({*facts, *facts_of(runtime, unknown), *facts_of_keys(runtime, profile_id, queued)})
 
 
 # Local hiding goes through ``archive_fact`` (recall already skips archived facts), the same as
@@ -36,7 +37,7 @@ def hide_entries(host: SourceHost, runtime: Any, source: dict, entries: list[dic
     failures = 0
     for entry in live:
         ok = True
-        for fact in _facts(runtime, [entry]):
+        for fact in _facts(runtime, [entry], source["profile_id"]):
             try:
                 runtime.archive_fact(source["profile_id"], fact,
                                      idempotency_key=f"src:{source['source_id'][:12]}:{fact}")
@@ -64,16 +65,22 @@ def retry_hides(host: SourceHost, store: SourceStore, runtime: Any, source: dict
     return failures
 
 
-def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str, Any]) -> None:
-    """Soft-remove the PDF a file became, unless it is shared with a document saved another way."""
+def hide_document(store: SourceStore, runtime: Any, source: dict, row: dict[str, Any]) -> int:
+    """Soft-remove the PDF a file became, unless it is shared with a document saved another way.
+
+    Returns 1 when the document is still not removed afterwards (its pages may still be
+    recalled), else 0. A document that was already removed counts as done.
+    """
     if not row.get("document_id") or row.get("reason") == "shared":
-        return
+        return 0
     from superlocalmemory.documents import remove_document
 
     try:
         remove_document(row["document_id"], source["profile_id"], runtime=runtime, store=store._m)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - counted below
         logger.warning("a folder document could not be hidden (%s)", type(exc).__name__)
+    document = store._m.get_document(row["document_id"])
+    return int(bool(document) and document["state"] != "tombstoned")
 
 
 def hide_picture(store: SourceStore, row: dict[str, Any]) -> None:
@@ -98,7 +105,7 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     """Hide everything a file row owns. With ``tombstone`` the row stays, marked deleted."""
     entries = entries_of(row)
     failures = hide_entries(host, runtime, source, entries, row["relpath"])
-    hide_document(store, runtime, source, row)
+    failures += hide_document(store, runtime, source, row)
     hide_picture(store, row)
     release_copies(store, source, row)
     fields: dict[str, Any] = {"entries": entries}
@@ -111,7 +118,7 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
 
 def _erase(host: SourceHost, runtime: Any, source: dict, entries: list[dict[str, Any]],
            subject: str) -> bool:
-    facts = _facts(runtime, entries)
+    facts = _facts(runtime, entries, source["profile_id"])
     if not facts:
         return True
     if host.eraser is None:

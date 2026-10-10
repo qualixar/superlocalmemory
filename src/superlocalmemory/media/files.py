@@ -13,6 +13,7 @@ the media folder; nothing here follows a link out of it.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -25,6 +26,14 @@ _EXT = re.compile(r"[a-z0-9]{1,8}")
 _STALE_S = 3600.0
 _swept: set[str] = set()
 _sweep_lock = threading.Lock()
+
+
+#: What a person is told when a save fails because the disk (or their quota) is full.
+DISK_FULL = "The disk is full. Free some space and try again."
+
+
+def is_disk_full(exc: BaseException) -> bool:
+    return isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC))
 
 
 def media_root(data_root: str | Path) -> Path:

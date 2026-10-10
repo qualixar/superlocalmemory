@@ -29,6 +29,7 @@ from superlocalmemory.documents import (
 )
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.media.repair import repair as run_repair
 from superlocalmemory.retrieval.remote_view import parse_view
 from superlocalmemory.server.loopback import is_loopback
 
@@ -177,6 +178,32 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
     if not req.dry_run:  # removing stray files takes more than removing one's own leftovers
         _require_manage_if(request, profile, True)
     report = await asyncio.to_thread(run_gc, profile, req.dry_run)
+    return JSONResponse(dataclasses.asdict(report))
+
+
+class MediaRepairRequest(BaseModel):
+    profile_id: str = ""
+    dry_run: bool = False
+
+
+@router.post("/media/repair")
+async def repair_pictures(req: MediaRepairRequest, request: Request):
+    """Give pictures that have no vector one in the current index (rebuilding it when the model changed).
+
+    The picture index belongs to the whole library, so this is a MANAGE act like removing stray files.
+    A dry run only counts and needs no credentials.
+    """
+    from superlocalmemory.access.rbac import Permission
+    from superlocalmemory.server.routes.helpers import require_engine
+    from superlocalmemory.server.write_identity import authenticated_request_actor
+
+    _require_local(request)
+    if not req.dry_run:
+        authenticated_request_actor(request, actor_kind="http-media")
+    engine = require_engine(request)
+    profile = _profile(engine, req.profile_id, request, Permission.WRITE)
+    _require_manage_if(request, profile, True)
+    report = await asyncio.to_thread(run_repair, profile, req.dry_run)
     return JSONResponse(dataclasses.asdict(report))
 
 

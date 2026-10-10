@@ -199,6 +199,52 @@ async def remove_connected_app(
         raise HTTPException(503, "apps_unavailable") from None
 
 
+class AbilityIntent(BaseModel):
+    """The second yes: let every app on this connection use bots (mesh) or pictures (media).
+
+    The first yes is the owner's approval of each app at sign-in; both are needed."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    profile_id: str
+    ability: Literal["mesh", "media"]
+    allow: StrictBool
+
+
+def _abilities_runtime(request: Request):
+    runtime = _apps_runtime(request)
+    if not hasattr(runtime, "key_abilities"):
+        raise HTTPException(503, "connection_service_unavailable")
+    return runtime
+
+
+@router.get("/{connection_id}/abilities")
+async def connection_abilities(request: Request, connection_id: str):
+    """Whether apps on this connection may message your other bots and save pictures."""
+    owner, profile = _context(request)
+    runtime = _abilities_runtime(request)
+    try:
+        return await runtime.key_abilities(owner, profile, connection_id)
+    except ValueError as exc:
+        raise _apps_error(str(exc)) from None
+    except Exception:
+        logger.error("remote_connection_abilities_unavailable")
+        raise HTTPException(503, "apps_unavailable") from None
+
+
+@router.post("/{connection_id}/abilities")
+async def set_connection_ability(request: Request, connection_id: str, intent: AbilityIntent):
+    owner, profile = _context(request, mutation=True)
+    if intent.profile_id != profile:
+        raise HTTPException(409, "profile_changed")
+    runtime = _abilities_runtime(request)
+    try:
+        return await runtime.set_key_ability(owner, profile, connection_id, intent.ability, intent.allow)
+    except ValueError as exc:
+        raise _apps_error(str(exc)) from None
+    except Exception:
+        logger.error("remote_connection_ability_change_unavailable")
+        raise HTTPException(503, "apps_unavailable") from None
+
+
 @router.get("/status")
 async def connection_status(request: Request):
     owner, profile = _context(request)

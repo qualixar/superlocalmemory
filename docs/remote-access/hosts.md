@@ -175,13 +175,19 @@ any browser, pick the file and press Save; the page says "Saved to your memory"
 when your computer has it. The file goes from your browser to your computer
 over the connection that is already open, and nothing is kept in the cloud on
 the way. Your computer must be awake and running SuperLocalMemory, and the app
-needs both boxes above and the `media` key permission. Pictures can be up to
+needs the **Allow images and documents** box, a write key and the pictures
+permission on your computer (below). Pictures can be up to
 25 MB (PNG, JPEG, GIF or WebP) and PDFs up to 100 MB; each connection can make 3
 open links at a time and 20 uploads a day.
 
 Ticking a box is not enough. You must also allow it for the connection on your
-computer. Each connection has a remote key named `web-<connection id>`. Find it
-with `slm remote keys list`, then run:
+computer. In the dashboard, open **Connected apps**; the **Web access** row has
+two switches, **Let these apps message your other bots** and **Let these apps
+save and read pictures and documents**. They apply to every app on that
+connection, on its next request.
+
+From a terminal, the same switches are on the connection's remote key, named
+`web-<connection id>` (find it with `slm remote keys list`):
 
 ```bash
 slm remote keys allow web-<connection id> mesh
@@ -190,15 +196,26 @@ slm remote keys disallow web-<connection id> mesh
 ```
 
 `allow` turns a permission on and `disallow` turns it off. Without both the box
-and the key, the app is refused.
+and the switch, the app is refused. Turning pictures off also ends any upload
+link the connection has not finished.
 
 What a web app can do with bot messages:
 
 - `mesh_peers` lists your other bots.
 - `mesh_send` sends one message to one bot. There is no broadcast.
-- `mesh_inbox` checks for messages.
-- `mesh_wait` waits up to 20 seconds for a message.
+- `mesh_inbox` checks for messages. Pass `ack` (see below) with the ids you already have.
+- `mesh_wait` waits up to 20 seconds for a message. It takes `ack` too.
 - `mesh_state` reads shared notes. It cannot change them.
+
+**Delivery is at least once.** A relay can drop a reply after SLM has sent it, so
+a message is not marked read when it is handed over. Each reply that carries
+messages also carries `ack_ids`; the app passes those ids as `ack` on its next
+`mesh_inbox` or `mesh_wait` call, and the messages are then marked read. A message
+the app did not acknowledge comes again once about two minutes have passed
+(120 seconds), flagged `"repeat": true`, and at most three times in all; after
+that SLM treats it as delivered. Until the lease runs out a second call does not
+return it, so two calls never both receive a fresh message. Local sessions are
+not affected: their messages are marked read when returned.
 
 Limits: 200 messages sent per app per day. Inbox checks have their own daily
 budget. A connection can have at most 2 waits at once.

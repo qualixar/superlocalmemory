@@ -64,7 +64,7 @@ describe('upgrade memory engine card', () => {
         await h.mount();
         const card = h.document.getElementById('od-engine-upgrade');
         assert.ok(card.querySelector('.badge'), 'a New badge like the what\'s-new card');
-        assert.equal(card.querySelector('.badge').textContent, 'New');
+        assert.equal(card.querySelector('.badge').textContent, 'Preview');  // matches the README: a preview in 4.1.25
         const t = h.text();
         assert.match(t, /Upgrade memory engine/);
         assert.match(t, /Recall keeps working/);

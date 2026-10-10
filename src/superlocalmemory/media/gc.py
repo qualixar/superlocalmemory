@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 YOUNG_FILE_S = 600.0
 _SKIP_DIRS = ("tmp",)
+#: Only a content-addressed original (``ab/ab<62 hex>.ext``) can be a stray. Everything else
+#: under media/ (uploads.db and its sidecars, anything a later release adds) is never collected.
+_ORIGINAL = re.compile(r"([0-9a-f]{2})/\1[0-9a-f]{62}\.[a-z0-9]{1,8}")
 
 
 @dataclass
@@ -41,6 +45,7 @@ class GcReport:
     files_skipped_young: int = 0
     rows_removed: int = 0
     files_removed: int = 0
+    anchors_filled: int = 0
 
 
 def _memory_conn(root: Path) -> sqlite3.Connection | None:
@@ -89,7 +94,7 @@ def _stray_files(store, root: Path, now: float) -> tuple[list[Path], int]:
         rel = path.relative_to(base)
         if rel.parts[0] in _SKIP_DIRS or path.is_symlink() or not path.is_file():
             continue
-        if rel.as_posix() in known:
+        if not _ORIGINAL.fullmatch(rel.as_posix()) or rel.as_posix() in known:
             continue
         if now - path.stat().st_mtime < YOUNG_FILE_S:
             young += 1
@@ -136,8 +141,14 @@ def _memory_side(store, conn: sqlite3.Connection, profile_id: str, report: GcRep
     alive = _existing(conn, profile_id, sorted(set(anchored.values())))
     orphans = sorted(m for m, a in anchored.items() if a not in alive)
     report.rows_without_memory = orphans
-    report.memories_without_row = sorted(m for m, media_id in _media_memories(conn, profile_id)
-                                         if media_id not in every)
+    named = _media_memories(conn, profile_id)
+    report.memories_without_row = sorted(m for m, media_id in named if media_id not in every)
+    # A picture saved while its memory was still queued has no anchor yet; the memory names it.
+    for memory_id, media_id in named:
+        if media_id in every and not every[media_id]:
+            report.anchors_filled += 1
+            if not report.dry_run:
+                store.fill_anchor(media_id, memory_id)
     if orphans and not report.dry_run:
         out = erase_items(store, root, orphans)
         report.rows_removed = out["items"]
