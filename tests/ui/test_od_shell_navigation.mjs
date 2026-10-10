@@ -173,7 +173,12 @@ describe('OD shell navigation lifecycle', function () {
     assert.equal(replacement.style.display, 'none');
 
     releaseRefresh();
-    await new Promise(function (resolve) { window.setTimeout(resolve, 5); });
+    // The refresh settles through several promise and timer hops; on a busy machine 5 ms is
+    // not enough. Wait for the snapshot to go (or 2 s), then check.
+    for (let waited = 0; waited < 2000; waited += 10) {
+      if (!window.document.querySelector('[data-slm-stale-for="memories-pane"]')) break;
+      await new Promise(function (resolve) { window.setTimeout(resolve, 10); });
+    }
     assert.equal(
       window.document.querySelector('[data-slm-stale-for="memories-pane"]'),
       null,
