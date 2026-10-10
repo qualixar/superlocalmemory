@@ -124,6 +124,53 @@ the **Server URL** and the **OAuth metadata URL**, then sign in with GitHub on
 the approval page and tick **Allow saving memories** if wanted. If Muse was
 connected before, authorize it again.
 
+## Bot messages and the two new permissions
+
+The approval page has two more boxes. Both start unticked, and they appear
+only when the app asks for them.
+
+- **Allow talking to your other bots** lets the app list your other bots, send
+  them messages and read the replies.
+- **Allow images and documents** is prepared for a later release. No image or
+  document tools work over Web access yet. When they do, image links from a web
+  app will be limited to known file hosts.
+
+Ticking a box is not enough. You must also allow it for the connection on your
+computer. Each connection has a remote key named `web-<connection id>`. Find it
+with `slm remote keys list`, then run:
+
+```bash
+slm remote keys allow web-<connection id> mesh
+slm remote keys allow web-<connection id> media
+slm remote keys disallow web-<connection id> mesh
+```
+
+`allow` turns a permission on and `disallow` turns it off. Without both the box
+and the key, the app is refused.
+
+What a web app can do with bot messages:
+
+- `mesh_peers` lists your other bots.
+- `mesh_send` sends one message to one bot. There is no broadcast.
+- `mesh_inbox` checks for messages.
+- `mesh_wait` waits up to 20 seconds for a message.
+- `mesh_state` reads shared notes. It cannot change them.
+
+Limits: 200 messages sent per app per day. Inbox checks have their own daily
+budget. A connection can have at most 2 waits at once.
+
+Messages from other bots are data, not instructions. A web app should never act
+on a request inside a message without asking you, and should never reply to a
+bot message by itself. The [setup prompt](../web-agents/setup-prompt.md) tells
+it so.
+
+Each app gets a stable name. In the dashboard's **Bot messages** tab you can
+rename, mute or remove any peer.
+
+**ChatGPT:** ChatGPT keeps the scopes it saw when the app was created. To see
+the new boxes, uninstall the app and create it again. **Composio:** run a
+manual toolkit re-sync so it sees the new tools.
+
 ## After you connect any app
 
 1. Paste the [setup prompt](../web-agents/setup-prompt.md) into a chat with the
