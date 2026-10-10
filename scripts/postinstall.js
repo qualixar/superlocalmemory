@@ -266,6 +266,39 @@ function pythonGuidance(platform = os.platform()) {
   return lines;
 }
 
+// Machines with no build of the pinned security library (cryptography 50): an Intel
+// (x86_64) Python on macOS, including an x86_64 Python under Rosetta on Apple Silicon,
+// and a 32-bit Python on Windows. pip would fail deep in dependency resolution instead.
+function unsupportedMachine(platform, machine, is64) {
+  const m = String(machine || '').toLowerCase();
+  if (platform === 'darwin' && m === 'x86_64') {
+    return [
+      'This Python is an Intel (x86_64) build, and SuperLocalMemory needs an Apple Silicon (arm64) one.',
+      'On an Apple Silicon Mac, install the arm64 Python (Homebrew in /opt/homebrew: brew install python@3.13,',
+      'or the python.org installer run natively, not under Rosetta), then: npm rebuild -g superlocalmemory',
+      'Intel Macs are not supported: the security library SuperLocalMemory pins has no Intel Mac build.',
+    ].join('\n');
+  }
+  if (platform === 'win32' && is64 === false) {
+    return 'This Python is 32-bit. SuperLocalMemory needs 64-bit Python 3.12-3.14 on Windows '
+      + '(winget install Python.Python.3.13), then: npm rebuild -g superlocalmemory';
+  }
+  return null;
+}
+
+function pythonMachine(python) {
+  try {
+    const result = spawnSync(python.command, [...python.prefixArgs, '-c',
+      'import platform, sys; print(sys.platform, platform.machine(), sys.maxsize > 2**32)'], {
+      stdio: 'pipe', timeout: 5000, env: process.env,
+    });
+    const [platform, machine, wide] = String(result.stdout || '').trim().split(/\s+/);
+    return { platform: platform || '', machine: machine || '', is64: wide === 'True' ? true : wide === 'False' ? false : null };
+  } catch (_) {
+    return { platform: '', machine: '', is64: null };
+  }
+}
+
 function printPythonGuidance() {
   for (const line of pythonGuidance()) console.error(line);
 }
@@ -294,6 +327,13 @@ function main(argv = process.argv.slice(2)) {
 
   if (!python) {
     printPythonGuidance();
+    return 1;
+  }
+  const machine = pythonMachine(python);
+  const refusal = unsupportedMachine(machine.platform, machine.machine, machine.is64);
+  if (refusal) {
+    console.error('');
+    console.error(refusal);
     return 1;
   }
 
@@ -459,6 +499,7 @@ module.exports = {
   pypiSpecifier,
   pythonCandidates,
   pythonGuidance,
+  unsupportedMachine,
   runtimePythonPath,
   shouldForceCpuTorch,
   TORCH_CPU_INDEX_URL,

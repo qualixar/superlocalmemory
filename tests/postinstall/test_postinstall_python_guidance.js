@@ -41,3 +41,26 @@ test('every platform says the system Python is never changed', () => {
     assert.match(pythonGuidance(platform).join('\n'), /private virtual environment/);
   }
 });
+
+const { unsupportedMachine } = require('../../scripts/postinstall.js');
+
+test('an Intel Python on a Mac is refused in plain words before pip runs', () => {
+  const why = unsupportedMachine('darwin', 'x86_64', true);
+  assert.match(why, /Intel \(x86_64\)/);
+  assert.match(why, /Apple Silicon/);
+  assert.match(why, /npm rebuild -g superlocalmemory/);
+});
+
+test('a 32-bit Python on Windows is refused', () => {
+  assert.match(unsupportedMachine('win32', 'x86', false), /64-bit/);
+});
+
+test('supported machines pass', () => {
+  for (const [platform, machine] of [['darwin', 'arm64'], ['linux', 'x86_64'], ['linux', 'aarch64'], ['win32', 'AMD64']]) {
+    assert.equal(unsupportedMachine(platform, machine, true), null, `${platform} ${machine}`);
+  }
+});
+
+test('an unknown answer never blocks the install', () => {
+  assert.equal(unsupportedMachine('', '', null), null);
+});
