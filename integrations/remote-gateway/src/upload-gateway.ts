@@ -40,7 +40,7 @@ async function consentActive(env:UploadEnv,connection:string,authorization?:stri
 
 /** Remembers which app the laptop says issued the link, and checks that app's consent. Without a name (an older laptop) the earlier any-app check stands. */
 async function issuerConsent(env:UploadEnv,link:Link,reply:UploadReply):Promise<boolean> {
-  if(reply.authorizationId===undefined)return true;
+  if(reply.authorizationId===undefined){console.warn('upload_link_any_app_consent_fallback');return true;}
   link.authorization=reply.authorizationId;
   return consentActive(env,link.connection,link.authorization);
 }

@@ -302,3 +302,14 @@ test('a laptop that names no app gets the old any-app check (older SuperLocalMem
   await api.handleUpload(post(png(100)),l.env);
   assert.ok(l.asked.length>=2&&l.asked.every(a=>a===undefined));
 });
+
+test('the any-app fallback for a link that names no app is logged with a fixed tag and no ids',async()=>{
+  assert.ok(api);
+  const warnings=[];const original=console.warn;console.warn=(...args)=>warnings.push(args);
+  try{
+    await api.handleUpload(req(),live().env);                                    // older laptop: no authorization_id
+    await api.handleUpload(req(),laptop(bound('app-a')).env);                    // a link that names its app: no fallback
+  }finally{console.warn=original;}
+  assert.deepEqual(warnings,[['upload_link_any_app_consent_fallback']]);
+  assert.ok(!JSON.stringify(warnings).includes(CONN)&&!JSON.stringify(warnings).includes(TOKEN));
+});
