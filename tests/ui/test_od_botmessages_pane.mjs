@@ -136,6 +136,40 @@ describe('Bot messages pane', () => {
     it('an empty list says so', async () => {
         const h = setup({ messages: [] });
         await h.open();
-        assert.match(h.pane.textContent, /No messages yet/);
+        assert.match(h.pane.textContent, /Bots you connect can leave each other messages here/);
+    });
+
+    it('with no messages: one helpful line, an Open Connected apps button, and no Peers heading', async () => {
+        const h = setup({ messages: [] });
+        const seen = [];
+        h.window.slmNavigate = p => seen.push(p);
+        await h.open();
+        assert.match(h.pane.textContent, /Bots you connect can leave each other messages here\. Allow it per app in Connected apps\./);
+        assert.ok(![...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        h.btn('Open Connected apps').click();
+        assert.deepEqual(seen, ['apps-pane']);
+    });
+
+    it('peers show display name, then app, then a short id, with a kind chip; heading appears with peers', async () => {
+        const a = msg(3, 'p-web', 'web', 'x'); a.from.display_name = 'Kitchen bot';
+        const b = msg(2, 'p-loc', 'local', 'y');
+        const c = msg(1, '0123456789abcdef', 'local', 'z'); delete c.from.app;
+        const h = setup({ messages: [a, b, c] });
+        await h.open();
+        assert.ok([...h.pane.querySelectorAll('h3')].some(x => x.textContent === 'Peers'));
+        assert.match(h.row('p-web').textContent, /Kitchen bot/);
+        assert.match(h.row('p-web').textContent, /web/);
+        assert.match(h.row('p-loc').textContent, /app-p-loc/);
+        assert.match(h.row('p-loc').textContent, /this computer/);
+        assert.match(h.row('0123456789abcdef').querySelector('strong').textContent, /^01234567$/);
+    });
+
+    it('a hostile peer display name is text, never markup', async () => {
+        const m = msg(1, 'p-x', 'web', 'hi'); m.from.display_name = XSS;
+        const h = setup({ messages: [m] });
+        await h.open();
+        assert.equal(h.pane.querySelectorAll('img').length, 0);
+        assert.ok(h.row('p-x').textContent.includes(XSS));
+        assert.equal(h.window.__pwn, undefined);
     });
 });
