@@ -91,7 +91,18 @@ def test_ssrf_scheme_enforced() -> None:
     assert v3_api._validate_provider_url("gopher://x/", "10.0.0.9") is not None
 
 
-def test_ssrf_remote_caller_public_ok() -> None:
+def test_ssrf_remote_caller_public_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The policy for a host that resolves to a public address, decided without
+    # the network: a real lookup made this fail wherever DNS is unavailable.
+    import socket
+
+    from superlocalmemory.server import egress_policy
+
+    def _public(host, *args, **kwargs):
+        assert host == "api.openai.com"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.6.192", 0))]
+
+    monkeypatch.setattr(egress_policy.socket, "getaddrinfo", _public)
     assert v3_api._validate_provider_url("https://api.openai.com/v1", "10.0.0.9") is None
 
 
