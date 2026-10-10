@@ -24,7 +24,7 @@ export function makeEnv(routes, { ids = ['pane'], modules = [] } = {}) {
         if (url === '/internal/token') {
             return { ok: true, status: 200, json: async () => ({ token: TOKEN }) };
         }
-        const call = { method, url: String(url), headers, body: init.body ? String(init.body) : '' };
+        const call = { method, url: String(url), headers, body: init.body ? String(init.body) : '', rawBody: init.body };
         calls.push(call);
         const hit = routes.find(([m, p]) => m === method &&
             (typeof p === 'string' ? call.url === p || call.url.startsWith(p + '?') : p.test(call.url)));

@@ -71,9 +71,10 @@ def _minutes(memories: int) -> int:
 
 
 def _minutes_label(minutes: int) -> str:
+    """The time is an estimate (PROVISIONAL_SECONDS_PER_MEMORY, not measured on this machine); say so."""
     if minutes <= 0:
         return "about a moment"
-    return f"about {minutes} minute" + ("" if minutes == 1 else "s")
+    return f"about {minutes} minute" + ("" if minutes == 1 else "s") + " (a rough estimate)"
 
 
 def _reason(already: bool, job_running: bool, media_enabled: bool, env_state: str) -> str:

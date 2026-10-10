@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Sequence
 
 from superlocalmemory.media.store_jobs import utc_stamp
@@ -30,6 +31,28 @@ class DocumentsMixin:
                 f" VALUES ({','.join('?' * len(_NEW_DOC))}, ?, 'processing', ?, ?)",
                 [fields[k] for k in _NEW_DOC] + [origin, now, now])
         return fields["document_id"]
+
+    def insert_document_with_job(self, payload: dict[str, Any], **fields: Any) -> str:
+        """Insert a new document and queue its job in ONE transaction; returns the job id.
+
+        Two separate commits could leave a ``processing`` document with no job when the second
+        failed, and every later upload of the same file would be answered "already saved".
+        """
+        origin = fields.pop("origin", "user")
+        if set(fields) != set(_NEW_DOC):
+            raise ValueError(f"expected exactly {sorted(_NEW_DOC)}")
+        job_id, now = uuid.uuid4().hex, utc_stamp()
+        job_input = {**payload, "document_id": fields["document_id"]}
+        with self._write() as conn:
+            conn.execute(
+                f"INSERT INTO documents({','.join(_NEW_DOC)}, origin, state, created_at, updated_at)"
+                f" VALUES ({','.join('?' * len(_NEW_DOC))}, ?, 'processing', ?, ?)",
+                [fields[k] for k in _NEW_DOC] + [origin, now, now])
+            conn.execute(
+                "INSERT INTO jobs(job_id, profile_id, kind, state, done, total, payload_json, created_at, updated_at)"
+                " VALUES (?, ?, 'document', 'queued', 0, 0, ?, ?, ?)",
+                (job_id, fields["profile_id"], json.dumps(job_input), now, now))
+        return job_id
 
     def get_document(self, document_id: str) -> dict[str, Any] | None:
         row = self._read().execute("SELECT * FROM documents WHERE document_id = ?", (document_id,)).fetchone()
@@ -55,6 +78,14 @@ class DocumentsMixin:
         with self._write() as conn:
             conn.execute(f"UPDATE documents SET {sets}, updated_at = ? WHERE document_id = ?",
                          [*fields.values(), utc_stamp(), document_id])
+
+    def mark_document_ready(self, document_id: str, page_count: int) -> bool:
+        """processing -> ready in one statement; False when it was removed meanwhile (stays removed)."""
+        with self._write() as conn:
+            return conn.execute(
+                "UPDATE documents SET state = 'ready', page_count = ?, updated_at = ?"
+                " WHERE document_id = ? AND state = 'processing'",
+                (page_count, utc_stamp(), document_id)).rowcount == 1
 
     def document_bytes(self, profile_id: str) -> int:
         row = self._read().execute(

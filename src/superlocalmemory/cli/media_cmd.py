@@ -23,6 +23,7 @@ from superlocalmemory.cli.features_cmd import (
 
 SIZE_TEXT = "about 1.5 GB"
 EXIT_LOW_RAM = 4
+REPAIR_TIMEOUT_S = 300.0  # one run works for up to four minutes
 
 
 def _is_tty() -> bool:
@@ -124,15 +125,18 @@ def _plural(n: int, word: str) -> str:
 
 
 def _gc_text(report: dict[str, Any]) -> str:
+    linked = int(report.get("anchors_filled", 0))
     if not report.get("dry_run", True):
-        return (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
+        text = (f"Removed {_plural(int(report.get('rows_removed', 0)), 'picture record')} and "
                 f"{_plural(int(report.get('files_removed', 0)), 'file')}. Your memories are untouched.")
+        return text + (f" Linked {_plural(linked, 'picture')} to its memory." if linked else "")
     rows = len(report.get("rows_without_memory") or [])
     files = len(report.get("files_without_row") or [])
-    if not rows and not files:
+    if not rows and not files and not linked:
         return "Nothing to clean up."
-    return (f"Found {_plural(rows, 'picture record')} without a memory and {_plural(files, 'file')} "
-            "without a record. Nothing was removed; to remove them run: slm media gc --apply")
+    return (f"Found {_plural(rows, 'picture record')} without a memory, {_plural(files, 'file')} "
+            f"without a record and {_plural(linked, 'picture')} not yet linked to its memory. "
+            "Nothing was changed; to fix them run: slm media gc --apply")
 
 
 def _gc(args: Namespace) -> None:
@@ -141,10 +145,40 @@ def _gc(args: Namespace) -> None:
     _emit(args, report, _gc_text(report))
 
 
+def _repair_text(report: dict[str, Any]) -> str:
+    missing, done = int(report.get("missing", 0)), int(report.get("repaired", 0))
+    if report.get("dry_run"):
+        extra = " The picture index also needs rebuilding for the current model." if report.get(
+            "index_needs_rebuild") else ""
+        return (f"{_plural(missing, 'picture')} can't be found by what they show yet.{extra} "
+                "To fix: slm media repair") if missing or extra else "Nothing to repair."
+    lines = []
+    if report.get("rebuilt_index"):
+        lines.append("Rebuilt the picture index for the current model.")
+    lines.append(f"Repaired {done} of {_plural(missing, 'picture')}." if missing
+                 else "Every picture can already be found by what it shows.")
+    for key, text in (("skipped_no_file", "have no file kept, so they were skipped"),
+                      ("failed", "could not be repaired")):
+        if report.get(key):
+            lines.append(f"{_plural(int(report[key]), 'picture')} {text}.")
+    if report.get("remaining"):
+        lines.append(f"{report['remaining']} left; run slm media repair again.")
+    if report.get("reason"):
+        lines.append(str(report["reason"]))
+    return " ".join(lines)
+
+
+def _repair(args: Namespace) -> None:
+    """Make every saved picture findable by what it shows; --dry-run only counts."""
+    report = _call(args, "POST", "/api/v3/media/repair", {"dry_run": bool(getattr(args, "dry_run", False))},
+                   timeout_seconds=REPAIR_TIMEOUT_S)
+    _emit(args, report, _repair_text(report))
+
+
 def cmd_media(args: Namespace) -> None:
     sub = getattr(args, "media_command", None) or "status"
     args.media_command = sub
-    {"enable": _enable, "disable": _disable, "status": _status, "gc": _gc}[sub](args)
+    {"enable": _enable, "disable": _disable, "status": _status, "gc": _gc, "repair": _repair}[sub](args)
 
 
 def register_media_parser(sub: Any) -> None:
@@ -163,3 +197,6 @@ def register_media_parser(sub: Any) -> None:
     g = msub.add_parser("gc", help="find picture leftovers (records without a memory, stray files)")
     g.add_argument("--apply", action="store_true", help="remove them (owner or admin)")
     g.add_argument("--json", **flag)
+    r = msub.add_parser("repair", help="make pictures findable by what they show (re-embeds them; owner or admin)")
+    r.add_argument("--dry-run", action="store_true", help="only count what needs repair")
+    r.add_argument("--json", **flag)

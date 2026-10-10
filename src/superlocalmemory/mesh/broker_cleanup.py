@@ -59,6 +59,10 @@ def _reap_messages(conn: sqlite3.Connection, now: datetime) -> None:
         "DELETE FROM mesh_message_envelopes WHERE message_id NOT IN "
         "(SELECT id FROM mesh_messages)",
     )
+    conn.execute(
+        "DELETE FROM mesh_web_deliveries WHERE message_id NOT IN "
+        "(SELECT id FROM mesh_messages)",
+    )
     # The 9999-... sentinel of a legacy lock sorts after any real now.
     conn.execute("DELETE FROM mesh_locks WHERE expires_at < ?", (now_iso,))
     conn.execute("DELETE FROM mesh_events WHERE created_at < ?", (week_ago,))

@@ -31,7 +31,7 @@ from typing import Any, Literal
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save
-from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
+from superlocalmemory.memory_core.submit import SavePending, SaveReceipt, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
 
@@ -245,9 +245,12 @@ def _file_sha(path: Path) -> str:
 
 def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
     _wait_for_warm(job.client, job.remote)
-    fd = os.open(job.work / "source.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
+    try:
+        fd = os.open(job.work / "source.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+    except OSError as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The image could not be saved.") from None
     info = dict(job.client.prepare_image(job.work / "source.bin", job.work, wait_cold=False))
     ext = str(info.get("stored_ext") or "").lower().lstrip(".")  # the worker answers ".jpg"
     if info.get("mime") not in _MIMES or not _EXT.fullmatch(ext):
@@ -266,8 +269,8 @@ def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
     try:
         job.placed, job.placed_new = files.place_original_noting_new(
             job.root, info["stored_path"], profile_id, info["stored_ext"])
-    except (OSError, ValueError):
-        raise _refuse("The image could not be saved.") from None
+    except (OSError, ValueError) as exc:
+        raise _refuse(files.DISK_FULL if files.is_disk_full(exc) else "The image could not be saved.") from None
     return job.placed
 
 
@@ -337,19 +340,25 @@ def _check_space(job: _Job, dim: int) -> dict[str, Any]:
     """The signature this picture's space must carry; refuses before anything is saved when the index differs."""
     plan = replace(job.plan, image_model=str(job.client.model_id), image_revision=str(job.client.revision), dim=dim)
     if not compatible(plan, job.store.active_signature()):
-        raise _refuse("The picture index was built with a different model; rebuild it from the dashboard.")
+        raise _refuse("The picture index was built with a different model; run: slm media repair")
     return plan.signature()
 
 
+NO_VECTOR_REASON = ("Saved, but this picture can't be found by what it shows yet. "
+                    "To fix that, run: slm media repair")
+
+
 def _write_row(job: _Job, fields: dict[str, Any], vector: list[float], profile_id: str,
-               signature: dict[str, Any]) -> str:
+               signature: dict[str, Any]) -> bool:
+    """Insert the picture's row, then its vector. False when only the vector could not be written."""
     media_id = job.store.insert_item(**fields)
     try:
         space = job.store.ensure_active_space(job.client.model_id, job.client.revision, len(vector), signature)
         job.store.put_vector(media_id, space, profile_id, vector)
     except Exception as exc:  # noqa: BLE001 - the row is kept; only searching by picture is lost
         logger.warning("image %s saved without its vector (%s)", media_id, type(exc).__name__)
-    return media_id
+        return False
+    return True
 
 
 def _cleanup(job: _Job) -> None:
@@ -375,7 +384,13 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         idempotency_key=args["idempotency_key"], scope=args.get("scope"),
         shared_with=tuple(args.get("shared_with") or ()))
     try:
-        saved = submit_memory(args["runtime"], request, config=job.config)
+        saved = submit_memory_settled(args["runtime"], request, config=job.config)
+    except SavePending:
+        # Durable and queued: keep the picture; its anchor stays empty until ``slm media gc``
+        # fills it from the memory that names this media_id.
+        logger.info("image memory is queued; its anchor is filled later")
+        saved = SaveReceipt(status="accepted", memory_id=None, fact_ids=(), operation_id="",
+                            pii_count=0, secret_count=0)
     except Exception as exc:  # noqa: BLE001 - nothing was stored; undo the file
         logger.warning("image memory was not saved (%s)", type(exc).__name__)
         _cleanup(job)
@@ -390,13 +405,14 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
         remote_ok=int(ocr.engine != "none" and ocr.secrets == 0 and ocr.pii == 0))
     preview = ocr.text[:PREVIEW_CHARS]
     try:
-        _write_row(job, fields, vector, profile_id, signature)
+        indexed = _write_row(job, fields, vector, profile_id, signature)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
                             reason="The text was saved; the picture could not be indexed.")
     return MediaReceipt("stored", media_id=media_id, memory_id=saved.memory_id,
-                        near_duplicate_of=near, extracted_text_preview=preview)
+                        near_duplicate_of=near, extracted_text_preview=preview,
+                        reason="" if indexed else NO_VECTOR_REASON)
 
 
 def remember_media(

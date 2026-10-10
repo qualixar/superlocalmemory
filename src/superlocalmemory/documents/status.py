@@ -81,9 +81,17 @@ def remove_document(document_id: str, profile_id: str, *, hard: bool = False, ru
             return _erase(store_ref, document, eraser)
         if document["state"] == "tombstoned":
             return False
+        # Hide first: if any memory cannot be hidden, the document stays listed, so the person
+        # can try again (a removed-looking document with recallable pages has no way back).
         facts = _memory_facts(store_ref, document)
+        if _archive(runtime, profile_id, document_id, facts):
+            return False
         store_ref.tombstone_document(document_id)
-        _archive(runtime, profile_id, document_id, facts)
+        # Pages a running job saved during the removal; anything later is hidden by the job itself
+        # when it sees the tombstone (DocumentJob._hide_saved).
+        late = [f for f in _memory_facts(store_ref, store_ref.get_document(document_id) or document)
+                if f not in set(facts)]
+        _archive(runtime, profile_id, document_id, late)
         return True
     finally:
         if opened:
@@ -103,9 +111,18 @@ def _erase(store: Any, document: dict[str, Any], eraser: Any) -> bool:
     return not out["residue"]
 
 
-def _archive(runtime: Any, profile_id: str, document_id: str, fact_ids: list[str]) -> None:
+def archive_document_facts(store: Any, runtime: Any, document: dict[str, Any]) -> int:
+    """Hide every memory a document owns; returns how many could not be hidden."""
+    return _archive(runtime, document["profile_id"], document["document_id"], _memory_facts(store, document))
+
+
+def _archive(runtime: Any, profile_id: str, document_id: str, fact_ids: list[str]) -> int:
+    """Hide each memory (idempotent per document and fact); returns how many failed."""
+    failed = 0
     for fact_id in fact_ids:
         try:
             runtime.archive_fact(profile_id, fact_id, idempotency_key=f"doc-remove:{document_id}:{fact_id}")
-        except Exception as exc:  # noqa: BLE001 - hide what can be hidden; the rest stays visible, not lost
+        except Exception as exc:  # noqa: BLE001 - counted; the caller decides
+            failed += 1
             logger.warning("a document memory could not be hidden (%s)", type(exc).__name__)
+    return failed

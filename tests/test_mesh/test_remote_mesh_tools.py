@@ -205,3 +205,15 @@ def test_host_only_mesh_tools_still_refuse_a_web_caller(tools, broker, name, arg
     out = _as(APP_A, broker, tools[name], *args)
     assert out == {"ok": False,
                    "error": "mesh messages for connected web apps are not available yet"}
+
+
+def test_a_web_app_inbox_hands_out_ack_ids_and_an_ack_ends_the_redelivery(tools, broker) -> None:
+    local = make_peer(broker, "sess-1")
+    _as(APP_A, broker, tools["mesh_peers"])  # registers the app
+    assert broker.send_message(local, APP_A.peer_ref, "ping")["ok"]
+    first = _as(APP_A, broker, tools["mesh_inbox"])
+    assert first["count"] == 1 and first["ack_ids"] == [first["messages"][0]["id"]]
+    assert _as(APP_A, broker, tools["mesh_inbox"])["count"] == 0  # in flight, not redelivered yet
+    done = _as(APP_A, broker, tools["mesh_wait"], timeout_s=1, ack=first["ack_ids"])
+    assert done["messages"] == [] and "ack_ids" not in done
+    assert rows(broker, "SELECT read FROM mesh_messages")[0]["read"] == 1

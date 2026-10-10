@@ -90,7 +90,7 @@ LOCAL_EMBEDDERS: tuple[ModelEntry, ...] = (
 #: recognised) but not listed in ``catalog()``: they are offered by their own flow.
 MANAGED_EMBEDDERS: tuple[ModelEntry, ...] = (
     _e(id="google/embeddinggemma-2", role="embedder", provider="slm-media",
-       label="EmbeddingGemma 2 (managed)", size_gb=1.5, min_ram_gb=8, dimension=768,
+       label="EmbeddingGemma 2 (managed)", size_gb=1.5, min_ram_gb=16, dimension=768,
        advice="One model for text and pictures, run by SLM's media environment. "
               "Switching to it re-indexes every memory."),
 )

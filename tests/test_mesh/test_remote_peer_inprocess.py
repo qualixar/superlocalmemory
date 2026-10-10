@@ -108,7 +108,8 @@ def test_one_web_app_messages_another_and_only_the_reader_gets_it_once(broker) -
     got = broker.claim_web_inbox(b, "default")
     assert [m["envelope"]["from"]["app"] for m in got] == ["app-a"]
     assert got[0]["envelope"]["from"]["kind"] == "web"
-    assert broker.claim_web_inbox(b, "default") == []
+    assert broker.claim_web_inbox(b, "default") == []     # in flight: no second reader gets it
+    broker.claim_web_inbox(b, "default", ack=[got[0]["id"]])
     assert rows(broker, "SELECT read FROM mesh_messages")[0][0] == 1
 
 
@@ -172,7 +173,10 @@ def test_the_cap_frees_up_once_the_recipient_reads(broker) -> None:
     broker._send_limiter = SendRateLimiter(limit=1000)
     for n in range(50):
         assert broker.web_send(other, "x", ref, f"m{n}", profile_id="default")["ok"]
-    assert len(broker.claim_web_inbox(ref, "default")) == 20       # one claim is capped
+    first = broker.claim_web_inbox(ref, "default")
+    assert len(first) == 20                                          # one claim is capped
+    assert broker.web_send(other, "x", ref, "again", profile_id="default")["ok"] is False
+    broker.claim_web_inbox(ref, "default", ack=[m["id"] for m in first])  # reading = acknowledging
     assert broker.web_send(other, "x", ref, "again", profile_id="default")["ok"]
 
 
@@ -267,3 +271,13 @@ def test_concurrent_web_senders_cannot_pass_the_unread_cap(broker) -> None:
         t.join(30)
     assert sum(outcomes) == 50 and len(outcomes) == 80
     assert len(rows(broker, "SELECT id FROM mesh_messages")) == 50
+
+
+def test_the_directory_a_web_app_sees_has_secrets_redacted_from_summaries(broker) -> None:
+    """Audit round 2 (MU-M5): a token a local agent put in its summary must not reach web apps raw."""
+    token = "ghp_" + "A1b2" * 9
+    local = broker.register_peer("sess-secret", summary=f"deploying with {token}",
+                                 agent_type="claude_code")["peer_id"]
+    listing = {p["peer_id"]: p for p in broker.list_peer_directory("default")}
+    assert token not in listing[local]["summary"]
+    assert "deploying with" in listing[local]["summary"]

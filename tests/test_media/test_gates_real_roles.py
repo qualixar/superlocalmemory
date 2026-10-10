@@ -121,3 +121,13 @@ def test_deleting_strays_asks_for_manage(roles, monkeypatch):
     assert asked == []
     roles.client.post("/api/v3/media/gc", json={"dry_run": False}, headers=roles.headers("admin"))
     assert len(asked) == 1
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("role,code", [("owner", 200), ("admin", 200), ("member", 403), ("viewer", 403)])
+def test_repairing_the_picture_index_needs_manage(roles, monkeypatch, dry_run, role, code):
+    from superlocalmemory.media.repair import RepairReport
+
+    monkeypatch.setattr(media, "run_repair", lambda profile, dry: RepairReport(dry_run=dry))
+    r = roles.client.post("/api/v3/media/repair", json={"dry_run": dry_run}, headers=roles.headers(role))
+    assert r.status_code == code
