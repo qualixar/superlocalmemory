@@ -228,7 +228,7 @@ def _prepare(job: _Job, data: bytes) -> dict[str, Any]:
     with os.fdopen(fd, "wb") as fh:
         fh.write(data)
     info = dict(job.client.prepare_image(job.work / "source.bin", job.work, wait_cold=False))
-    ext = str(info.get("stored_ext") or "").lower()
+    ext = str(info.get("stored_ext") or "").lower().lstrip(".")  # the worker answers ".jpg"
     if info.get("mime") not in _MIMES or not _EXT.fullmatch(ext):
         raise _refuse("The image could not be processed.")
     stored = _inside(job.work, info.get("stored_path"))
@@ -340,11 +340,11 @@ def _cleanup(job: _Job) -> None:
 def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> MediaReceipt:
     profile_id = args["profile_id"]
     info = _prepare(job, data)
-    relpath = _place(job, info)
-    ocr = _ocr(job, info)
+    ocr = _ocr(job, info)  # reads the scratch file, so the file moves to its address only after this
     vector = job.client.embed_images([info["stored_path"]], wait_cold=False)[0]
     signature = _check_space(job, len(vector))
     near = _near_duplicate(job.store, profile_id, info.get("phash"))
+    relpath = _place(job, info)
     media_id = uuid.uuid4().hex
     request = SaveRequest(
         segments=_segments(args["content"], ocr.text), profile_id=profile_id, source_type="media",

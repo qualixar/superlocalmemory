@@ -32,6 +32,7 @@ class FakeClient:
         self.ocr, self.phash, self.warm = ocr, phash, warm
         self.calls: list[str] = []
         self.prepare_exc: Exception | None = None
+        self.ext = "png"  # the real worker answers with a leading dot (".png")
 
     def is_warm(self):
         return self.warm
@@ -51,15 +52,17 @@ class FakeClient:
         thumb.write_bytes(b"RIFFthumb")
         ph = self.phash(src) if self.phash else hashlib.sha256(src).hexdigest()[:16]
         return {"mime": "image/png", "width": 3, "height": 2, "exif": {"Make": "Cam"},
-                "phash": ph, "stored_path": str(stored), "stored_ext": "png", "thumb_path": str(thumb)}
+                "phash": ph, "stored_path": str(stored), "stored_ext": self.ext, "thumb_path": str(thumb)}
 
     def ocr_image(self, path, *, wait_cold=True):
         self.calls.append("ocr")
+        assert Path(path).is_file(), "the scratch picture must still be there when it is read"
         engine, text = self.ocr
         return {"engine": engine, "text": text}
 
     def embed_images(self, paths, *, wait_cold=True):
         self.calls.append("embed")
+        assert all(Path(p).is_file() for p in paths), "the scratch picture must still be there when it is read"
         return [[1.0] + [0.0] * (DIM - 1) for _ in paths]
 
 
@@ -137,6 +140,14 @@ def test_happy_path(env):
     assert r.extracted_text_preview == "Invoice 42 total"
     assert env.store.knn([1.0] + [0.0] * (DIM - 1), "p1", 1)[0][0] == r.media_id
     assert not list((env.root / "media" / "tmp").iterdir())
+
+
+def test_the_real_worker_extension_has_a_leading_dot(env):
+    env.client.ext = ".png"
+    r = save(env)
+    assert r.status == "stored"
+    assert env.store.get_item(r.media_id)["original_relpath"].endswith(".png")
+    assert ".." not in env.store.get_item(r.media_id)["original_relpath"]
 
 
 def test_image_without_words_or_text_still_gets_an_anchor(env):
