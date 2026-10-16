@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import resource
+import pytest
+
+# POSIX only: Windows has no resource module and no open-file soft limit to raise.
+resource = pytest.importorskip("resource")
 
 from superlocalmemory.server import open_files
 

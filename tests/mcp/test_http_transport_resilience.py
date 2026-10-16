@@ -2,7 +2,7 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V4 | mcp 2.0.0 fully-stateless transport
 
-"""Stateless MCP transport contract (mcp==2.0.0).
+"""Stateless MCP transport contract (mcp==2.2.0).
 
 STATELESS IS THE DEFAULT. Session idle-timeout and EventStore SSE resumability
 are illegal/unused under ``stateless_http=True`` (SDK raises RuntimeError if
@@ -89,9 +89,9 @@ class TestStatelessDefaultContract:
         )
         sm = mcp.session_manager
         assert sm.stateless is True
-        assert sm.session_idle_timeout is None, (
-            "idle timeout must be None in stateless mode"
-        )
+        # mcp>=2.2.0 keeps a default idle timeout on every manager; the
+        # stateless path never stores a session, so it has nothing to expire.
+        assert sm._server_instances == {}
 
     def test_no_event_store_in_stateless_manager(self):
         """Stateless transport must not rely on an EventStore."""
@@ -107,18 +107,18 @@ class TestStatelessDefaultContract:
         # Manager may keep the ctor arg as None, or ignore it for stateless path.
         assert getattr(sm, "event_store", None) is None or sm.stateless is True
 
-    def test_stateless_plus_idle_timeout_is_sdk_illegal(self):
-        """Document the SDK invariant: stateless + idle timeout → RuntimeError."""
+    def test_stateful_sessions_are_bounded_by_the_sdk(self):
+        """GHSA-84m7-p3x7-pcfv: mcp>=2.2.0 expires and caps stateful sessions.
+
+        SLM serves stateless by default; SLM_MCP_STATEFUL opts into sessions,
+        and those must not accumulate without bound.
+        """
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from mcp.server.lowlevel import Server
 
-        app = Server("probe")
-        with pytest.raises(RuntimeError, match="session_idle_timeout"):
-            StreamableHTTPSessionManager(
-                app=app,
-                stateless=True,
-                session_idle_timeout=600.0,
-            )
+        sm = StreamableHTTPSessionManager(app=Server("probe"), stateless=False)
+        assert sm.session_idle_timeout is not None and sm.session_idle_timeout > 0
+        assert sm.max_sessions is not None and sm.max_sessions > 0
 
     def test_product_version_on_mcp_server(self):
         """MCPServer.version is set via constructor — no private _mcp_server poke."""

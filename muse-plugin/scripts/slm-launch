@@ -107,7 +107,8 @@ _slm_run_uvx() {
     if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
         export UV_TORCH_BACKEND="${UV_TORCH_BACKEND:-cpu}"
     fi
-    export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
+    # slm sets its own thread defaults (cli/main.py, mcp/server.py); this
+    # launcher sets nothing else (guarded in tests/test_plugin).
     echo "SLM plugin: no installed slm; running superlocalmemory==4.2.7 through uvx (downloaded once, then cached)." >&2
     if [ "${_daemon_running}" -ne 1 ]; then
         uvx --from "superlocalmemory==4.2.7" slm serve start >&2 || \
