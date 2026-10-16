@@ -273,7 +273,11 @@ jobs:
         run: |
           python -m pytest -q -o "addopts=" -o faulthandler_timeout=60 -rs \
             tests/test_plugin/test_windows_mcp_starts_installed_slm.py \
-            tests/server/test_remote_secrets_owner_only.py
+            tests/server/test_remote_secrets_owner_only.py \
+            tests/test_mesh/test_mesh_store.py \
+            tests/test_mesh/test_mesh_store_hardening.py \
+            tests/test_mesh/test_mesh_store_fsync.py \
+            tests/test_cli/test_doctor_reports_mesh_db.py
 
   native-lancedb:
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}

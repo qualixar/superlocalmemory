@@ -454,7 +454,9 @@ def _write_marker(conn: sqlite3.Connection, source: str) -> None:
 
 
 def _fsync(path: Path) -> None:
-    fd = os.open(str(path), os.O_RDONLY)
+    # Write access: Windows' fsync (_commit) refuses a read-only handle with
+    # EBADF, which stopped every Windows daemon from building mesh.db.
+    fd = os.open(str(path), os.O_RDWR | getattr(os, "O_BINARY", 0))
     try:
         os.fsync(fd)
     finally:
