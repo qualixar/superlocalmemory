@@ -72,11 +72,14 @@ def _load_json(path: Path) -> dict:
 @pytest.fixture(scope="module", autouse=True)
 def _ensure_plugin_generated() -> None:
     """Regenerate ignored plugin outputs before checking the plugin layout."""
-    subprocess.run(
-        ["node", "scripts/build-plugin.mjs", "--quiet"],
-        cwd=REPO,
-        check=True,
-    )
+    from tests.test_plugin._plugin_sandbox import plugin_tree_lock
+
+    with plugin_tree_lock():
+        subprocess.run(
+            ["node", "scripts/build-plugin.mjs", "--quiet"],
+            cwd=REPO,
+            check=True,
+        )
 
 
 # ---------------------------------------------------------------------------

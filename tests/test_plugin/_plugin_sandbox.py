@@ -101,3 +101,14 @@ def run(argv: list[str], env: dict[str, str], *, stdin: str = "", timeout: int =
     return subprocess.run(
         argv, env=env, input=stdin, capture_output=True, text=True, timeout=timeout,
     )
+
+
+def plugin_tree_lock():
+    """Cross-process lock for tests that build or check the tracked plugin/ tree.
+
+    Under pytest-xdist one worker can rebuild plugin/ while another runs
+    ``build-plugin.mjs --check`` against it and sees a half-written tree.
+    """
+    from filelock import FileLock
+
+    return FileLock(str(REPO / ".pytest-plugin-tree.lock"))
