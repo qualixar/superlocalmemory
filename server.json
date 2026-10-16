@@ -11,6 +11,21 @@
           "value": "mcp"
         }
       ],
+      "registryType": "pypi",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "version": "4.2.7"
+    },
+    {
+      "identifier": "superlocalmemory",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
       "registryType": "npm",
       "runtimeHint": "npx",
       "transport": {
