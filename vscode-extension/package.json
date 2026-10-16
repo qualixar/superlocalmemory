@@ -2,7 +2,7 @@
   "name": "superlocalmemory",
   "displayName": "SuperLocalMemory",
   "description": "Starts the locally installed SuperLocalMemory MCP server so AI agents in VS Code get long-term memory that stays on your machine.",
-  "version": "4.2.7",
+  "version": "4.2.8",
   "publisher": "qualixar",
   "license": "MIT",
   "icon": "media/icon.png",

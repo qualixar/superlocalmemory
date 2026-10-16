@@ -5,6 +5,85 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.8] — No more lock errors, nothing dropped silently, and your own forgetting settings decide what archives
+
+Upgrading runs a few one-time repairs automatically the first time the daemon
+starts. Nothing to run. Every repair keeps an undo record, and `slm doctor`
+shows what each one did.
+
+### Automatic on first start
+
+- **Mesh gets its own database file.** Agent-to-agent messages, heartbeats and
+  locks move from `memory.db` to `mesh.db`, so mesh traffic can no longer make a
+  memory write wait or fail with "database is locked". Mesh settings (peer
+  names, mutes, web-app connections, shared state) are kept for good; activity
+  older than `mesh.retention_days` (default 7) is cleared, because mesh is live
+  coordination, not memory. `mesh.db` is included in backups.
+- **Made-up dates are removed.** Before 4.1.6 the extraction step sometimes
+  wrote a placeholder date (14 or 15 January 2024, or 15 January 2026) into a fact when it did not
+  know the real one. Those dates are removed from the fact and its date record;
+  the fact itself stays. A date that also appears in the text the fact came
+  from is left alone.
+- **Memories archived against your own settings come back.** One maintenance
+  pass decided archiving with built-in defaults instead of your `forgetting`
+  settings, and an older clock bug archived some memories a day after they were
+  saved. Those memories are restored to the zone your settings give them. Never
+  restored: anything you deleted, forgot or erased.
+- **Leftover search-index rows** from a delete that stopped partway are removed.
+
+### Memory
+
+- **Every part of SLM that can archive a memory now follows your settings.**
+  How often a memory is recalled is not, on its own, a reason to archive it. A
+  test keeps the archive decisions in agreement.
+- **The overnight forgetting pass used the wrong clock** when Ebbinghaus–Langevin
+  coupling was turned on, and could archive months-old memories that should have
+  stayed warm. Thanks to @kenyonxu (#266).
+- **Test strings, placeholder dates and empty facts can no longer be scored as
+  "worth keeping".** They stay searchable; they just don't outrank your notes.
+- `slm delete --profile <name>` deletes a memory in another profile, and the
+  doctor's hidden-memory list names the profile of each row.
+
+### Nothing dropped silently
+
+- **Hook events went missing under load.** The tool-result hook gave the
+  database 50 ms and quietly dropped the event when it was busy. Hooks now hand
+  events to the daemon, which writes them through its single writer; if the
+  daemon is not running, events wait in a small local queue and are written
+  later, once. `slm doctor` has a "Hook events" row.
+- Learning-store writes that gave up after under a second now wait like every
+  other writer.
+
+### Connect more agents
+
+- `slm connect qwen-code`, `kimi-code`, `kimi-cli` and `kiro`.
+- The plugin now ships native manifests for Qwen Code and Kimi Code, and an
+  Agent Plugins manifest, so it installs as a Kiro power.
+- New guide: [OpenCode setup](docs/opencode.md).
+- **Codex printed "Ignoring malformed agent role definition" on every run.** SLM's
+  Codex agent files used the key `instructions`; Codex reads
+  `developer_instructions`. The next `slm upgrade-hosts` rewrites the files SLM
+  wrote; files you edited yourself are left alone.
+- **MCP registry clients start SLM with `uvx` first.** Apps that install
+  servers from the official MCP registry (VS Code, Copilot, Zed) used to run a
+  first-time `npx` install that took longer than they wait. `uvx
+  superlocalmemory mcp` now works.
+
+### Security
+
+- `mcp` 2.0.0 → 2.2.0 for GHSA-84m7-p3x7-pcfv (medium): stateful
+  Streamable-HTTP sessions could pile up. SLM serves stateless by default, so
+  only `SLM_MCP_STATEFUL` users were exposed.
+- The Claude plugin's launcher no longer exports a variable whose name looked
+  like a credential to Anthropic's plugin directory.
+
+### Releases
+
+- A release now publishes itself everywhere: PyPI, npm (trusted publishing),
+  the GitHub release, the MCP registry, Open VSX, the Claude plugin repository,
+  the DeepSeek Harness bundle and ClawHub, and opens a checklist for the
+  listings that need a person. See `docs/release-distribution.md`.
+
 ## [4.2.7] — An agent's "I" stays the agent's, and a damaged keyword index no longer stops an upgrade
 
 No migration. Nothing is moved or deleted.

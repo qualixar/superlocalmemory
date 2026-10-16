@@ -1,7 +1,7 @@
 ---
 name: slm-mesh
 description: Cross-session peer coordination via the SLM mesh network. Lets multiple AI agent sessions on the same machine, and web apps the owner has allowed (ChatGPT, Claude on the web, Grok Bot, Muse, Composio), discover each other, send messages, wait for replies with mesh_wait, share lightweight state, and lock files to avoid conflicts. Covers the at-least-once delivery rule for web apps (pass ack_ids back as ack) and the two permissions a web app needs. Available in the default tool set and in the full, power and mesh MCP profiles. Only `slm mesh status` and `slm mesh peers` exist on the command line; the other tools are MCP-only.
-version: "4.2.7"
+version: "4.2.8"
 agent: agent
 tools:
   - mesh_summary
@@ -387,4 +387,4 @@ mesh availability.
 
 ---
 
-*SuperLocalMemory v4.2.7 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.8 · Qualixar · AGPL-3.0-or-later*

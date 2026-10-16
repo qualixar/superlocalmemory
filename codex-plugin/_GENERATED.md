@@ -2,7 +2,7 @@
 
 Built by `scripts/build-codex-plugin.mjs` from the single source in `plugin-src/`. Version stamped from `plugin-src/manifest.json`.
 
-Version: **4.2.7**
+Version: **4.2.8**
 
 ## Derived — do not edit by hand
 

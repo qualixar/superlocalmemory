@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "4.2.7"
+version = "4.2.8"
 description = "The governed memory brain for AI agents: one local memory for Claude Code, Codex, Cursor, Copilot, ChatGPT and any MCP client"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
