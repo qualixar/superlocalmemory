@@ -52,16 +52,20 @@ def test_release_tests_and_records_exact_candidates_before_publication() -> None
     assert "verify-source-parity" in source
     assert ".cdx.json" in source
     assert "actions/upload-artifact@" in source
-    assert "gh release create" in source
+    # The GitHub release is a distribution channel now: it runs after the
+    # release job, from scripts/release/github-release.sh.
+    github_release = (ROOT / "scripts" / "release" / "github-release.sh").read_text(encoding="utf-8")
+    assert "gh release create" in github_release
+    assert "release" in workflow["jobs"]["distribute"]["needs"]
 
     build = source.index("Build both release artifacts")
     artifact_tests = source.index("Test exact candidate artifacts")
     evidence = source.index("Generate immutable release evidence")
     publish_pypi = source.index("Publish to PyPI")
     parity = source.index("Verify registry parity")
-    github_release = source.index("Create GitHub release")
+    distribute = source.index("\n  distribute:")
 
-    assert build < artifact_tests < evidence < publish_pypi < parity < github_release
+    assert build < artifact_tests < evidence < publish_pypi < parity < distribute
 
 
 def test_release_python_lock_is_part_of_the_source_checkout() -> None:

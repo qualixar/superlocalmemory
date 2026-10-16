@@ -37,6 +37,39 @@ jobs:
       - run: pip install "import-linter==2.15"
       - name: Import contracts
         run: PYTHONPATH=src lint-imports
+  # The plugin folders (plugin/, cursor-plugin/, codex-plugin/, copilot-plugin/,
+  # antigravity-plugin/, hermes-plugin/, muse-plugin/, vscode-agent-plugin/ ...)
+  # are generated from plugin-src/ but tracked, because hosts install them
+  # straight from git. A source change without a rebuild once shipped stale
+  # launcher copies; rebuilding here and requiring a clean tree stops that.
+  plugin-drift:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
+    name: Generated plugins match their sources
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "22"
+      - name: Rebuild every plugin
+        run: node scripts/build-all-plugins.mjs
+      - name: Fail on any difference from the committed copies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code --stat; then
+            echo "::error::Generated plugin files are out of date. Run 'node scripts/build-all-plugins.mjs' and commit the result."
+            git diff | head -n 200
+            exit 1
+          fi
+          untracked="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$untracked" ]; then
+            echo "::error::The plugin build created files that are not committed:"
+            echo "$untracked"
+            exit 1
+          fi
+
   security:
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
     name: Dependency and static security gates
