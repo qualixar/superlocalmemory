@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "superlocalmemory": {
+      "command": "slm",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
