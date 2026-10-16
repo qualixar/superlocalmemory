@@ -314,15 +314,21 @@ def _erase_states(engine, op_id: str) -> dict:
     return {dict(r)["owner"]: dict(r) for r in rows}
 
 
-def test_redrive_never_closes_erase_when_residue_remains(stored_engine) -> None:
-    """A bm25 row for the subject must block ERASED (no vacuous proof).
+def test_redrive_never_closes_erase_when_residue_remains(stored_engine, monkeypatch) -> None:
+    """A bm25 row the index will not give up must block ERASED (no vacuous proof).
 
-    The obligation is marked unconfirmed with the reason and one re-proof, but
-    no erase attempt: the redrive re-checks, it never erases.
+    Since 4.2.8 the redrive tries the removal again before it proves; when that
+    fails the obligation stays unconfirmed with the reason and one re-proof.
     """
+    from superlocalmemory.core.transactions import concrete_owners
     from superlocalmemory.server.unified_daemon import (
         _reconcile_pending_projections,
     )
+
+    def _locked(self, context, fact_id):
+        raise OSError("bm25 index is locked")
+
+    monkeypatch.setattr(concrete_owners.Bm25Owner, "_remove", _locked)
 
     engine, _operation = stored_engine
     op_id, subject = "erase-op-residue-1", "fact-erased-residue-1"
@@ -335,8 +341,13 @@ def test_redrive_never_closes_erase_when_residue_remains(stored_engine) -> None:
 
     _reconcile_pending_projections(engine, force=True)
 
-    for owner, row in _erase_states(engine, op_id).items():
-        assert row["state"] == "failed", f"{owner}: {row}"
+    states = _erase_states(engine, op_id)
+    assert all(row["state"] == "failed" for row in states.values()), states
+    # The redrive tried the bm25 removal once; it is recorded with its residue.
+    assert states["bm25"]["attempts"] == 1, states["bm25"]
+    assert "residue" in states["bm25"]["detail"], states["bm25"]
+    for owner in ("temporal", "vector"):  # not attempted: re-proved, with the reason
+        row = states[owner]
         assert row["attempts"] == 0, f"{owner}: {row}"
         assert row["verify_attempts"] == 1, f"{owner}: {row}"
         assert "the bm25 index still holds it" in row["detail"], f"{owner}: {row}"

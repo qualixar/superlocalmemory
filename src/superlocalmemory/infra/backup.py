@@ -77,6 +77,7 @@ MANAGED_DATABASES: tuple[str, ...] = (
     "pending.db",       # Pending operations queue
     "audit.db",         # Legacy audit (pre-v3.4)
     "media.db",         # Images and documents: items, pages, media vectors, jobs
+    "mesh.db",          # Mesh peers, messages, locks, events (own file since 4.2.8)
 )
 
 

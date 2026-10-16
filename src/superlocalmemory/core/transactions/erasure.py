@@ -398,6 +398,18 @@ class ErasureService:
         """
         return self._prove_owner(context, owner)
 
+    def complete_owner(
+        self, db: object, context: OperationContext, name: str,
+    ) -> ErasureProofRecord:
+        """Run one owner's removal again for an erasure left unfinished.
+
+        Used by the background redrive when the memory is already gone and
+        tombstoned but this owner still holds residue (its removal failed or was
+        interrupted). The owner's removal is idempotent; the attempt is recorded
+        in the ledger like the first one.
+        """
+        return self._erase_owner(db, context, name)
+
     def _prove_owner(
         self, context: OperationContext, name: str,
     ) -> ErasureProofRecord:

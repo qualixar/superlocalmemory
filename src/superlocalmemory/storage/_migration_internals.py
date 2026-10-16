@@ -216,6 +216,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M063_blank_temporal_dates_are_null as _M063,
 )
+from superlocalmemory.storage.migrations import (
+    M064_orphan_index_rows_are_removed as _M064,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -287,6 +290,7 @@ _MODULES = {
     _M061.NAME: _M061,
     _M062.NAME: _M062,
     _M063.NAME: _M063,
+    _M064.NAME: _M064,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

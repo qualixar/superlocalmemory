@@ -3383,6 +3383,22 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             if not use_json:
                 print(f"  auto-repair error: {_fix_exc}\n")
 
+        # 4.2.8: index rows of memories that no longer exist (a delete that failed
+        # partway). The daemon removes them by itself on its first start of this
+        # version and in its routine pass; this is the same removal, on demand.
+        try:
+            from superlocalmemory.infra.data_root import canonical_data_root
+            from superlocalmemory.storage.vector_residue import repair_orphan_index_rows
+
+            _orphans = repair_orphan_index_rows(canonical_data_root() / "memory.db")
+            if not use_json:
+                print(f"  Removed {_orphans.total} search-index row(s) of memories "
+                      "that no longer exist." if _orphans.total
+                      else "  No leftover search-index rows found.")
+        except Exception as _orphan_exc:
+            if not use_json:
+                print(f"  search-index cleanup skipped: {_orphan_exc}")
+
         # H5 — stale-artifact reap (additive; runs after component healer).
         # Removes provably-dead lock/PID files so the doctor report below
         # reflects the healed state.  Fail-open — never blocks doctor.
