@@ -647,6 +647,11 @@ def main() -> None:
     delete_p = sub.add_parser("delete", help="Delete a specific memory by ID (precise)")
     delete_p.add_argument("fact_id", help="Exact fact ID to delete")
     delete_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+    delete_p.add_argument(
+        "--profile", default="", metavar="PROFILE",
+        help="Profile the memory lives in (default: the active one). "
+             "The active profile is not switched.",
+    )
     delete_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
     update_p = sub.add_parser("update", help="Edit the content of a specific memory by ID")

@@ -93,7 +93,8 @@ def protected_fact(db, fact_id, profile_id):
 def metadata_query(db, internal_access, consolidated):
     protection = protection_clause(db)
     sql = (
-        "SELECT f.fact_id, COALESCE(al.access_count,0) AS access_count, "
+        "SELECT f.fact_id, f.content AS content, "
+        "COALESCE(al.access_count,0) AS access_count, "
         "COALESCE(fi.pagerank_score,0.0) AS importance, "
         "COALESCE(f.evidence_count,0) AS confirmation_count, "
         "COALESCE(f.emotional_valence,0.0) AS emotional_salience, "

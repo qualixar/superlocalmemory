@@ -84,7 +84,9 @@ def db_with_facts(tmp_path):
                 fact_id,
                 f"mem_{i}",
                 "test_profile",
-                f"Test fact {i}",
+                # Real-looking text: "Test fact 3" is a probe string, and
+                # probe strings are held below "keep" by design.
+                f"Release note {i}: the dashboard loads recall results faster",
                 "semantic",
                 "[]",
                 "[]",

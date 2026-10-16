@@ -125,8 +125,18 @@ class ForgettingScheduler:
             hours_since,
         )
 
-        # Recompute retention with new strength
-        new_retention = self._ebbinghaus.retention(0.0, new_strength)
+        # Recompute retention with new strength; junk is held at the keep
+        # threshold however often it is touched (core/keep_worthiness.py).
+        from superlocalmemory.core.keep_worthiness import cap_retention
+
+        rows = self._db.execute(
+            "SELECT content FROM atomic_facts WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, profile_id),
+        )
+        content = dict(rows[0])["content"] if rows else None
+        new_retention = cap_retention(
+            self._ebbinghaus.retention(0.0, new_strength), content,
+        )
         new_zone = self._ebbinghaus.lifecycle_zone(new_retention)
 
         now_iso = datetime.now(UTC).isoformat()
