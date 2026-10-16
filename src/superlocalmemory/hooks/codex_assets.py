@@ -140,7 +140,9 @@ def _agent_toml(filename: str) -> str:
         instructions = '"""\n' + basic + '\n"""'
     else:
         instructions = "'''\n" + body + "\n'''"
-    return f'name = "{name}"\ndescription = "{escaped}"\ninstructions = {instructions}\n'
+    # Codex reads a role's prompt from ``developer_instructions``; a file with
+    # only ``instructions`` is skipped with "malformed agent role definition".
+    return f'name = "{name}"\ndescription = "{escaped}"\ndeveloper_instructions = {instructions}\n'
 
 
 def _agent_files() -> dict:
