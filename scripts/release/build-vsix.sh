@@ -18,7 +18,10 @@ slm_parse_args "$@"
 
 VSCE_VERSION=4.0.0
 EXT="$SLM_ROOT/vscode-extension"
-OUT="$SLM_DIST/vscode/superlocalmemory-vscode-$SLM_VERSION.vsix"
+# Absolute: vsce runs from inside the extension folder, where a relative
+# --dist would land the .vsix in vscode-extension/dist (v4.2.8 lost Open VSX).
+case "$SLM_DIST" in /*) DIST_ABS="$SLM_DIST" ;; *) DIST_ABS="$PWD/$SLM_DIST" ;; esac
+OUT="$DIST_ABS/vscode/superlocalmemory-vscode-$SLM_VERSION.vsix"
 
 manifest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$EXT/package.json")"
 [ "$manifest" = "$SLM_VERSION" ] || slm_die "vscode-extension/package.json is $manifest, expected $SLM_VERSION"
