@@ -250,8 +250,20 @@ class EngagementRewardModel:
         *,
         clock_ms: Callable[[], int] | None = None,
         kill_switch: Callable[[], bool] | None = None,
+        busy_timeout_ms: int | None = None,
+        raise_on_db_error: bool = False,
     ) -> None:
         self._db = Path(memory_db_path)
+        # 4.2.8: the daemon's hook event writer is the one caller that sets
+        # these. It waits as long as every other writer (the shared
+        # ``SLM_DB_BUSY_TIMEOUT_MS``) and needs a failed write to RAISE, so the
+        # event stays in the spool instead of being reported as applied.
+        # Every other caller keeps the fail-soft 500 ms behaviour.
+        self._busy_timeout_ms = (
+            int(busy_timeout_ms) if busy_timeout_ms is not None
+            else _BUSY_TIMEOUT_MS * 10
+        )
+        self._raise_on_db_error = bool(raise_on_db_error)
         self._clock_ms: Callable[[], int] = (
             clock_ms if clock_ms is not None
             else lambda: int(time.time() * 1000)
@@ -298,12 +310,12 @@ class EngagementRewardModel:
         if self._conn is None:
             self._conn = sqlite3.connect(
                 str(self._db),
-                timeout=2.0,
+                timeout=max(2.0, self._busy_timeout_ms / 1000.0),
                 isolation_level=None,  # autocommit — we manage txns ourselves
                 check_same_thread=False,
             )
             try:
-                self._conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS * 10}")
+                self._conn.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
                 # M-P-02: daemon bootstrap owns journal_mode=WAL; flipping it
                 # here contradicts ``hooks/_outcome_common.py``'s policy ("must
                 # not flip the journal mode under a live daemon"). synchronous
@@ -379,7 +391,9 @@ class EngagementRewardModel:
                     ),
                 )
             return outcome_id
-        except sqlite3.Error as exc:  # pragma: no cover — defensive
+        except sqlite3.Error as exc:
+            if self._raise_on_db_error:
+                raise
             logger.debug("record_recall SQLite error: %s", exc)
             return _DISABLED_SENTINEL
 
@@ -485,7 +499,9 @@ class EngagementRewardModel:
                     (json.dumps(signals), outcome_id),
                 )
             return True
-        except sqlite3.Error as exc:  # pragma: no cover — defensive
+        except sqlite3.Error as exc:
+            if self._raise_on_db_error:
+                raise
             logger.debug("register_signal SQLite error: %s", exc)
             return False
 
@@ -573,7 +589,9 @@ class EngagementRewardModel:
                 order = {oid: i for i, oid in enumerate(oid_list)}
                 matched.sort(key=lambda o: order.get(o, 1_000_000))
                 return matched[: int(self.PENDING_WRITE_CAP)]
-        except sqlite3.Error as exc:  # pragma: no cover — defensive
+        except sqlite3.Error as exc:
+            if self._raise_on_db_error:
+                raise
             logger.debug("match_pending_for_fact_ids SQLite error: %s", exc)
             return []
 
@@ -666,6 +684,8 @@ class EngagementRewardModel:
                 _qid = pending["recall_query_id"]
                 _facts_json = str(pending["fact_ids_json"] or "[]")
         except sqlite3.Error as exc:
+            if self._raise_on_db_error:
+                raise
             logger.debug("finalize_outcome SQLite error: %s", exc)
             return _FALLBACK_REWARD
         except Exception as exc:  # pragma: no cover — defence in depth

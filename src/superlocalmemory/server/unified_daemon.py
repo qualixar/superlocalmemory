@@ -2643,6 +2643,16 @@ async def lifespan(application: FastAPI):
             start_worker(_memory_db)
         except Exception as _oqexc:  # pragma: no cover — defensive
             logger.debug("outcome_queue start failed (non-fatal): %s", _oqexc)
+        # 4.2.8: the single writer of hook events (tool_events + reward
+        # signals). Hooks hand events to /internal/hook-events or spool them;
+        # this thread drains the spool now (whatever waited while the daemon
+        # was down) and on every wake.
+        try:
+            from superlocalmemory.server.hook_event_writer import start_writer
+            start_writer(_memory_db)
+        except Exception as _hewexc:  # pragma: no cover — defensive
+            logger.warning("hook event writer start failed; hook events stay "
+                           "spooled until the next start: %s", _hewexc)
         # 4.1.20: the Answer Check history writer — the only writer of its table.
         try:
             _rc = engine._config.retrieval
@@ -3704,6 +3714,15 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("outcome_queue stop failed: %s", exc)
     try:
+        from superlocalmemory.server.hook_event_writer import (
+            stop_writer as _stop_hook_event_writer,
+        )
+        if not _stop_hook_event_writer(timeout_s=5.0):
+            logger.warning("hook event writer did not stop in time; anything "
+                           "left stays spooled for the next start")
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("hook event writer stop failed: %s", exc)
+    try:
         from superlocalmemory.core.answer_check_history_store import stop_writer
         _ac_left = stop_writer(timeout_s=2.0)
         if _ac_left:
@@ -4103,6 +4122,17 @@ def create_app() -> FastAPI:
         application.include_router(prewarm_router)
     except ImportError as exc:  # pragma: no cover — defensive wiring
         logger.warning("prewarm router not wired: %s", exc)
+
+    # -- Hook events route (4.2.8) --
+    # POST /internal/hook-events: hooks hand tool events and reward signals to
+    # the daemon's single writer instead of writing memory.db themselves.
+    try:
+        from superlocalmemory.server.routes.hook_events import (
+            router as hook_events_router,
+        )
+        application.include_router(hook_events_router)
+    except ImportError as exc:  # pragma: no cover — defensive wiring
+        logger.warning("hook events router not wired: %s", exc)
 
     # -- Token route — auto-inject install token into the local dashboard --
     # GET /internal/token returns the install token to loopback+origin-

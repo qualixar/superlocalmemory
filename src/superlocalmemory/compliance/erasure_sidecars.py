@@ -13,6 +13,8 @@ of the data folder after an erasure, to still hold what the person wrote:
   committed, the instruction to write it again;
 * ``recall_queue.db``: the prompts the per-prompt hook queued and, for up to an
   hour after each, the memories recalled for them;
+* ``hook_spool/``: tool events and reward signals hooks handed to the daemon
+  that it has not written yet (4.2.8), with their tool summaries;
 * ``write_commits``: the receipt ledger, protected from ordinary deletes;
 * ``llmcache.db``: MCP cache values and the reversible originals of compression;
 * ``profiles.json``: the workspace's name and description;
@@ -109,6 +111,14 @@ def erase_profile_sidecars(
         finally:
             conn.close()
 
+    def hook_spool() -> None:
+        # Spooled hook events carry tool summaries. Removed under the writer's
+        # drain lock and before the row sweep below, so none is written back.
+        from superlocalmemory.server.hook_event_writer import erase_profile_spool
+
+        counts["hook_spool"] = erase_profile_spool(
+            profile_id, db_path=db_path, root=root / "hook_spool")
+
     def capture() -> None:
         # An opt-in developer corpus of raw proxy traffic. It names no profile, so
         # nothing in it can be selected for removal; say so rather than call the
@@ -144,6 +154,7 @@ def erase_profile_sidecars(
     _step(counts, "pending_memories", pending)
     _step(counts, "admission_journal", journal)
     _step(counts, "recall_queue", recall_queue)
+    _step(counts, "hook_spool", hook_spool)
     _step(counts, "optimize_capture", capture)
     _step(counts, "write_receipts", receipts)
     _step(counts, "optimize_cache", optimize)

@@ -13,7 +13,8 @@ Flow (hot path, <10 ms typical, <20 ms hard):
   2. Compute topic_signature(prompt) — stdlib regex, bounded.
   3. Read session_state/<session_id>.json (via safe_resolve_identifier).
   4. If prior sig == current sig AND prior age <= 60 s AND prior
-     outcome_id is set → register_signal(requery=True).
+     outcome_id is set → hand a ``requery`` outcome_signal to the daemon's
+     writer (spooled if it does not ack in time; it never writes here).
   5. Always overwrite state with {sig, ts, outcome_id=current_best}
      so next turn has fresh context.
   6. Emit ``{}`` on stdout, exit 0.
@@ -29,14 +30,12 @@ from superlocalmemory.hooks._outcome_common import (
     emit_empty_json,
     load_session_state,
     log_perf,
-    memory_db_path,
     now_ms,
     open_memory_db,
     read_stdin_json,
     save_session_state,
     session_state_file,
 )
-
 
 _HOOK_NAME = "user_prompt_rehash"
 
@@ -90,7 +89,7 @@ def _current_latest_outcome_id_on(
     return row[0] if row else None
 
 
-def _inner_main() -> str:
+def _inner_main(started: float | None = None) -> str:
     payload = read_stdin_json()
     if payload is None:
         return "invalid_payload"
@@ -159,36 +158,24 @@ def _inner_main() -> str:
     if not isinstance(prior_oid, str) or not prior_oid:
         return "no_prior_outcome"
 
-    # Register the negative signal via the canonical reward API.
-    try:
-        from superlocalmemory.learning.reward import EngagementRewardModel
-    except Exception:
-        return "import_fail"
+    # Register the negative signal through the daemon's single writer
+    # (4.2.8: no write connection from the hook; spooled if not acked).
+    from superlocalmemory.hooks import event_delivery as ed
 
-    try:
-        model = EngagementRewardModel(memory_db_path())
-    except Exception:
-        return "model_init_fail"
-
-    try:
-        ok = model.register_signal(
-            outcome_id=prior_oid,
-            signal_name="requery",
-            signal_value=True,
-        )
-        return "requery_written" if ok else "requery_unknown"
-    finally:
-        try:
-            model.close()
-        except Exception:
-            pass
+    profile_id = ed.active_profile()
+    delivered = ed.deliver(
+        [ed.outcome_signal(outcome_id=prior_oid, signal_name="requery",
+                           signal_value=True, profile_id=profile_id)],
+        profile=profile_id, started=started,
+    )
+    return f"requery_{delivered}"
 
 
 def main() -> int:
     t0 = time.perf_counter()
     outcome = "exception"
     try:
-        outcome = _inner_main()
+        outcome = _inner_main(t0)
     except Exception as exc:  # pragma: no cover
         try:
             sys.stderr.write(

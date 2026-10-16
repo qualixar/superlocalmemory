@@ -263,3 +263,30 @@ def test_v2_evidence_with_listing_mismatch_is_never_sealed_or_persisted(
             call_tool, profile_id="alpha", producer_identity="test:bounded-loops-mcp"
         ))
     assert store.status("alpha")["learning_events_total"] == 0
+
+
+def test_a_receipt_waits_out_another_writer_instead_of_failing(
+    store: ExecutionLearningStore,
+) -> None:
+    """4.2.8: the store waited 1 s for learning.db and then raised "database is
+    locked". It now waits the shared busy timeout (SLM_DB_BUSY_TIMEOUT_MS,
+    default 10 s) like every other writer, so a 1.5 s writer is not a failure."""
+    import threading
+    import time
+
+    holder = sqlite3.connect(store._path, isolation_level=None,  # noqa: SLF001
+                             check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    released = threading.Event()
+
+    def _release() -> None:
+        time.sleep(1.5)
+        holder.execute("COMMIT")
+        holder.close()
+        released.set()
+
+    threading.Thread(target=_release, daemon=True).start()
+    try:
+        assert store.ingest(_verified_receipt()) is True
+    finally:
+        released.wait(5)

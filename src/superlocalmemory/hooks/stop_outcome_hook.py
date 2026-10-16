@@ -2,23 +2,27 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory v3.4.22 — Track A.2 (LLD-09 / LLD-00)
 
-"""Stop hook — finalize every pending outcome for this session.
+"""Stop hook — ask the daemon to finalize every pending outcome for this session.
 
-Flow (<500 ms typical, <1 s hard):
+Flow:
   1. Read stdin JSON {session_id}.
-  2. SELECT outcome_id FROM pending_outcomes
-     WHERE session_id = ? AND status = 'pending'.
-  3. For each outcome_id, call
-     ``EngagementRewardModel.finalize_outcome(outcome_id=...)``.
-     The reward model owns the action_outcomes INSERT (profile_id
-     populated per SEC-C-05) and the pending→settled transition.
-  4. Cleanup: delete the per-session state file (best effort).
-  5. Emit ``{}`` on stdout, exit 0.
+  2. Hand one ``session_finalize`` event to the daemon's single writer
+     (``event_delivery``; spooled when the daemon does not ack in time).
+     The daemon selects the session's pending outcomes and calls
+     ``EngagementRewardModel.finalize_outcome(outcome_id=...)`` for each:
+     the reward model owns the action_outcomes INSERT (profile_id populated
+     per SEC-C-05) and the pending->settled transition.
+  3. Cleanup: delete the per-session state file (best effort).
+  4. Emit ``{}`` on stdout, exit 0.
+
+The event is queued behind every signal this session already produced, so
+the outcome is settled with them, not before them.
+
+4.2.8: this hook no longer opens a write connection (it finalized directly
+with a 500 ms busy timeout and reported nothing when that failed).
 
 Contract (LLD-00 §2): the EngagementRewardModel finalize entry point
-takes ``outcome_id=`` as its only keyword argument. Any other form
-(positional args, or a ``query_id=`` keyword) is forbidden and the
-Stage-5b CI gate fails the build on sight.
+takes ``outcome_id=`` as its only keyword argument.
 """
 
 from __future__ import annotations
@@ -29,17 +33,14 @@ import time
 from superlocalmemory.hooks._outcome_common import (
     emit_empty_json,
     log_perf,
-    memory_db_path,
-    open_memory_db,
     read_stdin_json,
     session_state_file,
 )
 
-
 _HOOK_NAME = "stop_outcome"
 
 
-def _inner_main() -> str:
+def _inner_main(started: float | None = None) -> str:
     payload = read_stdin_json()
     if payload is None:
         return "invalid_payload"
@@ -48,56 +49,15 @@ def _inner_main() -> str:
     if not isinstance(session_id, str) or not session_id:
         return "no_session"
 
-    # Enumerate pending outcomes for this session.
-    conn = None
-    try:
-        conn = open_memory_db()
-        rows = conn.execute(
-            "SELECT outcome_id FROM pending_outcomes "
-            "WHERE session_id = ? AND status = 'pending'",
-            (session_id,),
-        ).fetchall()
-    except Exception:
-        return "db_locked"
-    finally:
-        if conn is not None:
-            conn.close()
+    from superlocalmemory.hooks import event_delivery as ed
 
-    if not rows:
-        _cleanup_session_state(session_id)
-        return "no_pending"
-
-    # Delayed import of the model — the hot-path budget for Stop is 500 ms,
-    # generous enough to pay the import tax once per session end.
-    try:
-        from superlocalmemory.learning.reward import EngagementRewardModel
-    except Exception:
-        return "import_fail"
-
-    try:
-        model = EngagementRewardModel(memory_db_path())
-    except Exception:
-        return "model_init_fail"
-
-    finalized = 0
-    try:
-        for r in rows:
-            oid = r["outcome_id"]
-            # CRITICAL: kwarg-only per LLD-00 §2. Never positional.
-            # Never the legacy ``query_id=``. Stage-5b CI gate enforces.
-            try:
-                model.finalize_outcome(outcome_id=oid)
-                finalized += 1
-            except Exception:  # pragma: no cover — reward returns 0.5 on error
-                continue
-    finally:
-        try:
-            model.close()
-        except Exception:
-            pass
-
+    profile_id = ed.active_profile()
+    delivered = ed.deliver(
+        [ed.session_finalize(session_id=session_id, profile_id=profile_id)],
+        profile=profile_id, started=started,
+    )
     _cleanup_session_state(session_id)
-    return f"finalized_{finalized}"
+    return f"finalize_{delivered}"
 
 
 def _cleanup_session_state(session_id: str) -> None:
@@ -116,7 +76,7 @@ def main() -> int:
     t0 = time.perf_counter()
     outcome = "exception"
     try:
-        outcome = _inner_main()
+        outcome = _inner_main(t0)
     except Exception as exc:  # pragma: no cover
         try:
             sys.stderr.write(
