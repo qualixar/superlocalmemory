@@ -1503,13 +1503,24 @@ def get_memory_detail(request: Request, memory_id: str):
 
 
 @router.get("/api/facts/{fact_id}")
-def get_fact_detail(request: Request, fact_id: str):
-    """Single atomic fact detail (for fact popup)."""
+def get_fact_detail(request: Request, fact_id: str, profile_id: str = ""):
+    """Single atomic fact detail (for fact popup).
+
+    ``profile_id`` names the profile to read, authorized as a READ on THAT
+    profile (``slm delete --profile`` previews through here); without it, the
+    active profile. An unknown profile answers like an unknown fact.
+    """
+    profile = _routed_profile(profile_id)
+    if profile is not None:
+        try:
+            _authorize_review_read(request, profile)
+        except _UnknownRoutedProfile as exc:
+            raise HTTPException(status_code=404, detail="Fact not found") from exc
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        active_profile = get_active_profile()
+        active_profile = profile or get_active_profile()
 
         cursor.execute(
             "SELECT f.fact_id, f.memory_id, f.content, f.fact_type, "

@@ -28,6 +28,7 @@ def run_refile(args: Any, use_json: bool) -> dict:
         "moved": report.moved,
         "fact_ids": list(report.fact_ids),
         "previews": list(report.previews),
+        "profiles": list(report.profiles),
     }
 
 
@@ -37,9 +38,12 @@ def _print(report: Any, apply: bool) -> None:
         return
     verb = "Re-filed" if apply else "Would re-file"
     print(f"\n{verb} {len(report.fact_ids)} memories:")
-    for fid, text in zip(report.fact_ids, report.previews):
-        print(f"  {fid}  {text}")
+    # The list is store-wide, like the count beside it, so each row names its
+    # profile: `slm delete` acts on the active profile unless told otherwise.
+    for fid, text, profile in zip(report.fact_ids, report.previews, report.profiles):
+        print(f"  {fid}  [{profile}]  {text}")
     if apply:
         print(f"Moved {report.moved}. Nothing else changed.")
     else:
         print("Dry run. Re-run with --yes to apply.")
+        print("To delete one instead: slm delete <id> --profile <profile>")

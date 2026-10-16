@@ -32,6 +32,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from superlocalmemory.core.keep_worthiness import KEEP_THRESHOLD
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -112,13 +114,16 @@ def _open_for_measure(db_path: str | Path) -> tuple[sqlite3.Connection, bool]:
     be counted only by a connection that has the extension, and a count taken
     without it would be a count of something else.
     """
+    from superlocalmemory.core.keep_worthiness import register_sql
     from superlocalmemory.retrieval.vector_physical import VectorIndexUnreadable, open_vec
 
     try:
-        return open_vec(db_path, read_only=True), True
+        conn, readable = open_vec(db_path, read_only=True), True
     except VectorIndexUnreadable as exc:
         logger.debug("memory health: vector index not readable here: %s", exc)
-    return sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True), False
+        conn, readable = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True), False
+    register_sql(conn)  # the "scored to keep" predicate reads content
+    return conn, readable
 
 
 def measure(db_path: str | Path) -> MemoryHealth:
@@ -362,15 +367,26 @@ class RefileReport:
     #: First 80 characters of each flagged memory, in the same order.
     previews: tuple[str, ...] = ()
     moved: int = 0
+    #: The profile each flagged memory lives in, in the same order. The count
+    #: and the re-file are store-wide, so the list is too, and a memory in
+    #: another profile needs its profile named to be acted on.
+    profiles: tuple[str, ...] = ()
 
 
 def _inconsistent_from(live_clause: str) -> str:
-    """FROM/WHERE shared by the count and the re-file, so they cannot differ."""
+    """FROM/WHERE shared by the count and the re-file, so they cannot differ.
+
+    "Scored to keep" needs the content to be able to justify it: a score above
+    the threshold is often the schema default or a recall reset, not a verdict,
+    and the doctor offered "2024-01-15 File was modified" on that basis. The
+    connection must have ``keep_worthiness.register_sql`` applied.
+    """
     return (
         "FROM fact_retention r "
         "JOIN atomic_facts af ON af.fact_id = r.fact_id "
         "WHERE r.lifecycle_zone IN ('archive', 'forgotten') "
-        "  AND r.retention_score > 0.8 "
+        f"  AND r.retention_score > {KEEP_THRESHOLD} "
+        "  AND slm_keep_worthy(af.content) = 1 "
         f"  AND {_prefixed(live_clause, 'af')}"
     )
 
@@ -383,26 +399,30 @@ def refile_hidden(db_path: str | Path, *, dry_run: bool = True) -> RefileReport:
     step. No other row is touched. No snapshot is taken: the change is one
     reversible zone per memory and the ids are logged.
     """
+    from superlocalmemory.core.keep_worthiness import register_sql
     from superlocalmemory.core.lifecycle_state import set_fact_lifecycle_zone
 
     conn = sqlite3.connect(str(Path(db_path)), timeout=30)
     conn.row_factory = sqlite3.Row
+    register_sql(conn)
     try:
         has_q = _has_column(conn, "atomic_facts", "quarantined")
         live = "COALESCE(quarantined, 0) = 0" if has_q else "1=1"
         rows = conn.execute(
-            "SELECT af.fact_id AS fact_id, af.content AS content "
+            "SELECT af.fact_id AS fact_id, af.content AS content, "
+            "af.profile_id AS profile_id "
             + _inconsistent_from(live) + " ORDER BY af.fact_id"
         ).fetchall()
         ids = tuple(r["fact_id"] for r in rows)
         previews = tuple((r["content"] or "")[:80] for r in rows)
+        profiles = tuple(r["profile_id"] for r in rows)
         if dry_run or not ids:
-            return RefileReport(ids, previews, 0)
+            return RefileReport(ids, previews, 0, profiles)
         moved = set_fact_lifecycle_zone(conn, ids, "active")
         conn.commit()
         logger.info("memory health: re-filed %d hidden memories: %s",
                     moved, ", ".join(ids))
-        return RefileReport(ids, previews, moved)
+        return RefileReport(ids, previews, moved, profiles)
     except sqlite3.Error:
         conn.rollback()
         raise

@@ -82,6 +82,8 @@ def _memory_not_found(command: str, fact_id: str, use_json: bool) -> None:
     """
     message = f"No memory with id {fact_id}"
     hint = "Run `slm list` to see memory ids."
+    if command == "delete":
+        hint += " A memory in another profile needs `--profile <name>`."
     if use_json:
         from superlocalmemory.cli.json_output import json_print
 
@@ -2425,15 +2427,19 @@ def cmd_delete(args: Namespace) -> None:
 
     use_json = getattr(args, 'json', False)
     fact_id = args.fact_id.strip()
+    # A memory in another profile is named, not reached by switching: the
+    # daemon routes both requests to ``profile_id`` and authorizes on it.
+    profile = (getattr(args, "profile", "") or "").strip()
+    query = "?profile_id=" + urllib.parse.quote(profile, safe="") if profile else ""
     if is_daemon_running() or ensure_daemon():
-        path = "/api/memories/" + urllib.parse.quote(fact_id, safe="")
+        path = "/api/memories/" + urllib.parse.quote(fact_id, safe="") + query
         confirmed = getattr(args, "yes", False)
         content = ""
         if not confirmed:
             try:
                 detail = daemon_request(
                     "GET",
-                    "/api/facts/" + urllib.parse.quote(fact_id, safe=""),
+                    "/api/facts/" + urllib.parse.quote(fact_id, safe="") + query,
                     preserve_not_found=True,
                 )
             except DaemonNotFound:
@@ -2443,14 +2449,16 @@ def cmd_delete(args: Namespace) -> None:
             content = str(detail.get("content") or "")
             if use_json:
                 from superlocalmemory.cli.json_output import json_print
+                again = f" --profile {profile}" if profile else ""
                 json_print("delete", data={
                     "fact_id": fact_id,
                     "content": content[:120],
                     "deleted": False,
                     "hint": "Add --yes to confirm deletion",
+                    **({"profile": profile} if profile else {}),
                 }, next_actions=[
                     {
-                        "command": f"slm delete {fact_id} --json --yes",
+                        "command": f"slm delete {fact_id}{again} --json --yes",
                         "description": "Confirm deletion",
                     },
                 ])
@@ -2476,7 +2484,8 @@ def cmd_delete(args: Namespace) -> None:
             from superlocalmemory.cli.json_output import json_print
             json_print(
                 "delete",
-                data={"deleted": fact_id, "content": content[:120]},
+                data={"deleted": fact_id, "content": content[:120],
+                      **({"profile": profile} if profile else {})},
                 next_actions=[
                     {
                         "command": "slm list --json",
@@ -2485,7 +2494,7 @@ def cmd_delete(args: Namespace) -> None:
                 ],
             )
         else:
-            print(f"Deleted: {fact_id}")
+            print(f"Deleted: {fact_id}" + (f" (profile {profile})" if profile else ""))
         return
     _daemon_unavailable("delete", use_json)
 

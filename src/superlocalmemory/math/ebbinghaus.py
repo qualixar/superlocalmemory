@@ -43,12 +43,13 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     pass
 
 from superlocalmemory.core.config import ForgettingConfig
+from superlocalmemory.core.keep_worthiness import cap_retention
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ class FactRetentionInput(TypedDict):
     emotional_salience: float  # Mapped from atomic_facts.emotional_valence
     last_accessed_at: str  # ISO 8601 datetime string
     trust_score: float  # Source trust in [0, 1]. Default 1.0.
+    #: The memory's text. When present, junk is held at the keep threshold
+    #: (``core/keep_worthiness.py``); absent, the score is the curve's alone.
+    content: NotRequired[str]
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +390,10 @@ class EbbinghausCurve:
                 self.store_scaled_strength(strength),
                 trust,
             )
+            if "content" in fact:
+                # The curve measures use, not worth: a fresh "2024-01-15 File
+                # was modified" computes 1.0. Content decides whether it may.
+                ret = cap_retention(ret, fact["content"])
             zone = self.lifecycle_zone(ret)
 
             results.append(
