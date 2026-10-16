@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "superlocalmemory",
+  "version": "4.2.7",
+  "description": "Local-first agent memory as an MCP server: remember, recall and search across sessions and agents, on your own machine.",
+  "author": {
+    "name": "Qualixar",
+    "url": "https://github.com/qualixar"
+  },
+  "keywords": [
+    "memory",
+    "remember",
+    "recall",
+    "agent memory",
+    "mcp",
+    "local-first",
+    "context"
+  ],
+  "homepage": "https://superlocalmemory.com",
+  "repository": "https://github.com/qualixar/superlocalmemory",
+  "license": "AGPL-3.0-or-later"
+}
