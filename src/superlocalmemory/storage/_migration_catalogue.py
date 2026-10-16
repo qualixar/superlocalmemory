@@ -199,6 +199,12 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M064_orphan_index_rows_are_removed as _M064,
 )
+from superlocalmemory.storage.migrations import (
+    M065_fabricated_dates_are_removed as _M065,
+)
+from superlocalmemory.storage.migrations import (
+    M066_wrongly_archived_memories_are_restored as _M066,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -424,4 +430,12 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # that failed partway). Deferred: it reads atomic_facts and vector_row_map,
     # which engine init creates.
     Migration(name=_M064.NAME, db_target="memory", ddl=_M064.DDL),
+    # M065 takes the made-up dates of builds before 4.1.6 out of facts and their
+    # date rows, with an undo record. Deferred: it reads temporal_events,
+    # fact_context and bm25_tokens, which engine init creates.
+    Migration(name=_M065.NAME, db_target="memory", ddl=_M065.DDL),
+    # M066 restores memories the hours-clock ELC step archived (#266) to the zone
+    # the store-scaled clock gives them, with an undo record. Deferred: it reads
+    # fact_retention and the decay inputs, which engine init creates.
+    Migration(name=_M066.NAME, db_target="memory", ddl=_M066.DDL),
 ]

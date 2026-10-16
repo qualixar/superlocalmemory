@@ -32,6 +32,9 @@ DERIVED_FACT_ROWS: tuple[tuple[str, str], ...] = (
     ("bm25_tokens", "fact_id"),
     ("fact_outcome_score", "fact_id"),
     ("activation_cache", "node_id"),
+    # The undo record of an automatic data repair quotes the fact's text; it
+    # cascades from atomic_facts, and is listed for delete paths without FKs.
+    ("data_repair_undo", "fact_id"),
 )
 
 

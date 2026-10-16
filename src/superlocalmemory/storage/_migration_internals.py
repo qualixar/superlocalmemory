@@ -219,6 +219,12 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M064_orphan_index_rows_are_removed as _M064,
 )
+from superlocalmemory.storage.migrations import (
+    M065_fabricated_dates_are_removed as _M065,
+)
+from superlocalmemory.storage.migrations import (
+    M066_wrongly_archived_memories_are_restored as _M066,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -291,6 +297,8 @@ _MODULES = {
     _M062.NAME: _M062,
     _M063.NAME: _M063,
     _M064.NAME: _M064,
+    _M065.NAME: _M065,
+    _M066.NAME: _M066,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally
@@ -691,7 +699,16 @@ def _apply_single(
             # trailing statement (e.g. a perf index over a table that may not
             # exist yet) can fail without discarding the essential leading DDL.
             conn.executescript(migration.ddl)
-    except sqlite3.Error as exc:
+    except Exception as exc:  # noqa: BLE001 - see below
+        # Any error, not only sqlite3.Error: a Python bug in one module's
+        # apply() (KeyError, ImportError...) used to escape the pass, and
+        # MemoryEngine init turned it into "initialization stopped" -- one
+        # broken data repair kept the whole store from starting, with its log
+        # row stuck at in_progress inside an open transaction. It is now that
+        # migration's failure, logged with its traceback and retried next start.
+        if not isinstance(exc, sqlite3.Error):
+            logger.warning("Migration %s raised a non-database error", migration.name,
+                           exc_info=True)
         # Best-effort rollback.
         try:
             conn.execute("ROLLBACK")

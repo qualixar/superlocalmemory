@@ -69,7 +69,9 @@ from pathlib import Path
 #: change); the ceiling follows it by the same convention, floor 51.
 #: M063 stores blank temporal dates as NULL (data only), floor 51.
 #: M064 removes index rows of memories that are gone (data only), floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 64
+#: M065 removes made-up dates (data + an undo table), floor 51.
+#: M066 restores wrongly archived memories (data, same undo table), floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 66
 
 
 class SchemaVersionError(RuntimeError):
