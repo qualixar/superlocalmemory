@@ -391,6 +391,39 @@ export function renderKimiPluginJson(manifest) {
   }, null, 2) + '\n';
 }
 
+/** Agent Plugins 1.0.0 plugin.json (Kiro powers and other cross-tool hosts). */
+export function renderAgentPluginJson(manifest) {
+  return JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+    name: manifest.pluginName,
+    version: manifest.version,
+    description: HOST_DESCRIPTION,
+    author: { name: 'Qualixar', url: 'https://github.com/qualixar' },
+    keywords: ['memory', 'remember', 'recall', 'agent memory', 'mcp', 'local-first', 'context'],
+    homepage: 'https://superlocalmemory.com',
+    repository: manifest.repository,
+    license: 'AGPL-3.0-or-later',
+  }, null, 2) + '\n';
+}
+
+/**
+ * Agent Plugins 1.0.0 mcp.json. The format has no plugin-root variable, so the
+ * server is the installed `slm` on PATH (same as the Codex build).
+ */
+export function renderAgentMcpJson() {
+  return JSON.stringify({
+    $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+    mcpServers: {
+      superlocalmemory: {
+        type: 'stdio',
+        command: 'slm',
+        args: ['mcp'],
+        env: { SLM_AGENT_ID: 'agent_plugins' },
+      },
+    },
+  }, null, 2) + '\n';
+}
+
 export function buildPlan(root, manifest) {
   const plan = new Map();
 
@@ -444,6 +477,10 @@ export function buildPlan(root, manifest) {
   // too deep and kept the Windows-only ${ComSpec} launch line (found 4.2.8).
   plan.set(path.join(pluginRoot, 'qwen-extension.json'), renderQwenExtensionJson(manifest));
   plan.set(path.join(pluginRoot, 'kimi.plugin.json'), renderKimiPluginJson(manifest));
+  // Agent Plugins 1.0.0 manifest + MCP config at the plugin root: Kiro powers,
+  // and any other host that reads the cross-tool format (Codewhale, Copilot).
+  plan.set(path.join(pluginRoot, 'plugin.json'), renderAgentPluginJson(manifest));
+  plan.set(path.join(pluginRoot, 'mcp.json'), renderAgentMcpJson());
 
   // ---------------------------------------------------------------------------
   // .claude-plugin/marketplace.json at REPO ROOT (not plugin root)

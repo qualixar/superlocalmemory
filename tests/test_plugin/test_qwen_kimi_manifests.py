@@ -43,3 +43,21 @@ def test_kimi_manifest_uses_paths_inside_the_plugin_root() -> None:
 def test_no_manifest_carries_the_windows_launch_line() -> None:
     for name in ("qwen-extension.json", "kimi.plugin.json"):
         assert "ComSpec" not in (BUILT_PLUGIN / name).read_text(encoding="utf-8")
+
+
+def test_agent_plugins_manifest_for_kiro_and_cross_tool_hosts() -> None:
+    plugin = _load("plugin.json")
+    assert plugin["$schema"] == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+    assert plugin["name"] == "superlocalmemory" and plugin["version"] == _version()
+    assert plugin["license"] == "AGPL-3.0-or-later" and plugin["keywords"]
+    mcp = _load("mcp.json")
+    assert mcp["$schema"] == "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+    server = mcp["mcpServers"]["superlocalmemory"]
+    assert server == {"type": "stdio", "command": "slm", "args": ["mcp"],
+                      "env": {"SLM_AGENT_ID": "agent_plugins"}}
+
+
+def test_muse_build_does_not_carry_other_hosts_manifests() -> None:
+    muse = REPO / "muse-plugin"
+    for name in ("plugin.json", "mcp.json", "qwen-extension.json", "kimi.plugin.json"):
+        assert not (muse / name).exists(), f"muse-plugin must not ship {name}"

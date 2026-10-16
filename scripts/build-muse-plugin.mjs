@@ -37,7 +37,12 @@ const ROOT = join(dirname(new URL(import.meta.url).pathname), '..');
 const SRC = join(ROOT, 'plugin');
 const OUT = join(ROOT, 'muse-plugin');
 const AGENT_ID = 'muse';
-const DROP = new Set(['.mcp.json', 'settings.json', '_GENERATED.md', '.claude-plugin/plugin.json']);
+// Other hosts' manifests stay out: Muse reads the Claude layout, and a root
+// mcp.json here would register SLM a second time.
+const DROP = new Set([
+  '.mcp.json', 'settings.json', '_GENERATED.md', '.claude-plugin/plugin.json',
+  'plugin.json', 'mcp.json', 'qwen-extension.json', 'kimi.plugin.json',
+]);
 
 const check = process.argv.includes('--check');
 const files = new Map(); // relative path -> { content, mode }
