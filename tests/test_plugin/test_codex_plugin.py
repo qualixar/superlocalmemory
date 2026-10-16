@@ -522,12 +522,15 @@ class TestBackwardCompat:
     def test_build_plugin_mjs_still_passes_check(self) -> None:
         """node scripts/build-plugin.mjs --check must still pass (plugin/ in-sync)."""
         import subprocess
-        result = subprocess.run(
-            ["node", "scripts/build-plugin.mjs", "--check", "--quiet"],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-        )
+        from tests.test_plugin._plugin_sandbox import plugin_tree_lock
+
+        with plugin_tree_lock():
+            result = subprocess.run(
+                ["node", "scripts/build-plugin.mjs", "--check", "--quiet"],
+                cwd=REPO,
+                capture_output=True,
+                text=True,
+            )
         assert result.returncode == 0, (
             f"build-plugin.mjs --check failed (codex-plugin must be additive-only):\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"

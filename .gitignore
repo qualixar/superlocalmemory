@@ -243,3 +243,4 @@ docs/audits/
 
 # ==== UPGRADE FIXTURES (stores are rebuilt on demand; manifests live in tests/upgrade/manifests/) ====
 tests/upgrade/fixtures/
+.pytest-plugin-tree.lock
