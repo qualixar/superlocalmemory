@@ -6034,7 +6034,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             try:
                 from superlocalmemory.core.maintenance import run_maintenance as _run_maint
                 maint_result = _run_maint(engine._db, engine._config, pid)
-                results["langevin"] = {"updated": maint_result.get("updated", 0)}
+                results["langevin"] = {"updated": maint_result.get("langevin_updated", 0)}
             except Exception:
                 logger.exception("maintenance langevin step failed")
                 results["langevin"] = {"error": "internal error"}

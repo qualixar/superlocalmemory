@@ -511,7 +511,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             try:
                 from superlocalmemory.core.maintenance import run_maintenance as _run_maint
                 maint_result = _run_maint(engine._db, engine._config, pid)
-                results["langevin"] = {"updated": maint_result.get("updated", 0)}
+                results["langevin"] = {"updated": maint_result.get("langevin_updated", 0)}
             except Exception as exc:
                 results["langevin"] = {"error": str(exc)}
 

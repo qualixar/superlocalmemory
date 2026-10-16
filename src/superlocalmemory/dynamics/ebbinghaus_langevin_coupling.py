@@ -138,7 +138,17 @@ class EbbinghausLangevinCoupling:
             access_count, importance, confirmation_count, emotional_salience,
         )
 
-        # Step 3: Ebbinghaus retention
+        # Step 3: Ebbinghaus retention, on the store's own clock.
+        # Raw ``retention(hours, strength)`` feeds an hours-tuned curve real
+        # elapsed time: a memory three months old computed R ~ 0 and was
+        # filed forgotten (the maintenance tick then archived it), while the
+        # batch path — which scales strength onto the store timescale per
+        # GitHub #136 — called the same memory warm. The #136 fix landed
+        # only in ``batch_compute_retention``; this path kept the broken
+        # clock and re-broke zones nightly (2026-09-23: 3,281 facts
+        # archived in one 02:00 tick). Same conversion, same place, so the
+        # two paths cannot drift apart again.
+        strength = self._ebbinghaus.store_scaled_strength(strength)
         retention = self._ebbinghaus.retention(hours_since_last_access, strength)
 
         # Step 4: Lifecycle zone
