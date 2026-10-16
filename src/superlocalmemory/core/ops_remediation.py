@@ -45,6 +45,7 @@ from superlocalmemory.core.ops_inspection import (
     list_failed_operations,
     operation_profiles,
 )
+from superlocalmemory.storage.memory_write import memory_write
 
 logger = logging.getLogger(__name__)
 
@@ -129,15 +130,13 @@ def _action_cancel(db_path: Path, operation_id: str,
     )
     found = False
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
+        # memory_write: the process write lock and the shared busy timeout, so
+        # the daemon's own memory writer is waited for, not raced (4.2.8).
+        with memory_write(db_path) as conn:
             for sql, params in statements:
                 scoped_sql, scoped_params = _scoped(sql, params, profiles)
                 if conn.execute(scoped_sql, scoped_params).rowcount > 0:
                     found = True
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as exc:  # noqa: BLE001
         logger.error("resolve_operation cancel %s: %s", operation_id, exc)
         return {
@@ -218,15 +217,11 @@ def _action_retry(db_path: Path, engine: Any, operation_id: str,
             return _retry_result(operation_id, False, reason=(
                 "retry_still_failed — operation remains in FAILED state;"
                 " DLQ row preserved for further investigation"))
-        conn = sqlite3.connect(str(db_path))
-        try:
+        with memory_write(db_path) as conn:
             sql, params = _scoped(
                 "DELETE FROM dead_letter_operations WHERE original_op_id = ?",
                 (operation_id,), profiles)
             conn.execute(sql, params)
-            conn.commit()
-        finally:
-            conn.close()
         return _retry_result(operation_id, True, message=(
             f"Operation re-queued for retry (state: {operation.state.value})."))
     except Exception as exc:  # noqa: BLE001

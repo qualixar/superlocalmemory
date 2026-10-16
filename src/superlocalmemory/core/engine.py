@@ -261,20 +261,15 @@ class MemoryEngine:
         self._db = DatabaseManager(self._config.db_path)
         self._db.initialize(schema)
 
-        # V3.4.3: Apply "Unified Brain" schema extensions (mesh, entity compilation, ingestion)
+        # V3.4.3: Apply "Unified Brain" schema extensions (entity compilation, ingestion)
         # Idempotent — safe to call on every init. Skips if already applied.
+        # The mesh tables (and their v3.4.6 additions) are not created here:
+        # from 4.2.8 they live in mesh.db, built by mesh/mesh_store.py.
         try:
             from superlocalmemory.storage.schema_v343 import apply_v343_schema
-            apply_v343_schema(str(self._db.db_path))
+            apply_v343_schema(str(self._db.db_path), include_mesh=False)
         except Exception as exc:
             logger.warning("V3.4.3 schema migration failed: %s", exc)
-
-        # V3.4.6: Apply "Connected Brain" mesh enhancements (broadcast, project routing, offline queue)
-        try:
-            from superlocalmemory.storage.schema_v343 import apply_v346_schema
-            apply_v346_schema(str(self._db.db_path))
-        except Exception as exc:
-            logger.warning("V3.4.6 schema migration failed: %s", exc)
 
         # V3.4.7: Apply "Learning Brain" schema before deferred migrations.
         # M029 adds composite history indexes to these runtime tables, so the

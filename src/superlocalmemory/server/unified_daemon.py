@@ -2425,13 +2425,16 @@ async def lifespan(application: FastAPI):
 
     # H4 — mesh lock TTL expiry: delete expired mesh_locks rows on boot so
     # dead-node leases are cleared before any actor reads the lock table.
-    # mesh_locks lives in memory.db.  Fail-soft — never blocks startup.
+    # mesh_locks lives in mesh.db next to memory.db (4.2.8); a store that has
+    # no mesh.db yet is skipped. Fail-soft — never blocks startup.
     try:
         from superlocalmemory.infra.self_heal import expire_stale_mesh_locks
+        from superlocalmemory.mesh.mesh_store import mesh_db_path
 
         # The store resolved from config for the migration step above, not
         # the default location: a configured store keeps its own leases.
-        _mesh_db = locals().get("_memory_db") or canonical_data_root() / "memory.db"
+        _mesh_db = mesh_db_path(
+            locals().get("_memory_db") or canonical_data_root() / "memory.db")
         _mesh_expired = expire_stale_mesh_locks(_mesh_db)
         if _mesh_expired:
             logger.info("boot mesh expiry: cleared %d stale mesh_lock row(s)", _mesh_expired)
@@ -3208,7 +3211,9 @@ async def lifespan(application: FastAPI):
         if mesh_enabled:
             from superlocalmemory.mesh.broker import MeshBroker
             db_path = config.db_path if config else state_path("memory.db")
-            mesh_broker = MeshBroker(str(db_path))
+            # mesh.db next to memory.db: migrated from memory.db on first open.
+            mesh_broker = MeshBroker.for_store(
+                db_path, retention_days=getattr(config, "mesh_retention_days", 7))
             mesh_broker.start_cleanup()
             application.state.mesh_broker = mesh_broker
             logger.info("Mesh broker started")

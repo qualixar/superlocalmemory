@@ -79,6 +79,17 @@ CURRENT_MODE_FILE = "current_mode"
 _MODE_CONFIG_NAMES: dict | None = None
 
 
+def _mesh_retention_days(section: object) -> int:
+    """``mesh.retention_days`` from config.json: a whole number of days, at least 1."""
+    raw = section.get("retention_days", 7) if isinstance(section, dict) else 7
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid mesh.retention_days %r; using 7", raw)
+        return 7
+    return days if days >= 1 else 7
+
+
 def _runtime_base_dir() -> Path:
     """Resolve the process namespace when a config root is not explicit."""
     return canonical_data_root()
@@ -1336,6 +1347,9 @@ class SLMConfig:
 
     # v3.4.3: Mesh
     mesh_enabled: bool = True
+    # 4.2.8: mesh activity older than this many days is deleted from mesh.db
+    # (config.json ``mesh.retention_days``); configuration rows never expire.
+    mesh_retention_days: int = 7
 
     # Deployment policy overlay. Personal installs remain unchanged; the
     # daemon upgrades this to True before engine initialization when the
@@ -1609,6 +1623,7 @@ class SLMConfig:
             "entity_compilation_retrieval_boost", 1.0,
         )
         config.mesh_enabled = data.get("mesh_enabled", True)
+        config.mesh_retention_days = _mesh_retention_days(data.get("mesh"))
 
         # v4.0.6: GDPR retention window (additive — defaults to 90 if absent)
         try:
@@ -1848,6 +1863,7 @@ class SLMConfig:
         data["entity_compilation_enabled"] = self.entity_compilation_enabled
         data["entity_compilation_retrieval_boost"] = self.entity_compilation_retrieval_boost
         data["mesh_enabled"] = self.mesh_enabled
+        data["mesh"] = {**(data.get("mesh") or {}), "retention_days": self.mesh_retention_days}
         # v4.0.6: GDPR retention window — always written so load→save is lossless.
         data["retention_window_days"] = self.retention_window_days
 

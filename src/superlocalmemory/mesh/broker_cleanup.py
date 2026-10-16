@@ -6,6 +6,12 @@
 
 Runs inside one transaction the broker opens and retries. Nothing here commits
 except :func:`run_cleanup` at its end.
+
+The mesh is live coordination, not memory: activity (peers, messages, events,
+shared state, locks, sent-operation ids, the remote outbox) older than the
+retention window is deleted. Configuration is never aged out: peer profiles
+(owner mute/rename/retire, web-app connections), web-app peers, node identity,
+and the nonce store, which keeps its own replay window.
 """
 
 from __future__ import annotations
@@ -15,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 
 #: A connected web app is not a process that heartbeats, so the liveness rules
 #: below never touch it. It leaves only when the owner revokes the app.
+DEFAULT_RETENTION_DAYS = 7
+
 _NOT_WEB = "peer_id NOT IN (SELECT peer_id FROM mesh_peer_profiles WHERE kind='web')"
 
 
@@ -39,7 +47,6 @@ def _reap_peers(conn: sqlite3.Connection, now: datetime) -> None:
 def _reap_messages(conn: sqlite3.Connection, now: datetime) -> None:
     now_iso = now.isoformat()
     day_ago = (now - timedelta(hours=24)).isoformat()
-    week_ago = (now - timedelta(days=7)).isoformat()
     conn.execute(
         "DELETE FROM mesh_messages WHERE target_type='peer' AND read=1 "
         "AND created_at < ?",
@@ -65,12 +72,33 @@ def _reap_messages(conn: sqlite3.Connection, now: datetime) -> None:
     )
     # The 9999-... sentinel of a legacy lock sorts after any real now.
     conn.execute("DELETE FROM mesh_locks WHERE expires_at < ?", (now_iso,))
-    conn.execute("DELETE FROM mesh_events WHERE created_at < ?", (week_ago,))
 
 
-def run_cleanup(conn: sqlite3.Connection) -> None:
-    """Mark stale peers, delete dead ones and expired data, then commit."""
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (name,)).fetchone() is not None
+
+
+def _reap_old_activity(conn: sqlite3.Connection, now: datetime, days: int) -> None:
+    """Delete activity older than the retention window; configuration stays."""
+    cutoff = now - timedelta(days=days)
+    iso = cutoff.isoformat()
+    conn.execute(f"DELETE FROM mesh_peers WHERE last_heartbeat < ? AND {_NOT_WEB}", (iso,))
+    conn.execute("DELETE FROM mesh_messages WHERE created_at < ?", (iso,))
+    conn.execute("DELETE FROM mesh_events WHERE created_at < ?", (iso,))
+    conn.execute("DELETE FROM mesh_state WHERE updated_at < ?", (iso,))
+    conn.execute("DELETE FROM mesh_locks WHERE locked_at < ?", (iso,))
+    conn.execute("DELETE FROM mesh_sent_ops WHERE created_at < ?", (iso,))
+    if _has_table(conn, "mesh_outbox_remote"):
+        conn.execute("DELETE FROM mesh_outbox_remote WHERE created_at < ?",
+                     (cutoff.timestamp(),))
+
+
+def run_cleanup(conn: sqlite3.Connection, retention_days: int = DEFAULT_RETENTION_DAYS) -> None:
+    """Mark stale peers, delete dead ones, expired data and old activity, then commit."""
     now = datetime.now(timezone.utc)
     _reap_peers(conn, now)
-    _reap_messages(conn, now)
+    _reap_old_activity(conn, now, max(1, int(retention_days)))
+    _reap_messages(conn, now)  # last: orphaned reads/envelopes/leases go with their message
     conn.commit()

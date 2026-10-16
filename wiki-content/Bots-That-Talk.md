@@ -4,7 +4,7 @@ SLM-Mesh lets the agents working on your computer, and optionally the web apps y
 
 ## Peers, messages, state and locks
 
-A **peer** is any session that registers: an agent on this computer, or a web app through Web access. Peers can send each other direct messages or broadcast to a project, read their inbox, wait for new mail, share key-value state and take advisory file locks so two agents do not edit the same file at once. Mesh is on by default (`mesh_enabled`), with a switch in Settings. Everything is stored in `memory.db` and is isolated per profile.
+A **peer** is any session that registers: an agent on this computer, or a web app through Web access. Peers can send each other direct messages or broadcast to a project, read their inbox, wait for new mail, share key-value state and take advisory file locks so two agents do not edit the same file at once. Mesh is on by default (`mesh_enabled`), with a switch in Settings. Everything is stored in `mesh.db` next to `memory.db` and is isolated per profile. The mesh is live coordination, not memory: messages, events, shared state, locks and offline peers older than 7 days are deleted (`mesh.retention_days` in `config.json`); peer settings such as mute, rename, retire and connected web apps are kept.
 
 | Tool | What it does |
 |---|---|

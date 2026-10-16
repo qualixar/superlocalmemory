@@ -135,7 +135,7 @@ def _seed_receipts(u: Universe) -> None:
 def _seed_mesh(u: Universe) -> None:
     from superlocalmemory.mesh.broker import MeshBroker
 
-    broker = MeshBroker(str(u.engine._db.db_path))
+    broker = MeshBroker.for_store(u.engine._db.db_path)  # mesh.db (4.2.8)
     broker.register_peer("sess-erase", profile_id=PROFILE)
     broker.send_message("other", "broadcast", f"mesh note {u.mark('mesh')}", profile_id=PROFILE)
 

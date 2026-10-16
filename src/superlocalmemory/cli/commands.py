@@ -3734,6 +3734,16 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             # pending on it by definition, so this is not a finding.
             _check("Projection queue", "PASS", "not applicable to this store")
 
+    _stage("Mesh store")
+    # 10b'. mesh.db, the agent mesh's own file (4.2.8). Read-only; the daemon
+    # builds, migrates and repairs it at start.
+    try:
+        from superlocalmemory.cli.doctor_mesh import mesh_finding
+
+        _check("Mesh store", *mesh_finding(db_path.parent))
+    except Exception as _mesh_exc:  # noqa: BLE001 - never break doctor
+        _check("Mesh store", "WARN", f"could not read mesh.db: {_mesh_exc}")
+
     _stage("Failed saves")
     # 10c. Failed saves. `slm ops status` reports dead-lettered saves, degraded
     # operations and exhausted retries; doctor said nothing about them and read

@@ -237,8 +237,11 @@ def apply_v346_schema(db_path: str | sqlite3.Connection) -> dict:
     return result
 
 
-def apply_v343_schema(db_path: str | sqlite3.Connection) -> dict:
+def apply_v343_schema(db_path: str | sqlite3.Connection, *, include_mesh: bool = True) -> dict:
     """Apply all v3.4.3 schema changes. Idempotent — safe to call multiple times.
+
+    ``include_mesh=False`` is memory.db from 4.2.8 on: the mesh tables live in
+    mesh.db (mesh/mesh_store.py) and must not come back into memory.db.
 
     Returns dict with migration status and any errors.
     """
@@ -268,8 +271,9 @@ def apply_v343_schema(db_path: str | sqlite3.Connection) -> dict:
 
         # Phase C: Mesh tables
         try:
-            conn.executescript(_MESH_DDL)
-            result["applied"].append("mesh tables (5 tables, 2 indexes)")
+            if include_mesh:
+                conn.executescript(_MESH_DDL)
+                result["applied"].append("mesh tables (5 tables, 2 indexes)")
         except sqlite3.OperationalError as e:
             result["errors"].append(f"mesh: {e}")
 

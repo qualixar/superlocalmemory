@@ -5,7 +5,8 @@
 """SLM Mesh Broker — core orchestration for P2P agent communication.
 
 Manages peer lifecycle, scheduled cleanup, and event logging.
-All operations use the shared memory.db via SQLite tables with mesh_ prefix.
+All operations use mesh.db, the mesh's own file next to memory.db (4.2.8; see
+mesh_store), so a mesh write never races the canonical memory writer.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
@@ -62,11 +63,25 @@ _WRITE_RETRY_BASE_SECONDS = 0.05
 _WRITE_BUSY_TIMEOUT_MS = 2000
 
 
+def _is_store_fault(exc: sqlite3.DatabaseError) -> bool:
+    """The file itself is gone or damaged, not the request."""
+    message = str(exc).lower()
+    return any(m in message for m in ("malformed", "not a database", "no such table"))
+
+
 class MeshBroker(OwnerControlsMixin, WebPeersMixin):
     """Lightweight mesh broker — peer lifecycle, messaging, state, locks, events."""
 
-    def __init__(self, db_path: str | Path):
+    _memory_db: Path | None = None
+    _retention_days: int = broker_cleanup.DEFAULT_RETENTION_DAYS
+
+    def __init__(self, db_path: str | Path, *, memory_db: str | Path | None = None,
+                 retention_days: int = broker_cleanup.DEFAULT_RETENTION_DAYS):
         self._db_path = str(db_path)
+        # Set by for_store: the store mesh.db is rebuilt from if it is lost or corrupt.
+        self._memory_db = Path(memory_db) if memory_db is not None else None
+        self._retention_days = retention_days
+        self._recover_lock = threading.Lock()
         self._started_at = time.monotonic()
         self._cleanup_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -92,6 +107,28 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
         self._apply_schema_updates()
         _set_nonce_db_path(self._db_path)  # SEC-3: wire SQLite nonce store for durability
         self._fencing_counter = seed_fencing_counter(self._db_path)  # 3a-3: restart-safe fence
+
+    @classmethod
+    def for_store(cls, memory_db: str | Path, *,
+                  retention_days: int = broker_cleanup.DEFAULT_RETENTION_DAYS) -> "MeshBroker":
+        """The daemon's broker: mesh.db next to ``memory_db``, migrated on first open."""
+        from .mesh_store import prepare_mesh_db
+
+        mesh_db = prepare_mesh_db(memory_db, retention_days=retention_days)
+        return cls(mesh_db, memory_db=memory_db, retention_days=retention_days)
+
+    def _recover_store(self) -> bool:
+        """Rebuild a lost or corrupt mesh.db instead of failing every call (once per loss)."""
+        if self._memory_db is None:
+            return False
+        from .mesh_store import inspect, prepare_mesh_db
+
+        with self._recover_lock:
+            if inspect(self._db_path)["status"] != "ok":
+                prepare_mesh_db(self._memory_db, retention_days=self._retention_days)
+                self._apply_schema_updates()
+                return True
+        return False
 
     # -- Remote / Multi-Machine support (v3.4.47) --
 
@@ -168,12 +205,15 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
     # -- Connection helper --
 
     def _conn(self) -> sqlite3.Connection:
+        if self._memory_db is not None and not _os.path.exists(self._db_path):
+            self._recover_store()  # deleted under a live daemon: rebuild, do not crash
         conn = sqlite3.connect(
             self._db_path,
             timeout=_WRITE_BUSY_TIMEOUT_MS / 1000,
         )
         try:
             conn.execute(f"PRAGMA busy_timeout={_WRITE_BUSY_TIMEOUT_MS}")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.row_factory = sqlite3.Row
         except BaseException:
             # Setup failed: close it now, or the file stays open (Windows
@@ -194,8 +234,12 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
             conn = self._conn()
             try:
                 return operation(conn)
-            except sqlite3.OperationalError as exc:
-                if not self._is_transient_lock(exc):
+            except sqlite3.DatabaseError as exc:
+                transient = isinstance(exc, sqlite3.OperationalError) and self._is_transient_lock(exc)
+                if not transient:
+                    conn.close()
+                    if attempt == 0 and _is_store_fault(exc) and self._recover_store():
+                        continue  # mesh.db was corrupt or lost: rebuilt, try once more
                     raise
                 last_error = exc
                 try:
@@ -735,4 +779,5 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
                 logger.debug("Mesh cleanup error: %s", exc)
 
     def _run_cleanup(self) -> None:
-        self._write_with_retry(broker_cleanup.run_cleanup)
+        days = self._retention_days
+        self._write_with_retry(lambda conn: broker_cleanup.run_cleanup(conn, days))
