@@ -58,12 +58,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! git diff --exit-code --stat; then
+          # Only the generated plugin trees: the build does not own docs/ assets,
+          # and binary files there (demo GIFs) differ on every checkout.
+          paths=(plugin codex-plugin copilot-plugin cursor-plugin antigravity-plugin
+                 muse-plugin hermes-plugin vscode-agent-plugin
+                 .claude-plugin .cursor-plugin .github/plugin)
+          if ! git diff --exit-code --stat -- "${paths[@]}"; then
             echo "::error::Generated plugin files are out of date. Run 'node scripts/build-all-plugins.mjs' and commit the result."
-            git diff | head -n 200
+            git diff -- "${paths[@]}" | head -n 200
             exit 1
           fi
-          untracked="$(git status --porcelain --untracked-files=all)"
+          untracked="$(git status --porcelain --untracked-files=all -- "${paths[@]}")"
           if [ -n "$untracked" ]; then
             echo "::error::The plugin build created files that are not committed:"
             echo "$untracked"
