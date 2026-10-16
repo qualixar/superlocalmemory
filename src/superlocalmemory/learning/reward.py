@@ -244,6 +244,10 @@ class EngagementRewardModel:
     VALID_SIGNALS: Final[frozenset[str]] = _VALID_SIGNALS
     DISABLED_SENTINEL: Final[str] = _DISABLED_SENTINEL
 
+    # Defaults for instances built without ``__init__`` (tests, subclasses).
+    _busy_timeout_ms: int = _BUSY_TIMEOUT_MS * 10
+    _raise_on_db_error: bool = False
+
     def __init__(
         self,
         memory_db_path: Path,

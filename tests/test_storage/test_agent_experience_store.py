@@ -296,8 +296,8 @@ def test_write_busy_deadline_is_bounded_and_visible(
         real_start = time.monotonic()
         with pytest.raises(LearningWriteBusyError, match="deadline exceeded"):
             store.record_experience(_experience())
-        assert clock.slept <= ae._WRITE_DEADLINE_SECONDS + 1e-9  # never sleeps past it
-        assert clock.slept >= ae._WRITE_DEADLINE_SECONDS - 0.05  # it really retried
+        assert clock.slept <= ae.write_deadline_seconds() + 1e-9  # never sleeps past it
+        assert clock.slept >= ae.write_deadline_seconds() - 0.05  # it really retried
         assert time.monotonic() - real_start < 30  # liveness only: no hang
     finally:
         locked.rollback()
@@ -453,7 +453,7 @@ def test_waiting_behind_this_processs_own_writers_is_not_a_busy_database(
     store: AgentExperienceStore,
 ) -> None:
     """A writer ahead in this process's queue holding the lock longer than the
-    0.9 s SQLite deadline must not make the next receipt fail: nothing else
+    SQLite busy deadline must not make the next receipt fail: nothing else
     held the database. (The concurrent test failed this way under load.)"""
     import threading
 
@@ -471,3 +471,34 @@ def test_waiting_behind_this_processs_own_writers_is_not_a_busy_database(
         assert store.record_experience(_experience()) is True
     finally:
         t.join()
+
+
+def _hold_learning_db(path: Path, seconds: float):
+    """Another process's writer: holds learning.db for ``seconds``."""
+    import threading
+
+    holder = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    done = threading.Event()
+
+    def release() -> None:
+        time.sleep(seconds)
+        holder.execute("COMMIT")
+        holder.close()
+        done.set()
+
+    threading.Thread(target=release, daemon=True).start()
+    return done
+
+
+def test_a_receipt_waits_out_another_writer_like_every_other_writer(
+    store: AgentExperienceStore, tmp_path: Path,
+) -> None:
+    """4.2.8: the busy deadline was 0.9 s, so a 1.5 s write by another process
+    failed the receipt with LearningWriteBusyError. It is now the shared busy
+    timeout (SLM_DB_BUSY_TIMEOUT_MS, default 10 s) every writer uses."""
+    released = _hold_learning_db(tmp_path / "learning.db", 1.5)
+    try:
+        assert store.record_experience(_experience()) is True
+    finally:
+        released.wait(5)
