@@ -259,11 +259,15 @@ def test_entity_erasure_is_not_closed_while_a_listed_memory_remains(
     # Plant it for the second memory: the redrive must still refuse to close.
     engine._db.store_bm25_tokens(second, engine._profile_id, ["acme", "ingrid"])
 
-    _redrive(engine)
+    # 4.2.8: the redrive finishes a removal left undone, so the index must still
+    # refuse the removal for the erasure to stay open.
+    with monkeypatch.context() as patched:
+        patched.setattr(concrete_owners.Bm25Owner, "_remove", _locked)
+        _redrive(engine)
 
     bm25 = _rows(engine, erasure_id)["bm25"]
     assert bm25["state"] == "failed", bm25
-    assert "the bm25 index still holds it" in bm25["detail"], bm25
+    assert "residue" in bm25["detail"] and "OSError" in bm25["detail"], bm25
 
 
 def _write_receipt_without_fact_list(engine, erasure_id: str, subject: str) -> None:

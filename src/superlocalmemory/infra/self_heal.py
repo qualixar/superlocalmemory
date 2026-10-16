@@ -13,7 +13,8 @@ H1 from the No-Deadlock Hardening Plan:
     is numerically alive to avoid treating an unrelated process as ours.
 
 H4 from the plan (mesh TTL expiry):
-  - expire_stale_mesh_locks() purges expired mesh_locks rows on boot.
+  - expire_stale_mesh_locks() purges expired mesh_locks rows on boot (mesh.db
+    since 4.2.8; the daemon passes mesh_store.mesh_db_path(memory.db)).
 """
 
 from __future__ import annotations

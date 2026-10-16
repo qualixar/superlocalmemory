@@ -351,11 +351,20 @@ def _crash_child(path: str, when: str) -> None:
     import os
 
     journal = AdmissionJournal(Path(path), codec=_TestCodec())
-    journal._writer._linger = 0.5  # every save below lands in one batch
+    # Every save below lands in one batch by count, not by a stopwatch: the
+    # writer stops lingering once its queue reaches max_batch, so the batch
+    # closes when the eighth save arrives; the long linger is only a ceiling.
+    journal._writer._max_batch = _CRASH_BATCH
+    journal._writer._linger = 30.0
 
     def kill(live) -> None:
         if len(live) == _CRASH_BATCH:
             os.kill(os.getpid(), _hard_kill_signal())
+            # kill() of one's own multithreaded process can return before the
+            # process is gone (seen on macOS: 1 run in 3 under -n 4). This
+            # thread then ran on into COMMIT and 'before' found all 8 rows on
+            # disk. It must not take another step: wait here for the end.
+            threading.Event().wait()
 
     if when == "before":
         journal._writer.before_commit = kill

@@ -14,7 +14,8 @@ Identity files (`.install_token`, `.signer_key`, `api_key`, `credentials.json`) 
 
 | File or folder | What it holds |
 |---|---|
-| `memory.db` | Memories, facts, entities, graph, scenes, mesh, access control, audit, evolution log, corrections. |
+| `memory.db` | Memories, facts, entities, graph, scenes, access control, audit, evolution log, corrections. |
+| `mesh.db` | The agent mesh: peers, messages, shared state, locks and peer settings. Activity is kept `mesh.retention_days` days (default 7); shared state and peer settings are kept. |
 | `learning.db` | Learning signals, ranking state, receipts, Answer Check history, saved views. |
 | `media.db`, `media/` | Pictures, documents, folder sources and the original files. |
 | `config.json` | The active `SLMConfig`: mode, profile, LLM, embedding, retrieval, scope, forgetting, evolution and the rest. |

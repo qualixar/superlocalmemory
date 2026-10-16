@@ -196,6 +196,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M063_blank_temporal_dates_are_null as _M063,
 )
+from superlocalmemory.storage.migrations import (
+    M064_orphan_index_rows_are_removed as _M064,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -417,4 +420,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # (M057) can serve. Deferred: it reads temporal_events.
     Migration(name=_M063.NAME, db_target="memory", ddl=_M063.DDL,
               dependencies=(_M057.NAME,)),
+    # M064 removes the index rows of memories that no longer exist (a delete
+    # that failed partway). Deferred: it reads atomic_facts and vector_row_map,
+    # which engine init creates.
+    Migration(name=_M064.NAME, db_target="memory", ddl=_M064.DDL),
 ]

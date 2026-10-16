@@ -28,7 +28,20 @@ def wired(engine_with_mock_deps):
             "INSERT OR IGNORE INTO profiles (profile_id, name) VALUES (?, ?)",
             (pid, pid),
         )
-    return engine, MeshBroker(db_path), RbacEngine(db_path), GDPRCompliance(engine._db)
+    # The mesh lives in mesh.db next to memory.db (4.2.8).
+    broker = MeshBroker.for_store(db_path)
+    return engine, broker, RbacEngine(db_path), GDPRCompliance(engine._db)
+
+
+def _mesh_count(broker, table: str, pid: str) -> int:
+    import sqlite3
+
+    conn = sqlite3.connect(broker._db_path)
+    try:
+        return conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE profile_id = ?", (pid,)).fetchone()[0]
+    finally:
+        conn.close()
 
 
 def _seed_tenant(engine, broker, rbac, pid):
@@ -62,8 +75,7 @@ def test_erase_clears_every_profile_scoped_table(wired):
 
     scoped = gdpr._profile_scoped_tables()
     # The tables the audit flagged as missed MUST be in the erase set.
-    for t in ("mesh_messages", "mesh_peers", "mesh_state", "rbac_memberships",
-              "atomic_facts", "memories"):
+    for t in ("rbac_memberships", "atomic_facts", "memories"):
         assert t in scoped, f"{t} not in profile-scoped erase set"
 
     gdpr.forget_profile("wipe_me")
@@ -79,9 +91,10 @@ def test_erase_clears_every_profile_scoped_table(wired):
     keep_facts = engine._db.execute(
         "SELECT COUNT(*) AS c FROM atomic_facts WHERE profile_id='keep_me'")
     assert int(dict(keep_facts[0])["c"]) == 1
-    keep_msgs = engine._db.execute(
-        "SELECT COUNT(*) AS c FROM mesh_messages WHERE profile_id='keep_me'")
-    assert int(dict(keep_msgs[0])["c"]) == 1
+    # mesh.db: the erased tenant's mesh rows are gone, the other tenant's stay.
+    for t in ("mesh_messages", "mesh_peers", "mesh_state", "mesh_events"):
+        assert _mesh_count(broker, t, "wipe_me") == 0, f"mesh.db {t} still has wipe_me rows"
+    assert _mesh_count(broker, "mesh_messages", "keep_me") == 1
     keep_mem = engine._db.execute(
         "SELECT COUNT(*) AS c FROM rbac_memberships WHERE profile_id='keep_me'")
     assert int(dict(keep_mem[0])["c"]) == 1

@@ -159,3 +159,86 @@ def test_the_reconcile_action_still_refuses_an_erasure_it_cannot_prove(engine) -
 
     assert result["success"] is False and "still stored" in result["reason"], result
     assert {r["state"] for r in _rows(engine, "erase-work-still-stored")} == {"failed"}
+
+
+# -- 4.2.8: a removal left undone is finished, not only reported --------------
+
+class _Index:
+    """A projection owner whose removal can be made to fail, and holds a residue until it works."""
+
+    name = "vector"
+
+    def __init__(self, fail_times: int) -> None:
+        self.residue, self.fail_times, self.erase_calls = True, fail_times, 0
+
+    def erase(self, context):
+        from superlocalmemory.core.transactions.owners import OwnerErasureProof
+
+        self.erase_calls += 1
+        if self.fail_times > 0:
+            self.fail_times -= 1
+            return OwnerErasureProof(owner="vector", erased=False)
+        self.residue = False
+        return OwnerErasureProof(owner="vector", erased=True, checksum="c")
+
+    def prove_erased(self, context):
+        from superlocalmemory.core.transactions.owners import OwnerErasureProof
+
+        return OwnerErasureProof(owner="vector", erased=not self.residue, checksum="c")
+
+
+def _with_index(engine, monkeypatch, index) -> None:
+    from superlocalmemory.core.transactions import concrete_owners
+    from superlocalmemory.core.transactions.erasure import ErasureService
+
+    monkeypatch.setattr(concrete_owners, "build_erasure_service",
+                        lambda eng: ErasureService({"vector": index}))
+
+
+def _seed_vector_only(engine, op_id: str, subject: str, attempts: int) -> None:
+    now = time.time()
+    with engine._db.raw_connection() as conn:
+        conn.execute("INSERT INTO projection_tombstones (profile_id, fact_id, erasure_id, "
+                     "created_at) VALUES (?, ?, ?, ?)", (ACTIVE, subject, op_id, now))
+        conn.execute(
+            "INSERT INTO projection_obligations (operation_id, profile_id, owner, kind, "
+            "subject_id, state, attempts, created_at, updated_at) "
+            "VALUES (?, ?, 'vector', 'erase', ?, 'failed', ?, ?, ?)",
+            (op_id, ACTIVE, subject, attempts, now, now))
+
+
+def test_a_gone_memorys_leftover_index_rows_are_removed_by_the_redrive(engine, monkeypatch) -> None:
+    index = _Index(fail_times=0)
+    _with_index(engine, monkeypatch, index)
+    _seed_vector_only(engine, "erase-vector-left", "gone-fact", attempts=1)
+
+    _redrive(engine)
+
+    assert index.erase_calls == 1 and index.residue is False
+    assert {r["state"] for r in _rows(engine, "erase-vector-left")} == {"erased"}
+
+
+def test_a_removal_that_keeps_failing_stops_at_the_attempt_limit(engine, monkeypatch) -> None:
+    from superlocalmemory.core.transactions.erasure import MAX_ERASE_ATTEMPTS
+
+    index = _Index(fail_times=10**6)
+    _with_index(engine, monkeypatch, index)
+    _seed_vector_only(engine, "erase-vector-stuck", "gone-fact-2", attempts=1)
+
+    _redrive(engine, passes=MAX_ERASE_ATTEMPTS + 8)
+
+    assert index.erase_calls == MAX_ERASE_ATTEMPTS - 1  # attempts 1 -> limit, then reported only
+    assert {r["state"] for r in _rows(engine, "erase-vector-stuck")} == {"failed"}
+    assert _exhausted(engine) == 1
+
+
+def test_a_stored_memory_is_never_erased_by_the_redrive(engine, monkeypatch) -> None:
+    index = _Index(fail_times=0)
+    _with_index(engine, monkeypatch, index)
+    fact_id = _store_in(engine, ACTIVE, "The personal dentist visit is on Friday at noon.")
+    _seed_vector_only(engine, "erase-vector-stored", fact_id, attempts=1)
+
+    _redrive(engine, passes=3)
+
+    assert index.erase_calls == 0 and index.residue is True
+    assert engine._db.execute("SELECT 1 FROM atomic_facts WHERE fact_id = ?", (fact_id,))

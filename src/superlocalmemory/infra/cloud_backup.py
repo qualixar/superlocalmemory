@@ -693,7 +693,7 @@ def sync_to_github(backup_files: list[Path] | Path, dest_config: dict) -> bool:
 
 
 #: Backup files that are kept locally and never uploaded to a cloud destination.
-LOCAL_ONLY_BACKUP_PREFIXES = ("media-",)
+LOCAL_ONLY_BACKUP_PREFIXES = ("media-", "mesh-")
 
 
 def _find_latest_backup_set(backup_dir: Path) -> list[Path]:

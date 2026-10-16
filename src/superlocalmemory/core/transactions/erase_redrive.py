@@ -7,10 +7,13 @@ ingestion. Erasure ids have no ingestion row by design, so their obligations
 were failed as orphans and, after ten passes, reported as exhausted. This
 module owns the erase side of that redrive.
 
-An erase obligation is closed by proof, never by retrying: it becomes ERASED
-only when the memory is gone from the canonical store, its tombstone exists,
-and the owning projection holds nothing for it. Proof is read-only; nothing
-here deletes or restores data. When proof fails the obligation is marked
+An erase obligation is closed by proof: it becomes ERASED only when the memory
+is gone from the canonical store, its tombstone exists, and the owning
+projection holds nothing for it. Proof is read-only and never restores data.
+Since 4.2.8, when the memory is gone and tombstoned but an index still holds
+part of it (the delete's removal step failed or was interrupted), that owner's
+removal is run again, up to MAX_ERASE_ATTEMPTS times, and then proven. When
+proof still fails the obligation is marked
 FAILED with the reason, and once that has happened ``MAX_REPROOFS`` times the
 erasure is reported by ``slm ops status`` instead of sitting silently. From
 then on it is re-checked with a capped exponential back-off rather than every
@@ -217,7 +220,7 @@ def _covered_fact_ids(
 def _unproven_reason(
     db: Any, service: Any, context: OperationContext, obs: list[Obligation],
 ) -> tuple[str, list[tuple[str, str | None]]]:
-    """Read-only proof. Returns ``("", proofs)`` or ``(reason, [])``."""
+    """Proof, after finishing any removal left undone. ``("", proofs)`` or ``(reason, [])``."""
     from superlocalmemory.core.transactions.erasure import is_tombstoned
 
     for fact_id in context.fact_ids:
@@ -236,6 +239,12 @@ def _unproven_reason(
     proven: list[tuple[str, str | None]] = []
     for ob in obs:
         proof = service.prove_erased(context, ob.owner)
+        if not proof.erased and ob.attempts < MAX_ERASE_ATTEMPTS:
+            # The memory is gone and tombstoned but this index still holds part of
+            # it: the delete failed or was interrupted at this step. Finish it
+            # (bounded by MAX_ERASE_ATTEMPTS), then prove it again.
+            service.complete_owner(db, context, ob.owner)
+            proof = service.prove_erased(context, ob.owner)
         if not proof.erased:
             return f"the {ob.owner} index still holds it", []
         proven.append((ob.owner, proof.checksum or None))

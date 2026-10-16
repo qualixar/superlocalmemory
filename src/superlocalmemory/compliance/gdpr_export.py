@@ -275,6 +275,9 @@ class ProfileExport:
                                only=("audit_chain",))
         if chain and chain.get("audit_chain"):
             yield "audit_chain", "rows", chain["audit_chain"]
+        mesh = sidecar_tables(self._root / "mesh.db", self._profile, self.options)
+        if mesh:
+            yield "mesh", "object", mesh
         waiting = sidecar_tables(self._root / "pending.db", self._profile, self.options,
                                  only=("pending_memories",))
         if waiting and waiting.get("pending_memories"):

@@ -3392,6 +3392,22 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             if not use_json:
                 print(f"  auto-repair error: {_fix_exc}\n")
 
+        # 4.2.8: index rows of memories that no longer exist (a delete that failed
+        # partway). The daemon removes them by itself on its first start of this
+        # version and in its routine pass; this is the same removal, on demand.
+        try:
+            from superlocalmemory.infra.data_root import canonical_data_root
+            from superlocalmemory.storage.vector_residue import repair_orphan_index_rows
+
+            _orphans = repair_orphan_index_rows(canonical_data_root() / "memory.db")
+            if not use_json:
+                print(f"  Removed {_orphans.total} search-index row(s) of memories "
+                      "that no longer exist." if _orphans.total
+                      else "  No leftover search-index rows found.")
+        except Exception as _orphan_exc:
+            if not use_json:
+                print(f"  search-index cleanup skipped: {_orphan_exc}")
+
         # H5 — stale-artifact reap (additive; runs after component healer).
         # Removes provably-dead lock/PID files so the doctor report below
         # reflects the healed state.  Fail-open — never blocks doctor.
@@ -3742,6 +3758,16 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             # No table means a store that predates the queue. Nothing is
             # pending on it by definition, so this is not a finding.
             _check("Projection queue", "PASS", "not applicable to this store")
+
+    _stage("Mesh store")
+    # 10b'. mesh.db, the agent mesh's own file (4.2.8). Read-only; the daemon
+    # builds, migrates and repairs it at start.
+    try:
+        from superlocalmemory.cli.doctor_mesh import mesh_finding
+
+        _check("Mesh store", *mesh_finding(db_path.parent))
+    except Exception as _mesh_exc:  # noqa: BLE001 - never break doctor
+        _check("Mesh store", "WARN", f"could not read mesh.db: {_mesh_exc}")
 
     _stage("Failed saves")
     # 10c. Failed saves. `slm ops status` reports dead-lettered saves, degraded

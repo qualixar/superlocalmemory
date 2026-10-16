@@ -444,6 +444,11 @@ def delete_profile_from_db(name: str, *, move_to: str = "default") -> dict:
     ViewStore(root / "learning.db").erase_profile(name)
     sidecars.purge_learned_state(root / "learning.db", name)
     sidecars.purge_context_cache(root, name)
+    # Live mesh coordination of the deleted profile (mesh.db since 4.2.8; the
+    # fold below would have deleted it when it sat in memory.db).
+    from superlocalmemory.mesh.mesh_erasure import erase_profile as erase_mesh
+
+    erase_mesh(root / "mesh.db", name)
     sidecars.move_pending(root / "pending.db", name, move_to)
     from superlocalmemory.storage.profile_fold import fold_profile
 
