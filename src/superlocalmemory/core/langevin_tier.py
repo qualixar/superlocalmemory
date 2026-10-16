@@ -80,46 +80,65 @@ def _direction_seed(fact_id: str) -> int:
     return int.from_bytes(digest, "big")
 
 
-def _retention_radius(
-    access_count: int, age_days: float, importance: float,
-) -> float:
-    """``1 - R(t)`` on the store's own timescale.
+def _curve(curve: object | None) -> object:
+    """The person's curve when the caller has it; the decay pass's defaults else.
 
-    ``EbbinghausCurve`` is parameterised in HOURS -- ``max_strength`` is 100,
-    i.e. about four days -- because it models working-memory decay. Applied
-    verbatim it puts a one-day-old memory at r=0.94, archived. Measured, which
-    is the only reason this is not what shipped.
-
-    So the curve's SHAPE is used and its TIME CONSTANT is taken from the
-    ladder the product already documents in ``core/tier_manager.py``:
-    ``ARCHIVE_AFTER_DAYS`` days without access must reach
-    ``archive_threshold`` retention. That fixes S exactly, invents no new
-    constant, and leaves one authority for "how long is a long time here".
-
-    Strength then scales that constant, so being used extends the time
-    constant -- the same job ``ACCESS_BOOST_MULTIPLIER`` does in the tier
-    ladder, expressed continuously.
+    Callers on the maintenance path pass ``EbbinghausCurve(config.forgetting)``
+    -- the same settings the decay pass reads -- so both passes decide "may
+    this memory archive" from one function and one set of settings.
     """
-    # Imported here, like LangevinDynamics below: this module is loaded on the
-    # daemon's start path and the config/ebbinghaus pair costs real time.
+    if curve is not None:
+        return curve
     from superlocalmemory.core.config import ForgettingConfig
     from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+
+    return EbbinghausCurve(ForgettingConfig())
+
+
+def _retention_and_zone(
+    access_count: int, age_days: float, importance: float, curve: object | None = None,
+) -> tuple[float, str]:
+    """``(R, zone)`` from ``EbbinghausCurve.retention_and_zone``, the function the
+    decay pass and the ELC step use."""
+    retention, _strength, zone = _curve(curve).retention_and_zone(  # type: ignore[attr-defined]
+        access_count=access_count, importance=importance, confirmation_count=0,
+        emotional_salience=0.0, hours_since=max(0.0, age_days) * 24.0,
+    )
+    return retention, zone
+
+
+def _retention_radius(
+    access_count: int, age_days: float, importance: float, curve: object | None = None,
+) -> float:
+    """``1 - R(t)`` on the store's own timescale, with the person's settings.
+
+    ``EbbinghausCurve`` is parameterised in HOURS; applied verbatim it puts a
+    one-day-old memory at r=0.94, archived. ``store_scaled_strength`` takes the
+    time constant from the ladder in ``core/tier_manager.py`` (GitHub #136).
+
+    Until 4.2.8 this built ``EbbinghausCurve(ForgettingConfig())`` -- the
+    defaults -- whatever the person had set, while the decay pass used their
+    settings. On one real store that archived 630 memories the person's own
+    settings keep. ``curve`` is now the caller's, from the same settings.
+    """
     from superlocalmemory.math.langevin import _MAX_NORM
 
-    curve = EbbinghausCurve(ForgettingConfig())
-    strength = curve.memory_strength(
-        access_count=access_count,
-        importance=importance,
-        confirmation_count=0,
-        emotional_salience=0.0,
-    )
-    # Same conversion the decay path uses — one derivation, not two copies.
-    # 4.1.15 scaled the seed here and left the decay path unscaled, so the
-    # decay cycle overwrote every corrected tier minutes later.
-    retention = curve.retention(
-        max(0.0, age_days) * 24.0, curve.store_scaled_strength(strength),
-    )
+    retention, _zone = _retention_and_zone(access_count, age_days, importance, curve)
     return min(max(1.0 - retention, 0.0), _MAX_NORM * 0.95)
+
+
+def langevin_lifecycle(
+    access_count: int, age_days: float, importance: float, curve: object | None = None,
+) -> str:
+    """The tier the Langevin pass writes: the shared zone, in mirror spelling.
+
+    The radius still sets the retrieval weight; the tier (and so whether a
+    memory may archive) is the decay zone, so the two passes cannot disagree.
+    """
+    from superlocalmemory.core.lifecycle_state import atomic_lifecycle_for
+
+    _retention, zone = _retention_and_zone(access_count, age_days, importance, curve)
+    return atomic_lifecycle_for(zone)
 
 
 def _seed_langevin_position(
@@ -130,6 +149,7 @@ def _seed_langevin_position(
     dim: int = 8,
     *,
     fact_id: str = "",
+    curve: object | None = None,
 ) -> list[float]:
     """Place a fact at the radius its Ebbinghaus retention implies.
 
@@ -145,7 +165,7 @@ def _seed_langevin_position(
     nobody can reproduce is a support case nobody can answer. Direction still
     varies per fact, so facts do not collapse onto one point.
     """
-    r_eq = _retention_radius(access_count, age_days, importance)
+    r_eq = _retention_radius(access_count, age_days, importance, curve)
     rng = np.random.default_rng(_direction_seed(fact_id))
     direction = rng.standard_normal(dim)
     norm = float(np.linalg.norm(direction))
@@ -157,6 +177,7 @@ def _seed_langevin_position(
 
 def _anchor_to_retention(
     position: list[float], access_count: int, age_days: float, importance: float,
+    curve: object | None = None,
 ) -> list[float]:
     """Keep the direction a Langevin step chose; take the radius from retention.
 
@@ -168,7 +189,7 @@ def _anchor_to_retention(
     radius is ``1 - R(t)``, the relationship the seed already uses, so a pass
     can move a memory between tiers only when its retention moves.
     """
-    radius = _retention_radius(access_count, age_days, importance)
+    radius = _retention_radius(access_count, age_days, importance, curve)
     vector = np.asarray(position, dtype=np.float64)
     norm = float(np.linalg.norm(vector))
     if norm < 1e-12:
@@ -177,22 +198,26 @@ def _anchor_to_retention(
     return (vector / norm * radius).tolist()
 
 
-def _langevin_pass(ld: object, fact_dicts: list[dict]) -> list[dict]:
+def _langevin_pass(ld: object, fact_dicts: list[dict],
+                   curve: object | None = None) -> list[dict]:
     """One maintenance step for each fact: the Langevin step, anchored.
 
     Returns ``fact_id``, ``position`` and ``lifecycle`` per fact, the shape
-    ``_persist_lifecycle`` expects.
+    ``_persist_lifecycle`` expects. ``curve`` is the person's
+    (``EbbinghausCurve(config.forgetting)``); the tier is the shared decay
+    zone (:func:`langevin_lifecycle`), not the radius bands, so this pass can
+    never archive a memory the decay pass keeps.
     """
     results = []
     for fact, stepped in zip(fact_dicts, ld.batch_step(fact_dicts)):
         position = _anchor_to_retention(
             stepped["position"], fact["access_count"], fact["age_days"],
-            fact["importance"],
+            fact["importance"], curve,
         )
-        weight = ld.compute_lifecycle_weight(position)
         results.append({
             "fact_id": fact["fact_id"],
             "position": position,
-            "lifecycle": ld.get_lifecycle_state(weight).value,
+            "lifecycle": langevin_lifecycle(fact["access_count"], fact["age_days"],
+                                            fact["importance"], curve),
         })
     return results

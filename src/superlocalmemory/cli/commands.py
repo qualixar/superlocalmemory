@@ -3769,6 +3769,17 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
     except Exception as _mesh_exc:  # noqa: BLE001 - never break doctor
         _check("Mesh store", "WARN", f"could not read mesh.db: {_mesh_exc}")
 
+    _stage("Data repairs")
+    # 10b''. What the automatic 4.2.8 data repairs (M065 made-up dates, M066
+    # wrongly archived memories) did on their one run. Read-only.
+    if db_path.exists():
+        try:
+            from superlocalmemory.cli.doctor_repairs import data_repairs_finding
+
+            _check("Data repairs", *data_repairs_finding(db_path))
+        except Exception as _dr_exc:  # noqa: BLE001 - never break doctor
+            _check("Data repairs", "WARN", f"could not read the repair record: {_dr_exc}")
+
     _stage("Failed saves")
     # 10c. Failed saves. `slm ops status` reports dead-lettered saves, degraded
     # operations and exhausted retries; doctor said nothing about them and read

@@ -357,6 +357,45 @@ class EbbinghausCurve:
         """
         return _ZONE_WEIGHTS.get(zone, 0.0)
 
+    def retention_and_zone(
+        self,
+        *,
+        access_count: int,
+        importance: float,
+        confirmation_count: int,
+        emotional_salience: float,
+        hours_since: float,
+        stored_strength: float = 0.0,
+        trust: float = 1.0,
+    ) -> tuple[float, float, str]:
+        """``(retention, strength, zone)``: the ONE place that decides whether a
+        memory may archive.
+
+        Every pass that sets a tier calls this -- the decay pass
+        (:meth:`batch_compute_retention`), the ELC coupled step and the
+        maintenance Langevin pass -- with this curve built from the person's
+        own ``forgetting`` settings. Each used to carry its own copy and each
+        copy drifted: the ELC step kept the hours clock after #136 fixed the
+        batch path (#266), and the Langevin pass used ``ForgettingConfig()``
+        defaults while the decay pass used the person's settings, archiving
+        630 memories on one real store that the person's settings keep.
+        ``tests/test_dynamics/test_archive_zone_has_one_source.py`` holds them
+        together.
+
+        ``strength`` is the hours-tuned strength (learned repetition kept via
+        ``stored_strength``); the store-scaled clock (GitHub #136) is applied
+        here, before decay, and nowhere else.
+        """
+        strength = max(
+            self.memory_strength(access_count, importance, confirmation_count,
+                                 emotional_salience),
+            float(stored_strength),
+        )
+        retention = self.trust_modulated_retention(
+            hours_since, self.store_scaled_strength(strength), trust,
+        )
+        return retention, strength, self.lifecycle_zone(retention)
+
     def batch_compute_retention(
         self,
         facts: list[FactRetentionInput],
@@ -366,35 +405,20 @@ class EbbinghausCurve:
         results: list[dict] = []
 
         for fact in facts:
-            access_count = fact["access_count"]
-            importance = fact["importance"]
-            confirmation_count = fact["confirmation_count"]
-            emotional_salience = fact["emotional_salience"]
-            last_accessed_at = fact["last_accessed_at"]
-
-            hours_since = _hours_since(last_accessed_at, now)
-
-            strength = self.memory_strength(
-                access_count,
-                importance,
-                confirmation_count,
-                emotional_salience,
-            )
-            strength = max(strength, float(fact.get("memory_strength", 0.0)))
-            trust = fact.get("trust_score", 1.0)
-            # Scaled to the store's timescale before decay is applied. Without
-            # this, anything older than a few days computes R ~ 0 and is filed
-            # `forgotten` regardless of how often it is used. GitHub #136.
-            ret = self.trust_modulated_retention(
-                hours_since,
-                self.store_scaled_strength(strength),
-                trust,
+            ret, strength, zone = self.retention_and_zone(
+                access_count=fact["access_count"],
+                importance=fact["importance"],
+                confirmation_count=fact["confirmation_count"],
+                emotional_salience=fact["emotional_salience"],
+                hours_since=_hours_since(fact["last_accessed_at"], now),
+                stored_strength=float(fact.get("memory_strength", 0.0)),
+                trust=fact.get("trust_score", 1.0),
             )
             if "content" in fact:
                 # The curve measures use, not worth: a fresh "2024-01-15 File
                 # was modified" computes 1.0. Content decides whether it may.
                 ret = cap_retention(ret, fact["content"])
-            zone = self.lifecycle_zone(ret)
+                zone = self.lifecycle_zone(ret)
 
             results.append(
                 {
@@ -402,13 +426,12 @@ class EbbinghausCurve:
                     "retention": ret,
                     "strength": strength,
                     "zone": zone,
-                    "access_count": access_count,
-                    "last_accessed_at": last_accessed_at,
+                    "access_count": fact["access_count"],
+                    "last_accessed_at": fact["last_accessed_at"],
                 }
             )
 
         return results
-
 
 def _hours_since(value, now):
     try:

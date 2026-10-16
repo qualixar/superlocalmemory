@@ -38,6 +38,8 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from superlocalmemory.storage.fabricated_dates import FABRICATED_DAYS, contains_fabricated_date
+
 __all__ = [
     "KEEP_THRESHOLD", "PLACEHOLDER_DATES", "cap_retention", "fresh_retention",
     "is_keep_worthy", "junk_reason", "register_sql",
@@ -48,7 +50,9 @@ __all__ = [
 KEEP_THRESHOLD = 0.8
 
 #: Dates the extractor fabricates. Measured on the owner's store, 16 Oct 2026.
-PLACEHOLDER_DATES = frozenset({"2024-01-15", "2026-01-15"})
+#: One list for the decay cap and the M065 repair (``storage.fabricated_dates``),
+#: which also recognises them written out ("January 15, 2024").
+PLACEHOLDER_DATES = frozenset(FABRICATED_DAYS)
 
 #: Facts longer than this are notes, not extractions; the date rule skips them.
 _PLACEHOLDER_MAX_WORDS = 40
@@ -78,7 +82,27 @@ file files modified changed updated edited created saved written touched
 opened closed started ended began finished happened occurred
 date day time today yesterday tomorrow when which something thing data
 session event
+s his her their they he she last first current end start conversation
+modification located system directory same script unknown
+january february march april may june july august september october november
+december jan feb mar apr jun jul aug sep sept oct nov dec
+monday tuesday wednesday thursday friday saturday sunday weekday weekend
+am pm ist utc gmt est edt pst pdt cet cest bst
 """.split())
+#: A boundary note: who and when a session or conversation began or ended.
+_BOUNDARY = re.compile(
+    r"\b(?:session|conversation)\b.*\b(?:end(?:ed)?|start(?:ed)?|began|close[d]?)\b"
+    r"|\b(?:ended|started|began|closed)\s+(?:his|her|their|the|a)?\s*session\b",
+    re.IGNORECASE | re.DOTALL,
+)
+#: A file or path, named and nothing more ("engine.py", "videos/launch").
+_PATHLIKE = re.compile(r"^[^\W\d_][\w-]*(?:[./][\w-]+)+$")
+#: Punctuation around a token, not part of a file name.
+_EDGE = ".,;:!?()[]{}'\"`"
+#: Boundary and file notes are one short line; longer text says something.
+_NOTE_MAX_WORDS = 16
+#: At most this many specific words (a name, a file) may remain in such a note.
+_NOTE_MAX_SPECIFIC = 2
 
 
 def junk_reason(content: str | None) -> str | None:
@@ -87,16 +111,34 @@ def junk_reason(content: str | None) -> str | None:
     if not text:
         return "content_free"
     words = len(text.split())
-    if words <= _PLACEHOLDER_MAX_WORDS and any(
-        d in PLACEHOLDER_DATES for d in _DATE.findall(text)
+    if words <= _PLACEHOLDER_MAX_WORDS and (
+        any(d in PLACEHOLDER_DATES for d in _DATE.findall(text))
+        or contains_fabricated_date(text)
     ):
         return "placeholder_date"
     if words <= _TEST_MAX_WORDS and _TEST.search(text):
         return "test_string"
-    remainder = _TIME.sub(" ", _DATE.sub(" ", text))
-    if all(w.lower() in _GENERIC for w in _WORD.findall(remainder)):
+    # File names first, whole: a dated name ("HANDOFF-2026-07-20-v3.md") must
+    # not be split by the date rule into words that look like content.
+    tokens = [t.strip(_EDGE) for t in text.split()]
+    paths = [t for t in tokens if _PATHLIKE.match(t)]
+    rest = " ".join(t for t in tokens if t not in paths)
+    remainder = _TIME.sub(" ", _DATE.sub(" ", rest))
+    words_left = [w.rstrip(".") for w in _WORD.findall(remainder)]
+    specific = paths + [w for w in words_left if w.lower() not in _GENERIC]
+    if not specific or _says_only_who_or_which_file(text, words, specific):
         return "content_free"
     return None
+
+
+def _says_only_who_or_which_file(text: str, words: int, specific: list[str]) -> bool:
+    """A short note naming only who ended a session, or only which file was
+    touched: "Varun's session ended yesterday", "engine.py was modified"."""
+    if words > _NOTE_MAX_WORDS or len(specific) > _NOTE_MAX_SPECIFIC:
+        return False
+    if _BOUNDARY.search(text):
+        return True
+    return all(_PATHLIKE.match(w) for w in specific)
 
 
 def is_keep_worthy(content: str | None) -> bool:

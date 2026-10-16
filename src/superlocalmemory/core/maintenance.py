@@ -34,6 +34,7 @@ from superlocalmemory.core.langevin_tier import (  # noqa: F401 - re-exported
     _langevin_pass,
     _retention_radius,
     _seed_langevin_position,
+    langevin_lifecycle,
 )
 
 if TYPE_CHECKING:
@@ -320,17 +321,16 @@ def run_maintenance(
     except Exception as exc:  # pragma: no cover — legacy DB / missing FTS
         logger.debug("expansion backfill skipped: %s", exc)
 
+    # The person's forgetting settings, the ones the decay pass reads: every
+    # Langevin tier below is decided by the same function with the same
+    # settings (EbbinghausCurve.retention_and_zone), never by the defaults.
+    from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+
+    tier_curve = EbbinghausCurve(config.forgetting)
+
     # 1a. Backfill: seed uninitialized facts with metadata-aware positions (B+C)
     if config.math.langevin_persist_positions:
         try:
-            from superlocalmemory.math.langevin import LangevinDynamics
-
-            ld = LangevinDynamics(
-                dim=_LANGEVIN_DIM,
-                dt=config.math.langevin_dt,
-                temperature=config.math.langevin_temperature,
-            )
-
             backfilled = 0
             for f in facts:
                 if f.langevin_position is not None:
@@ -347,10 +347,11 @@ def run_maintenance(
                 position = _seed_langevin_position(
                     f.access_count, age_days, f.importance,
                     config.math.langevin_temperature, _LANGEVIN_DIM,
-                    fact_id=f.fact_id,
+                    fact_id=f.fact_id, curve=tier_curve,
                 )
-                weight = ld.compute_lifecycle_weight(position)
-                lifecycle = ld.get_lifecycle_state(weight).value
+                lifecycle = langevin_lifecycle(
+                    f.access_count, age_days, f.importance, tier_curve,
+                )
                 _persist_lifecycle(
                     db, profile_id, [(f.fact_id, lifecycle, position)],
                 )
@@ -387,7 +388,7 @@ def run_maintenance(
                 })
 
             if fact_dicts:
-                results = _langevin_pass(ld, fact_dicts)
+                results = _langevin_pass(ld, fact_dicts, tier_curve)
                 _persist_lifecycle(db, profile_id, [
                     (r["fact_id"], r["lifecycle"], r["position"])
                     for r in results
@@ -433,7 +434,7 @@ def run_maintenance(
                         "access_count": f.access_count,
                         "age_days": age_days,
                         "importance": f.importance,
-                    }])
+                    }], tier_curve)
                     new_pos, lifecycle = coupled["position"], coupled["lifecycle"]
                     _persist_lifecycle(
                         db, profile_id, [(f.fact_id, lifecycle, new_pos)],

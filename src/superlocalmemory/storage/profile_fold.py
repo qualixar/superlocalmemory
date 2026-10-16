@@ -48,7 +48,7 @@ table is recorded there)
 MOVE    action_outcomes, association_edges, atomic_facts, bm25_tokens,
         canonical_entities, ccq_audit_log, ccq_consolidated_blocks,
         completion_manifests, consolidation_log, correction_cases_overtaken,
-        correction_events, dead_letter_operations, derivation_lineage,
+        correction_events, data_repair_undo, dead_letter_operations, derivation_lineage,
         embedding_metadata, embedding_quantization_metadata, enrichment_changes,
         entity_aliases,
         fact_access_log, fact_consolidations, fact_context, fact_hub_baseline,
@@ -91,6 +91,8 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "atomic_facts": (MOVE, "its facts"),
     "memory_archive": (MOVE, "archived facts of the memories"),
     "pinned_facts": (MOVE, "pins on its facts"),
+    "data_repair_undo": (MOVE, "undo record of an automatic data repair; it names the "
+                               "moved facts by id, so it still applies after the move"),
     "dead_letter_operations": (MOVE, "writes that failed and can still be retried"),
     # search indexes and vectors
     "bm25_tokens": (MOVE, "keyword index"),
