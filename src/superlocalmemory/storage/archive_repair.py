@@ -30,7 +30,8 @@ on the hours clock (#266), and the maintenance Langevin pass, which until 4.2.8
 decided tiers on the default forgetting settings instead of the person's own
 (on the author's store, 630 memories archived that the person's settings keep).
 A memory the fixed Langevin pass would still archive stays archived, so the
-next pass never undoes a restore.
+next pass never undoes a restore. Junk (``core.keep_worthiness``) is never
+brought back, whatever the clock says.
 """
 
 from __future__ import annotations
@@ -250,6 +251,21 @@ def _restore(conn: sqlite3.Connection, writer: UndoWriter, fact: tuple[str, str]
     return True
 
 
+def _worth_keeping(conn: sqlite3.Connection, fact_ids: list[str]) -> list[str]:
+    """Drop junk (``core.keep_worthiness``, the one predicate the decay cap and
+    the refile use): a session-end note or a bare file name back in recall is
+    noise, whatever the clock says."""
+    from superlocalmemory.core.keep_worthiness import is_keep_worthy
+
+    kept = []
+    for fact_id in fact_ids:
+        row = conn.execute("SELECT content FROM atomic_facts WHERE fact_id = ?",
+                           (fact_id,)).fetchone()
+        if row is not None and is_keep_worthy(row[0]):
+            kept.append(fact_id)
+    return kept
+
+
 def _plan(conn: sqlite3.Connection, settings: _Settings,
           ) -> tuple[int, list[tuple[str, str, str]]]:
     """``(checked, [(fact_id, profile_id, zone)])``. Reads only."""
@@ -266,7 +282,8 @@ def _plan(conn: sqlite3.Connection, settings: _Settings,
         eligible = [fid for fid, created in facts
                     if rule_age is None or _age_days(created) <= rule_age]
         zones = _zones(conn, profile_id, eligible, curve) if eligible else {}
-        live = [fid for fid in eligible if zones.get(fid) in RESTORABLE_ZONES]
+        live = _worth_keeping(conn, [fid for fid in eligible
+                                      if zones.get(fid) in RESTORABLE_ZONES])
         langevin = _langevin_archives(conn, live, settings)
         restores += [(fid, profile_id, zones[fid]) for fid in live if fid not in langevin]
     return len(candidates), restores

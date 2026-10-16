@@ -282,3 +282,25 @@ def test_what_the_default_settings_archived_comes_back_on_the_persons_own(
     rows = sqlite3.connect(memory).execute(
         "SELECT COUNT(*) FROM data_repair_undo WHERE fact_id = 'kept_by_settings'").fetchone()
     assert rows[0] == 2  # mirror + authority, each undoable
+
+
+def test_junk_is_never_brought_back(tmp_path) -> None:
+    """A memory the keep-worthiness predicate calls junk stays archived even when
+    every clock calls it live: restoring it would put noise back in recall."""
+    memory, learning = migrated_store(tmp_path)
+    conn = sqlite3.connect(memory)
+    junk = {"j_session": "The session ended at 20:52 on August 3, 2026",
+            "j_file": "The file ISSUE-011-DRAFT.md was closed on 2026-07-30",
+            "j_date": "The file was modified on January 15, 2024."}
+    for fact_id, text in junk.items():
+        add_fact(conn, fact_id, text, created_at=_ago(60), lifecycle="archived")
+        conn.execute("INSERT INTO fact_retention (fact_id, profile_id, lifecycle_zone) "
+                     "VALUES (?, 'default', 'archive')", (fact_id,))
+    _archived(conn, "real", days=60)
+    conn.commit()
+    conn.close()
+    forget_migration(memory, M066.NAME)
+    first_start(memory, learning)
+    states = _states(memory)
+    assert all(states[f] == ("archived", "archive") for f in junk), states
+    assert states["real"] == ("warm", "warm")

@@ -23,14 +23,19 @@ from __future__ import annotations
 
 import re
 
-#: The made-up days, as stored in date columns.
-FABRICATED_DAYS: tuple[str, ...] = ("2024-01-15", "2026-01-15")
+#: The made-up days, as stored in date columns. 2024-01-14 is the prompt's own
+#: worked answer ("'Yesterday' with session date 2024-01-15 becomes
+#: '2024-01-14'"), echoed back the same way.
+FABRICATED_DAYS: tuple[str, ...] = ("2024-01-15", "2026-01-15", "2024-01-14")
 
-_YEARS = r"(?:2024|2026)"
 _MONTH = r"(?:January|Jan\.?)"
 _CLOCK = r"\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
-_ISO = (rf"{_YEARS}-01-15(?:[T ]{_CLOCK}(?:Z|[+-]\d{{2}}:?\d{{2}})?)?")
-_SPELLED = (rf"(?:{_MONTH}\s+15(?:th)?,?\s+{_YEARS}|15\s+{_MONTH}\s+{_YEARS})"
+#: (day, year) pairs of the made-up days, for the written-out forms.
+_DAY_YEAR = r"(?:15(?:th)?,?\s+(?:2024|2026)|14(?:th)?,?\s+2024)"
+_YEAR_DAY_FIRST = r"(?:15\s+{m}\s+(?:2024|2026)|14\s+{m}\s+2024)".format(m=_MONTH)
+_ISO = (r"(?:2024-01-1[45]|2026-01-15)"
+        rf"(?:[T ]{_CLOCK}(?:Z|[+-]\d{{2}}:?\d{{2}})?)?")
+_SPELLED = (rf"(?:{_MONTH}\s+{_DAY_YEAR}|{_YEAR_DAY_FIRST})"
             rf"(?:,?\s+at\s+{_CLOCK}(?:\s*[AaPp](?:\.[Mm]\.|[Mm]))?)?")
 #: One fabricated date with its time of day, if any, never part of a longer token
 #: (a clock right after the day belongs to it, so it is never left behind).
@@ -61,11 +66,11 @@ _BRACKETED = re.compile(rf"\s*[(\[]\s*{DATE}\s*[)\]]")
 _JAN = r"jan(?:uary|\.)?"
 _SOURCE_DAY = re.compile(
     r"(?<![\w.-])(?:"
-    r"(?:2024|2026)-01-15"
-    rf"|{_JAN}\s+15(?:st|nd|rd|th)?(?![\d])"
-    rf"|15(?:st|nd|rd|th)?\s+(?:of\s+)?{_JAN}(?![a-z])"
-    r"|0?1/15/(?:20)?(?:24|26)"
-    r"|15[/.]0?1[/.](?:20)?(?:24|26)"
+    r"(?:2024|2026)-01-1[45]"
+    rf"|{_JAN}\s+1[45](?:st|nd|rd|th)?(?![\d])"
+    rf"|1[45](?:st|nd|rd|th)?\s+(?:of\s+)?{_JAN}(?![a-z])"
+    r"|0?1/1[45]/(?:20)?(?:24|26)"
+    r"|1[45][/.]0?1[/.](?:20)?(?:24|26)"
     r")(?![\w-]|\.\d)", re.IGNORECASE)
 
 #: The first word is capitalised only if it is a plain short word, never an
@@ -81,7 +86,8 @@ def contains_fabricated_date(text: str | None) -> bool:
 
 
 def source_names_the_day(text: str | None) -> bool:
-    """Whether a source text names 15 January (any written form, any or no year)."""
+    """Whether a source text names 14 or 15 January (any written form, any or no
+    year). Either keeps the fact: deliberately broader than the made-up days."""
     return bool(text) and _SOURCE_DAY.search(str(text)) is not None
 
 

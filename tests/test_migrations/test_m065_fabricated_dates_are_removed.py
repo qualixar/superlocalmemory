@@ -19,8 +19,8 @@ from superlocalmemory.storage.migration_runner import DEFERRED_MIGRATIONS
 from superlocalmemory.storage.migrations import M065_fabricated_dates_are_removed as M065
 from tests.test_migrations._repair_store import (
     add_event,
-    add_ingestion,
     add_fact,
+    add_ingestion,
     first_start,
     forget_migration,
     fts_ids,
@@ -63,6 +63,11 @@ def _seed(memory) -> None:
              source="Mel was seen at the park on Jan 15.", referenced_date="2024-01-15")
     add_fact(conn, "f_dayfirst", "The demo ran on 2024-01-15",
              source="We ran the demo 15 Jan 2024.", referenced_date="2024-01-15")
+    # The prompt's "yesterday" answer, 2024-01-14, under the same source rule.
+    add_fact(conn, "f_yesterday", "The file a.md was last modified on 2024-01-14",
+             referenced_date="2024-01-14")
+    add_fact(conn, "f_yesterday_real", "The flight left on 2024-01-14",
+             source="my flight left Jan 14", referenced_date="2024-01-14")
     # No source anywhere: nothing can prove the date made up, so it stays.
     add_fact(conn, "f_nosource", "The deploy happened on 2024-01-15", source=None,
              referenced_date="2024-01-15")
@@ -156,7 +161,7 @@ def test_legitimate_mentions_are_never_touched(store) -> None:
     first_start(memory, learning)
     conn = sqlite3.connect(memory)
     kept = ("f_after", "f_source", "f_near", "f_plain", "f_spelled", "f_dayfirst",
-            "f_nosource", "f_lineage_dated")
+            "f_nosource", "f_lineage_dated", "f_yesterday_real")
     for fact_id in kept:
         row = conn.execute("SELECT content, referenced_date FROM atomic_facts WHERE fact_id=?",
                            (fact_id,)).fetchone()
@@ -171,6 +176,8 @@ def test_a_source_reached_through_its_ingestion_record_counts(store) -> None:
     first_start(memory, learning)
     conn = sqlite3.connect(memory)
     assert _fact(conn, "f_lineage")["content"] == "The build broke"
+    assert _fact(conn, "f_yesterday")["content"] == "The file a.md was last modified"
+    assert _fact(conn, "f_yesterday")["referenced_date"] is None
 
 
 def test_the_survey_counts_each_kept_group(store) -> None:
@@ -179,8 +186,9 @@ def test_the_survey_counts_each_kept_group(store) -> None:
     memory, _learning = store
     found = survey(sqlite3.connect(memory))
     assert {p.fact_id for p in found.repairs} == {"f_clause", "f_subject", "f_dateonly",
-                                                   "f_lineage"}
-    assert set(found.in_source) == {"f_source", "f_spelled", "f_dayfirst", "f_lineage_dated"}
+                                                   "f_lineage", "f_yesterday"}
+    assert set(found.in_source) == {"f_source", "f_spelled", "f_dayfirst", "f_lineage_dated",
+                                    "f_yesterday_real"}
     assert set(found.no_source) == {"f_nosource"}
 
 
@@ -253,8 +261,8 @@ def test_summary_reports_what_the_repair_did(store) -> None:
     first_start(memory, learning)
     conn = sqlite3.connect(memory)
     summary = undo_log.summary(conn, M065.NAME)
-    assert summary["facts"] == 4  # f_clause, f_subject, f_dateonly, f_lineage
-    assert summary["text_changed"] == 2
+    assert summary["facts"] == 5  # f_clause, f_subject, f_dateonly, f_lineage, f_yesterday
+    assert summary["text_changed"] == 3
     assert summary["undone"] == 0
 
 

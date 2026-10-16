@@ -71,8 +71,9 @@ _VALIDITY_DATES = ("valid_from", "valid_until")
 _VALIDITY_KEEP = ("valid_from", "valid_until", "system_expired_at", "invalidated_by",
                   "invalidation_reason")
 #: Cheap SQL prefilter; Python decides. Spelled forms are matched by LIKE too.
-_TEXT_LIKES = ("%2024-01-15%", "%2026-01-15%", "%15, 2024%", "%15, 2026%",
-               "%15th, 2024%", "%15th, 2026%", "%15 January 202%", "%15 Jan 202%")
+_TEXT_LIKES = ("%2024-01-15%", "%2026-01-15%", "%2024-01-14%", "%15, 2024%",
+               "%15, 2026%", "%14, 2024%", "%15th, 2024%", "%15th, 2026%", "%14th, 2024%",
+               "%15 January 202%", "%15 Jan 202%", "%14 January 2024%", "%14 Jan 2024%")
 
 
 @dataclass(frozen=True)
@@ -112,20 +113,24 @@ def _saved_before_cutoff_and_not_near(created_at: object) -> bool:
     return all(abs(created - day) > timedelta(days=NEAR_DAYS) for day in days)
 
 
+def _dated(columns: list[str]) -> tuple[str, list[str]]:
+    """``col LIKE 'day%'`` for every column and made-up day, with its params."""
+    days = [f"{d}%" for d in FABRICATED_DAYS]
+    where = " OR ".join(f"{c} LIKE ?" for c in columns for _ in days)
+    return where, [d for _ in columns for d in days]
+
+
 def _candidate_ids(conn: sqlite3.Connection, fact_cols: list[str]) -> list[str]:
-    days = tuple(f"{d}%" for d in FABRICATED_DAYS)
     text = " OR ".join("content LIKE ?" for _ in _TEXT_LIKES)
-    dated = " OR ".join(f"{c} LIKE ? OR {c} LIKE ?" for c in _FACT_DATES if c in fact_cols)
+    dated, params = _dated([c for c in _FACT_DATES if c in fact_cols])
     sql = f"SELECT fact_id FROM atomic_facts WHERE {text}" + (f" OR {dated}" if dated else "")
-    params: list[str] = [*_TEXT_LIKES, *(days * sum(c in fact_cols for c in _FACT_DATES))]
-    ids = {r[0] for r in conn.execute(sql, params)}  # noqa: S608
+    ids = {r[0] for r in conn.execute(sql, [*_TEXT_LIKES, *params])}  # noqa: S608
     for table, cols in (("temporal_events", _EVENT_DATES),
                         ("fact_temporal_validity", _VALIDITY_DATES)):
-        present = [c for c in cols if c in _cols(conn, table)]
-        if present:
-            where = " OR ".join(f"{c} LIKE ? OR {c} LIKE ?" for c in present)
+        where, params = _dated([c for c in cols if c in _cols(conn, table)])
+        if where:
             ids |= {r[0] for r in conn.execute(f"SELECT fact_id FROM {table} WHERE {where}",  # noqa: S608
-                                               days * len(present))}
+                                               params)}
     return sorted(ids)
 
 
