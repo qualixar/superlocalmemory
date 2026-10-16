@@ -197,6 +197,9 @@ Issues = "https://github.com/qualixar/superlocalmemory/issues"
 
 [project.scripts]
 slm = "superlocalmemory.cli.main:main"
+# Same CLI under the package name, so `uvx superlocalmemory mcp` (what MCP
+# registry clients run for a PyPI entry) finds a command.
+superlocalmemory = "superlocalmemory.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=77.0.3", "wheel"]
