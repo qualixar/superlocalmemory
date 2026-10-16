@@ -219,7 +219,10 @@ def test_hermes_dry_run_reports_the_served_subdirectory(tmp_path: Path) -> None:
     status = tmp_path / "status"
     version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
     result = subprocess.run(
-        ["bash", str(RELEASE_DIR / "hermes.sh"), "--dry-run", "--version", version],
+        # A ref that cannot be fetched keeps this offline and independent of
+        # what origin/main serves today (which lags a release until it merges).
+        ["bash", str(RELEASE_DIR / "hermes.sh"), "--dry-run", "--version", version,
+         "--ref", "origin/slm-test-ref-that-does-not-exist"],
         cwd=ROOT,
         capture_output=True,
         text=True,

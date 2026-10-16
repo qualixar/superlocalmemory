@@ -296,7 +296,15 @@ describe('buildPlan', () => {
     // (plus the Cursor-format pair: plugin/.cursor-plugin/plugin.json and the
     // repo-root .cursor-plugin/marketplace.json — tested in build-cursor-plugin.test.mjs)
     const isCursor = (k) => k.includes(`${path.sep}.cursor-plugin${path.sep}`);
-    const pluginJsonFiles = [...plan.keys()].filter(k => k.endsWith('plugin.json') && !isCursor(k));
+    // Other hosts' manifests sit at the plugin root (4.2.8): Agent Plugins
+    // plugin.json (Kiro, Codewhale, Copilot) and kimi.plugin.json (Kimi Code).
+    const pluginRoot = path.join(tmp, 'plugin');
+    const otherHosts = new Set([
+      path.join(pluginRoot, 'plugin.json'), path.join(pluginRoot, 'kimi.plugin.json'),
+    ]);
+    for (const p of otherHosts) assert.ok(plan.has(p), `missing host manifest ${p}`);
+    const pluginJsonFiles = [...plan.keys()].filter(
+      k => k.endsWith('plugin.json') && !isCursor(k) && !otherHosts.has(k));
     assert.equal(pluginJsonFiles.length, 1);
     assert.ok(pluginJsonFiles[0].includes(`plugin${path.sep}.claude-plugin`), 'plugin.json must be in plugin/.claude-plugin/');
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-FIX_DROPPED = ("Keep the daemon running (`slm start`; `slm status` shows it) so it drains "
+FIX_DROPPED = ("Keep the daemon running (`slm serve start`; `slm serve status` shows it) so it drains "
                "the spool; raise SLM_HOOK_SPOOL_MAX_BYTES if it was stopped for days")
 FIX_INVALID = "See logs/daemon.log in the SLM data folder for the unreadable spool file"
 

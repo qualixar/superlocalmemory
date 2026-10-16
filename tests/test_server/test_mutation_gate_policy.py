@@ -358,7 +358,10 @@ def test_personal_mode_the_operator_still_changes_settings_and_restarts(personal
                           headers=who["token"])
     switch = client.post("/api/profiles/default/switch", headers=who["token"])
 
-    assert restart.status_code == 200 and len(spawned) == 1, spawned
+    # Count restart spawns only: the optimize store may also run `ioreg` once to
+    # read the machine id when its cache is cold, depending on test order.
+    restarts = [a for a in spawned if "restart" in (a[0] if a else [])]
+    assert restart.status_code == 200 and len(restarts) == 1, spawned
     assert optimize.status_code == 200, optimize.text
     assert switch.status_code == 200, switch.text
     assert refused == []
