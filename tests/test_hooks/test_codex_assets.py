@@ -144,7 +144,44 @@ def test_generated_agent_toml_parses_and_carries_the_full_advisor_body(tmp_path)
     for filename in codex_assets.AGENTS:
         raw = (tmp_path / ".codex" / "agents" / filename).read_text(encoding="utf-8")
         data = tomllib.loads(raw)
-        assert set(data) >= {"name", "description", "instructions"}
+        assert set(data) >= {"name", "description", "developer_instructions"}
         assert data["name"] == filename.removesuffix(".toml")
-        assert "---" not in data["instructions"].split("\n")[0]
-        assert len(data["instructions"]) > 800, f"{filename} looks like a stub"
+        assert "---" not in data["developer_instructions"].split("\n")[0]
+        assert len(data["developer_instructions"]) > 800, f"{filename} looks like a stub"
+
+
+def test_every_codex_agent_file_uses_developer_instructions() -> None:
+    """Codex ignores a role file without ``developer_instructions`` and warns on
+    every run ("malformed agent role definition"); 4.2.7 wrote ``instructions``."""
+    import tomllib
+
+    from superlocalmemory.hooks import codex_assets
+
+    files = codex_assets._agent_files()  # noqa: SLF001
+    assert set(files) == set(codex_assets.AGENTS)
+    for filename, content in files.items():
+        parsed = tomllib.loads(content)
+        assert parsed["name"] == filename.removesuffix(".toml")
+        assert parsed["description"]
+        assert parsed["developer_instructions"].strip(), filename
+        assert "instructions" not in parsed, filename
+
+
+def test_an_upgrade_rewrites_a_file_slm_wrote_with_the_old_key(tmp_path) -> None:
+    import json
+    import tomllib
+
+    from superlocalmemory.hooks import codex_assets
+
+    agents = tmp_path / ".codex" / "agents"
+    agents.mkdir(parents=True)
+    old = 'name = "slm-loop-runner"\ndescription = "x"\ninstructions = \'\'\'\nbody\n\'\'\'\n'
+    target = agents / "slm-loop-runner.toml"
+    target.write_text(old, encoding="utf-8")
+    manifest = {"slm-loop-runner.toml": codex_assets._digest(old)}  # noqa: SLF001
+    (agents / codex_assets.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+
+    codex_assets.install_assets(home=tmp_path)
+
+    parsed = tomllib.loads(target.read_text(encoding="utf-8"))
+    assert "developer_instructions" in parsed and "instructions" not in parsed
