@@ -32,6 +32,9 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_sha: ${{ steps.tag.outputs.sha }}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
@@ -39,6 +42,7 @@ jobs:
           fetch-depth: 0
 
       - name: Resolve immutable release tag
+        id: tag
         shell: bash
         run: |
           set -euo pipefail
@@ -51,6 +55,7 @@ jobs:
           git checkout --detach "$TAG_SHA"
           test "$(git rev-parse HEAD)" = "$TAG_SHA"
           echo "TAG_SHA=$TAG_SHA" >> "$GITHUB_ENV"
+          echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.2.0
         with:
@@ -231,11 +236,29 @@ jobs:
           # failure ("File already exists") on an otherwise-successful release.
           skip-existing: true
 
+      # npm trusted publishing (OIDC): npmjs.com trusts this repository, this
+      # workflow file and the "pypi" environment, so no token is stored. It needs
+      # Node >= 22.14 and npm >= 11.5.1; the build above stays on its own Node.
+      - name: Set up Node for npm trusted publishing
+        if: steps.registry.outputs.npm_exists != 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Set up npm for trusted publishing
+        if: steps.registry.outputs.npm_exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.21.1
+          node -e 'const [a,b,c]=process.versions.node.split(".").map(Number); if (a<22||(a===22&&b<14)) { console.error("Node "+process.versions.node+" is too old for npm OIDC"); process.exit(1); }'
+          echo "node $(node --version), npm $(npm --version)"
+
       - name: Publish to npm
         if: steps.registry.outputs.npm_exists != 'true'
         run: npm publish "${{ steps.artifacts.outputs.npm_tarball }}" --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify registry parity
         run: |
@@ -245,42 +268,148 @@ jobs:
             --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
             --attempts 6 --interval 10
 
-      - name: Create GitHub release
+  # One VS Code extension build per release, shared by the GitHub release and
+  # Open VSX so both carry the same bytes.
+  vsix:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          ref: ${{ needs.release.outputs.tag_sha }}
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Build, test and package the extension
+        run: scripts/release/build-vsix.sh --version "${{ needs.release.outputs.version }}" --dist dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: superlocalmemory-${{ needs.release.outputs.version }}-vsix
+          path: dist/vscode/*.vsix
+          if-no-files-found: error
+          retention-days: 90
+
+  # Every distribution channel, one isolated job each: a failing channel never
+  # stops the others. Each script is idempotent (a re-run on the same version
+  # is a no-op) and supports --dry-run; see docs/release-distribution.md.
+  distribute:
+    name: distribute (${{ matrix.channel }})
+    needs: [release, vsix]
+    # Runs when the vsix job failed too: only the channels that need the .vsix
+    # fail then, and the summary says so.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write   # GitHub release assets
+      id-token: write   # MCP Registry login (GitHub OIDC)
+      issues: write     # manual listing checklist
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: github-release
+            release_assets: true
+            vsix: true
+          - channel: mcp-registry
+          - channel: openvsx
+            vsix: true
+          - channel: claude-plugin-repo
+          - channel: hermes
+          - channel: dsh-bundle
+          - channel: clawhub
+          - channel: listing-checklist
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          ref: ${{ needs.release.outputs.tag_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Download release artifacts
+        if: ${{ matrix.release_assets }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: superlocalmemory-${{ needs.release.outputs.version }}-candidates
+          path: dist
+
+      - name: Download the VS Code extension
+        if: ${{ matrix.vsix && needs.vsix.result == 'success' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: superlocalmemory-${{ needs.release.outputs.version }}-vsix
+          path: dist/vscode
+
+      - name: Publish channel
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
+          SLM_CHANNEL_STATUS_FILE: ${{ runner.temp }}/channel-status
+          OVSX_PAT: ${{ matrix.channel == 'openvsx' && secrets.OVSX_PAT || '' }}
+          CLAWHUB_TOKEN: ${{ matrix.channel == 'clawhub' && secrets.CLAWHUB_TOKEN || '' }}
+          SLM_DEPLOY_KEY: ${{ matrix.channel == 'claude-plugin-repo' && secrets.DEPLOY_KEY_SUPERLOCALMEMORY_PLUGIN || matrix.channel == 'dsh-bundle' && secrets.DEPLOY_KEY_DSH_SUPERLOCALMEMORY || '' }}
+        run: scripts/release/${{ matrix.channel }}.sh --version "${{ needs.release.outputs.version }}" --dist dist
+
+      - name: Record channel result
+        if: always()
         run: |
-          set -euo pipefail
-          git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$TAG_SHA"
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            EXISTING="$RUNNER_TEMP/existing-release"
-            mkdir -p "$EXISTING"
-            gh release download "$RELEASE_TAG" --dir "$EXISTING" || true
-            UPLOAD=()
-            for candidate in \
-              dist/python/* \
-              "${{ steps.artifacts.outputs.npm_tarball }}" \
-              dist/release-evidence.json \
-              dist/SHA256SUMS \
-              dist/*.cdx.json; do
-              published="$EXISTING/$(basename "$candidate")"
-              if test -f "$published"; then
-                cmp -- "$candidate" "$published"
-              else
-                UPLOAD+=("$candidate")
-              fi
-            done
-            if [ "${#UPLOAD[@]}" -gt 0 ]; then
-              gh release upload "$RELEASE_TAG" "${UPLOAD[@]}"
-            fi
-          else
-            gh release create "$RELEASE_TAG" \
-              dist/python/* \
-              "${{ steps.artifacts.outputs.npm_tarball }}" \
-              dist/release-evidence.json \
-              dist/SHA256SUMS \
-              dist/*.cdx.json \
-              --verify-tag \
-              --generate-notes \
-              --title "SuperLocalMemory $RELEASE_TAG"
-          fi
+          mkdir -p "$RUNNER_TEMP/results"
+          python3 scripts/release/release_tools.py record \
+            --channel "${{ matrix.channel }}" \
+            --outcome "${{ steps.publish.outcome }}" \
+            --status-file "$RUNNER_TEMP/channel-status" \
+            --out "$RUNNER_TEMP/results/${{ matrix.channel }}.json"
+
+      - name: Upload channel result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: channel-result-${{ matrix.channel }}
+          path: ${{ runner.temp }}/results/${{ matrix.channel }}.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  distribution-summary:
+    needs: [release, distribute]
+    if: ${{ always() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          ref: ${{ needs.release.outputs.tag_sha }}
+          sparse-checkout: scripts/release
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: channel-result-*
+          path: results
+          merge-multiple: true
+
+      - name: Write channel table
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          CHANNELS: github-release,mcp-registry,openvsx,claude-plugin-repo,hermes,dsh-bundle,clawhub,listing-checklist
+        run: |
+          mkdir -p results
+          {
+            echo "## SuperLocalMemory v$VERSION distribution"
+            echo
+            echo "PyPI and npm: published and verified by the release job."
+            echo
+            python3 scripts/release/release_tools.py summary --results results --channels "$CHANNELS"
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/release/release_tools.py summary --results results --channels "$CHANNELS" --fail-on-failed

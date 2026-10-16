@@ -2,6 +2,12 @@
 
 Every registry, in order. A release is not done until each line is checked.
 
+Since 4.2.8, pushing the tag (step 3) does the rest of steps 3 to 9 automatically,
+except approving the version in the Claude directory (see
+[release-distribution.md](release-distribution.md)): check the run's channel
+table and work through the "manual listing checklist" issue it opens. The
+commands below are the manual fallback for a channel that failed.
+
 1. `python3 scripts/bump_version.py X.Y.Z`, then `node scripts/build-all-plugins.mjs`.
 2. One full test suite, then the live-store gate (glance, session_init and hook recall on a real store).
 3. Tag `vX.Y.Z`, push, GitHub release with the wheel, sdist, npm tgz and vsix attached.
