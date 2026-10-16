@@ -2114,6 +2114,31 @@ def _warm_dashboard_summaries() -> None:
     threading.Thread(target=work, name="slm-dashboard-warm", daemon=True).start()
 
 
+async def _start_mesh_broker(config: Any) -> Any:
+    """The mesh broker on mesh.db next to the configured memory.db, or None.
+
+    Opening it can migrate mesh.db out of memory.db, wait for another process's
+    migration lock or wait out a busy file, so it runs in a worker thread: the
+    event loop keeps serving while it does. Failure is logged, never fatal.
+    """
+    if not (getattr(config, "mesh_enabled", True) if config else True):
+        return None
+    try:
+        from superlocalmemory.mesh.broker import MeshBroker
+
+        db_path = config.db_path if config else state_path("memory.db")
+        # mesh.db next to memory.db: migrated from memory.db on first open.
+        mesh_broker = await asyncio.to_thread(
+            functools.partial(MeshBroker.for_store,
+                db_path, retention_days=getattr(config, "mesh_retention_days", 7)))
+        mesh_broker.start_cleanup()
+        logger.info("Mesh broker started")
+        return mesh_broker
+    except Exception as exc:
+        logger.warning("Mesh broker init failed: %s", exc)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize engine, workers, and optional services on startup."""
@@ -3205,23 +3230,8 @@ async def lifespan(application: FastAPI):
         logger.debug("Health monitor init: %s", exc)
         application.state.health_monitor = None
 
-    # Phase C: Start mesh broker
-    try:
-        mesh_enabled = getattr(config, 'mesh_enabled', True) if config else True
-        if mesh_enabled:
-            from superlocalmemory.mesh.broker import MeshBroker
-            db_path = config.db_path if config else state_path("memory.db")
-            # mesh.db next to memory.db: migrated from memory.db on first open.
-            mesh_broker = MeshBroker.for_store(
-                db_path, retention_days=getattr(config, "mesh_retention_days", 7))
-            mesh_broker.start_cleanup()
-            application.state.mesh_broker = mesh_broker
-            logger.info("Mesh broker started")
-        else:
-            application.state.mesh_broker = None
-    except Exception as exc:
-        logger.warning("Mesh broker init failed: %s", exc)
-        application.state.mesh_broker = None
+    # Phase C: Start mesh broker (off the event loop; C-2 below needs it settled)
+    application.state.mesh_broker = await _start_mesh_broker(config)
 
     # Phase C-2: opt-in mDNS advertiser (default OFF — backward-compatible).
     # Enabled only when SLM_MESH_ADVERTISE=1|on|true|yes is set explicitly.

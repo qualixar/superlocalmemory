@@ -13,23 +13,30 @@ memory write.
 The mesh is live coordination, not memory. On first open this module builds
 mesh.db in a side file, copies the *configuration* rows of the old tables
 (owner controls on peer profiles, web-app peers, node identity, the replay
-window of nonces) and only the last ``retention_days`` of *activity*, writes a
-marker, and renames the file into place. Only a verified mesh.db lets the old
+window of nonces, shared state: feature flags and task assignments) and only
+the last ``retention_days`` of *activity*, writes a marker, and renames the
+file into place. Only a verified mesh.db lets the old
 tables be dropped from memory.db. Every step is idempotent: a crash before the
 rename leaves no mesh.db and the next start builds again; a crash after it
 leaves both, and the next start merges the configuration rows once more
 (INSERT OR IGNORE) and drops.
 
-A damaged mesh.db is quarantined (``mesh.db.quarantine-<ms>``) and rebuilt; a
-lost one is rebuilt empty. ``mesh.db.migrated`` (an empty file) records that a
-mesh.db existed here, so a later loss is logged as one instead of a first start.
+A damaged mesh.db is quarantined (``mesh.db.quarantine-<ms>``) and rebuilt,
+and the configuration rows still readable in it (read from a copy, so the
+quarantined file stays as it was) carry over into the new one; a lost one is
+rebuilt empty. A mesh.db that is only busy or cannot be opened is never
+quarantined: the open is retried, then the start fails with the reason.
+``mesh.db.migrated`` (an empty file) records that a mesh.db existed here, so a
+later loss is logged as one instead of a first start.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sqlite3
+import tempfile
 import threading
 import time
 from collections.abc import Sequence
@@ -48,19 +55,27 @@ BUILD_SUFFIX = ".building"
 DEFAULT_RETENTION_DAYS = broker_cleanup.DEFAULT_RETENTION_DAYS
 BUSY_TIMEOUT_MS = 2000
 _LOCK_WAIT_S = 30.0
+#: A busy or unopenable mesh.db is retried this often before the start fails.
+_INSPECT_ATTEMPTS = 4
+_INSPECT_BACKOFF_S = 0.5
+_INSPECT_TIMEOUT_S = 2.0
 
 #: Settings, never aged out: copied whole. Web-app peers (in mesh_peers) are
-#: configuration too and are selected by kind below.
-CONFIG_TABLES: tuple[str, ...] = ("mesh_peer_profiles", "mesh_node_identity", "mesh_nonces")
+#: configuration too and are selected by kind below. mesh_state holds what
+#: agents set for each other (feature flags, task assignments): settings.
+CONFIG_TABLES: tuple[str, ...] = (
+    "mesh_peer_profiles", "mesh_node_identity", "mesh_nonces", "mesh_state")
+_WEB_PEERS = "peer_id IN (SELECT peer_id FROM {schema}.mesh_peer_profiles WHERE kind='web')"
+#: Only these errors mean the file itself is damaged; anything else (locked,
+#: busy, unable to open, I/O) is a reason to wait or fail, never to quarantine.
+_DAMAGE_MARKERS: tuple[str, ...] = ("malformed", "not a database")
 
 #: Activity copied only from the retention window: table -> time filter.
 _RECENT = "{col} >= :cutoff"
 _ACTIVITY_FILTERS: dict[str, str] = {
-    "mesh_peers": ("last_heartbeat >= :cutoff OR peer_id IN "
-                   "(SELECT peer_id FROM legacy.mesh_peer_profiles WHERE kind='web')"),
+    "mesh_peers": "last_heartbeat >= :cutoff OR " + _WEB_PEERS.format(schema="legacy"),
     "mesh_messages": _RECENT.format(col="created_at"),
     "mesh_events": _RECENT.format(col="created_at"),
-    "mesh_state": _RECENT.format(col="updated_at"),
     "mesh_locks": "locked_at >= :cutoff AND expires_at >= :now",
     "mesh_sent_ops": _RECENT.format(col="created_at"),
     "mesh_outbox_remote": "created_at >= :cutoff_epoch",
@@ -141,14 +156,25 @@ def _add_column(conn: sqlite3.Connection, sql: str) -> None:
             raise
 
 
+def _error_status(exc: sqlite3.DatabaseError) -> str:
+    message = str(exc).lower()
+    if "no such table" in message:
+        return "unmigrated"
+    if any(marker in message for marker in _DAMAGE_MARKERS):
+        return "corrupt"
+    return "unavailable"  # locked, busy, unable to open: the file may be fine
+
+
 def inspect(path: str | Path) -> dict:
-    """Health of a mesh.db: ``status`` is ok, missing, unmigrated or corrupt."""
+    """Health of a mesh.db: ``status`` is ok, missing, unmigrated, corrupt or
+    unavailable (busy or not openable right now; not evidence of damage)."""
     p = Path(path)
     if not p.exists():
         return {"status": "missing", "path": str(p)}
     try:
         # mode=rw, not ro: a WAL file with no live -shm cannot be opened read-only.
-        conn = sqlite3.connect(f"{p.absolute().as_uri()}?mode=rw", uri=True, timeout=2)
+        conn = sqlite3.connect(f"{p.absolute().as_uri()}?mode=rw", uri=True,
+                               timeout=_INSPECT_TIMEOUT_S)
         try:
             check = conn.execute("PRAGMA quick_check").fetchone()[0]
             if check != "ok":
@@ -158,8 +184,7 @@ def inspect(path: str | Path) -> dict:
         finally:
             conn.close()
     except sqlite3.DatabaseError as exc:
-        status = "unmigrated" if "no such table" in str(exc).lower() else "corrupt"
-        return {"status": status, "path": str(p), "detail": str(exc)}
+        return {"status": _error_status(exc), "path": str(p), "detail": str(exc)}
     if row is None:
         return {"status": "unmigrated", "path": str(p)}
     return {"status": "ok", "path": str(p), "migrated_at": row[0],
@@ -188,13 +213,32 @@ def _siblings(path: Path) -> list[Path]:
     return [Path(str(path) + s) for s in ("", "-wal", "-shm", "-journal")]
 
 
-def _quarantine(target: Path, reason: str) -> None:
+def _inspect_settled(target: Path) -> dict:
+    """inspect(), waiting out a busy or unopenable file; raises if it never settles."""
+    state = inspect(target)
+    for attempt in range(1, _INSPECT_ATTEMPTS):
+        if state["status"] != "unavailable":
+            return state
+        time.sleep(_INSPECT_BACKOFF_S * attempt)
+        state = inspect(target)
+    if state["status"] == "unavailable":
+        raise MeshStoreError(f"{target} could not be opened ({state['detail']}); "
+                             "it was left untouched")
+    return state
+
+
+def _quarantine(target: Path, reason: str) -> dict[str, Path]:
+    """Move the damaged file and its siblings aside; returns them by suffix."""
     stamp = int(time.time() * 1000)
-    for part in _siblings(target):
+    moved: dict[str, Path] = {}
+    for suffix, part in zip(("", "-wal", "-shm", "-journal"), _siblings(target)):
         if part.exists():
-            part.rename(part.with_name(f"{part.name}.quarantine-{stamp}"))
+            aside = part.with_name(f"{part.name}.quarantine-{stamp}")
+            part.rename(aside)
+            moved[suffix] = aside
     _warn_once(f"quarantine:{target}", "mesh.db at %s was %s; quarantined and rebuilt",
                target, reason)
+    return moved
 
 
 def _legacy_tables(memory_db: Path) -> set[str]:
@@ -278,35 +322,129 @@ def _attach_legacy(conn: sqlite3.Connection, memory_db: Path) -> None:
     conn.execute("ATTACH DATABASE ? AS legacy", (str(memory_db.absolute()),))
 
 
-def _build(target: Path, memory_db: Path, retention_days: int) -> dict:
+def _salvage_rows(conn: sqlite3.Connection, table: str, select: str) -> Iterator[tuple]:
+    """Rows one at a time, so a read that fails part-way keeps what came before."""
+    cur = conn.execute(select)
+    try:
+        while (row := cur.fetchone()) is not None:
+            yield tuple(row)
+    finally:
+        cur.close()  # an open statement would keep the build file locked after close()
+
+
+def _salvage_table(conn: sqlite3.Connection, table: str, where: str) -> int:
+    """Copy what is readable of one table from the damaged file; newer than memory.db."""
+    try:
+        cols = [c for c in _columns(conn, "salvage", table)
+                if c in _columns(conn, "main", table)]
+    except sqlite3.DatabaseError as exc:
+        logger.warning("mesh.db salvage: %s unreadable (%s)", table, exc)
+        return 0
+    if not cols:
+        return 0
+    names = ", ".join(f'"{c}"' for c in cols)
+    insert = (f'INSERT OR REPLACE INTO main."{table}" ({names}) '
+              f'VALUES ({", ".join("?" for _ in cols)})')
+    copied = 0
+    rows = _salvage_rows(conn, table, f'SELECT {names} FROM salvage."{table}" WHERE {where}')
+    try:
+        for row in rows:
+            conn.execute(insert, row)
+            copied += 1
+    except sqlite3.DatabaseError as exc:
+        logger.warning("mesh.db salvage: %s read stopped after %d rows (%s)",
+                       table, copied, exc)
+    finally:
+        rows.close()
+    return copied
+
+
+def _salvage_config(conn: sqlite3.Connection) -> dict:
+    counts = {t: _salvage_table(conn, t, "1=1") for t in CONFIG_TABLES}
+    counts["mesh_peers"] = _salvage_table(conn, "mesh_peers", _WEB_PEERS.format(schema="main"))
+    return {f"salvaged:{t}": n for t, n in counts.items() if n}
+
+
+@contextmanager
+def _salvage_copy(quarantined: dict[str, Path] | None, target: Path) -> Iterator[Path | None]:
+    """A scratch copy of the quarantined file and its WAL; the evidence is never opened."""
+    if not quarantined or "" not in quarantined:
+        yield None
+        return
+    scratch = Path(tempfile.mkdtemp(prefix=".mesh-salvage-", dir=target.parent))
+    try:
+        copy = scratch / MESH_DB_NAME
+        shutil.copyfile(quarantined[""], copy)
+        if "-wal" in quarantined:  # committed settings may live only in the WAL
+            shutil.copyfile(quarantined["-wal"], scratch / (MESH_DB_NAME + "-wal"))
+        yield copy
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _attach_salvage(conn: sqlite3.Connection, copy: Path | None) -> bool:
+    if copy is None:
+        return False
+    try:
+        conn.execute("ATTACH DATABASE ? AS salvage", (str(copy),))
+        conn.execute("SELECT name FROM salvage.sqlite_master").fetchall()
+    except sqlite3.DatabaseError as exc:
+        logger.warning("mesh.db salvage: damaged file unreadable (%s); "
+                       "rebuilt without its settings", exc)
+        _detach(conn, "salvage")
+        return False
+    return True
+
+
+def _detach(conn: sqlite3.Connection, schema: str) -> None:
+    try:
+        conn.execute(f"DETACH DATABASE {schema}")
+    except sqlite3.Error:
+        pass  # never attached
+
+
+def _build(target: Path, memory_db: Path, retention_days: int,
+           quarantined: dict[str, Path] | None = None) -> dict:
     """Build mesh.db in a side file, then rename it into place."""
     building = target.with_name(target.name + BUILD_SUFFIX)
     for part in _siblings(building):
         part.unlink(missing_ok=True)
     present = _legacy_tables(memory_db)
-    conn = sqlite3.connect(f"{building.absolute().as_uri()}?mode=rwc", uri=True)
-    try:
-        create_schema(conn)
-        counts: dict[str, int] = {}
-        if present:
-            _attach_legacy(conn, memory_db)  # ATTACH cannot run inside a transaction
-        conn.execute("BEGIN")
-        if present:
-            counts = _copy_activity(conn, present, _window(retention_days))
-        source = "memory.db" if present else "fresh"
-        _write_marker(conn, source)
-        conn.commit()
-        if present:
-            conn.execute("DETACH DATABASE legacy")
-    finally:
-        conn.close()
+    with _salvage_copy(quarantined, target) as copy:
+        conn = sqlite3.connect(f"{building.absolute().as_uri()}?mode=rwc", uri=True)
+        try:
+            counts, source = _fill(conn, memory_db, present, retention_days, copy)
+        finally:
+            conn.close()
     _fsync(building)
     for part in _siblings(target)[1:]:
         part.unlink(missing_ok=True)  # a stale WAL must never replay onto the new file
     os.replace(building, target)
+    _fsync_dir(target.parent)  # the rename itself survives a power cut
     _enable_wal(target)
     logger.info("mesh.db ready at %s (from %s): %s", target, source, counts)
     return counts
+
+
+def _fill(conn: sqlite3.Connection, memory_db: Path, present: set[str],
+          retention_days: int, copy: Path | None) -> tuple[dict, str]:
+    """Schema, the old tables' rows, then the damaged file's settings (newest win)."""
+    create_schema(conn)
+    counts: dict[str, int] = {}
+    if present:
+        _attach_legacy(conn, memory_db)  # ATTACH cannot run inside a transaction
+    salvaging = _attach_salvage(conn, copy)
+    conn.execute("BEGIN")
+    if present:
+        counts = _copy_activity(conn, present, _window(retention_days))
+    if salvaging:
+        counts.update(_salvage_config(conn))
+    source = "memory.db" if present else "fresh"
+    _write_marker(conn, source)
+    conn.commit()
+    _detach(conn, "legacy")
+    _detach(conn, "salvage")
+    return counts, source
 
 
 def _write_marker(conn: sqlite3.Connection, source: str) -> None:
@@ -317,6 +455,18 @@ def _write_marker(conn: sqlite3.Connection, source: str) -> None:
 
 def _fsync(path: Path) -> None:
     fd = os.open(str(path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_dir(directory: Path) -> None:
+    """Make a rename in ``directory`` durable. POSIX only: Windows cannot open a
+    directory for fsync, and NTFS journals the rename itself."""
+    if os.name != "posix":
+        return
+    fd = os.open(str(directory), os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -356,8 +506,8 @@ def _merge_config_and_drop(target: Path, memory_db: Path) -> None:
             if table in present:
                 _copy(conn, table, "1=1", {}, verb="INSERT OR IGNORE")
         if {"mesh_peers", "mesh_peer_profiles"} <= present:
-            _copy(conn, "mesh_peers", "peer_id IN (SELECT peer_id FROM "
-                  "legacy.mesh_peer_profiles WHERE kind='web')", {}, verb="INSERT OR IGNORE")
+            _copy(conn, "mesh_peers", _WEB_PEERS.format(schema="legacy"), {},
+                  verb="INSERT OR IGNORE")
         conn.commit()
         conn.execute("DETACH DATABASE legacy")
     finally:
@@ -401,15 +551,16 @@ def prepare_mesh_db(memory_db: str | Path, *, retention_days: int = DEFAULT_RETE
     target = mesh_db_path(memory_db)
     target.parent.mkdir(parents=True, exist_ok=True)
     with _migration_lock(target):
-        state = inspect(target)
+        state = _inspect_settled(target)
         if state["status"] != "ok":
+            quarantined = None
             if state["status"] != "missing":
-                _quarantine(target, state["status"])
+                quarantined = _quarantine(target, state["status"])
             elif not _legacy_tables(memory_db) and target.with_name(
                     target.name + ".migrated").exists():
                 _warn_once(f"lost:{target}", "mesh.db at %s was missing; recreated empty",
                            target)
-            _build(target, memory_db, retention_days)
+            _build(target, memory_db, retention_days, quarantined)
             target.with_name(target.name + ".migrated").touch()
             if inspect(target)["status"] != "ok":
                 raise MeshStoreError(f"{target} failed verification after build")

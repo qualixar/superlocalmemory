@@ -8,10 +8,11 @@ Runs inside one transaction the broker opens and retries. Nothing here commits
 except :func:`run_cleanup` at its end.
 
 The mesh is live coordination, not memory: activity (peers, messages, events,
-shared state, locks, sent-operation ids, the remote outbox) older than the
-retention window is deleted. Configuration is never aged out: peer profiles
-(owner mute/rename/retire, web-app connections), web-app peers, node identity,
-and the nonce store, which keeps its own replay window.
+locks, sent-operation ids, the remote outbox) older than the retention window
+is deleted. Configuration is never aged out: peer profiles (owner
+mute/rename/retire, web-app connections), web-app peers, node identity, shared
+state (feature flags, task assignments), and the nonce store, which keeps its
+own replay window.
 """
 
 from __future__ import annotations
@@ -87,7 +88,6 @@ def _reap_old_activity(conn: sqlite3.Connection, now: datetime, days: int) -> No
     conn.execute(f"DELETE FROM mesh_peers WHERE last_heartbeat < ? AND {_NOT_WEB}", (iso,))
     conn.execute("DELETE FROM mesh_messages WHERE created_at < ?", (iso,))
     conn.execute("DELETE FROM mesh_events WHERE created_at < ?", (iso,))
-    conn.execute("DELETE FROM mesh_state WHERE updated_at < ?", (iso,))
     conn.execute("DELETE FROM mesh_locks WHERE locked_at < ?", (iso,))
     conn.execute("DELETE FROM mesh_sent_ops WHERE created_at < ?", (iso,))
     if _has_table(conn, "mesh_outbox_remote"):

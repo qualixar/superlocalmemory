@@ -55,3 +55,13 @@ def test_doctor_has_a_mesh_row(tmp_path: Path, monkeypatch) -> None:
     mesh_store.prepare_mesh_db(tmp_path / "memory.db")
     rows = _rows(tmp_path, monkeypatch)
     assert rows["Mesh store"]["status"] == "PASS"
+
+
+def test_busy_mesh_db_warns_and_never_suggests_a_rebuild(tmp_path: Path, monkeypatch) -> None:
+    """A locked mesh.db is not damaged: no FAIL, no 'restart to rebuild' advice."""
+    mesh_store.prepare_mesh_db(tmp_path / "memory.db")
+    monkeypatch.setattr(mesh_store, "inspect", lambda _p: {
+        "status": "unavailable", "path": "", "detail": "database is locked"})
+    status, detail, fix = doctor_mesh.mesh_finding(tmp_path)
+    assert status == "WARN" and "database is locked" in detail
+    assert "quarantine" not in fix

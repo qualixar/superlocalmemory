@@ -121,11 +121,14 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
         """Rebuild a lost or corrupt mesh.db instead of failing every call (once per loss)."""
         if self._memory_db is None:
             return False
-        from .mesh_store import inspect, prepare_mesh_db
+        from . import mesh_store
 
         with self._recover_lock:
-            if inspect(self._db_path)["status"] != "ok":
-                prepare_mesh_db(self._memory_db, retention_days=self._retention_days)
+            # Busy or not openable is not damage: the caller's own retry handles it.
+            if mesh_store.inspect(self._db_path)["status"] in ("missing", "corrupt",
+                                                               "unmigrated"):
+                mesh_store.prepare_mesh_db(self._memory_db,
+                                           retention_days=self._retention_days)
                 self._apply_schema_updates()
                 return True
         return False

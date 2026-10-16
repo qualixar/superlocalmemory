@@ -15,7 +15,9 @@ import sqlite3
 from pathlib import Path
 
 FIX = ("Run `slm restart`: the daemon quarantines a damaged mesh.db and builds a new "
-       "one (agent mesh messages and shared state are rebuilt as agents reconnect)")
+       "one, keeping peer settings, web-app connections and shared state")
+BUSY_FIX = ("Run `slm doctor` again in a moment; if it persists, check that the data "
+            "folder is readable and no other program holds mesh.db open")
 
 
 def _legacy_left(memory_db: Path) -> list[str]:
@@ -41,6 +43,9 @@ def mesh_finding(root: str | Path) -> tuple[str, str, str]:
     state = inspect(root / MESH_DB_NAME)
     if state["status"] == "missing":
         return "PASS", "mesh.db not yet created (the daemon makes it at start)", ""
+    if state["status"] == "unavailable":
+        return ("WARN", f"mesh.db could not be checked right now: {state.get('detail')}",
+                BUSY_FIX)
     if state["status"] != "ok":
         detail = state.get("detail") or state["status"]
         return "FAIL", f"mesh.db is {state['status']}: {detail}", FIX
@@ -53,4 +58,4 @@ def mesh_finding(root: str | Path) -> tuple[str, str, str]:
     return "PASS", detail, ""
 
 
-__all__ = ["FIX", "mesh_finding"]
+__all__ = ["BUSY_FIX", "FIX", "mesh_finding"]

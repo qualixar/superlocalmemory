@@ -127,7 +127,7 @@ def test_migration_copies_config_and_recent_activity_only(legacy: Path) -> None:
     assert _col(mesh, "SELECT message_id FROM mesh_reads") == [2]
     assert _col(mesh, "SELECT message_id FROM mesh_message_envelopes") == [2]
     assert _col(mesh, "SELECT operation_id FROM mesh_sent_ops") == ["op2"]
-    assert _col(mesh, "SELECT key FROM mesh_state") == ["new"]
+    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new", "old"]  # settings
     assert len(_col(mesh, "SELECT id FROM mesh_events")) == 1
     assert _col(mesh, "SELECT file_path FROM mesh_locks") == ["/a"]
     assert _col(mesh, "SELECT nonce FROM mesh_nonces") == ["n1"]
@@ -167,7 +167,7 @@ def test_interrupted_build_is_retried_cleanly(legacy: Path) -> None:
     partial.write_bytes(b"half a database")  # the copy died before the rename
     mesh = mesh_store.prepare_mesh_db(legacy)
     assert not partial.exists()
-    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new"]
+    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new", "old"]
     assert _tables(legacy) == set()
 
 
@@ -190,7 +190,7 @@ def test_corrupt_mesh_db_is_quarantined_and_rebuilt(legacy: Path, caplog) -> Non
     with caplog.at_level(logging.WARNING, logger="superlocalmemory.mesh"):
         assert mesh_store.prepare_mesh_db(legacy) == mesh
     assert mesh_store.inspect(mesh)["status"] == "ok"
-    assert _col(mesh, "SELECT key FROM mesh_state") == ["new"]
+    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new", "old"]
     assert list(mesh.parent.glob("mesh.db.quarantine-*"))
     assert any("mesh.db" in r.getMessage() for r in caplog.records)
 
@@ -227,7 +227,7 @@ def test_retention_deletes_old_activity_and_keeps_config(tmp_path: Path) -> None
     conn.close()
     assert sorted(_col(mesh, "SELECT peer_id FROM mesh_peers")) == ["p-new", "web-old"]
     assert _col(mesh, "SELECT id FROM mesh_messages") == [2]
-    assert _col(mesh, "SELECT key FROM mesh_state") == ["new"]
+    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new", "old"]  # settings
     assert _col(mesh, "SELECT operation_id FROM mesh_sent_ops") == ["op2"]
     assert _col(mesh, "SELECT file_path FROM mesh_locks") == ["/a"]
     assert len(_col(mesh, "SELECT id FROM mesh_events")) == 1
@@ -241,14 +241,14 @@ def test_retention_window_is_configurable(tmp_path: Path) -> None:
     conn = sqlite3.connect(mesh)
     broker_cleanup.run_cleanup(conn, retention_days=30)
     conn.close()
-    assert sorted(_col(mesh, "SELECT key FROM mesh_state")) == ["new", "old"]
+    assert len(_col(mesh, "SELECT id FROM mesh_events")) == 2
 
 
 def test_prepare_applies_retention_at_start(tmp_path: Path) -> None:
     mesh = mesh_store.prepare_mesh_db(tmp_path / "memory.db")
     _seed(mesh)
     mesh_store.prepare_mesh_db(tmp_path / "memory.db", retention_days=7)
-    assert _col(mesh, "SELECT key FROM mesh_state") == ["new"]
+    assert len(_col(mesh, "SELECT id FROM mesh_events")) == 1
 
 
 def test_broker_recreates_a_mesh_db_deleted_under_it(tmp_path: Path) -> None:
@@ -294,6 +294,6 @@ def test_daemon_builds_the_broker_on_the_configured_store() -> None:
 
     from superlocalmemory.server import unified_daemon
 
-    source = _inspect.getsource(unified_daemon)
-    assert "MeshBroker.for_store(\n                db_path," in source
-    assert "MeshBroker(str(db_path))" not in source
+    source = _inspect.getsource(unified_daemon._start_mesh_broker)
+    assert "MeshBroker.for_store,\n                db_path," in source
+    assert "MeshBroker(str(db_path))" not in _inspect.getsource(unified_daemon)
