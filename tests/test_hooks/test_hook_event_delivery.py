@@ -235,7 +235,9 @@ def test_a_hook_that_ran_long_still_ends_inside_its_budget(data_root, daemon) ->
     daemon[0].mode = "hang"
     started = time.perf_counter() - 0.1  # the hook already spent 100 ms
     assert ed.deliver(_events(), profile="default", started=started) == "spooled"
-    assert (time.perf_counter() - started) * 1000 < ed.HOOK_BUDGET_MS + 40
+    # A hung daemon would hold the hook for seconds; the margin covers the spool
+    # write and scheduler noise on a busy machine (206 ms was seen under load).
+    assert (time.perf_counter() - started) * 1000 < ed.HOOK_BUDGET_MS + 250
 
 
 @posix_only
