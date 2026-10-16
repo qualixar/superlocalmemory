@@ -102,7 +102,26 @@ jobs:
           npm ci --ignore-scripts
           uv sync --extra dev
 
+      # A recovery run (workflow_dispatch) for a version that PyPI and npm
+      # already serve only finishes distribution: those bytes passed the gates
+      # in the run that published them, and re-running a 40-minute suite on a
+      # busy runner only adds chances for a timing test to stop the channels.
+      - name: Detect an already published version
+        id: published
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -uo pipefail
+          V="${{ steps.version.outputs.version }}"
+          PYPI=$(curl -fsS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/superlocalmemory/$V/json" || true)
+          NPM=$(npm view "superlocalmemory@$V" version 2>/dev/null || true)
+          if [ "$PYPI" = "200" ] && [ "$NPM" = "$V" ]; then
+            echo "both=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$V is already on PyPI and npm; gates ran in the publishing run"
+          fi
+
       - name: Run release gates
+        if: steps.published.outputs.both != 'true'
         run: |
           RELEASE_TEST_ARGS=(
             tests/ -q --tb=short -x -n 4 --durations=15

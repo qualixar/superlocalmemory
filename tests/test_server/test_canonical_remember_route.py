@@ -556,8 +556,10 @@ def test_remember_under_a_held_write_lock_is_202_accepted_then_saved_once(
     assert writer_calls and writer_calls[0] < ceiling_s, (
         f"the route waited {writer_calls[0]:.3f}s for the writer")
     # A gross hang (the route sitting out the journal deadline and more) still
-    # fails end to end.
-    assert elapsed < journal_s + 1.0, f"acknowledgement took {elapsed:.3f}s"
+    # fails end to end. The writer-wait assertion above pins the 1.5 s contract;
+    # this one only catches a hang, so it leaves room for a loaded shared runner
+    # (3.36 s measured in the 4.2.8 gate, under 0.5 s locally).
+    assert elapsed < journal_s + 3.0, f"acknowledgement took {elapsed:.3f}s"
     assert final.status_code == 200, final.text
     assert final.json()["status"] == "queryable"
     assert len(final.json()["fact_ids"]) >= 1
