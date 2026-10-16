@@ -197,3 +197,15 @@ def test_launcher_is_executable_and_identical_in_every_tree() -> None:
     assert LAUNCHER.read_text(encoding="utf-8") == src.replace("__SLM_RELEASE__", version)
     assert f'uvx --from "superlocalmemory=={version}" slm mcp' in LAUNCHER.read_text(encoding="utf-8")
     assert os.access(LAUNCHER, os.X_OK)
+
+
+def test_launcher_exports_no_secret_like_names() -> None:
+    # Anthropic's plugin directory holds a plugin for review ("forwards a
+    # credential", MCP_FORWARDS_CREDENTIAL_ENV) when the MCP launch path names
+    # anything token-, key- or secret-like. TOKENIZERS_PARALLELISM alone did it.
+    import re
+
+    src = Path(__file__).resolve().parents[2] / "plugin-src" / "scripts" / "slm-launch"
+    text = src.read_text(encoding="utf-8")
+    flagged = re.findall(r"(?i)\b\w*(token|secret|api_?key|password|credential)\w*\b", text)
+    assert flagged == [], f"secret-like names in slm-launch: {flagged}"
