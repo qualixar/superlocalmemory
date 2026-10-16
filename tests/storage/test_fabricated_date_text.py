@@ -13,6 +13,7 @@ import pytest
 
 from superlocalmemory.storage.fabricated_dates import (
     contains_fabricated_date,
+    source_names_the_day,
     is_fabricated_date_value,
     remove_date_clauses,
 )
@@ -95,3 +96,20 @@ def test_a_date_column_value_matches_only_the_fabricated_day() -> None:
     assert not is_fabricated_date_value("2024-01-16")
     assert not is_fabricated_date_value(None)
     assert not is_fabricated_date_value("")
+
+
+@pytest.mark.parametrize("source", [
+    "paid on 2024-01-15", "As of 2026-01-15 we ship", "seen on January 15, 2024",
+    "seen on Jan 15", "meeting jan. 15th", "15 Jan 2024", "the 15th of January",
+    "15 January", "due 01/15/2024", "due 1/15/26", "le 15/01/2024", "am 15.01.2024",
+])
+def test_a_source_names_the_day_in_any_written_form(source: str) -> None:
+    assert source_names_the_day(source)
+
+
+@pytest.mark.parametrize("source", [
+    "", None, "2024-01-16", "January 25, 2024", "Jan 1, 2024", "150 January", "v2024.01.15x",
+    "June 15, 2024",
+])
+def test_other_days_are_not_the_day(source) -> None:
+    assert not source_names_the_day(source)

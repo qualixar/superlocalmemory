@@ -10,13 +10,16 @@ with 2024-01-15 as their date. On one real store, 175 facts carried 2024-01-15
 or 2026-01-15 in their words and about 500 date rows carried it as their time.
 
 WHAT THIS DOES
-``storage.fabricated_dates_repair``: for facts saved before 4.1.6 whose source
-never named the day, the clause with the date goes from the text when the
-sentence reads without it, and the date leaves the fact's date columns, its
-temporal events and its validity row. No fact is removed. Facts saved after
-4.1.6 are never changed. Every change is written to ``data_repair_undo`` in the
-same transaction, so ``data_repair_undo.undo(conn, NAME)`` reverses it and
-``slm doctor`` reports it.
+``storage.fabricated_dates_repair``: for facts saved before 4.1.6 whose
+originals (the source memory, or the raw text of the ingestion record linked by
+derivation lineage or the operation's fact list) never name the day in any
+written form, the clause with the date goes from the text when the sentence
+reads without it, and the date leaves the fact's date columns, its temporal
+events and its validity row. A fact with no reachable original is left as it
+is: nothing can show its date was invented. No fact is removed. Facts saved
+after 4.1.6 are never changed. Every change is written to ``data_repair_undo``
+in the same transaction, so ``data_repair_undo.undo(conn, NAME)`` reverses it
+and ``slm doctor`` reports it.
 
 WHY IT IS SAFE
 One transaction: a crash leaves the store as it was and the runner retries at
@@ -48,8 +51,10 @@ def apply(conn: sqlite3.Connection) -> None:
         return
     result = repair(conn, NAME)
     logger.info("M065: made-up dates removed from %d fact(s) (%d sentence(s) rewritten, "
-                "%d with date rows cleared); every change is in data_repair_undo",
-                result.facts, result.text_changed, result.dates_removed)
+                "%d with date rows cleared); kept %d whose source names the day and %d "
+                "with no reachable source; every change is in data_repair_undo",
+                result.facts, result.text_changed, result.dates_removed,
+                result.kept_in_source, result.kept_no_source)
 
 
 REPAIR_NOT_APPLICABLE = (

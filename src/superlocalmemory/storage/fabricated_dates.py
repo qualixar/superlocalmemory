@@ -55,6 +55,19 @@ _INLINE = re.compile(
     rf",?\s+{_PREPOSITION}\s+{DATE}{_NOT_A_RANGE}", re.IGNORECASE)
 _BRACKETED = re.compile(rf"\s*[(\[]\s*{DATE}\s*[)\]]")
 
+#: The day as a person might write it, with or without a year, so a source that
+#: names it in any form proves the date real. Broader than :data:`DATE` on
+#: purpose: a false "the source names it" only keeps a fact as it is.
+_JAN = r"jan(?:uary|\.)?"
+_SOURCE_DAY = re.compile(
+    r"(?<![\w.-])(?:"
+    r"(?:2024|2026)-01-15"
+    rf"|{_JAN}\s+15(?:st|nd|rd|th)?(?![\d])"
+    rf"|15(?:st|nd|rd|th)?\s+(?:of\s+)?{_JAN}(?![a-z])"
+    r"|0?1/15/(?:20)?(?:24|26)"
+    r"|15[/.]0?1[/.](?:20)?(?:24|26)"
+    r")(?![\w-]|\.\d)", re.IGNORECASE)
+
 #: The first word is capitalised only if it is a plain short word, never an
 #: identifier, path or user name ("file" -> "File"; "varunpratapbhardwaj" stays).
 _PLAIN_WORD = re.compile(r"^[a-z]{1,12}\b(?![./_@-])")
@@ -65,6 +78,11 @@ _MAX_PASSES = 4
 def contains_fabricated_date(text: str | None) -> bool:
     """Whether ``text`` mentions one of the made-up days, in any written form."""
     return bool(text) and _DATE_RE.search(str(text)) is not None
+
+
+def source_names_the_day(text: str | None) -> bool:
+    """Whether a source text names 15 January (any written form, any or no year)."""
+    return bool(text) and _SOURCE_DAY.search(str(text)) is not None
 
 
 def is_fabricated_date_value(value: object) -> bool:
@@ -129,4 +147,4 @@ def remove_date_clauses(text: str | None) -> str | None:
 
 
 __all__ = ["DATE", "FABRICATED_DAYS", "contains_fabricated_date",
-           "is_fabricated_date_value", "remove_date_clauses"]
+           "is_fabricated_date_value", "remove_date_clauses", "source_names_the_day"]

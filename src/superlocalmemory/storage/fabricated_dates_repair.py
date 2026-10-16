@@ -8,8 +8,11 @@ exactly as it is:
 
 * it was saved before 4.1.6 shipped (:data:`CUTOFF`). Later facts that mention
   those days (release notes about this very bug) are never read for change;
-* the memory it came from does not mention the day itself (the text the user
-  saved, and its session date): a date the user wrote is real;
+* it has a reachable original (its source memory, or the raw text of the
+  ingestion record linked by ``derivation_lineage`` or by the operation's
+  fact lists) and no original names the day in any written form or was dated
+  that day (``fabricated_dates.source_names_the_day``). A fact with no
+  reachable original is left as it is: nothing can show its date was made up;
 * it was not saved within :data:`NEAR_DAYS` of the day, when "yesterday" could
   truly have been 15 January;
 * it is not being erased.
@@ -50,6 +53,7 @@ from superlocalmemory.storage.fabricated_dates import (
     contains_fabricated_date,
     is_fabricated_date_value,
     remove_date_clauses,
+    source_names_the_day,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,12 +153,42 @@ def _rows_by_fact(conn: sqlite3.Connection, table: str,
     return out
 
 
-def _source_is_real(conn: sqlite3.Connection, memory_id: str) -> bool:
-    """The user's own text or session date names the day: the date is real."""
+def _ingestion_sources(conn: sqlite3.Connection,
+                       fact_ids: list[str]) -> dict[str, list[tuple[Any, Any]]]:
+    """Raw text and session date of the ingestion records each fact came from:
+    linked by derivation lineage, or named in the operation's own fact lists."""
+    out: dict[str, list[tuple[Any, Any]]] = {}
+    if not fact_ids or not _cols(conn, "ingestion_operations"):
+        return out
+    ids = json.dumps(fact_ids)
+    queries = [f"SELECT je.value, io.raw_content, io.session_date FROM ingestion_operations io, "  # noqa: S608
+               f"json_each(io.{column}) je WHERE je.value IN (SELECT value FROM json_each(?))"
+               for column in ("final_fact_ids_json", "queryable_fact_ids_json")
+               if column in _cols(conn, "ingestion_operations")]
+    if _cols(conn, "derivation_lineage"):
+        queries.append("SELECT dl.object_id, io.raw_content, io.session_date "
+                       "FROM derivation_lineage dl JOIN ingestion_operations io "
+                       "ON io.operation_id = dl.operation_id WHERE dl.object_type = 'fact' "
+                       "AND dl.object_id IN (SELECT value FROM json_each(?))")
+    for sql in queries:
+        for fact_id, raw, session_date in conn.execute(sql, (ids,)):
+            out.setdefault(str(fact_id), []).append((raw, session_date))
+    return out
+
+
+def _sources(conn: sqlite3.Connection, fact: dict[str, Any],
+             ingested: list[tuple[Any, Any]]) -> list[tuple[Any, Any]]:
+    """Every original text the fact was extracted from, with its session date."""
     row = conn.execute("SELECT content, session_date FROM memories WHERE memory_id = ?",
-                       (memory_id,)).fetchone()
-    return row is not None and (contains_fabricated_date(row[0])
-                                or is_fabricated_date_value(row[1]))
+                       (fact["memory_id"],)).fetchone()
+    found = [tuple(row)] if row is not None else []
+    return [s for s in (*found, *ingested) if s[0] is not None and str(s[0]).strip()]
+
+
+def _source_names_it(sources: list[tuple[Any, Any]]) -> bool:
+    """A source names the day (any written form) or was dated that day: real."""
+    return any(source_names_the_day(str(text)) or is_fabricated_date_value(day)
+               for text, day in sources)
 
 
 def _being_erased(conn: sqlite3.Connection, fact_id: str) -> bool:
@@ -164,15 +198,33 @@ def _being_erased(conn: sqlite3.Connection, fact_id: str) -> bool:
                         (fact_id,)).fetchone() is not None
 
 
-def _plan_fact(conn: sqlite3.Connection, fact: dict[str, Any],
-               events: list[dict[str, Any]], validity: list[dict[str, Any]]) -> FactPlan | None:
+#: Why a candidate fact was left as it is (see :class:`Survey`).
+KEPT_IN_SOURCE = "in_source"
+KEPT_NO_SOURCE = "no_source"
+_KEPT_OTHER = "other"
+
+
+def _classify(conn: sqlite3.Connection, fact: dict[str, Any], events: list[dict[str, Any]],
+              validity: list[dict[str, Any]], ingested: list[tuple[Any, Any]],
+              ) -> tuple[str, FactPlan | None]:
+    """``("repair", plan)`` or ``(reason kept, None)``.
+
+    A date is made up only when no original the fact came from names that day,
+    so a fact with no reachable original is never changed: nothing can show its
+    date was invented.
+    """
     if not _saved_before_cutoff_and_not_near(fact.get("created_at")):
-        return None
-    if _source_is_real(conn, fact["memory_id"]) or _being_erased(conn, fact["fact_id"]):
-        return None
+        return _KEPT_OTHER, None
+    if _being_erased(conn, fact["fact_id"]):
+        return _KEPT_OTHER, None
+    sources = _sources(conn, fact, ingested)
+    if not sources:
+        return KEPT_NO_SOURCE, None
+    if _source_names_it(sources):
+        return KEPT_IN_SOURCE, None
     dated = tuple(e for e in events
                   if any(is_fabricated_date_value(e.get(c)) for c in _EVENT_DATES))
-    plan = FactPlan(
+    plan_ = FactPlan(
         fact_id=fact["fact_id"], profile_id=fact["profile_id"], content=fact["content"],
         new_content=remove_date_clauses(fact["content"]),
         fact_dates=tuple(c for c in _FACT_DATES if is_fabricated_date_value(fact.get(c))),
@@ -181,31 +233,48 @@ def _plan_fact(conn: sqlite3.Connection, fact: dict[str, Any],
             is_fabricated_date_value(v.get(c)) for c in _VALIDITY_DATES)), None),
         quoting=tuple(e for e in events
                       if e not in dated and e.get("description") == fact["content"]))
-    if not (plan.text_changes or plan.fact_dates or plan.events or plan.validity):
-        return None
-    return plan
+    if not (plan_.text_changes or plan_.fact_dates or plan_.events or plan_.validity):
+        return _KEPT_OTHER, None
+    return "repair", plan_
+
+
+@dataclass(frozen=True)
+class Survey:
+    """Candidates by outcome: repaired, or kept because a source names the day,
+    or kept because no source is reachable. Fact ids for the kept groups."""
+    repairs: tuple[FactPlan, ...]
+    in_source: tuple[str, ...]
+    no_source: tuple[str, ...]
+
+
+def survey(conn: sqlite3.Connection, fact_ids: list[str] | None = None) -> Survey:
+    """Classify every candidate. Reads only. ``fact_ids`` limits the look."""
+    fact_cols = _cols(conn, "atomic_facts")
+    if not fact_cols:
+        return Survey((), (), ())
+    wanted = ["fact_id", "memory_id", "profile_id", "content", "created_at",
+              *[c for c in _FACT_DATES if c in fact_cols]]
+    ids = _candidate_ids(conn, fact_cols) if fact_ids is None else fact_ids
+    events = _rows_by_fact(conn, "temporal_events", ids)
+    validity = _rows_by_fact(conn, "fact_temporal_validity", ids)
+    ingested = _ingestion_sources(conn, ids)
+    groups: dict[str, list[Any]] = {"repair": [], KEPT_IN_SOURCE: [], KEPT_NO_SOURCE: [],
+                                    _KEPT_OTHER: []}
+    for fact_id in ids:
+        row = conn.execute(f"SELECT {','.join(wanted)} FROM atomic_facts WHERE fact_id = ?",  # noqa: S608
+                           (fact_id,)).fetchone()
+        if row is None:
+            continue
+        reason, found = _classify(conn, dict(zip(wanted, row)), events.get(fact_id, []),
+                                  validity.get(fact_id, []), ingested.get(fact_id, []))
+        groups[reason].append(found if found is not None else fact_id)
+    return Survey(tuple(groups["repair"]), tuple(groups[KEPT_IN_SOURCE]),
+                  tuple(groups[KEPT_NO_SOURCE]))
 
 
 def plan(conn: sqlite3.Connection, fact_ids: list[str] | None = None) -> list[FactPlan]:
     """What the repair would change. Reads only. ``fact_ids`` limits the look."""
-    fact_cols = _cols(conn, "atomic_facts")
-    if not fact_cols:
-        return []
-    wanted = ["fact_id", "memory_id", "profile_id", "content", "created_at",
-              *[c for c in _FACT_DATES if c in fact_cols]]
-    plans = []
-    ids = _candidate_ids(conn, fact_cols) if fact_ids is None else fact_ids
-    events = _rows_by_fact(conn, "temporal_events", ids)
-    validity = _rows_by_fact(conn, "fact_temporal_validity", ids)
-    for fact_id in ids:
-        row = conn.execute(f"SELECT {','.join(wanted)} FROM atomic_facts WHERE fact_id = ?",  # noqa: S608
-                           (fact_id,)).fetchone()
-        if row is not None:
-            found = _plan_fact(conn, dict(zip(wanted, row)), events.get(fact_id, []),
-                               validity.get(fact_id, []))
-            if found is not None:
-                plans.append(found)
-    return plans
+    return list(survey(conn, fact_ids).repairs)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +393,8 @@ class RepairResult:
     facts: int
     text_changed: int
     dates_removed: int
+    kept_in_source: int = 0
+    kept_no_source: int = 0
 
 
 def apply(conn: sqlite3.Connection, repair: str) -> RepairResult:
@@ -336,9 +407,11 @@ def apply(conn: sqlite3.Connection, repair: str) -> RepairResult:
     part-way leaves the store exactly as it was; the runner sees the migration
     unfinished and runs it again at the next start.
     """
-    found = [p.fact_id for p in plan(conn)]
+    looked = survey(conn)
+    kept = {"kept_in_source": len(looked.in_source), "kept_no_source": len(looked.no_source)}
+    found = [p.fact_id for p in looked.repairs]
     if not found:
-        return RepairResult(0, 0, 0)
+        return RepairResult(0, 0, 0, **kept)
     conn.execute("BEGIN IMMEDIATE")
     try:
         plans = plan(conn, found)
@@ -352,7 +425,7 @@ def apply(conn: sqlite3.Connection, repair: str) -> RepairResult:
     changed = [p.fact_id for p in plans if p.text_changes]
     _drop_cached_context(conn, changed)
     return RepairResult(len(plans), len(changed),
-                        sum(1 for p in plans if p.fact_dates or p.events or p.validity))
+                        sum(1 for p in plans if p.fact_dates or p.events or p.validity), **kept)
 
 
 def _drop_cached_context(conn: sqlite3.Connection, fact_ids: list[str]) -> None:

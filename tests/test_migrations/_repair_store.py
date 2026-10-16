@@ -9,6 +9,7 @@ migration log, so the next ``apply_deferred`` is exactly the first start of
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -36,11 +37,12 @@ def forget_migration(memory: Path, name: str) -> None:
 
 
 def add_fact(conn: sqlite3.Connection, fact_id: str, content: str, *,
-             created_at: str = "2026-05-10T07:14:22+00:00", source: str = "raw text",
+             created_at: str = "2026-05-10T07:14:22+00:00", source: str | None = "raw text",
              session_date: str | None = None, profile: str = "default", **cols) -> None:
-    conn.execute("INSERT OR IGNORE INTO memories (memory_id, profile_id, content, session_date, "
-                 "created_at) VALUES (?, ?, ?, ?, ?)",
-                 (f"m-{fact_id}", profile, source, session_date, created_at))
+    if source is not None:  # None: the source memory is gone
+        conn.execute("INSERT OR IGNORE INTO memories (memory_id, profile_id, content, "
+                     "session_date, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (f"m-{fact_id}", profile, source, session_date, created_at))
     names = ["fact_id", "memory_id", "profile_id", "content", "created_at", *cols]
     values = [fact_id, f"m-{fact_id}", profile, content, created_at, *cols.values()]
     conn.execute(f"INSERT INTO atomic_facts ({','.join(names)}) "  # noqa: S608
@@ -53,6 +55,21 @@ def add_event(conn: sqlite3.Connection, event_id: str, fact_id: str, content: st
                  "observation_date, referenced_date, description) "
                  "VALUES (?, 'default', 'e1', ?, ?, ?, ?)",
                  (event_id, fact_id, observed, referenced, content))
+
+
+def add_ingestion(conn: sqlite3.Connection, fact_id: str, raw: str, *,
+                  linked_by: str = "lineage") -> None:
+    """An ingestion record holding the raw text ``fact_id`` was extracted from,
+    linked by derivation lineage or by the operation's own fact list."""
+    op = f"op-{fact_id}"
+    facts = json.dumps([fact_id]) if linked_by == "fact_list" else "[]"
+    conn.execute("INSERT INTO ingestion_operations (operation_id, profile_id, source_type, "
+                 "idempotency_key, source_hash, raw_content, final_fact_ids_json) "
+                 "VALUES (?, 'default', 'store', ?, 'h', ?, ?)", (op, op, raw, facts))
+    if linked_by == "lineage":
+        conn.execute("INSERT INTO derivation_lineage (lineage_id, profile_id, object_type, "
+                     "object_id, operation_id, source_status) "
+                     "VALUES (?, 'default', 'fact', ?, ?, 'exact')", (f"l-{fact_id}", fact_id, op))
 
 
 def first_start(memory: Path, learning: Path) -> dict:

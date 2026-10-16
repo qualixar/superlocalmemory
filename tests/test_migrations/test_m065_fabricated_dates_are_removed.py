@@ -19,6 +19,7 @@ from superlocalmemory.storage.migration_runner import DEFERRED_MIGRATIONS
 from superlocalmemory.storage.migrations import M065_fabricated_dates_are_removed as M065
 from tests.test_migrations._repair_store import (
     add_event,
+    add_ingestion,
     add_fact,
     first_start,
     forget_migration,
@@ -57,6 +58,21 @@ def _seed(memory) -> None:
     add_fact(conn, "f_near", "The demo ran on 2026-01-15",
              created_at="2026-01-16T09:00:00+00:00", referenced_date="2026-01-15")
     add_fact(conn, "f_plain", "Nothing dated here", referenced_date="2026-05-01")
+    # The source names the day in another written form: the date is real.
+    add_fact(conn, "f_spelled", "Mel was seen on January 15, 2024",
+             source="Mel was seen at the park on Jan 15.", referenced_date="2024-01-15")
+    add_fact(conn, "f_dayfirst", "The demo ran on 2024-01-15",
+             source="We ran the demo 15 Jan 2024.", referenced_date="2024-01-15")
+    # No source anywhere: nothing can prove the date made up, so it stays.
+    add_fact(conn, "f_nosource", "The deploy happened on 2024-01-15", source=None,
+             referenced_date="2024-01-15")
+    # The memory row is gone but the raw text survives in its ingestion record.
+    add_fact(conn, "f_lineage", "The build broke on 2024-01-15", source=None,
+             referenced_date="2024-01-15")
+    add_ingestion(conn, "f_lineage", "the build broke again")
+    add_fact(conn, "f_lineage_dated", "The cache was cleared on 2024-01-15", source=None)
+    add_ingestion(conn, "f_lineage_dated", "cleared the cache on 2024-01-15",
+                  linked_by="fact_list")
     conn.commit()
     conn.close()
 
@@ -139,12 +155,33 @@ def test_legitimate_mentions_are_never_touched(store) -> None:
     before = _snapshot(memory)
     first_start(memory, learning)
     conn = sqlite3.connect(memory)
-    for fact_id in ("f_after", "f_source", "f_near", "f_plain"):
+    kept = ("f_after", "f_source", "f_near", "f_plain", "f_spelled", "f_dayfirst",
+            "f_nosource", "f_lineage_dated")
+    for fact_id in kept:
         row = conn.execute("SELECT content, referenced_date FROM atomic_facts WHERE fact_id=?",
                            (fact_id,)).fetchone()
         assert (fact_id, *row) in [(f[0], f[1], f[2]) for f in before["facts"]], fact_id
-    assert not conn.execute("SELECT 1 FROM data_repair_undo WHERE fact_id IN "
-                            "('f_after','f_source','f_near','f_plain')").fetchone()
+    marks = ",".join("?" * len(kept))
+    assert not conn.execute(f"SELECT 1 FROM data_repair_undo WHERE fact_id IN ({marks})",
+                            kept).fetchone()
+
+
+def test_a_source_reached_through_its_ingestion_record_counts(store) -> None:
+    memory, learning = store
+    first_start(memory, learning)
+    conn = sqlite3.connect(memory)
+    assert _fact(conn, "f_lineage")["content"] == "The build broke"
+
+
+def test_the_survey_counts_each_kept_group(store) -> None:
+    from superlocalmemory.storage.fabricated_dates_repair import survey
+
+    memory, _learning = store
+    found = survey(sqlite3.connect(memory))
+    assert {p.fact_id for p in found.repairs} == {"f_clause", "f_subject", "f_dateonly",
+                                                   "f_lineage"}
+    assert set(found.in_source) == {"f_source", "f_spelled", "f_dayfirst", "f_lineage_dated"}
+    assert set(found.no_source) == {"f_nosource"}
 
 
 def test_every_fact_is_kept(store) -> None:
@@ -216,8 +253,8 @@ def test_summary_reports_what_the_repair_did(store) -> None:
     first_start(memory, learning)
     conn = sqlite3.connect(memory)
     summary = undo_log.summary(conn, M065.NAME)
-    assert summary["facts"] == 3  # f_clause, f_subject, f_dateonly
-    assert summary["text_changed"] == 1
+    assert summary["facts"] == 4  # f_clause, f_subject, f_dateonly, f_lineage
+    assert summary["text_changed"] == 2
     assert summary["undone"] == 0
 
 
