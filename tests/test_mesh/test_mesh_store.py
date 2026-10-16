@@ -46,8 +46,11 @@ def _legacy_store(path: Path) -> Path:
 
 
 def _seed(path: Path) -> None:
+    # "Now" is read when the row is written: under a long parallel run the module
+    # can load half an hour before this test, and a heartbeat that old is reaped.
+    now = datetime.now(timezone.utc)
     conn = sqlite3.connect(path)
-    peers = [("p-old", OLD), ("p-new", NOW.isoformat()), ("web-old", OLD)]
+    peers = [("p-old", OLD), ("p-new", now.isoformat()), ("web-old", OLD)]
     for peer_id, seen in peers:
         conn.execute(
             "INSERT INTO mesh_peers (peer_id, session_id, registered_at, last_heartbeat,"
@@ -71,7 +74,7 @@ def _seed(path: Path) -> None:
                      " VALUES (?, 'v', 'p', ?)", (key, at))
         conn.execute("INSERT INTO mesh_events (event_type, emitted_by, created_at)"
                      " VALUES ('e', 'p', ?)", (at,))
-    future = (NOW + timedelta(hours=2)).isoformat()
+    future = (now + timedelta(hours=2)).isoformat()
     conn.execute("INSERT INTO mesh_locks (file_path, locked_by, locked_at, expires_at)"
                  " VALUES ('/a', 'p', ?, ?)", (RECENT, future))
     conn.execute("INSERT INTO mesh_locks (file_path, locked_by, locked_at, expires_at)"
@@ -154,7 +157,7 @@ def test_rerun_is_a_no_op(legacy: Path) -> None:
     marker = mesh_store.inspect(mesh)["migrated_at"]
     conn = sqlite3.connect(mesh)
     conn.execute("INSERT INTO mesh_state (key, value, set_by, updated_at)"
-                 " VALUES ('live', 'v', 'p', ?)", (NOW.isoformat(),))
+                 " VALUES ('live', 'v', 'p', ?)", (datetime.now(timezone.utc).isoformat(),))
     conn.commit()
     conn.close()
     assert mesh_store.prepare_mesh_db(legacy) == mesh

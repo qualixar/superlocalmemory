@@ -264,7 +264,11 @@ def test_an_oversized_socket_request_is_cut_off_unanswered(data_root, hook_socke
             client.sendall(b"x" * (_MAX_REQUEST_BYTES + 65536))
         except (BrokenPipeError, ConnectionResetError):
             pass
-        assert client.recv(64) == b""  # closed, no answer
+        try:
+            answer = client.recv(64)
+        except ConnectionResetError:  # Linux resets a socket closed with unread data
+            answer = b""
+        assert answer == b""  # closed, no answer
     finally:
         client.close()
     assert _spooled(data_root) == []

@@ -733,6 +733,11 @@ class GDPRCompliance:
         if residue_recount_failed:
             counts["residue_recount_failed"] = 1
 
+        # Where FTS5 secure-delete is off (SQLite older than 3.42, or 3.44-3.46.0
+        # where it corrupts the index), a delete leaves the erased words in the
+        # index segments; rewrite the indexes so they are gone from the file.
+        self._purge_keyword_indexes(counts)
+
         # I7 — post-erasure residue sweep: FTS shadow tables + WAL sanity.
         # This makes I7 enforceable rather than aspirational.
         self._scan_fts_residue(profile_id, tables, counts)
@@ -1263,6 +1268,26 @@ class GDPRCompliance:
             raise
 
     # -- I7: post-erasure residue scanner ----------------------------------
+
+    def _purge_keyword_indexes(self, counts: dict) -> None:
+        """Rewrite the keyword indexes so erased words leave the file (GDPR I7)."""
+        from superlocalmemory.storage import fts_residue
+
+        try:
+            present = {row[0] for row in self._db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("GDPR erase: keyword index listing failed: %s", exc)
+            counts["fts_purge_failed"] = 1
+            return
+        for table in fts_residue.FTS_TABLES:
+            if table not in present:
+                continue
+            try:
+                fts_residue.purge_deleted_terms(self._db, table)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("GDPR erase: keyword index %s purge failed: %s", table, exc)
+                counts["fts_purge_failed"] = 1
 
     def _scan_fts_residue(
         self,

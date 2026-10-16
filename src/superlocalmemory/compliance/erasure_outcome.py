@@ -37,6 +37,8 @@ _REMAINING: dict[str, tuple[str, str]] = {
     "table_delete_failures": ("Some tables could not be emptied.", "Run the erasure again."),
     "fts_residue_rows": ("The search index still holds words of this profile.",
                          "Run the erasure again, then `slm doctor`."),
+    "fts_purge_failed": ("The search index could not be rewritten without the erased words.",
+                         "Run `slm db repair`, then the erasure again."),
     "vector_store_failures": ("Some stored vectors of this profile could not be removed.",
                               "Run the erasure again; if it repeats, run `slm doctor`."),
     "graph_projection_failures": ("The graph store still holds some of this profile.",
