@@ -176,3 +176,42 @@ def test_recovery_point_covers_mesh_db(root):
     _add_peer(root / "mesh.db", "p-later")
     backup_bundle.restore_point(root, manifest["id"], settings=False)
     assert _peers(root / "mesh.db") == ["p-point"]
+
+
+def _try_write(path: Path, sql: str) -> str:
+    conn = sqlite3.connect(path, timeout=0.2)
+    try:
+        conn.execute(sql)
+        conn.commit()
+        return "ok"
+    except sqlite3.OperationalError as exc:
+        return str(exc)
+    finally:
+        conn.close()
+
+
+def test_mesh_write_during_a_backup_set_succeeds(root, monkeypatch):
+    """The memory.db fence never reaches mesh.db: heartbeats keep landing while a
+    backup set copies the memory stores. mesh.db is copied by SQLite's online
+    backup API on its own, and still lands in the set."""
+    real = BackupCoordinator._sqlite_backup
+    outcome: dict[str, str] = {}
+
+    def copying(self, src: Path, dest: Path) -> None:
+        if src.name == "memory.db":
+            outcome["mesh"] = _try_write(
+                root / "mesh.db", "INSERT INTO mesh_nonces VALUES ('during', 1.0)")
+            outcome["memory"] = _try_write(
+                root / "memory.db", "INSERT INTO atomic_facts VALUES ('f2', 'x')")
+        real(self, src, dest)
+
+    monkeypatch.setattr(BackupCoordinator, "_sqlite_backup", copying)
+    manifest = _coord(root).create_backup_set()
+    assert outcome["mesh"] == "ok"
+    assert "locked" in outcome["memory"]  # memory.db is still fenced
+    entry = next(e for e in manifest.stores if e.store_name == "mesh.db")
+    conn = sqlite3.connect(entry.file_path)
+    try:
+        assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    finally:
+        conn.close()

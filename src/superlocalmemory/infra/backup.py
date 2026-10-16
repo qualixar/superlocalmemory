@@ -80,6 +80,13 @@ MANAGED_DATABASES: tuple[str, ...] = (
     "mesh.db",          # Mesh peers, messages, locks, events (own file since 4.2.8)
 )
 
+#: Stores a backup set copies outside the writer fence. mesh.db is live
+#: coordination (heartbeats every few seconds) in its own WAL file precisely so
+#: it never waits on memory writes; fencing it for a whole backup set would
+#: stall every agent. SQLite's online backup API reads it in one consistent
+#: snapshot without blocking WAL writers.
+UNFENCED_DATABASES: frozenset[str] = frozenset({"mesh.db"})
+
 
 # ---------------------------------------------------------------------------
 # Coherent multi-store backup set
@@ -176,7 +183,9 @@ class BackupCoordinator:
           1. Identify which stores exist on disk.
           2. Create a staging directory.
           3. Fence SQLite writers (BEGIN IMMEDIATE) then copy every store and
-             record per-file SHA-256 checksums (Phase 3). If a ``lance/``
+             record per-file SHA-256 checksums (Phase 3). Stores in
+             ``UNFENCED_DATABASES`` (mesh.db) are copied after the fence is
+             released, each as one online-backup snapshot. If a ``lance/``
              directory exists under the base dir, copy it into staging as well.
           4. Re-read every staging file and compare to Phase-3 hashes.
              Mismatch → staging removed, BackupVerificationError raised.
@@ -206,19 +215,15 @@ class BackupCoordinator:
             db for db in self._managed_databases
             if (self._base_dir / db).exists()
         ]
-        sqlite_paths = [self._base_dir / db for db in existing_dbs]
 
         # staging_records: (db_name, staging_path, size_bytes, phase3_sha256)
         staging_records: list[tuple[str, Path, int, str]] = []
 
+        fenced = [db for db in existing_dbs if db not in UNFENCED_DATABASES]
         # Phases 2–3: fence writers, copy, hash
-        with self._writer_fence(sqlite_paths):
-            for db_name in existing_dbs:
-                src = self._base_dir / db_name
-                dest = staging_dir / db_name
-                self._sqlite_backup(src, dest)
-                sha = self._compute_entry_sha256(dest)
-                staging_records.append((db_name, dest, dest.stat().st_size, sha))
+        with self._writer_fence([self._base_dir / db for db in fenced]):
+            for db_name in fenced:
+                staging_records.append(self._copy_store(db_name, staging_dir))
 
             # Copy the LanceDB vector directory if present.
             lance_src = self._base_dir / "lance"
@@ -231,6 +236,11 @@ class BackupCoordinator:
                     set_id,
                     sum(1 for _ in lance_staging.rglob("*") if _.is_file()),
                 )
+
+        # Unfenced stores: an online-backup snapshot each, writers never wait.
+        for db_name in existing_dbs:
+            if db_name in UNFENCED_DATABASES:
+                staging_records.append(self._copy_store(db_name, staging_dir))
 
         # Phase 4: re-verify every staging copy
         for db_name, staging_path, _size, expected_sha in staging_records:
@@ -510,6 +520,12 @@ class BackupCoordinator:
                     conn.close()
                 except Exception:  # pragma: no cover – cleanup best-effort
                     pass
+
+    def _copy_store(self, db_name: str, staging_dir: Path) -> tuple[str, Path, int, str]:
+        """Copy one live store into staging; ``(name, path, size, sha256)``."""
+        dest = staging_dir / db_name
+        self._sqlite_backup(self._base_dir / db_name, dest)
+        return db_name, dest, dest.stat().st_size, self._compute_entry_sha256(dest)
 
     def _sqlite_backup(self, src: Path, dest: Path) -> None:
         """Copy a SQLite database using the Online Backup API (hot copy).
