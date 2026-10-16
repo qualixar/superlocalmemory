@@ -164,7 +164,10 @@ jobs:
         env:
           SHARD: ${{ matrix.os == 'windows-latest' && format('{0}/6', matrix.shard) || '1/1' }}
         run: |
-          python -m pytest tests/ -q --tb=short -o faulthandler_timeout=300 \
+          # -n 4: the suite ran on one core and Linux/macOS hit the 75-minute
+          # step limit on every run (76-78 min, "failure"); the release gate
+          # already runs -n 4.
+          python -m pytest tests/ -q --tb=short -o faulthandler_timeout=300 -n 4 \
             -p tests._shard_plugin --shard "$SHARD" \
             -p tests._hard_timeout_plugin --hard-timeout 900 \
             --hard-timeout-session 4200 --hard-timeout-report hung-test.txt \
