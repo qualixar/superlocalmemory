@@ -140,6 +140,16 @@ jobs:
           tarball="$(npm pack --ignore-scripts --json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d)[0].filename))")"
           test -f "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Build the Python wheel this npm candidate installs
+        # The npm installer fetches superlocalmemory==<version> from PyPI, which
+        # does not exist until the release publishes it. Install this commit's
+        # wheel instead, so the check tests the code being released.
+        shell: bash
+        run: |
+          python -m pip wheel --no-deps --disable-pip-version-check -w "$RUNNER_TEMP/slm-wheel" .
+          wheel="$(ls "$RUNNER_TEMP"/slm-wheel/superlocalmemory-*.whl)"
+          test -f "$wheel"
+          echo "SLM_LOCAL_WHEEL=$wheel" >> "$GITHUB_ENV"
       - name: Install, invoke and uninstall npm candidate on Unix
         if: runner.os != 'Windows'
         shell: bash
