@@ -276,7 +276,7 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             --python-dist dist/python \
             --npm-tarball "${{ steps.artifacts.outputs.npm_tarball }}" \
-            --attempts 6 --interval 10
+            --attempts 36 --interval 10
 
   # One VS Code extension build per release, shared by the GitHub release and
   # Open VSX so both carry the same bytes.
