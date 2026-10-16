@@ -150,7 +150,7 @@ jobs:
         run: pip install portalocker
 
       - name: Install test dependencies
-        run: pip install pytest pytest-asyncio sqlite-vec pytest-reportlog==1.0.0
+        run: pip install pytest pytest-asyncio sqlite-vec pytest-reportlog==1.0.0 "pytest-xdist>=3.6"
 
       # The report log is written one test at a time, so a run that is
       # cancelled or times out still names every test that ran and failed.
