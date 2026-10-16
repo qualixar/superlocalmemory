@@ -161,8 +161,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/python dist/npm
-          uv build --out-dir dist/python
-          npm pack --pack-destination dist/npm
+          if [ "${{ steps.published.outputs.both }}" = "true" ]; then
+            # Recovery of a published version: distribute the exact published
+            # bytes. A rebuild differs (file timestamps), and the registry guard
+            # rightly refuses bytes that are not the ones PyPI and npm serve.
+            V="${{ steps.version.outputs.version }}"
+            curl -fsS "https://pypi.org/pypi/superlocalmemory/$V/json" \
+              | python3 -c 'import json,sys; [print(u["url"]) for u in json.load(sys.stdin)["urls"]]' \
+              | while read -r url; do curl -fsSL -o "dist/python/$(basename "$url")" "$url"; done
+            (cd dist/npm && npm pack "superlocalmemory@$V")
+          else
+            uv build --out-dir dist/python
+            npm pack --pack-destination dist/npm
+          fi
           NPM_TARBALL=$(find dist/npm -maxdepth 1 -type f -name '*.tgz' -print -quit)
           test -n "$NPM_TARBALL"
           echo "npm_tarball=$NPM_TARBALL" >> "$GITHUB_OUTPUT"
