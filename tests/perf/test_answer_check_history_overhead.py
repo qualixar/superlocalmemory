@@ -2,8 +2,11 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 """What the Answer Check history costs a recall: one record, microseconds.
 
-Gates are ~10x above what was measured on Apple Silicon (median ~2 us), so
-they catch an O(n) or I/O regression, not machine noise.
+Measured 16-22 us median on an M5 Pro under load and ~31 us on a GitHub runner
+during a parallel suite (4.2.6-4.2.8; the code did not change). The gates sit
+well above that and far below what an O(n) pass over the 2,048-entry ring or a
+disk write per call would cost (milliseconds), so they catch the regression
+they exist for, not machine noise.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ def test_record_overhead_micro() -> None:
         p95_us = per_call[int(len(per_call) * 0.95)] / 1000
         print(f"\nrecord_recall_verdict: median {median_us:.2f} us, p95 {p95_us:.2f} us "
               f"per call over {BATCHES}x{PER_BATCH} (ring full: {len(h._ring) == h.RING_CAPACITY})")
-        assert median_us < 20.0, median_us
-        assert p95_us < 60.0, p95_us
+        assert median_us < 100.0, median_us
+        assert p95_us < 400.0, p95_us
     finally:
         h._reset_for_testing()

@@ -118,7 +118,9 @@ def test_storage_aggression_still_keeps_the_new_shapes() -> None:
 #: host deschedules the thread, so the same 1.0 s now has ~4x headroom, and a
 #: rule that goes quadratic over even one 40 kB run of this input (~2 s of
 #: CPU) still fails it.
-_HOSTILE_CPU_CEILING_S = 1.0
+# Linear work here is ~0.3 s; a quadratic pattern on this 80k-char input takes
+# minutes. 3 s keeps that margin on a loaded shared runner (1.31 s measured).
+_HOSTILE_CPU_CEILING_S = 3.0
 
 
 def test_the_new_rules_stay_linear_on_hostile_input() -> None:
