@@ -30,6 +30,7 @@ from __future__ import annotations
 from superlocalmemory.core.session_identity import is_conversation
 import logging
 import queue
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -146,13 +147,38 @@ def enqueue_recall(event: RecallEvent) -> None:
 # Worker — persists to pending_outcomes
 # ---------------------------------------------------------------------------
 
+def _is_lock(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "locked" in text or "busy" in text
+
+
+def _requeue(event: RecallEvent) -> None:
+    """Put an event the store could not take yet back for the next pass."""
+    try:
+        _queue.put_nowait(event)
+    except queue.Full:
+        _bump("recall_dropped_queue_full")
+        logger.warning("outcome_queue: queue full, a recall outcome was dropped "
+                       "(session=%s)", event.session_id)
+
+
 def _drain_once(memory_db_path: Path, max_batch: int = 50) -> int:
     """Drain up to ``max_batch`` events, persisting each via
     ``EngagementRewardModel.record_recall``. Returns count persisted.
+
+    4.2.8: the model waits the shared busy timeout under the process write
+    lock and RAISES on a database error. Before, a write that lost to a long
+    memory transaction returned a sentinel after 500 ms and was counted as
+    persisted while no row existed. A lock that outlasts the wait now leaves
+    the event queued for the next pass; any other error is counted as failed
+    and logged, never as persisted.
     """
     from superlocalmemory.learning.reward import EngagementRewardModel
+    from superlocalmemory.storage.memory_write import _busy_timeout_ms
+    from superlocalmemory.storage.write_lock import get_write_lock
 
-    model = EngagementRewardModel(memory_db_path)
+    model = EngagementRewardModel(memory_db_path, busy_timeout_ms=_busy_timeout_ms(),
+                                  raise_on_db_error=True)
     persisted = 0
     try:
         for _ in range(max_batch):
@@ -161,27 +187,38 @@ def _drain_once(memory_db_path: Path, max_batch: int = 50) -> int:
             except queue.Empty:
                 break
             try:
-                model.record_recall(
-                    profile_id=event.profile_id,
-                    session_id=event.session_id,
-                    recall_query_id=event.query_id or "",
-                    fact_ids=list(event.fact_ids),
-                    query_text=event.query,
-                )
+                with get_write_lock(memory_db_path):
+                    model.record_recall(
+                        profile_id=event.profile_id,
+                        session_id=event.session_id,
+                        recall_query_id=event.query_id or "",
+                        fact_ids=list(event.fact_ids),
+                        query_text=event.query,
+                    )
                 _bump("recall_persisted")
                 persisted += 1
+            except sqlite3.OperationalError as exc:
+                if not _is_lock(exc):
+                    _fail(event, exc)
+                    continue
+                _requeue(event)
+                logger.info("outcome_queue: store busy, recall outcome kept for the "
+                            "next pass (session=%s)", event.session_id)
+                break
             except Exception as exc:
-                _bump("recall_persist_failed")
-                logger.debug(
-                    "outcome_queue: record_recall failed: %s (session=%s)",
-                    exc, event.session_id,
-                )
+                _fail(event, exc)
     finally:
         try:
             model.close()
         except Exception:
             pass
     return persisted
+
+
+def _fail(event: RecallEvent, exc: BaseException) -> None:
+    _bump("recall_persist_failed")
+    logger.warning("outcome_queue: record_recall failed: %s: %s (session=%s)",
+                   type(exc).__name__, exc, event.session_id)
 
 
 #: S9-DASH-02: reaper cadence — force-finalize pending_outcomes older

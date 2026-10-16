@@ -2,27 +2,24 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory v3.4.22 — Track A.2 (LLD-09 / LLD-00)
 
-"""PostToolUse hook — detect fact usage + write engagement signal.
+"""PostToolUse hook — record the tool call and any fact-usage signal.
 
-Flow (hot path, <10 ms typical, <20 ms hard):
-  1. Read Claude Code JSON from stdin.
-  2. Resolve session_id via ``safe_resolve_identifier`` (LLD-00 §4).
+Flow (hot path):
+  1. Read the host's JSON from stdin.
+  2. Build a ``tool_event`` for the invocation (summaries truncated + scrubbed).
   3. Cap tool_response to 100 KB (bounded scan, LLD-09 §7 failure-mode #4).
   4. Extract HMAC markers (``slm:fact:<id>:<hmac8>``) — validate each
      (LLD-00 §3). Bare substring scans are **banned** by the Stage-5b
-     CI gate.
-  5. For each validated fact_id, find a pending_outcomes row where
-     ``session_id`` matches AND ``fact_ids_json`` includes the fact_id
-     AND ``status='pending'`` — call ``register_signal(outcome_id,
-     signal_name, True)``. ``signal_name`` is ``'edit'`` for
-     mutating tools (Edit/Write/NotebookEdit), else ``'dwell_ms'`` with
-     a nominal 3000 ms value.
+     CI gate. Validated fact ids become one ``fact_signal`` event:
+     ``'edit'`` for mutating tools (Edit/Write/NotebookEdit), else
+     ``'dwell_ms'`` with a nominal 3000 ms value.
+  5. Hand the events to the daemon's single writer (``event_delivery``);
+     what it does not ack within the cap goes to the spool, never nowhere.
   6. Always emit ``{}`` on stdout and return 0. NEVER raise.
 
-Crash-safety (LLD-09 §6):
-  - Outer try/except around every code path. stderr breadcrumb (no
-    stack trace, no payload echo). Always exit 0.
-  - SQLite ``busy_timeout=50`` → fast-fail on DB contention.
+4.2.8: this hook no longer opens a write connection. It wrote ``tool_events``
+with a 50 ms busy timeout and swallowed the failure; under a long memory
+write that silently lost 29 of 145 and 63 of 88 events in a stress run.
 """
 
 from __future__ import annotations
@@ -30,7 +27,6 @@ from __future__ import annotations
 import re
 import sys
 import time
-from pathlib import Path
 
 from superlocalmemory.hooks._outcome_common import (
     emit_empty_json,
@@ -39,16 +35,8 @@ from superlocalmemory.hooks._outcome_common import (
     session_state_file,
     summarize_response,
 )
-from superlocalmemory.hooks._outcome_common import (
-    memory_db_path as _memory_db_path_fn,
-)
 
 _HOOK_NAME = "post_tool_outcome"
-
-# Monkey-patchable indirection for tests.
-def _memory_db_path() -> Path:
-    return _memory_db_path_fn()
-
 
 # Tools that imply an "edit" signal (the agent acted on the fact).
 _EDIT_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
@@ -84,122 +72,45 @@ def _validate(marker: str) -> str | None:
 
 
 # --- Behavioural telemetry -------------------------------------------------
-# ``tool_events`` is the record of what the agent did, and several readers
-# depend on it: assertion mining, skill-performance mining, and the engagement
-# features that settle a recall against the actions which followed it. Each of
-# those reads the table; none of them writes it. The only writers were an
-# explicit ``log_tool_event`` call and a bulk importer, so on an ordinary
-# install the table simply stopped receiving invocations and every reader
-# quietly aged out with it.
-#
-# This hook already runs on exactly the right edge -- after each tool completes,
-# with the session that ran it -- so it records the invocation here. It happens
-# before the marker scan and independently of it: whether a recalled memory was
-# named in the output decides what a *reward* is worth, not whether the action
-# occurred at all.
-_MAX_SUMMARY_LEN = 500
-
-# Compiled once at import. This path now runs on every tool call rather than
-# only on the ~1-in-5 that carry a marker, so per-call ``re`` compilation or a
-# module import would be paid on the hot path for no benefit.
-_SECRET_PATTERNS = (
-    (re.compile(r"\b(?:sk-|pk-|api[_-]?key[_-]?)[A-Za-z0-9_-]{10,}\b"),
-     "[REDACTED]"),
-    (re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"), "[REDACTED]"),
-    (re.compile(r"password\s*[=:]\s*\S+", re.IGNORECASE),
-     "password=[REDACTED]"),
-)
+# ``tool_events`` is the record of what the agent did; assertion mining,
+# skill-performance mining and the engagement features read it. This hook runs
+# on exactly the right edge (after each tool, with its session), so it records
+# the invocation whether or not the output named a memory: the marker decides
+# what a reward is worth, not whether the action occurred.
 
 
-def _scrub(text: str) -> str:
-    """Strip credential-shaped substrings from telemetry text."""
-    for pattern, replacement in _SECRET_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
+def _validated_fact_ids(response_text: str) -> list[str]:
+    """HMAC-validated fact ids named in the (capped) tool response."""
+    if not response_text or "slm:fact:" not in response_text:
+        return []
+    # S9-W2 M-SEC-03: cap marker iteration to prevent adversarial
+    # response_text floods (5,000 crafted markers x ~5 us HMAC = 25 ms).
+    # LLD-09 says <=10 facts per recall; 100 is ample headroom.
+    hits: list[str] = []
+    for m in _MARKER_RE.finditer(response_text):
+        if len(hits) >= _MAX_MARKERS:
+            break
+        fact_id = _validate(m.group(0))
+        if fact_id:
+            hits.append(fact_id)
+    return hits
 
 
-def _summary(raw: object) -> str:
-    """Truncate-then-scrub ``raw`` for a summary column.
-
-    Truncation comes first so the regex cost is bounded by
-    ``_MAX_SUMMARY_LEN`` and not by the size of a tool response.
-    """
-    if raw is None:
-        return ""
-    if not isinstance(raw, str):
-        try:
-            import json as _json
-            raw = _json.dumps(raw, default=str)
-        except Exception:
-            try:
-                raw = str(raw)
-            except Exception:
-                return ""
-    return _scrub(raw[:_MAX_SUMMARY_LEN])
+_MAX_MARKERS = 100
 
 
-def _record_tool_event(
-    session_id: str,
-    tool_name: str,
-    payload: dict,
-    response_text: str,
-) -> bool:
-    """Append one ``tool_events`` row. Never raises; returns whether it wrote.
-
-    Failure is silent by design: telemetry must never be the reason a tool call
-    reports a problem to the user, and the hook contract is to exit 0 whatever
-    happens.
-    """
-    if not tool_name:
-        return False
+def _mark_session_active(session_id: str, profile_id: str) -> None:
+    # S9-DASH-10: keep registry fresh on every PostToolUse so the MCP
+    # server can pick up the current session even mid-turn.
     try:
-        import sqlite3
-        from datetime import datetime, timezone
+        from superlocalmemory.hooks.session_registry import mark_active
 
-        try:
-            from superlocalmemory.hooks.session_registry import (
-                resolve_active_profile,
-            )
-            profile_id = resolve_active_profile() or "default"
-        except Exception:
-            profile_id = "default"
-
-        project_path = ""
-        raw_cwd = payload.get("cwd")
-        if isinstance(raw_cwd, str):
-            project_path = raw_cwd[:_MAX_SUMMARY_LEN]
-
-        conn = sqlite3.connect(str(_memory_db_path()), timeout=0.05)
-        try:
-            conn.execute("PRAGMA busy_timeout=50")
-            conn.execute(
-                "INSERT INTO tool_events "
-                "(session_id, profile_id, project_path, tool_name, event_type,"
-                " input_summary, output_summary, duration_ms, metadata,"
-                " created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    session_id,
-                    profile_id,
-                    project_path,
-                    tool_name,
-                    "complete",
-                    _summary(payload.get("tool_input")),
-                    _summary(response_text),
-                    0,
-                    "{}",
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        return True
+        mark_active(session_id, agent_type="claude", profile_id=profile_id)
     except Exception:
-        return False
+        pass
 
 
-def _inner_main() -> str:
+def _inner_main(started: float | None = None) -> str:
     """Return an ``outcome`` string (for perf log); never raises."""
     payload = read_stdin_json()
     if payload is None:
@@ -210,118 +121,36 @@ def _inner_main() -> str:
     if not isinstance(session_id, str) or not session_id:
         return "no_session"
 
-    # S9-DASH-10: keep registry fresh on every PostToolUse so the MCP
-    # server can pick up the current session even mid-turn.
-    try:
-        from superlocalmemory.hooks.session_registry import (
-            mark_active,
-            resolve_active_profile,
-        )
-        mark_active(
-            session_id,
-            agent_type="claude",
-            profile_id=resolve_active_profile(),
-        )
-    except Exception:
-        pass
+    from superlocalmemory.hooks import event_delivery as ed
 
-    # Path-escape defence (SEC-C-02) — any unsafe session_id means we
-    # must not touch the filesystem for this invocation. We still want
-    # to safely query the DB (it uses parameterised SQL), so we only
-    # gate the filesystem branch.
-    _ = session_state_file(session_id)  # None → caller skips FS writes
-    # Note: for post_tool_outcome we do NOT need to write session state.
-    # Rehash / stop hooks are the writers/readers.
+    profile_id = ed.active_profile()
+    _mark_session_active(session_id, profile_id)
+    # Path-escape defence (SEC-C-02): this hook writes no session state;
+    # the rehash / stop hooks are its writers and readers.
+    _ = session_state_file(session_id)
 
     # Response scan — capped BEFORE regex (bound O(cap)).
     response_text = summarize_response(payload.get("tool_response"))
-
-    # The invocation is recorded before anything is decided about markers. An
-    # action the agent took is a fact about the session on its own terms; the
-    # marker only decides whether it also settles a pending recall.
-    _record_tool_event(session_id, tool_name, payload, response_text)
-
-    if not response_text:
-        return "no_response"
-
-    # Fast pre-check: if the HMAC prefix is absent, no marker can exist.
-    if "slm:fact:" not in response_text:
-        return "no_marker"
-
-    # S9-W2 M-SEC-03: cap marker iteration to prevent adversarial
-    # response_text floods. 5,000 crafted markers × ~5 μs HMAC = 25 ms
-    # of CPU inside a 20 ms hook budget — enough to cascade budget
-    # misses. LLD-09 says ≤10 facts per recall; 100 is ample headroom.
-    _MAX_MARKERS = 100
-    hits: list[str] = []
-    for m in _MARKER_RE.finditer(response_text):
-        if len(hits) >= _MAX_MARKERS:
-            break
-        marker = m.group(0)
-        fact_id = _validate(marker)
-        if fact_id:
-            hits.append(fact_id)
-    if not hits:
-        return "no_validated_marker"
-
-    # Persist signals via the canonical reward model — the DB write is
-    # behind ``register_signal`` which enforces the schema contract and
-    # the pending→settled state machine.
-    try:
-        from superlocalmemory.learning.reward import EngagementRewardModel
-    except Exception:
-        return "import_fail"
-
-    signal_name = "edit" if tool_name in _EDIT_TOOLS else "dwell_ms"
-    signal_value: object = True if signal_name == "edit" else _DEFAULT_DWELL_MS
-
-    # S9-W3 C6: single connection for BOTH the pending-row match AND
-    # the signal writes. Previously the hook opened ``open_memory_db()``
-    # for the SELECT, closed it, then constructed EngagementRewardModel
-    # which cached its own writer — two connects per invocation × 1-4 ms
-    # each × FileVault contention = blown 20 ms hook budget.
-    #
-    # H-SKEP-03 / H-ARC-H4: pending-row window raised back to 50
-    # (SEC-M2 had tightened it to 5 which silently dropped signals on
-    # heavy Claude Code sessions). Outer cap on returned outcome_ids
-    # caps UPDATE amplification at PENDING_WRITE_CAP × 10 by default.
-    try:
-        model = EngagementRewardModel(_memory_db_path())
-    except Exception:
-        return "model_init_fail"
-
-    try:
-        target_outcome_ids = model.match_pending_for_fact_ids(
-            session_id=session_id, fact_ids=hits,
-        )
-        if not target_outcome_ids:
-            # Distinguish "no pending rows exist" from "rows exist but
-            # none matched" for perf-log observability.
-            with model._lock:
-                conn = model._get_conn()
-                has_pending = conn.execute(
-                    "SELECT 1 FROM pending_outcomes "
-                    "WHERE session_id = ? AND status = 'pending' "
-                    "LIMIT 1",
-                    (session_id,),
-                ).fetchone()
-            return "no_match" if has_pending else "no_pending"
-
-        wrote = 0
-        for oid in target_outcome_ids:
-            ok = model.register_signal(
-                outcome_id=oid,
-                signal_name=signal_name,
-                signal_value=signal_value,
-            )
-            if ok:
-                wrote += 1
-        return f"signal_{signal_name}_x{wrote}"
-    finally:
-        try:
-            model.close()
-        except Exception:
-            pass
+    events: list[dict] = []
+    if isinstance(tool_name, str) and tool_name:
+        raw_cwd = payload.get("cwd")
+        events.append(ed.tool_event(
+            session_id=session_id, tool_name=tool_name, profile_id=profile_id,
+            tool_input=payload.get("tool_input"), response_text=response_text,
+            project_path=raw_cwd if isinstance(raw_cwd, str) else "",
+        ))
+    hits = _validated_fact_ids(response_text)
+    if hits:
+        signal_name = "edit" if tool_name in _EDIT_TOOLS else "dwell_ms"
+        events.append(ed.fact_signal(
+            session_id=session_id, fact_ids=hits, signal_name=signal_name,
+            signal_value=True if signal_name == "edit" else _DEFAULT_DWELL_MS,
+            profile_id=profile_id,
+        ))
+    if not events:
+        return "nothing"
+    delivered = ed.deliver(events, profile=profile_id, started=started)
+    return f"{delivered}_signal" if hits else delivered
 
 
 def main() -> int:
@@ -329,7 +158,7 @@ def main() -> int:
     t0 = time.perf_counter()
     outcome = "exception"
     try:
-        outcome = _inner_main()
+        outcome = _inner_main(t0)
     except Exception as exc:  # pragma: no cover — defensive
         try:
             sys.stderr.write(

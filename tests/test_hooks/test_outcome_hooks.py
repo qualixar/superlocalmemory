@@ -75,6 +75,9 @@ def _bootstrap_memory_db(path: Path) -> None:
                 ON pending_outcomes(status, expires_at_ms);
             """
         )
+        # 4.2.8: PostToolUse records every invocation (drained by the daemon).
+        from superlocalmemory.storage.schema_v347 import _TOOL_EVENTS_DDL
+        conn.executescript(_TOOL_EVENTS_DDL)
 
 
 @pytest.fixture()
@@ -176,6 +179,14 @@ def _fetch_action(db: Path, outcome_id: str) -> dict | None:
     return dict(r) if r else None
 
 
+def _drain(db: Path) -> None:
+    """Play the daemon's part (4.2.8): hooks hand events to the daemon's
+    writer, spooled here because no daemon runs in these tests."""
+    from superlocalmemory.server.hook_event_writer import HookEventWriter
+
+    HookEventWriter(db, root=db.parent / "hook_spool").drain_once()
+
+
 # ---------------------------------------------------------------------------
 # post_tool_outcome_hook — 6 tests
 # ---------------------------------------------------------------------------
@@ -203,6 +214,9 @@ def test_post_tool_hook_writes_signal_on_hmac_match(
     rc, out = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
     assert out == "{}"
+    assert _fetch_pending(memory_db, "oid-ok-1")["signals_json"] == '{"cite": true}', \
+        "the hook itself never writes memory.db"
+    _drain(memory_db)
 
     row = _fetch_pending(memory_db, "oid-ok-1")
     assert row is not None
@@ -235,6 +249,7 @@ def test_post_tool_hook_ignores_unvalidated_marker(
     rc, out = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
     assert out == "{}"
+    _drain(memory_db)
 
     row = _fetch_pending(memory_db, "oid-bad")
     assert row is not None
@@ -304,14 +319,14 @@ def test_post_tool_hook_uses_safe_resolve_for_session_state(
 def test_post_tool_hook_crash_returns_0(
     memory_db, slm_home, monkeypatch
 ) -> None:
-    """Any exception (import failure, DB gone) → exit 0, empty stdout."""
+    """Any exception (import failure, delivery blown up) → exit 0, empty stdout."""
+    from superlocalmemory.hooks import event_delivery
     from superlocalmemory.hooks import post_tool_outcome_hook as h
 
-    # Sabotage the DB path — simulate missing/broken memory.db.
-    monkeypatch.setattr(
-        h, "_memory_db_path",
-        lambda: Path("/nonexistent/slm/memory.db"),
-    )
+    def _boom(*_a, **_k):
+        raise RuntimeError("delivery exploded")
+
+    monkeypatch.setattr(event_delivery, "deliver", _boom)
     payload = {
         "session_id": "sess-X",
         "tool_name": "Edit",
@@ -386,9 +401,9 @@ def test_post_tool_hook_timing_budget_catches_a_real_slowdown(
 
     real_inner_main = h._inner_main
 
-    def _slow_inner_main() -> str:
+    def _slow_inner_main(*args) -> str:
         time.sleep(0.05)
-        return real_inner_main()
+        return real_inner_main(*args)
 
     monkeypatch.setattr(h, "_inner_main", _slow_inner_main)
 
@@ -445,6 +460,7 @@ def test_user_prompt_rehash_writes_requery_on_dup_topic(
     rc, out = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
     assert out == "{}"
+    _drain(memory_db)
 
     row = _fetch_pending(memory_db, "oid-rehash-1")
     assert row is not None
@@ -482,6 +498,7 @@ def test_user_prompt_rehash_ignores_stale_prior(
     rc, out = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
     assert out == "{}"
+    _drain(memory_db)
 
     row = _fetch_pending(memory_db, "oid-stale")
     assert row is not None
@@ -513,6 +530,8 @@ def test_stop_hook_finalizes_all_pending_for_session(
     assert rc == 0
     assert out == "{}"
 
+    assert _fetch_action(memory_db, "oid-A") is None, "the hook never writes"
+    _drain(memory_db)
     assert _fetch_action(memory_db, "oid-A") is not None
     assert _fetch_action(memory_db, "oid-B") is not None
     assert _fetch_action(memory_db, "oid-OTHER") is None
@@ -551,6 +570,7 @@ def test_stop_hook_calls_finalize_outcome_with_outcome_id_only(
     rc, out = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
     assert out == "{}"
+    _drain(memory_db)
 
     assert calls, "finalize_outcome was never called"
     for c in calls:
@@ -574,6 +594,7 @@ def test_stop_hook_action_outcomes_has_profile_id(
     payload = {"session_id": "sess-P"}
     rc, _ = _invoke_hook(h.main, payload, monkeypatch)
     assert rc == 0
+    _drain(memory_db)
 
     row = _fetch_action(memory_db, "oid-P")
     assert row is not None

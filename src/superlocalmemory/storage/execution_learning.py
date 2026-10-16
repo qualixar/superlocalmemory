@@ -121,7 +121,14 @@ class ExecutionLearningStore:
         now = datetime.now(timezone.utc).isoformat()
         conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(str(self._path), timeout=1.0, isolation_level=None)
+            # 4.2.8: wait the shared busy timeout like every other writer
+            # (it was 1 s, so a longer learning.db write failed the receipt).
+            from superlocalmemory.storage.memory_write import _busy_timeout_ms
+
+            busy_ms = _busy_timeout_ms()
+            conn = sqlite3.connect(str(self._path), timeout=busy_ms / 1000.0,
+                                   isolation_level=None)
+            conn.execute(f"PRAGMA busy_timeout={busy_ms}")
             conn.execute("BEGIN IMMEDIATE")
             # The same process-wide admission gate drains in-flight writes
             # before erasure. This durable closure check also prevents a late

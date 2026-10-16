@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -290,3 +291,48 @@ def test_a_gate_verdict_must_be_a_real_true_or_false(
     payload["nodes"] = [_node("probe", 1, gate_passed)]
     with pytest.raises(ExternalEvidenceValidationError, match="node gate metadata"):
         store.record(payload)
+
+
+def _hold_learning_db(path: Path, seconds: float):
+    """Another process's writer: holds learning.db for ``seconds``."""
+    import threading
+
+    holder = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    done = threading.Event()
+
+    def release() -> None:
+        time.sleep(seconds)
+        holder.execute("COMMIT")
+        holder.close()
+        done.set()
+
+    threading.Thread(target=release, daemon=True).start()
+    return done
+
+
+def test_evidence_waits_out_another_writer_like_every_other_writer(
+    store: ExternalEvidenceStore, tmp_path: Path,
+) -> None:
+    """4.2.8: the busy deadline was 0.9 s, so a 1.5 s write by another process
+    failed the observation with LearningWriteBusyError. It is now the shared
+    busy timeout (SLM_DB_BUSY_TIMEOUT_MS, default 10 s)."""
+    released = _hold_learning_db(tmp_path / "learning.db", 1.5)
+    try:
+        assert store.record(_evidence()) is True
+    finally:
+        released.wait(5)
+
+
+def test_evidence_still_says_busy_after_the_shared_deadline(
+    store: ExternalEvidenceStore, tmp_path: Path, monkeypatch,
+) -> None:
+    from superlocalmemory.storage.agent_experience import LearningWriteBusyError
+
+    monkeypatch.setenv("SLM_DB_BUSY_TIMEOUT_MS", "200")
+    released = _hold_learning_db(tmp_path / "learning.db", 1.0)
+    try:
+        with pytest.raises(LearningWriteBusyError, match="deadline exceeded"):
+            store.record(_evidence())
+    finally:
+        released.wait(5)

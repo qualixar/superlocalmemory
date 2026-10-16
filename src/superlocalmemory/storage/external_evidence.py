@@ -19,6 +19,8 @@ from superlocalmemory.storage.agent_experience import (
     LearningWriteBusyError,
     ProfileAdmissionError,
     _ProfileAdmissionGate,
+    queue_wait_seconds,
+    write_deadline_seconds,
 )
 
 _CONTRACT = "bounded-loops.dev/slm-bridge/v1"
@@ -67,10 +69,11 @@ class ExternalEvidenceStore:
         profile_id = payload["profile_id"]
         self._gate.admit(profile_id, self._is_profile_active)
         digest = _payload_digest(payload)
-        deadline = time.monotonic() + 0.90
-        if not self._lock.acquire(timeout=0.90):
+        # 4.2.8: the shared busy timeout (was a fixed 0.9 s for both waits).
+        if not self._lock.acquire(timeout=queue_wait_seconds()):
             self._gate.release(profile_id)
             raise LearningWriteBusyError("external evidence write deadline exceeded")
+        deadline = time.monotonic() + write_deadline_seconds()  # SQLite contention only
         try:
             while True:
                 conn: sqlite3.Connection | None = None

@@ -58,6 +58,10 @@ OPEN_ROUTES = {
 #: They refuse the install token, which is all the walk presents.
 CAPABILITY_ONLY = {
     ("POST", "/stop"): "stopping the daemon is break-glass for the person at the keyboard",
+    ("POST", "/internal/hook-events"): (
+        "hooks of this computer's user hand tool events and reward signals to the daemon's "
+        "single writer (4.2.8); before that they wrote memory.db directly"
+    ),
 }
 
 #: Routes a signed-in read-only viewer may call, with why (they read, they do not write).

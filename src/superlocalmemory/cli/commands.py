@@ -3757,6 +3757,18 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             _check("Failed saves", "WARN", f"could not read the failed-save counts: {_fs_exc}",
                    "Run `slm ops status`")
 
+    _stage("Hook events")
+    # 10d. Hook events (4.2.8). Hooks hand tool events and reward signals to the
+    # daemon's single writer or spool them; a full spool is the one place one
+    # can be lost, and this row is where that count is shown. Read-only.
+    try:
+        from superlocalmemory.cli.doctor_hook_spool import hook_spool_finding
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        _check("Hook events", *hook_spool_finding(canonical_data_root()))
+    except Exception as _hs_exc:  # noqa: BLE001 - never break doctor
+        _check("Hook events", "WARN", f"could not read the hook event spool: {_hs_exc}")
+
     if db_path.exists():
         try:
             from superlocalmemory.cli.doctor_quantization import qjl_finding

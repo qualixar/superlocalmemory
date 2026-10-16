@@ -48,6 +48,12 @@ _AF_UNIX = getattr(socket, "AF_UNIX", None)
 _SUN_PATH_MAX = 107 if sys.platform.startswith("linux") else 103
 
 
+#: A request is one JSON line: a prompt, or a batch of hook events (4.2.8).
+_MAX_REQUEST_BYTES = 1024 * 1024
+#: Request type for hook events handed to the daemon's single writer.
+HOOK_EVENTS_TYPE = "hook_events"
+
+
 def _default_sock_path() -> Path:
     return state_path(_DEFAULT_SOCK_NAME)
 
@@ -238,9 +244,9 @@ class HookDaemon:
             client.settimeout(30.0)
             data = b""
             while b"\n" not in data:
-                chunk = client.recv(4096)
-                if not chunk:
-                    return
+                chunk = client.recv(65536)
+                if not chunk or len(data) + len(chunk) > _MAX_REQUEST_BYTES:
+                    return  # the caller reads no ack and keeps its request
                 data += chunk
 
             line = data.decode("utf-8").strip()
@@ -268,6 +274,8 @@ class HookDaemon:
                 pass
 
     def _process_request(self, payload: dict) -> dict:
+        if payload.get("type") == HOOK_EVENTS_TYPE:
+            return _accept_hook_events(payload)
         from superlocalmemory.hooks.auto_recall_hook import (
             _is_ack, _get_mode_timeout, _detect_mode, _format_envelope,
             _DEFAULT_LIMIT, _switched_off,
@@ -309,6 +317,61 @@ class HookDaemon:
             return {}
 
 
+def _accept_hook_events(payload: dict) -> dict:
+    """Validate a hook event batch, spool it and wake the writer (4.2.8).
+
+    The ack (``ok: true``) is sent only after the events are on disk. A
+    malformed batch or an unusable spool is ``ok: false``: the hook then
+    spools the events itself, so nothing is acked that was not kept.
+    """
+    try:
+        from superlocalmemory.server.hook_event_writer import HookEventBatch, accept_batch
+
+        batch = HookEventBatch.model_validate({"events": payload.get("events")})
+    except Exception:
+        return {"ok": False, "error": "invalid_events"}
+    try:
+        written, dropped = accept_batch(batch)
+    except Exception as exc:
+        logger.warning("HookDaemon: hook events not spooled: %s", type(exc).__name__)
+        return {"ok": False, "error": "spool_failed"}
+    return {"ok": True, "accepted": written, "dropped": dropped}
+
+
+def owned_socket_path(sock_path: Path | None = None) -> Path | None:
+    """The hook socket when it exists and belongs to this account, else None."""
+    if _AF_UNIX is None:
+        return None
+    path = resolve_sock_path(sock_path or _default_sock_path())
+    if path is None or not path.exists() or not _owned_by_me(path):
+        return None
+    return path
+
+
+def _socket_request(path: Path, request: dict, timeout: float) -> dict | None:
+    """One newline-delimited JSON exchange. None on any failure."""
+    try:
+        client = socket.socket(_AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.settimeout(timeout)
+            client.connect(str(path))
+            client.sendall((json.dumps(request) + "\n").encode("utf-8"))
+            data = b""
+            while b"\n" not in data:
+                chunk = client.recv(8192)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            client.close()
+        if not data.strip():
+            return None
+        response = json.loads(data.decode("utf-8").strip())
+        return response if isinstance(response, dict) else None
+    except Exception:
+        return None
+
+
 def try_socket_recall(
     sock_path: Path | None = None,
     prompt: str = "",
@@ -320,36 +383,24 @@ def try_socket_recall(
     Returns the hook envelope dict on success, or None if the daemon
     is unavailable (triggers subprocess fallback in auto_recall_hook).
     """
-    if _AF_UNIX is None:
+    path = owned_socket_path(sock_path)
+    if path is None:
         return None
-    path = resolve_sock_path(sock_path or _default_sock_path())
-    if path is None or not path.exists() or not _owned_by_me(path):
+    return _socket_request(path, {"prompt": prompt, "session_id": session_id}, timeout)
+
+
+def try_socket_events(
+    events: list, *, timeout: float, sock_path: Path | None = None,
+) -> dict | None:
+    """Hand hook events to the daemon over the hook socket (4.2.8).
+
+    The daemon's answer (``{"ok": true, ...}`` once spooled), or None when
+    the socket is missing or did not answer within ``timeout``.
+    """
+    path = owned_socket_path(sock_path)
+    if path is None:
         return None
-
-    try:
-        client = socket.socket(_AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(timeout)
-        client.connect(str(path))
-
-        request = json.dumps({"prompt": prompt, "session_id": session_id}) + "\n"
-        client.sendall(request.encode("utf-8"))
-
-        data = b""
-        while b"\n" not in data:
-            chunk = client.recv(8192)
-            if not chunk:
-                break
-            data += chunk
-
-        client.close()
-
-        if not data.strip():
-            return None
-
-        response = json.loads(data.decode("utf-8").strip())
-        return response if isinstance(response, dict) else None
-    except Exception:
-        return None
+    return _socket_request(path, {"type": HOOK_EVENTS_TYPE, "events": list(events)}, timeout)
 
 
 def ensure_hook_daemon(

@@ -53,19 +53,23 @@ def test_ingestion_schema_verifier_closes_its_sqlite_connection(monkeypatch) -> 
     assert conn.closed is True
 
 
-def test_stop_hook_closes_owned_connection_on_cancellation(monkeypatch) -> None:
+def test_stop_hook_opens_no_database_connection(monkeypatch, tmp_path: Path) -> None:
+    """4.2.8: the Stop hook hands a finalize event to the daemon's writer (or
+    the spool); it owns no connection, so it has none to leak."""
+    import sqlite3
+
     from superlocalmemory.hooks import stop_outcome_hook as hook
 
-    conn = _CursorConnection(interrupt=True)
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         hook, "read_stdin_json", lambda: {"session_id": "session-1"},
     )
-    monkeypatch.setattr(hook, "open_memory_db", lambda: conn)
 
-    with pytest.raises(KeyboardInterrupt):
-        hook._inner_main()
+    def _no_connect(*_a, **_k):
+        raise AssertionError("the Stop hook must not open memory.db")
 
-    assert conn.closed is True
+    monkeypatch.setattr(sqlite3, "connect", _no_connect)
+    assert hook._inner_main() == "finalize_spooled"
 
 
 def test_rehash_lookup_closes_owned_connection(monkeypatch) -> None:
