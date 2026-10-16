@@ -152,7 +152,9 @@ async def test_waiter_observes_new_operator_check(receipt_db, tmp_path):
 
     checker_task = asyncio.create_task(execute())
     outcome = await harness(receipt_db)(
-        "build", "build", max_iterations=3, poll_interval_s=.25,
+        # Budget, not a deadline: the check runs a real subprocess, which on a
+        # busy machine outlasted 3 x 0.25 s and made this test flaky.
+        "build", "build", max_iterations=40, poll_interval_s=.25,
         gate_contract={"job_id": job["job_id"]},
     )
     await checker_task
