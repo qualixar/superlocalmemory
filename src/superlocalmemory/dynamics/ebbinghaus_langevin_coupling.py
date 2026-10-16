@@ -133,16 +133,17 @@ class EbbinghausLangevinCoupling:
             fisher_variance, langevin_radius, access_count,
         )
 
-        # Step 2: Ebbinghaus strength
-        strength = self._ebbinghaus.memory_strength(
-            access_count, importance, confirmation_count, emotional_salience,
+        # Steps 2-4: strength, retention and zone from the one function every
+        # tier-setting pass shares (store-scaled clock, the person's settings).
+        # Raw ``retention(hours, strength)`` here fed real elapsed time to an
+        # hours-tuned curve and archived memories the decay pass called warm
+        # (GitHub #136 follow-up, #266: 3,281 in one tick on one store).
+        retention, strength, zone = self._ebbinghaus.retention_and_zone(
+            access_count=access_count, importance=importance,
+            confirmation_count=confirmation_count,
+            emotional_salience=emotional_salience,
+            hours_since=hours_since_last_access,
         )
-
-        # Step 3: Ebbinghaus retention
-        retention = self._ebbinghaus.retention(hours_since_last_access, strength)
-
-        # Step 4: Lifecycle zone
-        zone = self._ebbinghaus.lifecycle_zone(retention)
 
         # Step 5: Forgetting drift coefficient
         # Higher forgetting (lower R) -> stronger drift toward boundary

@@ -249,3 +249,36 @@ def test_a_compliance_rule_that_archives_keeps_its_archive(store) -> None:
     states = _states(memory)
     assert states["a_cold"] == ("archived", "archive")    # 150 days: the rule covers it
     assert states["a_warm"] == ("warm", "warm")          # 60 days: the rule does not
+
+
+def test_what_the_default_settings_archived_comes_back_on_the_persons_own(
+        tmp_path, monkeypatch) -> None:
+    """Before 4.2.8 the Langevin pass decided tiers on the default forgetting
+    settings. A person whose own settings keep a 140-day-old memory gets it back;
+    one they pinned-out, forgot or erased stays where they put it."""
+    from superlocalmemory.core.config import ForgettingConfig
+    from superlocalmemory.storage import archive_repair
+
+    personal = ForgettingConfig(alpha=50.0, beta=100.0, gamma=30.0, delta=10.0,
+                                min_strength=720.0, max_strength=87600.0,
+                                archive_threshold=0.05, forget_threshold=0.01)
+    monkeypatch.setattr(archive_repair, "_settings",
+                        lambda conn: archive_repair._Settings(personal, True))
+    memory, learning = migrated_store(tmp_path)
+    conn = sqlite3.connect(memory)
+    _archived(conn, "kept_by_settings", days=140, importance=0.0)
+    _archived(conn, "user_forgot", days=140, importance=0.0, archive_status="archived")
+    _archived(conn, "user_pinned", days=140, importance=0.0, pinned=1)
+    conn.commit()
+    conn.close()
+    forget_migration(memory, M066.NAME)
+    first_start(memory, learning)
+    states = _states(memory)
+    assert states["kept_by_settings"][0] != "archived"
+    assert states["kept_by_settings"][0] == states["kept_by_settings"][1].replace(
+        "archive", "archived")
+    assert states["user_forgot"] == ("archived", "archive")
+    assert states["user_pinned"] == ("archived", "archive")
+    rows = sqlite3.connect(memory).execute(
+        "SELECT COUNT(*) FROM data_repair_undo WHERE fact_id = 'kept_by_settings'").fetchone()
+    assert rows[0] == 2  # mirror + authority, each undoable

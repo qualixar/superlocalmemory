@@ -98,7 +98,12 @@ def test_high_strength_stabilizes(coupling: EbbinghausLangevinCoupling) -> None:
 # ---- Test 11: Low strength fades ----
 
 def test_low_strength_fades(coupling: EbbinghausLangevinCoupling) -> None:
-    """access_count=0, importance=0, 720h since access -> zone in archive/forgotten."""
+    """access_count=0, importance=0, 720h since access -> demoted to 'cold'.
+
+    Store-scaled clock (GitHub #136, the same change as #266): 30 days unused
+    at zero importance computes R ~= 0.37, 'cold'. The old assertion pinned the
+    hours-tuned curve fed store time -- the bug #136 fixed in the batch path.
+    """
     fisher_var = np.array([5.0] * 8)
 
     state = coupling.compute_coupled_state(
@@ -112,8 +117,9 @@ def test_low_strength_fades(coupling: EbbinghausLangevinCoupling) -> None:
         hours_since_last_access=720.0,
     )
 
-    assert state.lifecycle_zone in ("archive", "forgotten"), (
-        f"Expected 'archive' or 'forgotten', got '{state.lifecycle_zone}'"
+    assert state.lifecycle_zone == "cold", (
+        f"30d unused at zero importance on the store clock is 'cold', "
+        f"got '{state.lifecycle_zone}'"
     )
 
 

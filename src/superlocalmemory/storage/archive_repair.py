@@ -25,11 +25,12 @@ store-scaled clock, GitHub #136) and the user's inactivity policy if one is set
 to that zone in both the authority (``fact_retention``) and the mirror
 (``atomic_facts``); one it calls archive or forgotten stays where it is.
 
-One more writer archives without a record: the maintenance Langevin pass, whose
-tier follows the retention radius. Where that pass files a memory as archived,
-the archive is its design, not the ELC defect, and it would come back on the
-next pass, so the memory stays archived. On the author's store (ELC never on)
-that is every archived memory the decay pass alone would call live.
+Two defects archived without a record, and both are repaired here: the ELC step
+on the hours clock (#266), and the maintenance Langevin pass, which until 4.2.8
+decided tiers on the default forgetting settings instead of the person's own
+(on the author's store, 630 memories archived that the person's settings keep).
+A memory the fixed Langevin pass would still archive stays archived, so the
+next pass never undoes a restore.
 """
 
 from __future__ import annotations
@@ -142,8 +143,6 @@ def _age_days(created_at: object) -> float:
 class _Settings:
     forgetting: Any
     langevin_on: bool
-    langevin_dt: float
-    langevin_temperature: float
 
 
 def _settings(conn: sqlite3.Connection) -> _Settings:
@@ -160,45 +159,35 @@ def _settings(conn: sqlite3.Connection) -> _Settings:
             forgetting, math_cfg = config.forgetting, config.math
     except Exception as exc:  # noqa: BLE001 - a broken config must not block a repair
         logger.info("M066: user config unreadable (%s); using default settings", exc)
-    return _Settings(forgetting, bool(math_cfg.langevin_persist_positions),
-                     float(math_cfg.langevin_dt), float(math_cfg.langevin_temperature))
+    return _Settings(forgetting, bool(math_cfg.langevin_persist_positions))
 
 
 def _langevin_archives(conn: sqlite3.Connection, fact_ids: list[str],
                        settings: _Settings) -> set[str]:
-    """Facts the maintenance Langevin pass itself files as archived.
+    """Facts the maintenance Langevin pass would archive again, on the person's
+    own settings.
 
-    That pass (``maintenance`` step 1b) sets every fact's tier from its
-    retention radius, which depends only on use, age and importance
-    (``langevin_tier._anchor_to_retention``). Its archive is the designed
-    Langevin tier, not the ELC defect, and it would archive the fact again on
-    the next pass, so such a fact is left where it is.
+    Since 4.2.8 that pass decides the tier with the decay pass's function and
+    the person's ``forgetting`` settings (``langevin_tier.langevin_lifecycle``);
+    before, it used the defaults and archived memories those settings keep --
+    those are exactly what this repair brings back. A memory the fixed pass
+    would still archive (its inputs are age, use and importance) is left
+    where it is, so a restore is never undone by the next pass.
     """
     if not settings.langevin_on or not fact_ids:
         return set()
-    import numpy as np
+    from superlocalmemory.core.langevin_tier import _age_days as langevin_age
+    from superlocalmemory.core.langevin_tier import langevin_lifecycle
+    from superlocalmemory.math.ebbinghaus import EbbinghausCurve
 
-    from superlocalmemory.core.langevin_tier import (
-        _LANGEVIN_DIM,
-        _retention_radius,
-    )
-    from superlocalmemory.core.langevin_tier import (
-        _age_days as langevin_age,
-    )
-    from superlocalmemory.math.langevin import LangevinDynamics
-
-    ld = LangevinDynamics(dim=_LANGEVIN_DIM, dt=settings.langevin_dt,
-                          temperature=settings.langevin_temperature)
-    unit = np.ones(_LANGEVIN_DIM) / np.sqrt(_LANGEVIN_DIM)
+    curve = EbbinghausCurve(settings.forgetting)
     archived = set()
     for fact_id in fact_ids:
         access, importance, created = conn.execute(
             "SELECT access_count, importance, created_at FROM atomic_facts WHERE fact_id = ?",
             (fact_id,)).fetchone()
-        radius = _retention_radius(int(access or 0), langevin_age(created),
-                                   float(importance or 0.0))
-        weight = ld.compute_lifecycle_weight((unit * radius).tolist())
-        if ld.get_lifecycle_state(weight).value == "archived":
+        if langevin_lifecycle(int(access or 0), langevin_age(created),
+                              float(importance or 0.0), curve) == "archived":
             archived.add(fact_id)
     return archived
 

@@ -82,33 +82,31 @@ class TestBeingUsedPullsAMemoryBack:
 
 class TestOneDerivationNotTwo:
     def test_the_seed_path_calls_the_same_helper(self) -> None:
-        """4.1.15 had two copies and they diverged within one release."""
+        """4.1.15 had two copies and they diverged within one release; 4.2.8
+        found a third (the Langevin pass on default settings). Every tier path
+        now goes through ``EbbinghausCurve.retention_and_zone``."""
+        import ast
         import inspect
 
-        from superlocalmemory.core import maintenance
+        from superlocalmemory.core import langevin_tier
 
-        import ast
-
-        src = inspect.getsource(maintenance._retention_radius)
-        assert "store_scaled_strength" in src
-        # Strip the docstring: prose that NAMES the constant is fine; code
-        # that re-derives it is the duplication this guards against.
-        fn = ast.parse(src.lstrip()).body[0]
-        body = fn.body[1:] if (fn.body and isinstance(fn.body[0], ast.Expr)
-                               and isinstance(fn.body[0].value, ast.Constant)) else fn.body
-        names = {n.id for stmt in body for n in ast.walk(stmt)
-                 if isinstance(n, ast.Name)}
-        assert "ARCHIVE_AFTER_DAYS" not in names, (
-            "the seed path is deriving the constant itself again"
-        )
+        src = inspect.getsource(langevin_tier._retention_and_zone)
+        assert ".retention_and_zone(" in src
+        for fn in (langevin_tier._retention_radius, langevin_tier.langevin_lifecycle):
+            body = ast.parse(inspect.getsource(fn).lstrip()).body[0]
+            names = {n.id for n in ast.walk(body) if isinstance(n, ast.Name)}
+            assert "_retention_and_zone" in names, fn.__name__
+            assert "ARCHIVE_AFTER_DAYS" not in names, (
+                "the seed path is deriving the constant itself again"
+            )
 
     def test_the_decay_path_calls_the_same_helper(self) -> None:
         import inspect
 
         from superlocalmemory.math.ebbinghaus import EbbinghausCurve as C
 
-        src = inspect.getsource(C.batch_compute_retention)
-        assert "store_scaled_strength" in src
+        assert "self.retention_and_zone(" in inspect.getsource(C.batch_compute_retention)
+        assert "store_scaled_strength" in inspect.getsource(C.retention_and_zone)
 
     def test_trust_weighting_still_applies(self, curve) -> None:
         """Rescaling must not quietly drop trust-weighted forgetting."""

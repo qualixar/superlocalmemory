@@ -8,7 +8,11 @@ maintenance ELC step fed real elapsed time to an hours-tuned retention curve. A
 memory three months old computed R ~ 0 and was archived, while the store-scaled
 clock the decay pass uses (GitHub #136) called it warm. One contributor's store
 lost 3,281 memories to the archive in a single 02:00 tick. PR #266 gave the ELC
-step the store-scaled clock; this repairs what it had already archived.
+step the store-scaled clock. Separately, the maintenance Langevin pass decided
+tiers on the default forgetting settings instead of the person's own, and on
+one real store archived 630 memories those settings keep. 4.2.8 makes every
+tier-setting pass use one function with the person's settings
+(``EbbinghausCurve.retention_and_zone``); this repairs what was archived.
 
 WHAT THIS DOES
 ``storage.archive_repair``: an archived memory with no recorded decision behind

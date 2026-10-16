@@ -188,7 +188,11 @@ class TestEnrichFactSetsLangevinPosition:
 
 class TestMaintenanceBackfill:
     def _make_config(self) -> MagicMock:
+        from superlocalmemory.core.config import ForgettingConfig
+
         config = MagicMock()
+        # The Langevin tier follows the person's forgetting settings (4.2.8).
+        config.forgetting = ForgettingConfig()
         config.math.langevin_persist_positions = True
         config.math.langevin_dt = 0.005
         config.math.langevin_temperature = 0.3
