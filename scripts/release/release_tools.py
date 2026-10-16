@@ -45,8 +45,6 @@ MANUAL_LISTINGS: tuple[tuple[str, str], ...] = (
      "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin"),
     ("xAI plugin marketplace PR",
      "https://github.com/xai-org/plugin-marketplace/pull/1455"),
-    ("Hermes catalog: PR #138545 was closed; resubmit if the catalog still wants an entry",
-     "https://github.com/NousResearch/hermes-agent/pull/138545"),
 )
 
 
@@ -165,8 +163,8 @@ def checklist_body(version: str) -> str:
     lines += [f"- [ ] {label}: {link}" for label, link in MANUAL_LISTINGS]
     lines += [
         "",
-        "Automatic channels are described in docs/release-distribution.md. Close this issue",
-        "when every box is ticked or consciously skipped.",
+        "Automatic channels are described in docs/release-distribution.md. Tick every box",
+        "or skip it consciously.",
     ]
     return "\n".join(lines) + "\n"
 

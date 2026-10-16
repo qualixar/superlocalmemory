@@ -112,7 +112,6 @@ def test_distribute_runs_every_channel_in_isolation_after_the_release() -> None:
     assert distribute["permissions"] == {
         "contents": "write",
         "id-token": "write",
-        "issues": "write",
     }
     run = _step(distribute, "Publish channel")["run"]
     assert 'scripts/release/${{ matrix.channel }}.sh' in run
@@ -377,8 +376,9 @@ def test_checklist_names_every_human_gated_channel() -> None:
         "awesome-opencode",
         "awesome-dsh-plugin",
         "xai-org/plugin-marketplace",
-        "NousResearch/hermes-agent",
     ):
         assert needle in body, needle
+    # Hermes was accepted (PR 139715); it is no longer a manual listing.
+    assert "NousResearch/hermes-agent" not in body
     assert body.count("- [ ]") >= 10
     assert "4.2.8" in body

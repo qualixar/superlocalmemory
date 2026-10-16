@@ -2,12 +2,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 #
-# listing-checklist.sh — open the issue "Release vX.Y.Z — manual listing
-# checklist" naming every channel that needs a person (review queues, forms,
-# PRs to other people's repositories). One issue per release: a re-run finds
-# the existing issue and does nothing. The list itself lives in
-# scripts/release/release_tools.py (MANUAL_LISTINGS). Needs GH_TOKEN with
-# issues: write.
+# listing-checklist.sh — count the channels that need a person (review queues,
+# forms, PRs to other people's repositories) and say so in the run log. It no
+# longer opens a public issue: the to-do list is the maintainer's, not the
+# project's front page (4.2.8 opened #288 and listed pending approvals in
+# public). The list lives in scripts/release/release_tools.py (MANUAL_LISTINGS);
+# `release_tools.py checklist-body X.Y.Z` prints it for the maintainer's notes.
 #
 #   scripts/release/listing-checklist.sh [--dry-run] [--version X.Y.Z]
 
@@ -17,24 +17,13 @@ SLM_CHANNEL=listing-checklist
 source "$(dirname "$0")/_lib.sh"
 slm_parse_args "$@"
 
-TITLE="Release v$SLM_VERSION — manual listing checklist"
-command -v gh >/dev/null || slm_die "the gh CLI is required"
+command -v python3 >/dev/null || slm_die "python3 is required"
 
 work=""
 slm_tmpdir work
 slm_tools checklist-body "$SLM_VERSION" >"$work/body.md"
-
-existing="$(gh issue list --state all --search "\"$TITLE\" in:title" --json number,title \
-  --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")" \
-  || slm_die "could not search issues"
-if [ -n "$existing" ]; then
-  slm_status skipped "issue #$existing already tracks the manual listings"
-  exit 0
-fi
+count="$(grep -c '^- \[ \]' "$work/body.md" || true)"
 if [ "$SLM_DRY_RUN" -eq 1 ]; then
   cat "$work/body.md"
-  slm_status ok "dry run: would open \"$TITLE\""
-  exit 0
 fi
-url="$(gh issue create --title "$TITLE" --body-file "$work/body.md")"
-slm_status ok "opened $url"
+slm_status ok "$count manual listing(s) for v$SLM_VERSION are tracked by the maintainer; nothing published"

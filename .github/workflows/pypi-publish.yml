@@ -350,7 +350,6 @@ jobs:
     permissions:
       contents: write   # GitHub release assets
       id-token: write   # MCP Registry login (GitHub OIDC)
-      issues: write     # manual listing checklist
     strategy:
       fail-fast: false
       matrix:
