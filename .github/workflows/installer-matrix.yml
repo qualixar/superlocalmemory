@@ -58,6 +58,9 @@ jobs:
           echo "UV_TOOL_DIR=${RUNNER_TEMP}/uv-tools" >> "$GITHUB_ENV"
           echo "UV_TOOL_BIN_DIR=${RUNNER_TEMP}/uv-bin" >> "$GITHUB_ENV"
           echo "SLM_DATA_DIR=${RUNNER_TEMP}/slm-data-must-not-exist" >> "$GITHUB_ENV"
+          # tree-sitter-language-pack downloads grammars on first use and found no
+          # cache directory on the Windows runner; give it a private one.
+          echo "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=${RUNNER_TEMP}/ts-pack-cache" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
