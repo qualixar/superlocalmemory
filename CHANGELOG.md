@@ -5,6 +5,23 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.10] — An edited memory can be found again
+
+If you edited a memory (the dashboard's Edit button, the `update_memory` tool
+or `slm update`) and applied the correction, a question could no longer find
+it. The old text was retired and the new text was saved, but the new text was
+never added to the search index, so only exact word matches reached it until
+the daemon restarted. Nothing to run after upgrading: the restart that comes
+with the upgrade indexes every edit made so far.
+
+### Fixed
+
+- **Applied corrections are indexed right away.** Applying a correction now
+  adds the corrected memory to the vector index, the ANN index and BM25, the
+  same way `remember` does. A proposal that is still waiting for review stays
+  out of search, as before. Saving with `remember`, including `replaces=`, was
+  never affected.
+
 ## [4.2.9] — Mode B stops keeping your local model busy for nothing
 
 If you run Mode B with Ollama, every saved memory used to cost up to eleven

@@ -23,7 +23,7 @@
       "name": "superlocalmemory",
       "repository": "https://github.com/qualixar/superlocalmemory",
       "source": "./cursor-plugin",
-      "version": "4.2.9"
+      "version": "4.2.10"
     }
   ]
 }

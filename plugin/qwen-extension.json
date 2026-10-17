@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "4.2.9",
+  "version": "4.2.10",
   "description": "Local-first agent memory as an MCP server: remember, recall and search across sessions and agents, on your own machine.",
   "mcpServers": {
     "superlocalmemory": {

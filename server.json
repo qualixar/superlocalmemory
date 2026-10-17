@@ -16,7 +16,7 @@
       "transport": {
         "type": "stdio"
       },
-      "version": "4.2.9"
+      "version": "4.2.10"
     },
     {
       "identifier": "superlocalmemory",
@@ -31,7 +31,7 @@
       "transport": {
         "type": "stdio"
       },
-      "version": "4.2.9"
+      "version": "4.2.10"
     }
   ],
   "repository": {
@@ -39,6 +39,6 @@
     "url": "https://github.com/qualixar/superlocalmemory"
   },
   "title": "SuperLocalMemory",
-  "version": "4.2.9",
+  "version": "4.2.10",
   "websiteUrl": "https://superlocalmemory.com"
 }

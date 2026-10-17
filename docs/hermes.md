@@ -6,7 +6,7 @@ not a replacement for, Hermes's built-in memory provider and configuration.
 Install the owning runtime first:
 
 ```bash
-python -m pip install --upgrade superlocalmemory==4.2.9
+python -m pip install --upgrade superlocalmemory==4.2.10
 slm doctor
 ```
 
@@ -52,7 +52,7 @@ SHA=$(git ls-remote https://github.com/qualixar/superlocalmemory.git refs/tags/v
 hermes plugins install 'https://github.com/qualixar/superlocalmemory.git#hermes-plugin' --force --ref "$SHA"
 ```
 
-Replace `v4.2.9` with the release you run (`slm --version`). `hermes plugins
+Replace `v4.2.10` with the release you run (`slm --version`). `hermes plugins
 update superlocalmemory` refuses a pinned plugin by design; `--force` with a new
 `--ref` is the supported way to move it.
 
