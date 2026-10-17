@@ -52,6 +52,33 @@ def test_an_applied_edit_is_in_the_vector_index(engine_with_mock_deps) -> None:
     assert _in_vector_index(engine, successor), "applied edit is not findable by meaning"
 
 
+def test_recall_returns_an_applied_edit(engine_with_mock_deps) -> None:
+    """4.2.10 on the live store: indexed, valid, found by search, yet never
+    returned by recall."""
+    from tests.test_server.test_per_request_profile import _daemon
+
+    with _daemon(engine_with_mock_deps, profiles=("work",)) as (client, _app):
+        saved = client.post("/remember", json={
+            "content": OLD, "profile_id": "work", "idempotency_key": "train-old-3"})
+        [old_id] = saved.json()["fact_ids"]
+        edited = client.patch(f"/api/memories/{old_id}",
+                              json={"content": NEW, "profile_id": "work"},
+                              headers={"X-Idempotency-Key": "edit-train-3"})
+        assert edited.status_code == 202, edited.text
+        case = edited.json()["correction_case"]
+        applied = client.post(f"/api/corrections/{case['case_id']}/apply",
+                              json={"expected_version": case["version"], "profile_id": "work"})
+        assert applied.status_code == 200, applied.text
+        successor = edited.json()["successor_fact_id"]
+        found = client.get("/recall", params={
+            "q": "When does the platform release train leave?",
+            "profile_id": "work", "answer_check": "skip"}).json()
+
+    ids = [r["fact_id"] for r in found["results"]]
+    assert successor in ids, found
+    assert old_id not in ids
+
+
 def test_a_proposed_edit_stays_out_of_the_vector_index(engine_with_mock_deps) -> None:
     engine = engine_with_mock_deps
     with _client(engine) as client:

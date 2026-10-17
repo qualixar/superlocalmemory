@@ -48,6 +48,7 @@ def _unverified(db: Any, profile_id: str, fact_ids: list[str]) -> dict[str, str]
             (*profiles, *fact_ids, RELEASED_PREFIX + "%"),
         )
     }
+    released |= _applied_corrections(db, profiles, fact_ids)
     flags: dict[str, str] = {}
     for row in rows:
         data = dict(row)
@@ -63,6 +64,31 @@ def _unverified(db: Any, profile_id: str, fact_ids: list[str]) -> dict[str, str]
         if not report.ok:
             flags[fact_id] = FLAGGED_PREFIX + "+".join(report.reasons)
     return flags
+
+
+def _applied_corrections(db: Any, profiles: list[str], fact_ids: list[str]) -> set:
+    """(profile, fact) for each candidate that is an applied correction.
+
+    A correction keeps the memory it corrects, so its source is the text it
+    replaced: checked against it, the new text always "changed what was said"
+    and the edit was withheld from every recall (4.2.10). An applied
+    correction is the person's own say-so, like a release. A store without
+    the correction ledger has none.
+    """
+    pmarks = ",".join("?" for _ in profiles)
+    marks = ",".join("?" for _ in fact_ids)
+    try:
+        rows = db.execute(
+            "SELECT profile_id, successor_fact_id FROM correction_cases "
+            f"WHERE profile_id IN ({pmarks}) AND successor_fact_id IN ({marks}) "
+            "AND status = 'applied'",
+            (*profiles, *fact_ids),
+        )
+    except Exception as exc:  # noqa: BLE001 - only a missing ledger is "none"
+        if "no such table" in str(exc).lower():
+            return set()
+        raise
+    return {(str(dict(r)["profile_id"]), str(dict(r)["successor_fact_id"])) for r in rows}
 
 
 def _source_results(results: list, db: Any) -> list:
