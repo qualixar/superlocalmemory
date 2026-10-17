@@ -60,3 +60,28 @@ def test_noninteractive_setup_keeps_an_explicit_installed_model(tmp_path, capsys
     )
     assert config.llm.model == "llama3.2"
     assert "gemma4:e2b" in capsys.readouterr().out
+
+
+def test_tested_faithful_model_outranks_untested_gemma4():
+    """4.2.9: gemma4:e2b sorted first whenever installed - its sort key began
+    with False, which is below every damage rate - though SLM never tested
+    its extraction. A model that tested faithful comes first."""
+    assert best_local_llm(32, ["gemma4:e2b", "gemma3:4b"]) == "gemma3:4b"
+    assert best_local_llm(32, ["gemma4:e2b", "qwen2.5:7b"]) == "qwen2.5:7b"
+
+
+def test_untested_gemma4_is_not_suggested_for_download():
+    """A 7.2 GB untested pull is never the suggestion on a fresh machine."""
+    from superlocalmemory.core.model_catalog import recommend_local_llms
+
+    recs = recommend_local_llms(32, [])
+    assert recs[0].model_id == "gemma3:4b"
+    assert "gemma4:e2b" not in [r.model_id for r in recs if not r.installed]
+
+
+def test_model_caught_inventing_facts_ranks_below_untested():
+    from superlocalmemory.core.model_catalog import recommend_local_llms
+
+    order = [r.model_id for r in recommend_local_llms(32, ["llama3.2", "gemma4:e2b"])
+             if r.installed]
+    assert order == ["gemma4:e2b", "llama3.2"]

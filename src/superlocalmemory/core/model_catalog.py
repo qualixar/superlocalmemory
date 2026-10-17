@@ -60,7 +60,7 @@ def _e(**kw) -> ModelEntry:
 
 LOCAL_LLMS: tuple[ModelEntry, ...] = (
     _e(id="gemma4:e2b", role="llm", provider="ollama", label="Gemma 4 E2B",
-       size_gb=7.2, min_ram_gb=16, recommended=True,
+       size_gb=7.2, min_ram_gb=16, recommended=False,
        advice="Installed local alternative for extraction. No automatic switch; "
               "run your source-fidelity checks before choosing it."),
     _e(id="gemma3:4b", role="llm", provider="ollama", label="Gemma 3 4B",
@@ -139,12 +139,19 @@ def find(model_id: str) -> ModelEntry | None:
     return None
 
 
+#: Above this share of changed facts in SLM's extraction test a model ranks
+#: below an untested one: it has been seen inventing what was never said.
+_UNFAITHFUL_RATE = 0.10
+
+
 def _rank(entry: ModelEntry) -> tuple[float, str]:
     """Lower is better. (damaged + 1) / (tested + 2): a small sample with no
-    damage does not outrank a large one with almost none."""
+    damage does not outrank a large one with almost none. Untested models
+    follow every faithful tested one; models caught inventing facts go last."""
     if entry.damaged is None or not entry.tested:
-        return (1.0, entry.id)  # untested sorts after every tested model
-    return ((entry.damaged + 1) / (entry.tested + 2), entry.id)
+        return (1.0, entry.id)
+    rate = (entry.damaged + 1) / (entry.tested + 2)
+    return (rate if rate <= _UNFAITHFUL_RATE else 1.0 + rate, entry.id)
 
 
 def recommend_local_llms(ram_gb: float | None, installed: list[str]) -> list[Recommendation]:
@@ -163,11 +170,7 @@ def recommend_local_llms(ram_gb: float | None, installed: list[str]) -> list[Rec
                 or ram_gb >= entry.min_ram_gb)
 
     known = {e.id: e for e in LOCAL_LLMS}
-
-    def preference(entry: ModelEntry):
-        if entry.id == 'gemma4:e2b':
-            return (False, True, *_rank(entry))
-        return _rank(entry)
+    preference = _rank
     out: list[Recommendation] = []
     for entry in sorted((known[m] for m in have_llm if m in known), key=preference):
         if fits(entry):
