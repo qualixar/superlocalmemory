@@ -21,6 +21,17 @@ WORKERS="${CI_GATE_WORKERS:-3}"
 # run the same on the runner as on a 16 GB+ Mac.
 export SLM_MEDIA_ALLOW_LOW_RAM=1
 
+# Fail in seconds, not after the suite, on a Python that cannot load SQLite
+# extensions (python.org builds): sqlite-vec never loads there and every
+# vector and media test fails. uv-managed and Homebrew Pythons can.
+python - <<'PY'
+import sqlite3, sys
+if not hasattr(sqlite3.connect(":memory:"), "enable_load_extension"):
+    sys.exit(f"ci-gate: {sys.executable} cannot load SQLite extensions; "
+             "use a uv-managed Python (UV_PYTHON_PREFERENCE=only-managed)")
+print(f"ci-gate: {sys.executable} {sys.version.split()[0]}, SQLite extensions OK")
+PY
+
 GATE_TESTS=(
   tests/test_version_consistency.py
   tests/test_ci_guards

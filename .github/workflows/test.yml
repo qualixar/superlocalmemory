@@ -96,6 +96,10 @@ jobs:
   gate:
     name: Release-contract gate (macOS)
     runs-on: macos-14
+    # uv-managed Python only: the runner's python.org build cannot load
+    # SQLite extensions, and uv prefers a system Python when it finds one.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -115,6 +119,10 @@ jobs:
   native-lancedb:
     name: Native LanceDB (macOS)
     runs-on: macos-14
+    # uv-managed Python only: the runner's python.org build cannot load
+    # SQLite extensions, and uv prefers a system Python when it finds one.
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
