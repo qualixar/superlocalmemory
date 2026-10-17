@@ -15,6 +15,12 @@ set -euo pipefail
 
 WORKERS="${CI_GATE_WORKERS:-3}"
 
+# GitHub's macOS runner has 7 GB of memory and SLM refuses images and
+# documents below 15 GiB, so the media tool contracts fail at setup there. The
+# tests use fake media models; the documented developer override lets them
+# run the same on the runner as on a 16 GB+ Mac.
+export SLM_MEDIA_ALLOW_LOW_RAM=1
+
 GATE_TESTS=(
   tests/test_version_consistency.py
   tests/test_ci_guards
