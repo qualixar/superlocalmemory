@@ -112,7 +112,9 @@ jobs:
       - name: Install libomp (required by lightgbm)
         run: brew install libomp
       - name: Install the locked environment
-        run: uv sync --frozen --python 3.12
+        run: |
+          uv sync --frozen --python 3.12
+          npm ci --ignore-scripts
       - name: Release-contract gate
         run: uv run bash scripts/ci-gate.sh
 
