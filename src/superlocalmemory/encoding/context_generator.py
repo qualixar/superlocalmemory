@@ -28,6 +28,26 @@ from superlocalmemory.storage.models import AtomicFact, FactType, SignalType
 
 logger = logging.getLogger(__name__)
 
+#: One sentence plus 3-5 keywords; the backbone default (4,096) let a model
+#: run on. Measured answers are ~75 tokens.
+CONTEXT_MAX_TOKENS = 160
+
+
+def _json_object(text: str) -> dict:
+    """The JSON object in a model answer, with or without a ```json fence.
+
+    4.2.9: gemma4:e2b fences its answer; a bare json.loads rejected it and
+    every context fell back to rules. Raises ValueError when there is none.
+    """
+    body = (text or "").strip()
+    start, end = body.find("{"), body.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("no JSON object in the model answer")
+    parsed = json.loads(body[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("the model answer is not a JSON object")
+    return parsed
+
 
 @dataclass(frozen=True)
 class ContextResult:
@@ -161,15 +181,17 @@ class ContextGenerator:
         response = self._llm.generate(
             prompt,
             system="You are a precise memory analyst. Respond ONLY with valid JSON.",
+            max_tokens=CONTEXT_MAX_TOKENS,
+            think=False,
         )
 
         try:
-            parsed = json.loads(response)
+            parsed = _json_object(response)
             return ContextResult(
                 description=parsed.get("description", "")[:500],
                 keywords=parsed.get("keywords", [])[:10],
                 generated_by="ollama" if mode == "b" else "cloud",
             )
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError):
             logger.debug("LLM context response unparseable, falling back to rules")
             return self._rules_based(fact)

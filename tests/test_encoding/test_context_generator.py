@@ -120,6 +120,33 @@ class TestLLMBasedContext:
         prompt = call_args[0][0]
         assert "Alice prefers Python" in prompt
 
+    def test_llm_fenced_json_is_parsed(self):
+        """4.2.9: gemma4:e2b wraps its answer in a ```json fence. A bare
+        json.loads rejected it, so after the 12 Oct switch 2,147 of 2,149
+        context calls on the live store fell back to rules - the model's
+        work was thrown away."""
+        mock_llm = MagicMock()
+        mock_llm.is_available.return_value = True
+        mock_llm.generate.return_value = (
+            '```json\n{"description": "Shows a palette rule", '
+            '"keywords": ["palette", "video"]}\n```'
+        )
+        result = ContextGenerator(llm=mock_llm).generate(_make_fact(), mode="b")
+        assert result.generated_by == "ollama"
+        assert result.description == "Shows a palette rule"
+        assert result.keywords == ["palette", "video"]
+
+    def test_llm_call_is_capped_and_not_thinking(self):
+        """One sentence and five keywords need well under 200 tokens; the
+        backbone default is 4,096. Thinking is off for this short answer."""
+        mock_llm = MagicMock()
+        mock_llm.is_available.return_value = True
+        mock_llm.generate.return_value = '{"description": "d", "keywords": []}'
+        ContextGenerator(llm=mock_llm).generate(_make_fact(), mode="b")
+        kwargs = mock_llm.generate.call_args.kwargs
+        assert 0 < kwargs["max_tokens"] <= 200
+        assert kwargs["think"] is False
+
     def test_llm_response_parsed_as_json(self):
         mock_llm = MagicMock()
         mock_llm.is_available.return_value = True

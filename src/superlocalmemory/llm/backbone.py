@@ -91,6 +91,10 @@ class LLMResponse:
 LLM_YIELD_MAX_S = 20.0
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
 def _yield_to_recall() -> None:
     """Background generation (Mode B extraction, summaries) waits while a recall runs.
 
@@ -127,6 +131,9 @@ class LLMBackbone:
         self._timeout = config.timeout_seconds
         self._default_temperature = config.temperature
         self._default_max_tokens = config.max_tokens
+        # Set once an Ollama server rejects the think field (HTTP 400), so an
+        # old server costs one extra request per process, not one per call.
+        self._think_unsupported = False
 
         # Resolve API key: config > environment variable. A custom api_base
         # with an empty api_key is treated as intentionally keyless so local
@@ -260,6 +267,7 @@ class LLMBackbone:
                         and payload.pop("think", None) is not None
                     ):
                         think_downgraded = True
+                        self._think_unsupported = True
                         logger.info(
                             "Ollama rejected think:false (HTTP 400); "
                             "retrying once with model defaults.",
@@ -371,22 +379,28 @@ class LLMBackbone:
                 "num_ctx": 4096,
             },
         }
-        # Only an explicit False is ever sent (generate(think=False));
-        # True/None omit the key and keep model defaults.
-        if think is False:
-            payload["think"] = False
-        # #128: thinking-capable models (qwen3.x family) answer inside
-        # message.thinking, leaving content empty. The _extract_text
-        # fallback plus the extractor's array recovery cover that by
-        # default; operators who prefer plain content-only answers can
-        # opt out of thinking entirely with SLM_OLLAMA_DISABLE_THINK=1.
-        # Opt-in only and omitted by default: thinking support varies
-        # across model families, so the key is never sent unasked.
-        if os.environ.get(
-            "SLM_OLLAMA_DISABLE_THINK", "",
-        ).strip().lower() in {"1", "true", "yes"}:
+        if self._ollama_think_off(think):
             payload["think"] = False
         return self._base_url, headers, payload
+
+    def _ollama_think_off(self, think: bool | None) -> bool:
+        """Whether this request carries ``think: false``.
+
+        4.2.9: off unless asked for. Every SLM prompt wants a short structured
+        answer; a thinking model's default reasoning costs ~6x the tokens
+        (gemma4:e2b: ~410 vs ~75 per context call) and, under a token cap,
+        can leave content empty. ``True`` is never sent (non-thinking models
+        reject it): it, or ``SLM_OLLAMA_ALLOW_THINK=1``, keeps the model's
+        default. ``SLM_OLLAMA_DISABLE_THINK=1`` (#128) still forces it off.
+        A server that rejected the field once is not asked again.
+        """
+        if _env_flag("SLM_OLLAMA_DISABLE_THINK"):
+            return not self._think_unsupported
+        if self._think_unsupported or think is True:
+            return False
+        if think is False:
+            return True
+        return not _env_flag("SLM_OLLAMA_ALLOW_THINK")
 
     def _build_anthropic(
         self, prompt: str, system: str, max_tokens: int, temperature: float,

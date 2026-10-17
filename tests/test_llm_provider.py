@@ -215,7 +215,21 @@ def test_ollama_extract_text_empty_both_returns_empty():
     assert backbone._extract_text({}) == ""
 
 
-def test_ollama_payload_omits_think_by_default():
+def test_ollama_payload_disables_think_by_default(monkeypatch):
+    """4.2.9: every SLM prompt asks for a short structured answer, so thinking
+    is off unless asked for. Measured on gemma4:e2b: 406-423 tokens and ~5 s
+    per context call with the model default, 73-77 tokens and 0.85 s with
+    think:false - and a capped call left on the default spends the whole cap
+    thinking and returns empty content."""
+    monkeypatch.delenv("SLM_OLLAMA_ALLOW_THINK", raising=False)
+    backbone = _thinking_model_backbone()
+    _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
+    assert payload["think"] is False
+
+
+def test_ollama_payload_keeps_model_thinking_when_allowed(monkeypatch):
+    """An operator who wants the model's own thinking back opts in."""
+    monkeypatch.setenv("SLM_OLLAMA_ALLOW_THINK", "1")
     backbone = _thinking_model_backbone()
     _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
     assert "think" not in payload
@@ -223,19 +237,49 @@ def test_ollama_payload_omits_think_by_default():
 
 def test_ollama_payload_disables_think_when_env_set(monkeypatch):
     monkeypatch.setenv("SLM_OLLAMA_DISABLE_THINK", "1")
+    monkeypatch.setenv("SLM_OLLAMA_ALLOW_THINK", "1")
     backbone = _thinking_model_backbone()
     _, _, payload = backbone._build_ollama("hi", "", 100, 0.0)
+    # The older, stronger switch still wins over the opt-in.
     assert payload["think"] is False
 
 
-def test_generate_threads_think_flag_to_ollama():
+def test_generate_threads_think_flag_to_ollama(monkeypatch):
+    monkeypatch.delenv("SLM_OLLAMA_ALLOW_THINK", raising=False)
     backbone = _thinking_model_backbone()
     _, _, default_payload = backbone._build_request("hi", "", 100, 0.0)
-    assert "think" not in default_payload
+    assert default_payload["think"] is False
     _, _, off_payload = backbone._build_request("hi", "", 100, 0.0, False)
     assert off_payload["think"] is False
+    # True is never sent (non-thinking models reject it): the model decides.
     _, _, on_payload = backbone._build_request("hi", "", 100, 0.0, True)
     assert "think" not in on_payload
+
+
+def test_generate_remembers_think_unsupported_after_400(monkeypatch):
+    """A server that rejects the field once is not asked again, so an old
+    Ollama costs one extra request per process, not one per memory."""
+    import httpx
+
+    monkeypatch.delenv("SLM_OLLAMA_ALLOW_THINK", raising=False)
+    backbone = _thinking_model_backbone()
+    monkeypatch.setattr(backbone, "is_available", lambda: True)
+    seen: list[bool] = []
+
+    def _old_server(url, headers, payload):
+        seen.append("think" in payload)
+        if "think" in payload:
+            request = httpx.Request("POST", url)
+            raise httpx.HTTPStatusError(
+                "bad request", request=request,
+                response=httpx.Response(400, request=request),
+            )
+        return {"message": {"content": "ok"}}
+
+    monkeypatch.setattr(backbone, "_send", _old_server)
+    assert backbone.generate("one") == "ok"
+    assert backbone.generate("two") == "ok"
+    assert seen == [True, False, False]
 
 
 def test_generate_downgrades_think_once_on_400(monkeypatch):
