@@ -193,4 +193,4 @@ quality on a shared box.
 
 ---
 
-*SuperLocalMemory v4.2.8 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.9 · Qualixar · AGPL-3.0-or-later*

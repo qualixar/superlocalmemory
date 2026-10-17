@@ -1,7 +1,7 @@
 ---
 name: slm-loop
 description: Gate-verified bounded loops with SuperLocalMemory as the durable ledger. Use when a task has a checkable acceptance condition and you must iterate until an INDEPENDENT gate passes — never stopping because the agent believes it is done. `slm_loop_run` (MCP) waits, under hard bounds, for an independently executed check registered by the operator to pass; `slm loop demo` shows the control flow keyless; `slm loop history` and `slm loop show <run_id>` (or `slm_loop_history` / `slm_loop_show`) inspect past runs, whose every lap is stored as queryable SLM memory (tag `loop:<name>`). Terminal statuses are DONE / HALT / PAUSE / KILLED / ERROR — report them exactly, never converting HALT/PAUSE/ERROR into success.
-version: "4.2.8"
+version: "4.2.9"
 agent: agent
 tools:
   - slm_loop_run
@@ -183,4 +183,4 @@ Guides: `docs/skill-evolution.md`, `docs/bounded-loops-bridge.md`.
 
 ---
 
-SuperLocalMemory v4.2.8 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.9 · Qualixar · AGPL-3.0-or-later

@@ -1,7 +1,7 @@
 ---
 name: slm-session
 description: Manage SuperLocalMemory session lifecycle — call session_init once at the start of every fresh session to load relevant project context and get a session_id; call close_session when work is meaningfully complete to commit temporal summaries. Correct lifecycle hygiene is what makes SLM's learning loop work.
-version: "4.2.8"
+version: "4.2.9"
 agent: agent
 tools:
   - session_init
@@ -288,4 +288,4 @@ answered. To also surface shared or global facts, call `recall` with
 
 ---
 
-*SuperLocalMemory v4.2.8 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.9 · Qualixar · AGPL-3.0-or-later*
