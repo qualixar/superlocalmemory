@@ -276,3 +276,43 @@ def test_strengthen_increments_co_access_count(linker_db, mock_config):
         "SELECT co_access_count FROM association_edges WHERE edge_id = 'e1'",
     ).fetchone()
     assert row["co_access_count"] == 6
+
+
+def test_mode_b_evolution_makes_no_llm_calls_and_appends_keywords(linker_db):
+    """4.2.9: Mode B regenerated every linked old fact through the LLM (up to
+    10 calls per stored memory). The prompt held only the old fact, so the
+    answer could not reflect the new link, and the ContextResult it returned
+    was bound straight into SQL, which SQLite rejects - nothing was ever saved
+    (since v3.2.2). Evolution now uses the keyword path in every mode."""
+    for fid in ("existing_1", "existing_2"):
+        linker_db.execute(
+            "INSERT INTO fact_context (fact_id, profile_id, "
+            "contextual_description, keywords) VALUES (?, 'default', 'old', 'kw')",
+            (fid,),
+        )
+    linker_db.commit()
+    db = MagicMock()
+    db.execute.side_effect = lambda sql, params=(): (
+        linker_db.execute(sql, params).fetchall()
+    )
+    new_fact = AtomicFact(fact_id="new_fact", content="Palette rule for videos",
+                          canonical_entities=["Palette"])
+    db.get_fact.side_effect = lambda fid: (
+        new_fact if fid == "new_fact" else AtomicFact(fact_id=fid, content="old")
+    )
+    context_gen = MagicMock()
+    cfg = MagicMock()
+    cfg.mode.value = "b"
+
+    linker = AutoLinker(db=db, vector_store=MagicMock(), context_generator=context_gen,
+                        config=cfg)
+    linker.evolve_linked_facts("new_fact", ["existing_1", "existing_2"], "default")
+
+    context_gen.generate.assert_not_called()
+    rows = linker_db.execute(
+        "SELECT fact_id, contextual_description, keywords FROM fact_context "
+        "ORDER BY fact_id").fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("existing_1", "old", "kw, Palette"),
+        ("existing_2", "old", "kw, Palette"),
+    ]

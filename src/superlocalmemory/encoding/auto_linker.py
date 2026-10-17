@@ -122,6 +122,11 @@ class AutoLinker:
         A-MEM memory evolution: old facts gain new context from new links.
         Updates fact_context table ONLY (immutability preserved -- Rule 17).
         Non-blocking, fire-and-forget. Errors logged, never raised (Rule 19).
+
+        4.2.9: the keyword path in every mode. Mode B/C used to regenerate each
+        linked fact through the LLM - up to 10 calls per stored memory, from a
+        prompt that held only the old fact, whose ContextResult was bound into
+        SQL that SQLite rejects, so nothing was ever saved (since v3.2.2).
         """
         try:
             new_fact = self._db.get_fact(new_fact_id)
@@ -129,17 +134,8 @@ class AutoLinker:
                 return
 
             for old_fact_id in linked_fact_ids:
-                old_fact = self._db.get_fact(old_fact_id)
-                if not old_fact:
-                    continue
-
-                if self._mode == "a":
+                if self._db.get_fact(old_fact_id):
                     self._append_keyword(old_fact_id, new_fact, profile_id)
-                else:
-                    if self._context_gen:
-                        self._regenerate_context(
-                            old_fact_id, old_fact, new_fact, profile_id,
-                        )
         except Exception as exc:
             logger.debug(
                 "evolve_linked_facts failed (non-fatal): %s", exc,
@@ -258,7 +254,7 @@ class AutoLinker:
     def _append_keyword(
         self, fact_id: str, new_fact: AtomicFact, profile_id: str,
     ) -> None:
-        """Mode A: append new fact's first entity as keyword."""
+        """Append the new fact's first entity (or first word) as a keyword."""
         keyword = ""
         if new_fact.canonical_entities:
             keyword = new_fact.canonical_entities[0]
@@ -287,22 +283,3 @@ class AutoLinker:
                     )
         except Exception as exc:
             logger.debug("_append_keyword failed: %s", exc)
-
-    def _regenerate_context(
-        self,
-        old_fact_id: str,
-        old_fact: AtomicFact,
-        new_fact: AtomicFact,
-        profile_id: str,
-    ) -> None:
-        """Mode B/C: regenerate contextual_description for old fact."""
-        try:
-            if self._context_gen:
-                new_desc = self._context_gen.generate(old_fact, self._mode)
-                self._db.execute(
-                    "UPDATE fact_context SET contextual_description = ? "
-                    "WHERE fact_id = ? AND profile_id = ?",
-                    (new_desc, old_fact_id, profile_id),
-                )
-        except Exception as exc:
-            logger.debug("_regenerate_context failed: %s", exc)
