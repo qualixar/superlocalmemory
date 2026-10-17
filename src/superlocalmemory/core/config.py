@@ -2280,7 +2280,6 @@ class SLMConfig:
         _base.mkdir(parents=True, exist_ok=True)
 
         old_config = cls.load(_base / "config.json")
-        old_mode = old_config.mode.value.lower()
         new_mode_val = _M(new_mode.lower())
 
         # 4.1.18: the answer check's settings get their one home before any
@@ -2289,10 +2288,11 @@ class SLMConfig:
         _answer_check_state.ensure(
             _base, seed=lambda: _answer_check_state.snapshot(old_config.retrieval))
 
-        # 1. Save current config to its per-mode file (preserve customizations)
-        if old_mode != new_mode.lower():
-            old_path = cls._mode_config_path(_base, old_config.mode)
-            old_config.save(old_path)
+        # 1. Save current config to its per-mode file (preserve customizations).
+        #    4.2.9: also when switching to the mode already active. Skipping it
+        #    then loaded a stale mode_<x>.json and reverted every change saved
+        #    since the last switch (dashboard, wizard, `slm provider set`).
+        old_config.save(cls._mode_config_path(_base, old_config.mode))
 
         # 2. Determine new config:
         #    a) mode_{new}.json exists → user had prior config for this mode, use it

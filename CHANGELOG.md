@@ -29,6 +29,15 @@ upgrading.
 - **Memory descriptions from Gemma 4 are kept.** Gemma 4 wraps its answer in a
   code fence, which SLM could not read, so the description fell back to a
   template every time. Fenced answers are now read.
+- **`slm provider set ollama --mode b --model <name>` does what it says.**
+  Named providers were always saved as Mode C with the preset model: `--mode`
+  and `--model` were read only for `custom`. A local provider now defaults to
+  Mode B, `--mode` and `--model` are honoured, and an unknown mode is refused.
+- **A model or embedder you change stays changed when you switch modes.**
+  SLM keeps one settings file per mode. Running `slm mode b` while already in
+  Mode B, or switching modes from the dashboard, skipped saving the mode you
+  were in, so the next switch could bring back the old model or embedder. The
+  mode you leave is now always saved first, from the CLI and the dashboard.
 - **Setup recommends the model that tested best.** An installed `gemma4:e2b`
   was put first in the model list and offered as a 7.2 GB download, although
   SLM has not tested it. The list now puts models that kept facts intact in

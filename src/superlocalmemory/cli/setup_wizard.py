@@ -656,6 +656,21 @@ def _install_autostart_service() -> bool:
 # ---------------------------------------------------------------------------
 # Mode C provider config (preserved from original)
 # ---------------------------------------------------------------------------
+def _named_provider_mode(provider_name: str, target_mode: str | None):
+    """The mode ``slm provider set <provider>`` saves: ``--mode`` when given,
+    else B for a local model (Ollama) and C for a hosted one.
+
+    4.2.9: named providers were always saved as Mode C and ``--mode`` was read
+    only for ``custom``, so ``slm provider set ollama --mode b`` left Mode C.
+    """
+    from superlocalmemory.storage.models import Mode
+
+    choice = (target_mode or ("b" if provider_name == "ollama" else "c")).strip().lower()
+    if choice not in ("b", "c"):
+        raise ValueError(f"--mode must be b or c for an LLM provider, not {target_mode!r}")
+    return Mode.B if choice == "b" else Mode.C
+
+
 def configure_provider(
     config: object,
     provider_name: str | None = None,
@@ -737,7 +752,7 @@ def configure_provider(
     # preset model as the default. Non-interactive runs (``slm provider set``,
     # CI) keep the preset model — unchanged zero-prompt behavior. Logic lives
     # in cli.model_choice (this file is already past the 800-line guideline).
-    chosen_model = preset["model"]
+    chosen_model = (model or "").strip() or preset["model"]
     if interactive_selection and is_interactive():
         from superlocalmemory.cli.model_choice import pick_mode_c_model
         chosen_model = pick_mode_c_model(
@@ -749,8 +764,9 @@ def configure_provider(
     # configured a local or promoted Cozo/Lance deployment.  Keep every
     # unrelated setting intact and change only the mode/provider contract.
     from superlocalmemory.core.config import LLMConfig
+    mode = _named_provider_mode(provider_name, target_mode)
     updated = config if isinstance(config, SLMConfig) else SLMConfig.load()
-    updated.mode = Mode.C
+    updated.mode = mode
     updated.llm = LLMConfig(
         provider=provider_name,
         model=chosen_model,
@@ -758,6 +774,10 @@ def configure_provider(
         api_base=preset["base_url"],
     )
     updated.save(mode_change=True)
-    SLMConfig.write_current_mode(Mode.C, updated.base_dir)
+    # 4.2.9: the per-mode file too, or the next `slm mode` switch restores the
+    # model this command just replaced.
+    updated.save(SLMConfig._mode_config_path(updated.base_dir, mode))
+    SLMConfig.write_current_mode(mode.value, updated.base_dir)
+    print(f"  Mode: {mode.value.upper()}")
     print(f"  Provider: {provider_name}")
     print(f"  Model: {chosen_model}")

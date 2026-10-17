@@ -305,6 +305,11 @@ async def set_mode(request: Request):
             if _refusal is not None:
                 return JSONResponse(_refusal, status_code=400)
 
+        # 4.2.9: keep the mode being left in its own mode_<x>.json first, as
+        # `slm mode` does; otherwise a later CLI switch back loads a stale
+        # profile and reverts the model or embedder chosen in that mode.
+        old_config.save(SLMConfig._mode_config_path(old_config.base_dir, old_config.mode))
+
         # Apply new mode's structural presets (retrieval, math, channel_weights)
         # by building a fresh template, then graft them onto the loaded config so
         # all user-tuned blocks (forgetting, injection, consolidation, scope, …)
@@ -490,6 +495,10 @@ async def set_full_config(request: Request):
             return value.strip() or None
 
         new_mode = (_nonblank("mode") or config.mode.value).lower()
+        if new_mode != old_mode:
+            # 4.2.9: keep the mode being left in its mode_<x>.json, as `slm mode`
+            # does, so switching back never restores a stale profile.
+            config.save(SLMConfig._mode_config_path(config.base_dir, config.mode))
         provider_input = _nonblank("provider")
         model_input = _nonblank("model")
         api_key_input = _nonblank("api_key")

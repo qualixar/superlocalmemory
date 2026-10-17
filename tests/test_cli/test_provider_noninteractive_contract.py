@@ -55,3 +55,42 @@ def test_named_provider_preserves_existing_runtime_configuration(tmp_path, monke
     assert reloaded.vector_backend == "lancedb"
     assert reloaded.scale_engine_state == "promoted"
     assert reloaded.retrieval.semantic_top_k == 73
+
+
+def test_provider_set_ollama_honours_mode_and_model(tmp_path, monkeypatch) -> None:
+    """4.2.9: `slm provider set ollama --mode b --model gemma3:4b` saved Mode C
+    with the preset model - --mode and --model were read only for 'custom'.
+    The per-mode file kept the old model, so a later `slm mode b` restored it."""
+    from superlocalmemory.cli.setup_wizard import configure_provider
+
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    config = SLMConfig.for_mode(Mode.B, base_dir=tmp_path)
+    config.save(mode_change=True)
+
+    configure_provider(config, provider_name="ollama", model="qwen2.5:7b",
+                       target_mode="b")
+
+    reloaded = SLMConfig.load(tmp_path / "config.json")
+    assert reloaded.mode is Mode.B
+    assert (reloaded.llm.provider, reloaded.llm.model) == ("ollama", "qwen2.5:7b")
+    assert SLMConfig.read_current_mode(tmp_path) == "b"
+    profile = SLMConfig.load(SLMConfig._mode_config_path(tmp_path, Mode.B))
+    assert profile.llm.model == "qwen2.5:7b"
+
+
+def test_provider_set_ollama_defaults_to_mode_b(tmp_path) -> None:
+    """A local model is Mode B unless the operator asks for C."""
+    from superlocalmemory.cli.setup_wizard import configure_provider
+
+    config = SLMConfig.for_mode(Mode.A, base_dir=tmp_path)
+    configure_provider(config, provider_name="ollama")
+    assert SLMConfig.load(tmp_path / "config.json").mode is Mode.B
+
+
+def test_provider_set_rejects_an_unknown_mode(tmp_path) -> None:
+    import pytest
+    from superlocalmemory.cli.setup_wizard import configure_provider
+
+    config = SLMConfig.for_mode(Mode.B, base_dir=tmp_path)
+    with pytest.raises(ValueError, match="mode"):
+        configure_provider(config, provider_name="ollama", target_mode="a")

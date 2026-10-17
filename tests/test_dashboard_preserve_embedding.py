@@ -631,3 +631,42 @@ class TestForModeContract:
 
         assert config.embedding.model_name == "nomic-ai/nomic-embed-text-v1.5"
         assert config.embedding.dimension == 768
+
+    def test_dashboard_switch_keeps_the_mode_it_leaves(self, isolated_config):
+        """4.2.9: PUT /api/v3/mode never saved the mode being left to its
+        mode_<x>.json, so a later `slm mode b` loaded a stale profile and
+        reverted the model chosen in B."""
+        live = {**_BASE_CONFIG, "mode": "b",
+                "llm": {**_BASE_CONFIG["llm"], "api_key": "sk-b", "model": "fresh-model"}}
+        _write_config(isolated_config, live)
+        stale = {**live, "llm": {**live["llm"], "model": "stale-model"}}
+        (isolated_config / "mode_b.json").write_text(json.dumps(stale), encoding="utf-8")
+
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.server.routes.v3_api import set_mode
+
+        asyncio.run(set_mode(_make_request({"mode": "c"})))
+        assert _read_config(isolated_config)["mode"] == "c"
+
+        back = SLMConfig.switch_mode("b", base_dir=isolated_config)
+        assert back.llm.model == "fresh-model"
+
+    def test_settings_save_with_mode_change_keeps_the_mode_it_leaves(self, isolated_config):
+        """4.2.9: POST /api/v3/mode/set switching B -> C left mode_b.json stale."""
+        live = {**_BASE_CONFIG, "mode": "b",
+                "llm": {**_BASE_CONFIG["llm"], "model": "fresh-model"}}
+        _write_config(isolated_config, live)
+        stale = {**live, "llm": {**live["llm"], "model": "stale-model"}}
+        (isolated_config / "mode_b.json").write_text(json.dumps(stale), encoding="utf-8")
+
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.server.routes.v3_api import set_full_config
+
+        asyncio.run(set_full_config(_make_request({
+            "mode": "c", "provider": "openrouter", "model": "openai/gpt-6-luna",
+            "api_key": "sk-new-key", "base_url": "https://openrouter.example.com",
+        })))
+        assert _read_config(isolated_config)["mode"] == "c"
+
+        back = SLMConfig.switch_mode("b", base_dir=isolated_config)
+        assert back.llm.model == "fresh-model"

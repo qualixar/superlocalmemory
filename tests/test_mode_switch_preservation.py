@@ -269,3 +269,59 @@ class TestNoEmbeddingChangedWarning:
 
         out = capsys.readouterr().out
         assert "Embedding model changed" not in out
+
+
+# --------------------------------------------------------------------------
+# 4.2.9: a setting saved in one mode survives a switch away and back
+# --------------------------------------------------------------------------
+
+
+class TestSavedSettingSurvivesModeRoundTrip:
+    """Every writer (dashboard, CLI, re-index activation) saved config.json
+    only. switch_mode() restores mode_<x>.json when it exists, so a model or
+    embedder changed in Mode B came back as the old one after B -> C -> B."""
+
+    def _start_in_b(self, base_dir: Path):
+        import dataclasses
+
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.storage.models import Mode
+
+        config = SLMConfig.for_mode(Mode.B, base_dir=base_dir)
+        config.llm = dataclasses.replace(config.llm, provider="ollama", model="gemma4:e2b")
+        config.save(mode_change=True)
+        SLMConfig.switch_mode("c", base_dir=base_dir)   # mode_b.json now holds gemma4
+        SLMConfig.switch_mode("b", base_dir=base_dir)
+        return SLMConfig.load(base_dir / "config.json")
+
+    def test_llm_model_survives_b_c_b(self, isolated_config):
+        import dataclasses
+
+        from superlocalmemory.core.config import SLMConfig
+
+        config = self._start_in_b(isolated_config)
+        config.llm = dataclasses.replace(config.llm, model="gemma3:4b")
+        config.save()   # what the dashboard and the wizard do
+
+        SLMConfig.switch_mode("c", base_dir=isolated_config)
+        back = SLMConfig.switch_mode("b", base_dir=isolated_config)
+        assert back.llm.model == "gemma3:4b"
+        assert _read_config(isolated_config)["llm"]["model"] == "gemma3:4b"
+
+    def test_same_mode_switch_keeps_a_setting_saved_since(self, isolated_config):
+        """`slm mode b` while already in B skipped saving config.json to
+        mode_b.json but still loaded mode_b.json - reverting any change made
+        since the last switch (the dashboard, the wizard, `slm provider set`)."""
+        import dataclasses
+
+        from superlocalmemory.core.config import SLMConfig
+
+        config = self._start_in_b(isolated_config)
+        config.llm = dataclasses.replace(config.llm, model="gemma3:4b")
+        config.save()
+
+        back = SLMConfig.switch_mode("b", base_dir=isolated_config)
+        assert back.llm.model == "gemma3:4b"
+        assert _read_config(isolated_config)["llm"]["model"] == "gemma3:4b"
+        profile = SLMConfig.load(isolated_config / "mode_b.json")
+        assert profile.llm.model == "gemma3:4b"
