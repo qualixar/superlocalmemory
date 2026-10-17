@@ -5,6 +5,40 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.9] — Mode B stops keeping your local model busy for nothing
+
+If you run Mode B with Ollama, every saved memory used to cost up to eleven
+model calls, most of them wasted. A machine with a steady stream of memories
+kept Ollama busy all day, and recalls waited behind it. Nothing to run after
+upgrading.
+
+### Fixed
+
+- **Linked memories no longer trigger model calls that were never saved.**
+  Each new memory links to up to ten similar older ones, and Mode B asked the
+  model to rewrite every one of them. The request never included the new
+  memory, and saving the answer always failed without a visible error, so none
+  of that work was ever kept (since 3.2.2). Linked memories now get the new
+  memory's keyword added, as in Mode A, with no model call.
+- **Thinking models answer directly.** SLM never told Ollama to skip a model's
+  thinking step, so models that think by default (Gemma 4, Qwen 3) reasoned
+  for ~400 tokens before every short answer: about 5 s instead of under 1 s on
+  `gemma4:e2b`, and an empty answer when the reply had a length limit. Thinking
+  is now off for every SLM request. Set `SLM_OLLAMA_ALLOW_THINK=1` to give the
+  model its default back.
+- **Memory descriptions from Gemma 4 are kept.** Gemma 4 wraps its answer in a
+  code fence, which SLM could not read, so the description fell back to a
+  template every time. Fenced answers are now read.
+- **Setup recommends the model that tested best.** An installed `gemma4:e2b`
+  was put first in the model list and offered as a 7.2 GB download, although
+  SLM has not tested it. The list now puts models that kept facts intact in
+  SLM's extraction test first, then untested ones, then models the test caught
+  inventing details (such as `llama3.2`).
+
+Measured on one Mac with `gemma4:e2b`: a memory's description took 11.7 s and
+was discarded; it now takes 2.2 s and is kept. The calls for three linked
+memories took 28.7 s; they now take none.
+
 ## [4.2.8] — No more lock errors, nothing dropped silently, and your own forgetting settings decide what archives
 
 Upgrading runs a few one-time repairs automatically the first time the daemon
