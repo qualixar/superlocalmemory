@@ -143,3 +143,4 @@ def test_optional_native_backend_runs_in_a_dedicated_process_lane() -> None:
     )[0]
     assert "native-lancedb" in workflow
     assert "python -m pytest -q -m native tests/vector" in workflow
+    assert "uv sync --frozen --python 3.12 --extra lancedb" in workflow

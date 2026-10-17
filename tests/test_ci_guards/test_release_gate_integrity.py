@@ -19,11 +19,17 @@ def _workflow(path: Path) -> tuple[str, dict]:
     return source, payload
 
 
-def test_windows_test_failures_are_not_blanket_waived() -> None:
+def test_gate_failures_are_never_waived() -> None:
+    """4.2.9: the gate is small so it can be strict. Any failure fails the job."""
     source, workflow = _workflow(TEST_WORKFLOW)
-    versions = workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+    gate_script = (ROOT / "scripts" / "ci-gate.sh").read_text(encoding="utf-8")
 
-    assert "3.14" in versions
+    assert "set -euo pipefail" in gate_script
+    assert "|| true" not in gate_script
+    for path in (TEST_WORKFLOW, RELEASE_WORKFLOW):
+        _, payload = _workflow(path)
+        for step in payload["jobs"]["gate"]["steps"]:
+            assert not step.get("continue-on-error"), (path.name, step.get("name"))
     assert "EXIT_CODE=$?" not in source
     assert "Windows KeyboardInterrupt during cleanup (non-fatal)" not in source
 

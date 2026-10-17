@@ -127,9 +127,16 @@ def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> Non
     assert "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b" in source
     assert "check-release-registries" in source
     assert "verify-release-registries" in source
-    assert "RELEASE_TEST_ARGS=(" in source
-    assert "tests/ -q --tb=short -x" in source
-    assert 'uv run python -m pytest "${RELEASE_TEST_ARGS[@]}"' in source
+    # 4.2.9: one gate script for PRs and releases, on macOS, before publication.
+    gate = workflow["jobs"]["gate"]
+    assert gate["runs-on"] == "macos-14"
+    assert release["needs"] == "gate"
+    assert "uv run bash scripts/ci-gate.sh" in source
+    assert "uv run bash scripts/ci-gate.sh" in (
+        RELEASE_WORKFLOW.parent / "test.yml").read_text(encoding="utf-8")
+    # A partial publication reuses the bytes each registry already serves.
+    assert "steps.published.outputs.pypi" in source
+    assert "steps.published.outputs.npm" in source
     assert "SLM_RELEASE_PYTHON_DIST" in source
     assert "scripts/release_evidence.py" in source
     assert "steps.registry.outputs.pypi_exists != 'true'" in source

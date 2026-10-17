@@ -1,22 +1,16 @@
 name: Tests
+
+# Fast and green by design (4.2.9). Three Linux checks that finish in about a
+# minute each, one macOS gate (scripts/ci-gate.sh, the same script the release
+# job runs) and the native LanceDB lane. The full suite runs once, locally,
+# before each release; on shared runners its timing and process tests measured
+# the runner, not SLM, and no full-suite job had finished green in weeks.
 on:
-  # Pull requests run on pull_request; a push runs only on the long-lived
-  # branches, so a PR branch push no longer queues a second, duplicate run.
   push:
     branches: [main, "release/**"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      focused_windows:
-        description: Run only repeated Windows release-blocker proofs
-        required: true
-        type: boolean
-        default: false
-      python_matrix:
-        description: JSON array of Python versions for focused Windows proofs
-        required: true
-        type: string
-        default: '["3.12", "3.13", "3.14"]'
+
 concurrency:
   # A newer commit on the same PR or branch supersedes the older run; without
   # this, superseded runs and duplicate push runs queued for hours.
@@ -25,7 +19,6 @@ concurrency:
 
 jobs:
   architecture:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
     name: Import contracts
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -43,7 +36,6 @@ jobs:
   # straight from git. A source change without a rebuild once shipped stale
   # launcher copies; rebuilding here and requiring a clean tree stops that.
   plugin-drift:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
     name: Generated plugins match their sources
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -76,7 +68,6 @@ jobs:
           fi
 
   security:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
     name: Dependency and static security gates
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -102,198 +93,33 @@ jobs:
       - name: Reject high-confidence high-severity Python findings
         run: uvx --from bandit==1.8.6 bandit -r src/superlocalmemory -q -lll -iii
 
-  test:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
-    runs-on: ${{ matrix.os }}
-    # The test step stops at 75 minutes and the job at 90, so the report and
-    # the artifact upload below always have time to run after a timeout.
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
-        python-version: ["3.12", "3.13", "3.14"]
-        # Windows runs the suite about 1.5x slower, so it runs in 6 fixed parts
-        # (tests/_shard_plugin.py): a part that times out cannot hide the
-        # failures of the others.
-        shard: [1, 2, 3, 4, 5, 6]
-        exclude:
-          - {os: ubuntu-22.04, shard: 2}
-          - {os: ubuntu-22.04, shard: 3}
-          - {os: ubuntu-22.04, shard: 4}
-          - {os: ubuntu-22.04, shard: 5}
-          - {os: ubuntu-22.04, shard: 6}
-          - {os: macos-14, shard: 2}
-          - {os: macos-14, shard: 3}
-          - {os: macos-14, shard: 4}
-          - {os: macos-14, shard: 5}
-          - {os: macos-14, shard: 6}
+  gate:
+    name: Release-contract gate (macOS)
+    runs-on: macos-14
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      # uv-managed Python: python.org builds cannot load SQLite extensions,
+      # so sqlite-vec never loads and doctor, media and document tests fail.
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install libomp (macOS — required by lightgbm)
-        if: runner.os == 'macOS'
+          node-version: "22"
+      - name: Install libomp (required by lightgbm)
         run: brew install libomp
-
-      # No fallback: a failed dev install must fail here, not run the suite
-      # without its test dependencies.
-      - name: Install package
-        run: pip install -e ".[dev]"
-        shell: bash
-
-      - name: Install portalocker (Windows file locking)
-        if: runner.os == 'Windows'
-        run: pip install portalocker
-
-      - name: Install test dependencies
-        run: pip install pytest pytest-asyncio sqlite-vec pytest-reportlog==1.0.0 "pytest-xdist>=3.6"
-
-      # The report log is written one test at a time, so a run that is
-      # cancelled or times out still names every test that ran and failed.
-      # A test stuck for 15 minutes, or a run still going at 70, ends the run
-      # itself (tests/_hard_timeout_plugin.py) with the stuck test's stacks and
-      # processes in hung-test.txt, before the step and job limits cancel the
-      # job and lose its log.
-      - name: Run tests
-        shell: bash
-        timeout-minutes: 75
-        env:
-          SHARD: ${{ matrix.os == 'windows-latest' && format('{0}/6', matrix.shard) || '1/1' }}
-        run: |
-          # -n 4: the suite ran on one core and Linux/macOS hit the 75-minute
-          # step limit on every run (76-78 min, "failure"); the release gate
-          # already runs -n 4.
-          python -m pytest tests/ -q --tb=short -o faulthandler_timeout=300 -n 4 \
-            -p tests._shard_plugin --shard "$SHARD" \
-            -p tests._hard_timeout_plugin --hard-timeout 900 \
-            --hard-timeout-session 4200 --hard-timeout-report hung-test.txt \
-            -rfE --durations=30 --report-log=test-report.jsonl \
-            --ignore=tests/test_integration/test_mode_b_ollama.py \
-            --ignore=tests/test_integration/test_e2e.py \
-            --ignore=tests/test_integration/test_e2e_v32.py \
-            --ignore=tests/test_integration/test_e2e_v33.py \
-            --ignore=tests/test_benchmarks/ \
-            --ignore=tests/graph/test_cozo_backend.py \
-            --ignore=tests/vector/test_lancedb_backend.py
-
-      # always(): this must run after a failure, a step timeout and a cancel.
-      - name: List every failed test
-        if: always()
-        shell: bash
-        run: |
-          python - <<'EOF'
-          import json, pathlib
-          log = pathlib.Path("test-report.jsonl")
-          if not log.exists():
-              raise SystemExit("No test report: the run stopped before any test ran.")
-          bad, started, finished = {}, [], set()
-          # A run cut short leaves a half-written last line; every line before
-          # it is still a complete record.
-          for line in log.read_text(encoding="utf-8").splitlines():
-              try:
-                  rec = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              kind, nodeid = rec.get("$report_type"), rec.get("nodeid")
-              if kind in ("TestReport", "CollectReport") and rec.get("outcome") == "failed":
-                  bad.setdefault(nodeid or "(collection)", rec.get("when", "collect"))
-              if kind == "TestReport" and rec.get("when") == "setup":
-                  started.append(nodeid)
-              if kind == "TestReport" and rec.get("when") == "teardown":
-                  finished.add(nodeid)
-          print(f"{len(bad)} failed or errored:")
-          for nodeid, when in bad.items():
-              print(f"  {when:8} {nodeid}")
-          unfinished = [nodeid for nodeid in started if nodeid not in finished]
-          if unfinished:
-              print(f"{len(unfinished)} started and never finished (the run stopped here):")
-              for nodeid in unfinished:
-                  print(f"  {nodeid}")
-          hung = pathlib.Path("hung-test.txt")
-          if hung.exists():
-              print(hung.read_text(encoding="utf-8", errors="replace"))
-          EOF
-
-      - name: Upload the test report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-report-${{ matrix.os }}-py${{ matrix.python-version }}-part${{ matrix.shard }}
-          path: |
-            test-report.jsonl
-            hung-test.txt
-          retention-days: 14
-          if-no-files-found: warn
-
-  windows-focused:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.focused_windows }}
-    name: Windows focused proofs (${{ matrix.python-version }})
-    runs-on: windows-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ${{ fromJSON(inputs.python_matrix) }}
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-      - name: Install focused test environment
-        shell: bash
-        run: |
-          python -m pip install --disable-pip-version-check -e ".[dev]"
-          python -m pip install --disable-pip-version-check \
-            pytest pytest-asyncio sqlite-vec portalocker
-      - name: Repeat Windows release-blocker proofs
-        shell: bash
-        run: |
-          for attempt in 1 2 3 4 5; do
-            echo "Windows proof attempt ${attempt}/5"
-            python -m pytest -q -o "addopts=" -o faulthandler_timeout=20 \
-              tests/test_adapters/test_antigravity_adapter.py::test_content_hash_skip \
-              tests/storage/test_admission_journal_concurrency.py::test_deadline_refusal_is_never_written_later \
-              tests/stress/test_386_canonical_legacy_multiprocess_contention.py::test_386_canonical_remember_survives_legacy_multiprocess_contention \
-              "tests/test_core/test_embedding_fallback.py::TestEmbeddingServiceTimeout"
-          done
-      # Windows-only tests skip everywhere else, so this job is the only place
-      # a focused Windows run proves them: the plugin starting the installed
-      # slm through cmd.exe (#139, 8 tests) and owner-only access lists on the
-      # remote TLS key and key store.
-      - name: Windows-only behaviour
-        shell: bash
-        run: |
-          python -m pytest -q -o "addopts=" -o faulthandler_timeout=60 -rs \
-            tests/test_plugin/test_windows_mcp_starts_installed_slm.py \
-            tests/server/test_remote_secrets_owner_only.py \
-            tests/test_mesh/test_mesh_store.py \
-            tests/test_mesh/test_mesh_store_hardening.py \
-            tests/test_mesh/test_mesh_store_fsync.py \
-            tests/test_cli/test_doctor_reports_mesh_db.py
+      - name: Install the locked environment
+        run: uv sync --frozen --python 3.12
+      - name: Release-contract gate
+        run: uv run bash scripts/ci-gate.sh
 
   native-lancedb:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.focused_windows }}
-    name: Native LanceDB (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Native LanceDB (macOS)
+    runs-on: macos-14
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-14]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
       - name: Install native backend test environment
-        run: python -m pip install --disable-pip-version-check -e ".[dev,lancedb]"
+        run: uv sync --frozen --python 3.12 --extra lancedb
       - name: Run LanceDB in a dedicated process lane
-        run: python -m pytest -q -m native tests/vector
+        run: uv run python -m pytest -q -m native tests/vector

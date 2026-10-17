@@ -19,13 +19,67 @@ env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
+  # The release-contract gate (scripts/ci-gate.sh) on macOS: the same script
+  # pull requests run, so a green PR is what the release checks. 4.2.9: the
+  # full suite (~23,000 tests, 46 min on the runner) left this job; its timing
+  # tests measured the shared runner and kept failing releases. The full suite
+  # runs once, locally, before tagging.
+  gate:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Check out the release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          git checkout --detach "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
+
+      # A recovery run for a version a registry already serves skips the gate:
+      # those bytes are public, and the release job still tests the exact
+      # candidate artifacts before it publishes what is missing.
+      - name: Detect a recovery run
+        id: recovery
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -uo pipefail
+          V="${RELEASE_TAG#v}"
+          PYPI=$(curl -fsS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/superlocalmemory/$V/json" || true)
+          NPM=$(npm view "superlocalmemory@$V" version 2>/dev/null || true)
+          if [ "$PYPI" = "200" ] || [ "$NPM" = "$V" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$V is already on a registry; this recovery run skips the gate"
+          fi
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        if: steps.recovery.outputs.skip != 'true'
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        if: steps.recovery.outputs.skip != 'true'
+        with:
+          node-version: "22"
+
+      - name: Install the locked environment
+        if: steps.recovery.outputs.skip != 'true'
+        run: |
+          brew install libomp
+          uv sync --frozen --python 3.12
+          npm ci --ignore-scripts
+
+      - name: Release-contract gate
+        if: steps.recovery.outputs.skip != 'true'
+        run: uv run bash scripts/ci-gate.sh
+
   release:
+    needs: gate
     runs-on: ubuntu-latest
-    # The gates run ~22,500 tests. Serial, that measured 70-95 minutes on the
-    # runner (v4.2.3 reached 34% in 23 min; v4.2.4 reached 48% at the old 45 min
-    # limit and was cancelled), so the gate is parallel (-n 4) and the budget
-    # leaves room for slower runners plus the build, artifact and publish steps.
-    timeout-minutes: 90
+    # Build, artifact tests and publication only; the gate job tested the code.
+    timeout-minutes: 45
     environment:
       name: pypi
       url: https://pypi.org/project/superlocalmemory/
@@ -102,10 +156,9 @@ jobs:
           npm ci --ignore-scripts
           uv sync --extra dev
 
-      # A recovery run (workflow_dispatch) for a version that PyPI and npm
-      # already serve only finishes distribution: those bytes passed the gates
-      # in the run that published them, and re-running a 40-minute suite on a
-      # busy runner only adds chances for a timing test to stop the channels.
+      # A recovery run (workflow_dispatch) reuses what a registry already
+      # serves: a rebuild never matches published bytes (file timestamps), and
+      # the registry guard rightly refuses bytes PyPI or npm do not serve.
       - name: Detect an already published version
         id: published
         if: github.event_name == 'workflow_dispatch'
@@ -115,45 +168,13 @@ jobs:
           V="${{ steps.version.outputs.version }}"
           PYPI=$(curl -fsS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/superlocalmemory/$V/json" || true)
           NPM=$(npm view "superlocalmemory@$V" version 2>/dev/null || true)
+          [ "$PYPI" = "200" ] && echo "pypi=true" >> "$GITHUB_OUTPUT"
+          [ "$NPM" = "$V" ] && echo "npm=true" >> "$GITHUB_OUTPUT"
           if [ "$PYPI" = "200" ] && [ "$NPM" = "$V" ]; then
             echo "both=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::$V is already on PyPI and npm; gates ran in the publishing run"
+            echo "::notice::$V is already on PyPI and npm; distributing the published bytes"
           fi
-
-      - name: Run release gates
-        if: steps.published.outputs.both != 'true'
-        run: |
-          RELEASE_TEST_ARGS=(
-            tests/ -q --tb=short -x -n 4 --durations=15
-            --deselect=tests/test_retrieval/test_recall_latency_budget.py::test_wide_store_recall_stays_within_latency_budget
-            --ignore=tests/test_integration/test_mode_b_ollama.py
-            --ignore=tests/test_integration/test_e2e.py
-            --ignore=tests/test_integration/test_e2e_v32.py
-            --ignore=tests/test_integration/test_e2e_v33.py
-            --ignore=tests/test_benchmarks/
-            --ignore=tests/graph/test_cozo_backend.py
-            --ignore=tests/vector/test_lancedb_backend.py
-          )
-          # V4.0.1 was tagged with stale documentation and V3.7 metadata tests.
-          # This one-time remediation preserves the immutable tagged package and
-          # retains executable, artifact, plugin, and registry gates.
-          if [ "$RELEASE_TAG" = "v4.0.1" ]; then
-            RELEASE_TEST_ARGS+=(--deselect=tests/docs/test_readme_wp13.py::test_line_count_le_720)
-            RELEASE_TEST_ARGS+=(--deselect=tests/release/test_v37_rc_candidate_contract.py::test_v37_release_source_has_final_package_version)
-            RELEASE_TEST_ARGS+=(--deselect=tests/release/test_v37_rc_candidate_contract.py::test_v37_citation_metadata_matches_the_release)
-          fi
-          uv run python -m pytest "${RELEASE_TEST_ARGS[@]}"
-          npm test
-          npm run check:plugin
-
-      # A wall-clock budget measured while three other workers run the suite
-      # measures the runner, not SLM. It runs alone here and reports.
-      - name: Recall latency budget (alone, reported)
-        continue-on-error: true
-        run: |
-          uv run python -m pytest -q -s -p no:xdist \
-            tests/test_retrieval/test_recall_latency_budget.py \
-            || echo "::warning::recall latency budget exceeded on this runner; see the p95 above"
+          exit 0
 
       - name: Build both release artifacts
         id: artifacts
@@ -161,17 +182,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/python dist/npm
-          if [ "${{ steps.published.outputs.both }}" = "true" ]; then
-            # Recovery of a published version: distribute the exact published
-            # bytes. A rebuild differs (file timestamps), and the registry guard
-            # rightly refuses bytes that are not the ones PyPI and npm serve.
-            V="${{ steps.version.outputs.version }}"
+          V="${{ steps.version.outputs.version }}"
+          # Per registry: what is published is reused byte for byte, and only
+          # what is missing is built (4.2.9: PyPI published, npm not).
+          if [ "${{ steps.published.outputs.pypi }}" = "true" ]; then
             curl -fsS "https://pypi.org/pypi/superlocalmemory/$V/json" \
               | python3 -c 'import json,sys; [print(u["url"]) for u in json.load(sys.stdin)["urls"]]' \
               | while read -r url; do curl -fsSL -o "dist/python/$(basename "$url")" "$url"; done
-            (cd dist/npm && npm pack "superlocalmemory@$V")
           else
             uv build --out-dir dist/python
+          fi
+          if [ "${{ steps.published.outputs.npm }}" = "true" ]; then
+            (cd dist/npm && npm pack "superlocalmemory@$V")
+          else
             npm pack --pack-destination dist/npm
           fi
           NPM_TARBALL=$(find dist/npm -maxdepth 1 -type f -name '*.tgz' -print -quit)

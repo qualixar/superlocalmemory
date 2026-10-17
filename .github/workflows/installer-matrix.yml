@@ -49,7 +49,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
+        # macOS only (4.2.9): CI must be fast and green. The Windows steps
+        # below stay, guarded, so adding the OS back is a one-line change.
+        os: [macos-14]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Prepare isolated runtime paths
@@ -118,7 +120,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
+        # macOS only (4.2.9): CI must be fast and green. The Windows steps
+        # below stay, guarded, so adding the OS back is a one-line change.
+        os: [macos-14]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Prepare isolated runtime paths

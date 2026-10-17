@@ -365,7 +365,21 @@ pytest tests/test_memory_store.py::test_add_memory
 
 # Verbose output
 pytest -v tests/
+
+# The CI gate: what every pull request and release must pass (about 10 min)
+bash scripts/ci-gate.sh
 ```
+
+### What CI runs
+
+CI is kept small so it stays fast and green: three quick Linux checks (import
+contracts, generated plugins match their sources, dependency and security
+audit) and one macOS job that runs `scripts/ci-gate.sh`, the release-contract
+tests. The release workflow runs the same script before it publishes.
+
+The full suite (about 23,000 tests) is not a CI job. Maintainers run it once,
+locally, before tagging a release (`pytest tests/ -n auto`). If you change code
+outside the gate's folders, run that code's tests locally and say so in the PR.
 
 ### Test Requirements
 
