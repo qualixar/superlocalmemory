@@ -1881,9 +1881,14 @@ def review_correction(request: Request, case_id: str, action: str, caller_view: 
         if not result.get("ok"):
             raise HTTPException(404, detail="Correction case not found")
         if action in {"apply", "rollback"}:
-            from superlocalmemory.core.mutations import purge_profile_context_cache
+            from superlocalmemory.core.mutations import (
+                index_applied_successor,
+                purge_profile_context_cache,
+            )
 
             purge_profile_context_cache(engine, target_profile)
+            if action == "apply" and result.get("successor_fact_id"):
+                index_applied_successor(engine, target_profile, str(result["successor_fact_id"]))
         engine._hooks.run_post("update", hook_context)
         _announce("memory.updated", {"case_id": case_id, "profile_id": target_profile,
                                      "status": action}, hook_context["agent_id"])

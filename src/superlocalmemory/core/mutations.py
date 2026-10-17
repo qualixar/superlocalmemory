@@ -769,4 +769,34 @@ def update_fact_authorized(
     }
 
 
-__all__ = ["delete_fact_authorized", "purge_profile_context_cache", "update_fact_authorized"]
+def index_applied_successor(engine: Any, profile_id: str, successor_fact_id: str) -> bool:
+    """Make an applied correction findable by meaning; True when it is.
+
+    The writer saves a successor with its embedding but outside the vector
+    index and BM25, so a proposal is never searchable. Once applied it must
+    be: before 4.2.10 nothing indexed it, and a question could not find the
+    corrected memory until a daemon restart rebuilt the index. The apply is
+    already committed, so a failure here is logged, never raised: that
+    rebuild still covers the memory.
+    """
+    try:
+        from superlocalmemory.core.store_pipeline import _upsert_fact_vectors
+
+        fact = engine._db.get_fact(successor_fact_id)
+        if fact is None:
+            return False
+        projected = _upsert_fact_vectors(
+            fact, profile_id, engine._ann_index, engine._vector_store, engine._embedder,
+        )
+        bm25 = getattr(getattr(engine, "_retrieval_engine", None), "_bm25", None)
+        if bm25 is not None:
+            bm25.add(fact.fact_id, fact.content, profile_id)
+        return projected
+    except Exception as exc:  # noqa: BLE001 - the apply is committed; restart re-indexes
+        logger.warning("Applied correction %s not indexed (%s); a restart re-indexes it",
+                       successor_fact_id[:16], type(exc).__name__)
+        return False
+
+
+__all__ = ["delete_fact_authorized", "index_applied_successor",
+           "purge_profile_context_cache", "update_fact_authorized"]
