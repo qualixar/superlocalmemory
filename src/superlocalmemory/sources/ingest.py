@@ -208,7 +208,7 @@ def resolve_keys(runtime: Any, profile_id: str, keys: list[str]) -> KeyFacts:
 
 
 def _finished(row: Any) -> bool:
-    """True when an operation row (key, state, attempt_count, next_retry_at, ...) can gain no more facts."""
+    """True when an operation row (key, state, attempts, next retry, ...) can gain no more facts."""
     return row[1] == "complete" or is_terminal_failure(row[1], row[2], row[3])
 
 
@@ -228,8 +228,9 @@ def unfinished_keys(runtime: Any, profile_id: str, keys: list[str]) -> list[str]
         for i in range(0, len(keys), 400):
             part = keys[i:i + 400]
             rows = db.execute(
-                "SELECT idempotency_key, state, attempt_count, next_retry_at FROM ingestion_operations"
-                " WHERE profile_id = ? AND source_type IN ('folder', 'media') AND idempotency_key IN ("
+                "SELECT idempotency_key, state, attempt_count, next_retry_at"
+                " FROM ingestion_operations WHERE profile_id = ?"
+                " AND source_type IN ('folder', 'media') AND idempotency_key IN ("
                 + ",".join("?" * len(part)) + ")", (profile_id, *part))
             unfinished += [str(row[0]) for row in rows if not _finished(row)]
     except Exception as exc:  # noqa: BLE001 - what cannot be looked up is not known to be finished

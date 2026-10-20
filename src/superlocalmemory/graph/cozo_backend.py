@@ -556,7 +556,8 @@ class CozoDBGraphBackend:
                 "created_at": now,
             })
 
-        columns = ("from_id", "to_id", "edge_type", "weight", "metadata", "profile_id", "created_at")
+        columns = ("from_id", "to_id", "edge_type", "weight", "metadata", "profile_id",
+                   "created_at")
         for start in range(0, len(edge_dicts), 50_000):
             self._put_edges([[e[c] for c in columns] for e in edge_dicts[start:start + 50_000]])
         logger.info("CozoDB: imported %d edges", len(edge_dicts))

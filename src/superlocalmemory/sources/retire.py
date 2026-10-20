@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 def _facts(runtime: Any, entries: list[dict[str, Any]], profile_id: str = "") -> tuple[list[str], int]:
     """The fact ids the entries own, and how many saves (by key) may still gain facts.
 
-    The ``f`` ids are only what was queryable when a save returned; enrichment adds facts to the same
-    memory afterwards (#297). So every memory's facts are read again here, and a committed save whose
-    operation has not finished counts as pending, never as hidden or erased.
+    The ``f`` ids are only what was queryable when a save returned; enrichment adds facts to
+    the same memory afterwards (#297). So every memory's facts are read again here, and a
+    committed save whose operation has not finished counts as pending, never as done.
     """
     facts = [f for e in entries for f in e.get("f") or []]
     memories = [e["m"] for e in entries if e.get("m")]
