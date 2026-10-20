@@ -197,8 +197,26 @@ def hide_file(host: SourceHost, store: SourceStore, runtime: Any, source: dict, 
     return failures
 
 
+def _erasure_done(counts: dict[str, Any]) -> tuple[bool, int]:
+    """Whether an erasure left the live store clean, and how many snapshots still hold the facts.
+
+    A snapshot (``backups/``, ``pre-migration-snapshots/`` from a scale promotion) cannot be
+    rewritten, so the erasure records it as an obligation: replayed on any restore, outstanding
+    on the receipt until the snapshot is gone. No retry here can change that, so it does not
+    hold the folder back (#297). Anything else left, or a receipt that was not written, does.
+    """
+    if counts.get("erasure_complete"):
+        return True, 0
+    from superlocalmemory.compliance.erasure_outcome import remaining_markers
+
+    held = int(counts.get("backup_obligations_pending") or 0)
+    if held and remaining_markers(counts) == ["backup_obligations_pending"]:
+        return True, held
+    return False, 0
+
+
 def _erase(host: SourceHost, runtime: Any, source: dict, entries: list[dict[str, Any]],
-           subject: str) -> bool:
+           subject: str, held: list[int] | None = None) -> bool:
     facts, pending = _facts(runtime, entries, source["profile_id"])
     if pending:  # a queued save that has not committed cannot be erased yet; retried on the next pass
         return False
@@ -211,13 +229,20 @@ def _erase(host: SourceHost, runtime: Any, source: dict, entries: list[dict[str,
     except Exception as exc:  # noqa: BLE001 - retried on the next pass
         logger.warning("a folder erasure failed (%s)", type(exc).__name__)
         return False
-    return bool(counts.get("erasure_complete"))
+    done, snapshots = _erasure_done(counts)
+    if done and held is not None:
+        held.append(snapshots)
+    return done
 
 
-def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, row: dict[str, Any]) -> bool:
-    """Hard-erase a file row's memories (and its PDF) and drop the row; False if not complete."""
+def erase_row(host: SourceHost, store: SourceStore, runtime: Any, source: dict, row: dict[str, Any],
+              held: list[int] | None = None) -> bool:
+    """Hard-erase a file row's memories (and its PDF) and drop the row; False if not complete.
+
+    ``held`` collects, per erasure, how many snapshots still hold what was erased.
+    """
     subject = f"src:{source['source_id'][:12]}"
-    if not _erase(host, runtime, source, entries_of(row), subject):
+    if not _erase(host, runtime, source, entries_of(row), subject, held):
         return False
     if row.get("document_id") and row.get("reason") != "shared":
         from superlocalmemory.documents import remove_document

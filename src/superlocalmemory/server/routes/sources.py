@@ -128,8 +128,8 @@ async def confirm(source_id: str, request: Request):
 async def remove(source_id: str, request: Request, purge: bool = False):
     profile, _ = await _context(request, delete=True)
     await _owned(profile, source_id)
-    await _call(sources.remove_source, source_id, purge=purge)
-    return {"removed": True, "source_id": source_id, "purged": purge}
+    report = await _call(sources.remove_source, source_id, purge=purge)
+    return {"removed": True, "source_id": source_id, "purged": purge, **(report or {})}
 
 
 @router.post("/{source_id}/forget-empty")

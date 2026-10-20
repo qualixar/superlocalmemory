@@ -181,8 +181,11 @@ def _source(store: SourceStore | None, source_id: str) -> dict[str, Any]:
     return source
 
 
-def remove_source(source_id: str, *, purge: bool = False) -> None:
+def remove_source(source_id: str, *, purge: bool = False) -> dict[str, int] | None:
     """Disconnect a folder. Its memories are hidden (kept); with ``purge`` they are erased.
+
+    A purge returns ``{"backup_copies_holding": n}``: the most snapshots that still hold any
+    erased memory, as erasure obligations (they are cleaned on restore; delete them to finish).
 
     A scan that is running for the folder is told to stop and finishes its current file first;
     queued scans are cancelled. Once removed, the folder is never set back by a scan.
@@ -197,22 +200,24 @@ def remove_source(source_id: str, *, purge: bool = False) -> None:
         try:
             store.cancel_scans(source_id)
             with locks.held(source_id, _REMOVE_WAIT_S):
-                _clear_source(host, store, runtime, source, purge)
+                held = _clear_source(host, store, runtime, source, purge)
         except locks.SourceBusy:
             raise SourceRefused("source_busy", _BUSY_MESSAGE) from None
         finally:
             locks.clear_removing(source_id)
     finally:
         media.close()
+    return {"backup_copies_holding": max(held, default=0)} if purge else None
 
 
 def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: dict[str, Any],
-                  purge: bool) -> None:
+                  purge: bool) -> list[int]:
     source_id = source["source_id"]
     failures = 0
+    held: list[int] = []
     if purge:
         for row in store.files(source_id):
-            if not retire.erase_row(host, store, runtime, source, row):
+            if not retire.erase_row(host, store, runtime, source, row, held):
                 raise SourceRefused("erasure_incomplete", "The erasure was not complete; try again.")
     else:
         # Memories and documents an earlier attempt could not hide are tried again here too.
@@ -226,6 +231,7 @@ def _clear_source(host: SourceHost, store: SourceStore, runtime: Any, source: di
         store.delete_source_rows(source_id)
     else:
         store.set_state(source_id, "removed")
+    return held
 
 
 def _check_still_empty(host: SourceHost, source: dict[str, Any]) -> int:

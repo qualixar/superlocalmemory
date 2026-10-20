@@ -209,8 +209,15 @@ def _remove(args: Namespace) -> None:
                               _ERASE_WORD):
         out.fail("Nothing was erased.")
     done = _request(out, "DELETE", f"{_BASE}/{sid}" + ("?purge=true" if purge else ""))
-    out.emit(done, f"Removed {sid}." + (" Its memories were erased." if purge
-                                        else " Its memories stay, hidden from the folder's files; add --purge to erase them."))
+    held = int((done or {}).get("backup_copies_holding") or 0) if isinstance(done, dict) else 0
+    text = f"Removed {sid}." + (" Its memories were erased." if purge
+                                else " Its memories stay, hidden from the folder's files; add --purge to erase them.")
+    if held:
+        text += (f" {held} backup cop{'y' if held == 1 else 'ies'} still hold some of them: each is an"
+                 " erasure obligation, cleaned on any restore. They are the snapshots in the"
+                 " backups/ and pre-migration-snapshots/ folders of your SLM data folder;"
+                 " delete them to finish.")
+    out.emit(done, text)
 
 
 def _forget_empty(args: Namespace) -> None:
