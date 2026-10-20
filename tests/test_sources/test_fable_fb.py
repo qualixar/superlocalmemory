@@ -176,8 +176,11 @@ def test_removing_a_folder_with_a_queued_save_is_incomplete_until_the_save_commi
     with pytest.raises(SourceRefused):
         sources.remove_source(sid)
     ops.conn.execute("UPDATE ingestion_operations SET state = 'queryable', queryable_fact_ids_json = '[\"q1\"]'")
-    sources.remove_source(sid)  # the commit landed: the retry hides it
-    assert env.runtime.archived == ["q1"]
+    with pytest.raises(SourceRefused):  # queryable, but enrichment may still add facts (#297)
+        sources.remove_source(sid)
+    ops.conn.execute("UPDATE ingestion_operations SET state = 'complete'")
+    sources.remove_source(sid)  # the save finished: the retry hides it
+    assert set(env.runtime.archived) == {"q1"}  # archived early, again on retry (same idempotency key)
     assert sources.list_sources("default") == []
 
 
@@ -201,8 +204,14 @@ def test_a_scan_hides_a_queued_save_that_was_replaced_once_it_commits(env, monke
     old = [e for e in json.loads(env.files(sid)["a.md"]["memory_ids_json"]) if e.get("k") == key]
     assert old and old[0].get("old") and not old[0].get("sup")
     ops.put(key, "queryable", ["q1"])
-    env.scan(sid)
+    env.scan(sid)  # queryable, but enrichment may still add facts (#297): hidden so far, not done
     assert "q1" in env.runtime.archived
+    old = [e for e in json.loads(env.files(sid)["a.md"]["memory_ids_json"]) if e.get("k") == key]
+    assert old[0].get("old") and not old[0].get("sup")
+    ops.conn.execute("UPDATE ingestion_operations SET state = 'complete'")
+    env.scan(sid)
+    old = [e for e in json.loads(env.files(sid)["a.md"]["memory_ids_json"]) if e.get("k") == key]
+    assert old[0].get("sup") and not old[0].get("old")
 
 
 # -- CX5 residual: a retry of the same file version re-sends the same keys --------------------

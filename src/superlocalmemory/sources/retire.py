@@ -12,7 +12,7 @@ from typing import Any
 
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
-from superlocalmemory.sources.ingest import facts_of, resolve_keys
+from superlocalmemory.sources.ingest import facts_of, resolve_keys, unfinished_keys
 from superlocalmemory.sources.store import (
     SourceStore, current_documents, entries_of, memory_entries, pending_documents, replaced_documents,
     replaced_pictures,
@@ -22,12 +22,20 @@ logger = logging.getLogger(__name__)
 
 
 def _facts(runtime: Any, entries: list[dict[str, Any]], profile_id: str = "") -> tuple[list[str], int]:
-    """The fact ids the entries own, and how many queued saves (by key) have not committed yet."""
+    """The fact ids the entries own, and how many saves (by key) may still gain facts.
+
+    The ``f`` ids are only what was queryable when a save returned; enrichment adds facts to the same
+    memory afterwards (#297). So every memory's facts are read again here, and a committed save whose
+    operation has not finished counts as pending, never as hidden or erased.
+    """
     facts = [f for e in entries for f in e.get("f") or []]
-    unknown = [e["m"] for e in entries if e.get("m") and not e.get("f")]
+    memories = [e["m"] for e in entries if e.get("m")]
     queued = [e["k"] for e in entries if e.get("k") and not e.get("m") and not e.get("f")]
+    committed = [e["k"] for e in entries if e.get("k") and (e.get("m") or e.get("f"))]
     keyed = resolve_keys(runtime, profile_id, queued)
-    return sorted({*facts, *facts_of(runtime, unknown), *keyed.facts}), len(keyed.pending)
+    unfinished = unfinished_keys(runtime, profile_id, committed)
+    return (sorted({*facts, *facts_of(runtime, memories), *keyed.facts}),
+            len(keyed.pending) + len(unfinished))
 
 
 # Local hiding goes through ``archive_fact`` (recall already skips archived facts), the same as
