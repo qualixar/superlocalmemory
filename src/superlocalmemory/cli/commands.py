@@ -1327,6 +1327,10 @@ def cmd_config(args: Namespace) -> None:
             # found declaring two backends it had never built.
             "scope.default_scope", "scope.recall_include_global",
             "scope.recall_include_shared",
+            # #297: the documented switches for automatic context. injection.enabled off means
+            # SLM adds no memories to an agent's context on its own; auto_invoke.enabled off
+            # stops the auto-invoke engine. Explicit recall and search keep working.
+            "injection.enabled", "auto_invoke.enabled",
         }
         if key not in _ALLOWED_CONFIG_KEYS:
             if use_json:
@@ -1379,6 +1383,7 @@ def cmd_config(args: Namespace) -> None:
             sys.exit(1)
         if key in {
             "scope.recall_include_global", "scope.recall_include_shared",
+            "injection.enabled", "auto_invoke.enabled",
         } and not isinstance(parsed_value, bool):
             message = f"{key} must be true or false"
             if use_json:
@@ -1458,13 +1463,18 @@ def cmd_config(args: Namespace) -> None:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
 
+        # The auto-invoke engine is built when the daemon starts; hooks read injection each run.
+        restart_required = key == "auto_invoke.enabled"
         if use_json:
             from superlocalmemory.cli.json_output import json_print
             json_print("config", data={
                 "key": key, "old_value": old_value, "new_value": parsed_value,
+                **({"restart_required": True} if restart_required else {}),
             })
         else:
             print(f"{key}: {old_value} -> {parsed_value}")
+            if restart_required:
+                print("Run `slm restart` to apply it.")
             if key == "evolution.enabled" and parsed_value is True:
                 print(
                     "\n⚠  Skill evolution is now ON. It makes background "
@@ -5012,6 +5022,16 @@ def cmd_session_context(args: Namespace) -> None:
 
     use_json = getattr(args, "json", False)
     use_full = getattr(args, "full", False)
+
+    # The Claude and Codex SessionStart hooks both print this command's output into the agent's
+    # context: ``injection.enabled`` / ``auto_recall.on_session_start`` off means nothing goes in.
+    from superlocalmemory.hooks import rules_engine
+
+    if not rules_engine.load().should_recall("session_start"):
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print("session-context", data={"context": "", "switched_off": True})
+        return
 
     if use_full:
         # Full engine path (slow, requires Ollama) — for explicit CLI use

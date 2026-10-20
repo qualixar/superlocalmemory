@@ -66,7 +66,11 @@ def _upgraded(stored: dict, version: int) -> dict:
 class RulesEngine:
     """Manage configurable rules for auto-capture and auto-recall."""
 
-    def __init__(self, config: dict | None = None, config_path: Path | None = None):
+    def __init__(self, config: dict | None = None, config_path: Path | None = None,
+                 *, injection_on: bool = True):
+        # ``injection.enabled`` is the master switch for everything SLM adds to an agent's
+        # context on its own (InjectionConfig); off, no automatic recall fires anywhere.
+        self._injection_on = injection_on
         if config:
             self._rules = _merged(config)
         elif config_path and config_path.exists():
@@ -74,6 +78,9 @@ class RulesEngine:
             version = data.get("rules_version", 1)
             stored = data.get("rules", {})
             self._rules = _merged(_upgraded(stored, version if isinstance(version, int) else 1))
+            injection = data.get("injection")
+            if isinstance(injection, dict) and injection.get("enabled") is False:
+                self._injection_on = False
         else:
             self._rules = _merged({})
 
@@ -94,7 +101,7 @@ class RulesEngine:
     def should_recall(self, trigger: str) -> bool:
         """Check if auto-recall should fire for a trigger."""
         recall_rules = self._rules.get("auto_recall", {})
-        if not recall_rules.get("enabled", True):
+        if not self._injection_on or not recall_rules.get("enabled", True):
             return False
 
         if trigger == "session_start":

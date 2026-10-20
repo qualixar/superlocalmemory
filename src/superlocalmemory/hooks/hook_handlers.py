@@ -139,11 +139,20 @@ PER_PROMPT_ACTIONS = frozenset({
 })
 
 
-def _per_prompt_recall_off() -> bool:
+#: Every hook that adds recalled memories to the agent's context, by its rules trigger. All of
+#: them honour ``injection.enabled`` and ``auto_recall.enabled``; the session-start context goes
+#: through ``slm session-context``, which checks the ``session_start`` trigger itself.
+INJECTING_ACTIONS = {
+    **{action: "every_prompt" for action in PER_PROMPT_ACTIONS},
+    "before_web": "before_web",
+}
+
+
+def _recall_switched_off(trigger: str) -> bool:
     try:
         from superlocalmemory.hooks import rules_engine
 
-        return not rules_engine.load().per_prompt_recall_on()
+        return not rules_engine.load().should_recall(trigger)
     except Exception:  # fail open: the hook runs as it always has
         return False
 
@@ -153,7 +162,8 @@ def handle_hook(action: str) -> None:
     # Grok CLI sends camelCase keys; every handler below reads snake_case.
     from superlocalmemory.hooks.payload_keys import normalize_stdin
     normalize_stdin()
-    if action in PER_PROMPT_ACTIONS and _per_prompt_recall_off():
+    trigger = INJECTING_ACTIONS.get(action)
+    if trigger and _recall_switched_off(trigger):
         sys.stdout.write("{}")
         sys.exit(0)
     # v3.4.22 (LLD-01 §4.7): Active-Brain hot-path handlers are routed here

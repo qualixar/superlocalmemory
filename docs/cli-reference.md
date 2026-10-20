@@ -1047,6 +1047,11 @@ slm config set scope.recall_include_shared true
 | `entity_compilation_enabled` | Per-entity knowledge summaries |
 | `graph_backend`, `vector_backend` | Scale Engine backends (see `slm db scale`) |
 | `scope.default_scope`, `scope.recall_include_global`, `scope.recall_include_shared` | Where new memories go and whether recall includes other profiles' memories (see [Shared memory](shared-memory.md)) |
+| `injection.enabled` | `false` stops SLM adding memories to an agent's context on its own: no session-start context (Claude Code and Codex), no per-prompt or before-web recall, and `session_init` / `prestage_context` return no memories. Explicit `recall` and `search` keep working. Default `true` |
+| `auto_invoke.enabled` | `false` turns off the auto-invoke engine. Default `true`. Takes effect after `slm restart` |
+
+`injection.enabled` is read each time a hook or tool runs, so it applies from the next prompt.
+To check what is set: `slm config get injection.enabled`.
 
 Other settings are changed with their own command (`slm mode`, `slm provider`,
 `slm embedder`, `slm optimize`) or in the dashboard. See
