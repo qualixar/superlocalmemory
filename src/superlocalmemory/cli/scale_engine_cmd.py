@@ -18,6 +18,8 @@ def cmd_db_scale(args: Namespace) -> int:
         SLMConfig.load(), profile_id="default" if action == "adopt" else None
     )
     try:
+        if action in ("promote", "rollback"):
+            _refuse_while_daemon_runs(action)
         if action == "status":
             result = manager.status()
         elif action == "adopt":
@@ -54,3 +56,20 @@ def cmd_db_scale(args: Namespace) -> int:
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _refuse_while_daemon_runs(action: str) -> None:
+    """``promote`` and ``rollback`` swap the Cozo/LanceDB stores a running daemon holds open.
+
+    Swapping them underneath it corrupted the new Cozo store once the daemon restarted
+    (#296: ``rocksdb::kCorruption``, missing SST files), the same reason
+    ``slm db compact --offline`` refuses while the daemon runs.
+    """
+    from superlocalmemory.cli import daemon as _daemon
+    from superlocalmemory.core.scale_engine import ScaleEngineError
+
+    if _daemon.owned_daemon_process_alive():
+        raise ScaleEngineError(
+            f"{action} refused: the daemon is running and holds the graph and vector stores open. "
+            f"Stop it first (`slm serve stop`), run `slm db scale {action}` again, then start it."
+        )

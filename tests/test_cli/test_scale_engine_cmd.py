@@ -54,3 +54,35 @@ def test_vector_contract_failure_is_reported_without_traceback(monkeypatch, caps
     output = capsys.readouterr().out
     assert "Scale Engine: canonical vector mapping is incomplete" in output
     assert "Traceback" not in output
+
+
+# -- #296: promote/rollback swap the Cozo/LanceDB stores a running daemon holds open --------------
+
+import pytest  # noqa: E402
+
+from superlocalmemory.cli import daemon as _daemon  # noqa: E402
+
+
+@pytest.mark.parametrize("action,arg", [("promote", "stage_id"), ("rollback", "backup_id")])
+def test_promote_and_rollback_refuse_while_the_daemon_runs(monkeypatch, capsys, action, arg):
+    monkeypatch.setattr(SLMConfig, "load", staticmethod(SLMConfig))
+    monkeypatch.setattr(_daemon, "owned_daemon_process_alive", lambda: True)
+    called: list[str] = []
+    monkeypatch.setattr(ScaleEngineManager, action, lambda self, _id: called.append(_id) or {})
+
+    args = {"scale_action": action, "stage_id": None, "backup_id": None, arg: "x-1"}
+    assert cmd_db_scale(Namespace(**args)) == 1
+    assert called == []
+    assert "daemon is running" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("action,arg", [("promote", "stage_id"), ("rollback", "backup_id")])
+def test_promote_and_rollback_run_with_the_daemon_stopped(monkeypatch, capsys, action, arg):
+    monkeypatch.setattr(SLMConfig, "load", staticmethod(SLMConfig))
+    monkeypatch.setattr(_daemon, "owned_daemon_process_alive", lambda: False)
+    called: list[str] = []
+    monkeypatch.setattr(ScaleEngineManager, action, lambda self, _id: called.append(_id) or {"ok": True})
+
+    args = {"scale_action": action, "stage_id": None, "backup_id": None, arg: "x-1"}
+    assert cmd_db_scale(Namespace(**args)) == 0
+    assert called == ["x-1"]
