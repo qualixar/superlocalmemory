@@ -126,7 +126,7 @@ This shows which channels contributed what. If BM25 is dominating with weak keyw
 
 ```bash
 slm db regraph --check    # how far the graph copy has drifted; changes nothing
-slm db regraph            # re-derive it from the store
+slm db regraph            # rebuild a drifted copy from the store
 ```
 
 Use it when entity relationships look wrong or after bulk imports.

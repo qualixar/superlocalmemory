@@ -198,112 +198,88 @@ def _cmd_db_compact(args: Namespace) -> int:
 
 
 def _cmd_db_regraph(args: Namespace) -> None:
-    """Re-derive the graph copy of your memories from the store.
+    """Check the graph copy of your memories against the store; rebuild it if it drifted.
 
     Your memories live in one place; a second copy of the connections between
-    them is kept in a graph store so that searching them is fast. The two are
-    kept in step by a queue. If the queue is empty and the two still disagree
-    -- after a crash, a disk problem, or a copy restored from elsewhere --
-    nothing notices, because "the queue is empty" is what "in step" looks like.
+    them is kept in a graph store so that searching them is fast. A queue keeps
+    the two in step, but a queue cannot repair what it never saw: an edge an
+    older version failed to remove stays in the copy for good (#296: 4.3 M edges
+    in the copy against 2.9 M in the store).
 
-    This is how you say so out loud. ``--check`` reports the difference and
-    changes nothing; without it, every memory is queued to be re-derived and
-    the background worker rebuilds the copy from the store, which is the one
-    that is authoritative.
+    ``--check`` reports the difference and changes nothing; without it, a copy
+    that differs once the queue is drained is rebuilt from the store, which is
+    the authoritative one. The daemon checks this by itself on every maintenance
+    cycle; this is how you ask now. Only one process may open the graph copy, so
+    with the daemon running this asks the daemon, and with SLM stopped it works
+    here.
     """
+    from superlocalmemory.cli import daemon as _daemon
+
+    check = bool(getattr(args, "check", False))
+    wanted = str(getattr(args, "profile", "") or "").strip()
+    if _daemon.owned_daemon_process_alive():
+        if not _daemon.is_daemon_running():
+            print("[slm] the daemon is running but not answering; try again shortly.",
+                  file=sys.stderr)
+            sys.exit(1)
+        out = _daemon.daemon_request(
+            "POST", "/maintenance/regraph", {"check": check, "profile": wanted},
+        )
+        if not isinstance(out, dict) or not isinstance(out.get("reports"), list):
+            print(f"[slm] the daemon could not check the graph copy: {out}", file=sys.stderr)
+            sys.exit(1)
+        reports = out["reports"]
+    else:
+        reports = _regraph_offline(check, wanted)
+        if reports is None:
+            print("[slm] no graph copy on this store; nothing to do.")
+            return
+    _print_regraph(reports, check)
+    if any(r.get("error") for r in reports):
+        sys.exit(1)
+
+
+def _regraph_offline(check: bool, wanted: str) -> list[dict] | None:
+    """``slm db regraph`` with SLM stopped; None when the store has no graph copy."""
+    from superlocalmemory.core.backend_orchestrator import BackendOrchestrator
     from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.storage import projection_outbox
+    from superlocalmemory.core.graph_projection_check import regraph
     from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.storage.logical_edges import count_logical_edges
 
     config = SLMConfig.load()
+    if not config.db_path.exists():
+        return None
     db = DatabaseManager(config.db_path)
-    wanted = str(getattr(args, "profile", "") or "").strip()
+    orchestrator = BackendOrchestrator(config, db)
     try:
-        rows = db.execute(
-            "SELECT DISTINCT profile_id FROM atomic_facts ORDER BY profile_id"
-        )
-        profiles = [dict(r)["profile_id"] for r in rows]
-    except Exception as exc:  # noqa: BLE001
-        print(f"[slm] could not list workspaces: {exc}")
-        sys.exit(1)
-    if wanted:
-        profiles = [p for p in profiles if p == wanted]
-        if not profiles:
-            print(f"[slm] no workspace named {wanted!r}")
-            sys.exit(1)
+        if not orchestrator.open_graph_offline():
+            return None
+        return regraph(db, orchestrator, profile=wanted, heal=not check)
+    finally:
+        orchestrator.close_graph_offline()
+        db.close()
 
-    backend = None
-    try:
-        from superlocalmemory.core.backend_orchestrator import get_orchestrator
 
-        orchestrator = get_orchestrator()
-        backend = orchestrator.get_graph_backend() if orchestrator else None
-    except Exception as exc:  # noqa: BLE001
-        print(f"[slm] no graph copy is configured on this store ({exc}).")
+def _print_regraph(reports: list[dict], check: bool) -> None:
+    if not reports:
+        print("[slm] no memories to check.")
         return
-    if backend is None:
-        print("[slm] no graph copy is configured on this store; nothing to do.")
-        return
-
-    total_queued = 0
-    for profile_id in profiles:
-        with db.raw_connection() as conn:
-            stored = count_logical_edges(conn, profile_id)
-        try:
-            result = backend._db.run(
-                "?[count(a)] := *edge{from_id: a, profile_id: $pid}",
-                {"pid": profile_id},
-            )
-            copied = int(result.values.tolist()[0][0]) if len(result) else 0
-        except Exception as exc:  # noqa: BLE001
-            print(f"  {profile_id}: the graph copy could not be read ({exc})")
-            continue
-        drift = abs(copied - stored) / float(stored) if stored else 0.0
-        pending = 0
-        try:
-            pending_rows = db.execute(
-                "SELECT COUNT(*) AS c FROM projection_outbox WHERE profile_id = ?",
-                (profile_id,),
-            )
-            pending = int(dict(pending_rows[0])["c"]) if pending_rows else 0
-        except Exception:  # noqa: BLE001
-            pending = -1
-        print(
-            f"  {profile_id}: {stored} connections stored, {copied} in the "
-            f"graph copy ({drift:.1%} apart), {pending} waiting to be applied"
-        )
-        if getattr(args, "check", False):
-            continue
-
-        fact_rows = db.execute(
-            "SELECT fact_id FROM atomic_facts WHERE profile_id = ?", (profile_id,)
-        )
-        fact_ids = [dict(r)["fact_id"] for r in fact_rows]
-        if not fact_ids:
-            continue
-        if not projection_outbox.is_available(db):
-            print("  (this store has no queue to rebuild through)")
-            continue
-        for start in range(0, len(fact_ids), 500):
-            projection_outbox.enqueue_many(
-                db, fact_ids[start:start + 500], profile_id,
-                op=projection_outbox.OP_UPSERT,
-            )
-        total_queued += len(fact_ids)
-        print(f"  {profile_id}: queued {len(fact_ids)} memories to re-derive")
-
-    db.close()
-    if getattr(args, "check", False):
-        return
-    if total_queued:
-        print(
-            f"[slm] {total_queued} memories queued. The background worker "
-            f"rebuilds the copy from the store; watch `slm status` until the "
-            f"waiting count reaches zero."
-        )
-    else:
-        print("[slm] nothing to re-derive.")
+    for r in reports:
+        line = (f"  {r['profile_id']}: {r['stored']} connections stored, {r['copied']} in "
+                f"the graph copy, {r['pending']} waiting to be applied")
+        if r.get("error"):
+            line += f" -- failed: {r['error']}"
+        elif r.get("rebuilt"):
+            line += f" -- rebuilt from the store ({r['after']} now)"
+        elif r.get("skipped"):
+            line += f" -- {r['skipped']}"
+        elif r.get("in_step"):
+            line += " -- in step"
+        elif check:
+            line += " -- differs; run `slm db regraph` to rebuild it"
+        else:
+            line += " -- differed for a moment and caught up"
+        print(line)
 
 
 def _cmd_db_reembed(args: Namespace) -> None:

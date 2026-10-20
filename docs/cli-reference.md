@@ -1310,8 +1310,12 @@ stopped, `--withhold FACT_ID` takes one fact out of answers (undo with
 
 ### `slm db regraph [--check] [--profile P]`
 
-Re-derive the graph copy of your memories from the store. `--check` only reports
-how far the copy has drifted.
+Compare the graph copy of your memories (Cozo, on a promoted store) with the
+store, per profile. A copy that still differs once its update queue is drained is
+rebuilt from the store; recall reads the store while that runs. `--check` only
+reports. With the daemon running this asks the daemon, which owns the copy; with
+SLM stopped it works directly. The daemon also runs this check on every
+maintenance cycle, so a drifted copy heals without you asking.
 
 ### `slm db reembed [--missing-only] [--all-profiles] [--limit N] [--json]`
 

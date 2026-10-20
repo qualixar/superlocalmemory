@@ -6150,6 +6150,38 @@ def _register_daemon_routes(application: FastAPI) -> None:
         authorization.complete()
         return out
 
+    # `slm db regraph` (live): the daemon alone may open the graph copy (RocksDB
+    # takes an exclusive process lock), so the CLI asks it here (#296).
+    @application.post("/maintenance/regraph")
+    async def regraph_endpoint(request: Request):
+        _update_activity()
+        engine = _get_engine_or_503()
+        from superlocalmemory.server.rbac_enforce import require_global_manage
+        require_global_manage(request)
+        from superlocalmemory.server.acting_profile import acting_profile
+        from superlocalmemory.server.route_mutations import (
+            authorize_route_mutation,
+        )
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 - an empty body means "every profile, rebuild"
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        authorization = authorize_route_mutation(
+            request,
+            operation="update",
+            source_agent_id="http-maintenance",
+            profile_id=acting_profile(engine.profile_id),
+        )
+        from superlocalmemory.core.backend_orchestrator import get_orchestrator
+        from superlocalmemory.core.graph_projection_check import regraph
+        reports = await asyncio.to_thread(
+            regraph, engine._db, get_orchestrator(),
+            profile=str(body.get("profile") or ""), heal=not bool(body.get("check")),
+        )
+        authorization.complete()
+        return {"reports": reports}
+
     @application.get("/status")
     async def status(request: Request):
         _update_activity()

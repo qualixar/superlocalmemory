@@ -191,6 +191,11 @@ class MaintenanceScheduler:
         self._initial_coverage_timer = threading.Timer(450.0, self._coverage_pass)
         self._initial_coverage_timer.daemon = True
         self._initial_coverage_timer.start()
+        # #296: a graph copy an older version let drift is rebuilt soon after an
+        # upgrade instead of a full interval later. Same pattern, after the others.
+        self._initial_graph_check_timer = threading.Timer(510.0, self._graph_projection_pass)
+        self._initial_graph_check_timer.daemon = True
+        self._initial_graph_check_timer.start()
         logger.info(
             "Maintenance scheduler started (interval=%dm)",
             self._config.forgetting.scheduler_interval_minutes,
@@ -271,6 +276,26 @@ class MaintenanceScheduler:
             self._record_step("project backfill", True)
         except Exception as exc:  # noqa: BLE001
             self._record_step("project backfill", False, str(exc))
+
+    def _graph_projection_pass(self, profile_ids: tuple[str, ...] | None = None) -> None:
+        """Rebuild any profile's graph copy that has drifted from the store (#296)."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.core.backend_orchestrator import get_orchestrator
+            from superlocalmemory.core.graph_projection_check import check_graph_projection
+
+            orchestrator = get_orchestrator()
+            ok = True
+            for profile_id in profile_ids or self._profile_ids():
+                report = check_graph_projection(self._db, orchestrator, profile_id, heal=True)
+                ok = ok and not report.error
+                if report.rebuilt:
+                    logger.info("Graph copy check (%s): rebuilt, %s edges", profile_id,
+                                report.after)
+            self._record_step("graph copy check", ok)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("graph copy check", False, str(exc))
 
     def _initial_vector_compaction(self) -> None:
         """Drop stale vector-store versions without waiting a full interval."""
@@ -356,6 +381,10 @@ class MaintenanceScheduler:
         if _coverage_timer is not None:
             _coverage_timer.cancel()
             self._initial_coverage_timer = None
+        _graph_check_timer = getattr(self, "_initial_graph_check_timer", None)
+        if _graph_check_timer is not None:
+            _graph_check_timer.cancel()
+            self._initial_graph_check_timer = None
         _coverage_job = getattr(self, "_coverage_job", None)
         if _coverage_job is not None:  # stops after the memory in progress
             _coverage_job.stop()
@@ -453,6 +482,9 @@ class MaintenanceScheduler:
         )
 
         for profile_id in self._profile_ids():
+            # Before pruning: pruning queues re-projections, and a check that
+            # finds the queue busy waits for the next cycle.
+            self._graph_projection_pass((profile_id,))
             if self._config.forgetting.enabled:
                 try:
                     from superlocalmemory.core.maintenance import run_maintenance

@@ -15,6 +15,7 @@ from tests.test_server.test_rbac_company_mode_credential import app_and_engine  
         ("/api/integrity/repair-entities", {"root": "/sandbox"}),
         ("/maintenance/run", {}),
         ("/maintenance/compact", {}),
+        ("/maintenance/regraph", {}),
     ],
 )
 def test_scoped_admin_cannot_mutate_installation(matrix, path, body):

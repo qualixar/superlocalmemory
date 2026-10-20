@@ -826,6 +826,15 @@ class CozoDBGraphBackend:
     # Rebuild (from SQLite canonical)
     # ------------------------------------------------------------------
 
+    def rebuild_profile(self, conn: sqlite3.Connection, profile_id: str) -> int:
+        """Replace one profile's share of the graph with a fresh import from SQLite.
+
+        For a copy that drifted from the store (#296). Other profiles are not
+        touched. Returns the number of edges imported.
+        """
+        self.remove_profile(profile_id)
+        return self.bulk_import_from_sqlite(conn, profile_id)
+
     def rebuild_from_sqlite(
         self, conn: sqlite3.Connection, profile_id: str = "default"
     ) -> int:

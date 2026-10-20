@@ -447,6 +447,52 @@ class BackendOrchestrator:
             return self._cozo
         return None
 
+    def open_graph_offline(self) -> bool:
+        """Open a promoted store's graph copy in this process, with the daemon stopped.
+
+        For ``slm db regraph`` offline only: RocksDB lets one process open the copy, so
+        while the daemon runs it alone may. Returns False when there is no copy to open.
+        """
+        if getattr(self._config, "scale_engine_state", "local_core") != "promoted":
+            return False
+        if not self._detect_cozo():
+            return False
+        self._init_cozo()
+        if self._cozo is None:
+            return False
+        self._update_status("cozo", "active")
+        return True
+
+    def close_graph_offline(self) -> None:
+        """Close what ``open_graph_offline`` opened."""
+        if self._cozo is not None:
+            self._cozo.close()
+            self._cozo = None
+
+    def graph_backend_for_check(self) -> Any:
+        """The graph backend whatever its status, for the drift check only (never for reads)."""
+        return self._cozo
+
+    def rebuild_graph_profile(self, profile_id: str) -> int:
+        """Rebuild one profile's graph copy from SQLite while recall reads SQLite.
+
+        While it runs the status is ``rebuilding``, so ``get_graph_backend``
+        returns None: recall falls back to SQLite and the projection drain leaves
+        its queue alone. A failed rebuild leaves the status ``error``, never a
+        half-built copy marked active; the next check rebuilds it again.
+        """
+        if self._cozo is None:
+            raise RuntimeError("no graph projection to rebuild")
+        self._update_status("cozo", "rebuilding")
+        try:
+            with self._db.raw_connection() as conn:
+                imported = self._cozo.rebuild_profile(conn, profile_id)
+        except Exception as exc:
+            self._update_status("cozo", "error", error=f"rebuild failed: {exc}")
+            raise
+        self._update_status("cozo", "active", self._cozo.health_check().get("edges", 0))
+        return imported
+
     def get_vector_backend(self) -> Any:
         """Return active vector backend or None."""
         if self._lancedb and self._lancedb_status() == "active":

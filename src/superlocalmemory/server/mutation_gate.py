@@ -103,6 +103,7 @@ _EXACT: dict[str, Rule] = {
         "/api/learning/migrate-legacy",
         "/maintenance/run",
         "/maintenance/compact",
+        "/maintenance/regraph",
         "/api/daemon/restart",
         "/api/daemon/doctor",
         "/api/daemon/repair",
