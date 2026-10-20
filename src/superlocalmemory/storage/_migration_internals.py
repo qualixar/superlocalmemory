@@ -224,6 +224,7 @@ from superlocalmemory.storage.migrations import (
 )
 from superlocalmemory.storage.migrations import (
     M066_wrongly_archived_memories_are_restored as _M066,
+    M067_projection_follows_every_fact_change as _M067,
 )
 
 # Emit under the runner's logger name so operational log filters that key on
@@ -299,6 +300,7 @@ _MODULES = {
     _M064.NAME: _M064,
     _M065.NAME: _M065,
     _M066.NAME: _M066,
+    _M067.NAME: _M067,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

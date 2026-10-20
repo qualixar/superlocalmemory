@@ -106,3 +106,55 @@ def test_deletes_and_prunes_leave_the_projection_equal_to_the_store(setup):
     prune_graph(db, "default")
     _drain(db, drain)
     assert _projected(graph) == _canonical(db)
+
+
+# -- a fact's visibility changed by any code path reaches the graph (#296/#297) ---------------------
+
+@pytest.mark.parametrize("change", [
+    "archive_status = 'archived'",   # remember_runtime._archive_fact, source hiding
+    "quarantined = 1",               # source-fidelity quarantine
+])
+def test_hiding_a_fact_by_any_update_reaches_the_graph(setup, change):
+    db, graph, drain = setup
+    a, b = _fact(db, "stays"), _fact(db, "about to be hidden")
+    _edge(db, a, b)
+    _drain(db, drain)
+    assert _projected(graph) == _canonical(db) != set()
+
+    db.execute(f"UPDATE atomic_facts SET {change} WHERE fact_id = ?", (b,))  # nobody queues it
+    assert projection_outbox.depth(db) == 1
+    _drain(db, drain)
+    assert _projected(graph) == _canonical(db) == set()
+
+
+def test_showing_a_fact_again_by_an_update_reaches_the_graph(setup):
+    db, graph, drain = setup
+    a, b = _fact(db, "a"), _fact(db, "b")
+    _edge(db, a, b)
+    db.execute("UPDATE atomic_facts SET archive_status = 'archived' WHERE fact_id = ?", (b,))
+    _drain(db, drain)
+    db.execute("UPDATE atomic_facts SET archive_status = 'live' WHERE fact_id = ?", (b,))
+    _drain(db, drain)
+    assert _projected(graph) == _canonical(db) != set()
+
+
+def test_an_update_that_changes_nothing_projected_queues_nothing(setup):
+    db, _graph, drain = setup
+    a = _fact(db, "a")
+    _drain(db, drain)
+    db.execute("UPDATE atomic_facts SET archive_status = archive_status, access_count = 5 "
+               "WHERE fact_id = ?", (a,))
+    assert projection_outbox.depth(db) == 0
+
+
+def test_a_merged_fact_is_queued_and_the_copy_stays_equal_to_the_store(setup):
+    """``merged`` is not hidden by the visibility rule (only ``archived`` is); the copy follows the store."""
+    db, graph, drain = setup
+    a, b = _fact(db, "kept"), _fact(db, "merged away")
+    _edge(db, a, b)
+    _drain(db, drain)
+    db.execute("UPDATE atomic_facts SET archive_status = 'merged', merged_into = ? WHERE fact_id = ?",
+               (a, b))
+    assert projection_outbox.depth(db) == 1
+    _drain(db, drain)
+    assert _projected(graph) == _canonical(db)

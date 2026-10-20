@@ -175,7 +175,10 @@ import pytest
 #: 66 as of 4.2.8: +M065_fabricated_dates_are_removed and
 #: +M066_wrongly_archived_memories_are_restored (deferred, memory.db; data plus
 #: the data_repair_undo table), downgrade floor 51.
-_EXPECTED_SCHEMA_VERSION: int = 66
+#: 67 as of 4.2.11: +M067_projection_follows_every_fact_change (deferred,
+#: memory.db; one trigger that queues fact changes for the projections),
+#: downgrade floor 51.
+_EXPECTED_SCHEMA_VERSION: int = 67
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -204,7 +207,7 @@ _EXPECTED_SCHEMA_VERSION: int = 66
 # 63 as of 4.2.8: +M064_orphan_index_rows_are_removed (deferred, memory.db).
 # 65 as of 4.2.8: +M065_fabricated_dates_are_removed,
 #                 +M066_wrongly_archived_memories_are_restored (deferred, memory.db).
-_EXPECTED_MIGRATION_COUNT: int = 65
+_EXPECTED_MIGRATION_COUNT: int = 66  # +M067 (4.2.11)
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:

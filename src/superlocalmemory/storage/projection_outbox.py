@@ -122,6 +122,69 @@ PROJECTED_FACT_COLUMNS = frozenset({
 
 _AVAILABILITY_ATTR = "_projection_outbox_available"
 
+#: Queues a fact whenever an UPDATE changes what its projection should hold.
+#:
+#: ``DatabaseManager.update_fact`` queues on ``PROJECTED_FACT_COLUMNS``, but most
+#: visibility changes are plain ``UPDATE atomic_facts`` statements elsewhere
+#: (archive, merge, quarantine, lifecycle), and none of them queued. An archived
+#: fact kept its edges, bridge and vector in Cozo and LanceDB until something
+#: else happened to re-project it, and the copy drifted from the store (#296).
+#: A trigger covers every such path, present and future, in the writer's own
+#: transaction.
+CHANGE_TRIGGER = "trg_projection_fact_changed"
+
+#: Visibility (``archive_status``, ``quarantined``, ``merged_into``) and what the
+#: projection is built from. Not ``embedding``: an embedding switch renames the
+#: vector columns and SQLite rewrites a trigger that names a renamed column (see
+#: storage/hub_baseline_trigger.py); vector changes are queued where they happen.
+CHANGE_TRIGGER_COLUMNS = (
+    "archive_status", "quarantined", "merged_into", "lifecycle",
+    "canonical_entities_json", "profile_id", "scope",
+)
+
+
+def change_trigger_ddl(columns: list[str]) -> str:
+    """The trigger watching ``columns`` (all present on ``atomic_facts``)."""
+    changed = " OR ".join(f"OLD.{c} IS NOT NEW.{c}" for c in columns)
+    return (
+        f"CREATE TRIGGER {CHANGE_TRIGGER} AFTER UPDATE OF {', '.join(columns)} "
+        f"ON atomic_facts WHEN {changed} BEGIN "
+        "INSERT INTO projection_outbox "
+        "(fact_id, profile_id, op, revision, enqueued_at, attempts, last_error) "
+        "VALUES (NEW.fact_id, COALESCE(NEW.profile_id, 'default'), 'upsert', 1, "
+        "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 0, NULL) "
+        "ON CONFLICT(fact_id) DO UPDATE SET op = 'upsert', "
+        "profile_id = excluded.profile_id, revision = projection_outbox.revision + 1, "
+        "enqueued_at = excluded.enqueued_at, attempts = 0, last_error = NULL; END"
+    )
+
+
+def install_change_trigger(conn: sqlite3.Connection) -> bool:
+    """(Re-)create the change trigger over the watched columns this store has.
+
+    False when there is nothing to install on (no queue, or no fact table).
+    Re-created every time so a column a later migration adds is watched too.
+    The caller owns the transaction.
+    """
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name IN ('atomic_facts', 'projection_outbox')")}
+    if names != {"atomic_facts", "projection_outbox"}:
+        return False
+    present = {r[1] for r in conn.execute("PRAGMA table_info(atomic_facts)")}
+    columns = [c for c in CHANGE_TRIGGER_COLUMNS if c in present]
+    if not columns:
+        return False
+    conn.execute(f"DROP TRIGGER IF EXISTS {CHANGE_TRIGGER}")
+    conn.execute(change_trigger_ddl(columns))
+    return True
+
+
+def change_trigger_installed(conn: sqlite3.Connection) -> bool:
+    """True when the store has the change trigger."""
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+                        (CHANGE_TRIGGER,)).fetchone() is not None
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -150,6 +213,13 @@ def is_available(db: Any) -> bool:
         present = bool(rows)
     except sqlite3.Error:
         present = False
+    if not present:
+        # The change trigger writes this table; without it every UPDATE of a fact
+        # would fail. Nothing drops the table, but a write must never be the price.
+        try:
+            db.execute(f"DROP TRIGGER IF EXISTS {CHANGE_TRIGGER}")
+        except sqlite3.Error:
+            pass
     setattr(db, _AVAILABILITY_ATTR, present)
     return present
 
@@ -162,6 +232,10 @@ def forget_availability(db: Any) -> None:
     """
     if hasattr(db, _AVAILABILITY_ATTR):
         delattr(db, _AVAILABILITY_ATTR)
+    # Look now, not at the next enqueue: a fact write is prepared together with
+    # the change trigger, so a trigger left without its table fails that write
+    # before any enqueue could notice.
+    is_available(db)
 
 
 # ---------------------------------------------------------------------------

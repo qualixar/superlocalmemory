@@ -204,6 +204,7 @@ from superlocalmemory.storage.migrations import (
 )
 from superlocalmemory.storage.migrations import (
     M066_wrongly_archived_memories_are_restored as _M066,
+    M067_projection_follows_every_fact_change as _M067,
 )
 
 # Order matters: M003 creates the log table. The runner handles M003's own
@@ -438,4 +439,9 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # the store-scaled clock gives them, with an undo record. Deferred: it reads
     # fact_retention and the decay inputs, which engine init creates.
     Migration(name=_M066.NAME, db_target="memory", ddl=_M066.DDL),
+    # M067 queues a fact for the graph and vector copies whenever its visibility
+    # or entities change (#296). Deferred: it watches columns engine init and
+    # earlier migrations add, and the queue table M033 creates.
+    Migration(name=_M067.NAME, db_target="memory", ddl=_M067.DDL,
+              dependencies=(_M033.NAME,)),
 ]
