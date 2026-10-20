@@ -83,3 +83,13 @@ def test_the_daemon_route_exists_and_is_gated():
     assert "from superlocalmemory.core.graph_projection_check import regraph" in body
     rule = rule_for("POST", "/maintenance/regraph")
     assert rule.scope == "global" and rule.permission == Permission.MANAGE
+
+
+def test_a_copy_with_queued_work_is_catching_up_not_drifted(monkeypatch, capsys):
+    monkeypatch.setattr("superlocalmemory.cli.daemon.owned_daemon_process_alive", lambda: True)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.is_daemon_running", lambda: True)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.daemon_request", lambda *a, **k: {"reports": [
+        {**_REPORT, "rebuilt": False, "after": None, "pending": 8, "copied": 137, "stored": 149}]})
+    cli_commands._cmd_db_regraph(Namespace(check=True, profile=""))
+    out = capsys.readouterr().out
+    assert "catching up" in out and "run `slm db regraph`" not in out

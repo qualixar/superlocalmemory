@@ -275,6 +275,8 @@ def _print_regraph(reports: list[dict], check: bool) -> None:
             line += f" -- {r['skipped']}"
         elif r.get("in_step"):
             line += " -- in step"
+        elif r.get("pending"):
+            line += " -- catching up; check again once nothing is waiting"
         elif check:
             line += " -- differs; run `slm db regraph` to rebuild it"
         else:
