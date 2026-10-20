@@ -19,7 +19,7 @@ _LOGICAL_EDGE_SELECT = """
         MAX(COALESCE(weight, 1.0)) AS weight,
         profile_id
     FROM graph_edges
-    WHERE profile_id = ?
+    WHERE profile_id = ?{scope}
       AND NOT EXISTS (
             SELECT 1 FROM atomic_facts f
             WHERE f.fact_id IN (graph_edges.source_id, graph_edges.target_id)
@@ -60,9 +60,29 @@ def _edge_select(conn: sqlite3.Connection) -> str:
     # The helper returns a leading-AND clause for appending; here it is needed as
     # a standalone predicate, so strip the connective and default to "always
     # visible" on a store that has neither column yet.
-    clause = visible_fact_clause_for_connection(conn, prefix="f").strip()
+    return _LOGICAL_EDGE_SELECT.format(
+        visible=_standalone(visible_fact_clause_for_connection(conn, prefix="f")), scope="",
+    )
+
+
+def _standalone(clause: str) -> str:
+    """A leading-AND visibility clause as a standalone predicate ("always visible" if empty)."""
+    clause = clause.strip()
     predicate = clause[4:].strip() if clause.upper().startswith("AND ") else clause
-    return _LOGICAL_EDGE_SELECT.format(visible=predicate or "1=1")
+    return predicate or "1=1"
+
+
+def fact_edge_select(visible_clause: str) -> str:
+    """The logical edges touching one fact, by the same definition as ``iter_logical_edges``.
+
+    Params: ``(profile_id, fact_id, fact_id)``. ``visible_clause`` is
+    ``DatabaseManager.visible_fact_clause(prefix="f")``. The projection drain re-projects a fact
+    from this, so an incrementally kept graph holds exactly what a fresh bulk import would: an
+    edge to a withheld fact stays out even when its visible neighbour is re-projected (#296).
+    """
+    return _LOGICAL_EDGE_SELECT.format(
+        visible=_standalone(visible_clause), scope=" AND (source_id = ? OR target_id = ?)",
+    )
 
 
 def iter_logical_edges(
