@@ -189,6 +189,21 @@ class CozoDBGraphBackend:
         except Exception:
             pass
 
+        # ``edge`` is keyed by ``from_id`` first, so a node's incoming edges
+        # cannot be found without scanning the relation. ``edge_rev`` mirrors
+        # every edge keyed by ``to_id`` (#296: removing one fact cost 3.98 s on
+        # a 4.3 M-edge store). ``::index create`` fails to parse on
+        # cozo_embedded 0.3.0, so the mirror is maintained by hand.
+        for script in (
+            ":create edge_rev {to_id: String, from_id: String, edge_type: String}",
+            ":create graph_meta {key: String => value: String}",
+        ):
+            try:
+                self._db.run(script)
+            except Exception:
+                pass
+        self._backfill_reverse_edges()
+
         # The entity recall channel resolves a query to canonical entity IDs,
         # while graph_edges links fact IDs.  Keeping those relations separate
         # is essential: treating fact IDs as entities produces a healthy but
@@ -203,6 +218,50 @@ class CozoDBGraphBackend:
             """)
         except Exception:
             pass
+
+    def _backfill_reverse_edges(self) -> None:
+        """Fill ``edge_rev`` once for a store created before it existed.
+
+        The marker is written after the copy, so a copy cut short is simply
+        redone on the next open (``:put`` is idempotent).
+        """
+        done = self._db.run(
+            "?[value] := *graph_meta{key: 'edge_rev', value}"
+        ).values.tolist()
+        if done:
+            return
+        self._db.run("""
+            ?[to_id, from_id, edge_type] := *edge{from_id, to_id, edge_type}
+            :put edge_rev {to_id, from_id, edge_type}
+        """)
+        self._db.run("?[key, value] <- [['edge_rev', 'v1']] :put graph_meta {key => value}")
+
+    def _remove_node_edges(self, node_id: str) -> None:
+        """Remove every edge from or to ``node_id`` by key seeks, in one transaction."""
+        self._db.run("""
+            {
+                ?[to_id, from_id, edge_type] :=
+                    from_id = $id, *edge{from_id, to_id, edge_type}
+                :rm edge_rev {to_id, from_id, edge_type}
+            }
+            {
+                ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
+                    to_id = $id, *edge_rev{to_id, from_id, edge_type},
+                    *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at}
+                :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+            }
+            {
+                ?[to_id, from_id, edge_type] :=
+                    to_id = $id, *edge_rev{to_id, from_id, edge_type}
+                :rm edge_rev {to_id, from_id, edge_type}
+            }
+            {
+                ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
+                    from_id = $id,
+                    *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at}
+                :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+            }
+        """, {"id": node_id})
 
     # ------------------------------------------------------------------
     # Write Path
@@ -242,15 +301,25 @@ class CozoDBGraphBackend:
         """Insert a relationship edge between two entities."""
         now = datetime.now().isoformat()
         meta = json.dumps(metadata or {})
-        self._db.put("edge", [{
-            "from_id": from_id,
-            "to_id": to_id,
-            "edge_type": edge_type,
-            "weight": weight,
-            "metadata": meta,
-            "profile_id": profile_id,
-            "created_at": now,
-        }])
+        self._put_edges([[from_id, to_id, edge_type, float(weight), meta, profile_id, now]])
+
+    def _put_edges(self, rows: list[list[Any]]) -> None:
+        """Upsert edges and their ``edge_rev`` mirror in one transaction.
+
+        Each row is ``[from_id, to_id, edge_type, weight, metadata, profile_id, created_at]``.
+        """
+        if not rows:
+            return
+        self._db.run("""
+            {
+                ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] <- $rows
+                :put edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+            }
+            {
+                ?[to_id, from_id, edge_type] <- $rev
+                :put edge_rev {to_id, from_id, edge_type}
+            }
+        """, {"rows": rows, "rev": [[r[1], r[0], r[2]] for r in rows]})
 
     def add_fact_entities(
         self,
@@ -273,18 +342,14 @@ class CozoDBGraphBackend:
         """Remove a fact's derived graph records using bound query values."""
         # Cozo :rm needs every non-key column in the output relation.  Binding
         # ``fact_id`` keeps apostrophes and Datalog syntax in external IDs from
-        # becoming executable query text.
+        # becoming executable query text.  Each id is bound *before* its stored
+        # atom so Cozo seeks on the key instead of scanning the relation (#296).
         self._db.run("""
             ?[fact_id, entity_id, profile_id] :=
-                *fact_entity{fact_id, entity_id, profile_id}, fact_id = $fact_id
+                fact_id = $fact_id, *fact_entity{fact_id, entity_id, profile_id}
             :rm fact_entity {fact_id, entity_id => profile_id}
         """, {"fact_id": fact_id})
-        self._db.run("""
-            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
-                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
-                (from_id = $fact_id or to_id = $fact_id)
-            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
-        """, {"fact_id": fact_id})
+        self._remove_node_edges(fact_id)
 
     def remove_entity(self, entity_id: str) -> None:
         """Remove an entity node and every bridge that reaches it.
@@ -304,12 +369,7 @@ class CozoDBGraphBackend:
                 *fact_entity{fact_id, entity_id, profile_id}, entity_id = $entity_id
             :rm fact_entity {fact_id, entity_id => profile_id}
         """, {"entity_id": entity_id})
-        self._db.run("""
-            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
-                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
-                (from_id = $entity_id or to_id = $entity_id)
-            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
-        """, {"entity_id": entity_id})
+        self._remove_node_edges(entity_id)
         self._db.run("""
             ?[id, name, entity_type, tier, properties, profile_id,
               created_at, updated_at] :=
@@ -333,10 +393,17 @@ class CozoDBGraphBackend:
             :rm fact_entity {fact_id, entity_id => profile_id}
         """, {"pid": profile_id})
         self._db.run("""
-            ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
-                *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
-                profile_id = $pid
-            :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+            {
+                ?[to_id, from_id, edge_type] :=
+                    *edge{from_id, to_id, edge_type, profile_id}, profile_id = $pid
+                :rm edge_rev {to_id, from_id, edge_type}
+            }
+            {
+                ?[from_id, to_id, edge_type, weight, metadata, profile_id, created_at] :=
+                    *edge{from_id, to_id, edge_type, weight, metadata, profile_id, created_at},
+                    profile_id = $pid
+                :rm edge {from_id, to_id, edge_type => weight, metadata, profile_id, created_at}
+            }
         """, {"pid": profile_id})
         self._db.run("""
             ?[id, name, entity_type, tier, properties, profile_id, created_at, updated_at] :=
@@ -489,8 +556,9 @@ class CozoDBGraphBackend:
                 "created_at": now,
             })
 
-        if edge_dicts:
-            self._db.put("edge", edge_dicts)
+        columns = ("from_id", "to_id", "edge_type", "weight", "metadata", "profile_id", "created_at")
+        for start in range(0, len(edge_dicts), 50_000):
+            self._put_edges([[e[c] for c in columns] for e in edge_dicts[start:start + 50_000]])
         logger.info("CozoDB: imported %d edges", len(edge_dicts))
 
         return len(edge_dicts)
@@ -769,6 +837,11 @@ class CozoDBGraphBackend:
             self._db.run("::remove edge")
         except Exception:
             pass
+        for relation in ("edge_rev", "graph_meta"):
+            try:
+                self._db.run(f"::remove {relation}")
+            except Exception:
+                pass
         try:
             self._db.run("::remove fact_entity")
         except Exception:
