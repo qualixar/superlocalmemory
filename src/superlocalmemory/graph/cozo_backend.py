@@ -434,7 +434,7 @@ class CozoDBGraphBackend:
         """
         self._db.run("""
             ?[fact_id, entity_id, profile_id] :=
-                *fact_entity{fact_id, entity_id, profile_id}, fact_id = $fact_id
+                fact_id = $fact_id, *fact_entity{fact_id, entity_id, profile_id}
             :rm fact_entity {fact_id, entity_id => profile_id}
         """, {"fact_id": fact_id})
 

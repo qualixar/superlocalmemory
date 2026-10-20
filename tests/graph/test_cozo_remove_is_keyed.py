@@ -120,3 +120,12 @@ def test_removal_cost_does_not_grow_with_the_edge_count(tmp_path):
     finally:
         small.close()
         large.close()
+
+
+def test_withdrawing_candidacy_drops_only_that_facts_bridge(backend):
+    backend.add_fact_entities("f1", ["e1", "e2"])
+    backend.add_fact_entities("f2", ["e1"])
+    backend.add_edge("f1", "f2", "rel", 1.0)
+    backend.remove_fact_candidacy("f1")
+    rows = backend._db.run("?[f, e] := *fact_entity{fact_id: f, entity_id: e}").values.tolist()
+    assert rows == [["f2", "e1"]] and _edges(backend) == {("f1", "f2", "rel")}
