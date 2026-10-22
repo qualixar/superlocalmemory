@@ -93,3 +93,29 @@ def test_a_copy_with_queued_work_is_catching_up_not_drifted(monkeypatch, capsys)
     cli_commands._cmd_db_regraph(Namespace(check=True, profile=""))
     out = capsys.readouterr().out
     assert "catching up" in out and "run `slm db regraph`" not in out
+
+
+def test_a_rebuild_is_given_time_to_finish(monkeypatch, capsys):
+    """Found live: rebuilding 378k edges outlasted daemon_request's 30 s default, so the CLI
+    printed "could not check the graph copy: None" while the daemon carried on."""
+    seen: list[float] = []
+    monkeypatch.setattr("superlocalmemory.cli.daemon.owned_daemon_process_alive", lambda: True)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.is_daemon_running", lambda: True)
+    monkeypatch.setattr(
+        "superlocalmemory.cli.daemon.daemon_request",
+        lambda method, path, body=None, **kw: seen.append(kw.get("timeout_seconds", 30.0))
+        or {"reports": [_REPORT]},
+    )
+    cli_commands._cmd_db_regraph(Namespace(check=False, profile=""))
+    cli_commands._cmd_db_regraph(Namespace(check=True, profile=""))
+    assert seen[0] >= 1800 and seen[1] >= 120
+
+
+def test_no_answer_says_the_daemon_may_still_be_working(monkeypatch, capsys):
+    monkeypatch.setattr("superlocalmemory.cli.daemon.owned_daemon_process_alive", lambda: True)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.is_daemon_running", lambda: True)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.daemon_request", lambda *a, **k: None)
+    with pytest.raises(SystemExit):
+        cli_commands._cmd_db_regraph(Namespace(check=False, profile=""))
+    err = capsys.readouterr().err
+    assert "None" not in err and "--check" in err

@@ -197,6 +197,10 @@ def _cmd_db_compact(args: Namespace) -> int:
     return 0 if out.get("ok") else 1
 
 
+_REGRAPH_CHECK_TIMEOUT = 300.0
+_REGRAPH_TIMEOUT = 3600.0
+
+
 def _cmd_db_regraph(args: Namespace) -> None:
     """Check the graph copy of your memories against the store; rebuild it if it drifted.
 
@@ -222,11 +226,17 @@ def _cmd_db_regraph(args: Namespace) -> None:
             print("[slm] the daemon is running but not answering; try again shortly.",
                   file=sys.stderr)
             sys.exit(1)
+        # A rebuild re-imports every edge (378k on a real store took minutes), far
+        # past daemon_request's 30 s default.
         out = _daemon.daemon_request(
             "POST", "/maintenance/regraph", {"check": check, "profile": wanted},
+            timeout_seconds=_REGRAPH_CHECK_TIMEOUT if check else _REGRAPH_TIMEOUT,
         )
         if not isinstance(out, dict) or not isinstance(out.get("reports"), list):
-            print(f"[slm] the daemon could not check the graph copy: {out}", file=sys.stderr)
+            detail = out.get("error") if isinstance(out, dict) else ""
+            print("[slm] no answer from the daemon about the graph copy"
+                  f"{': ' + str(detail) if detail else ''}. A rebuild may still be running "
+                  "there; see `slm db regraph --check` in a few minutes.", file=sys.stderr)
             sys.exit(1)
         reports = out["reports"]
     else:
