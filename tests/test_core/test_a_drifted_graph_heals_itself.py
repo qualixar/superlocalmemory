@@ -152,3 +152,16 @@ def test_regraph_covers_every_profile_with_memories(world):
     assert {r["profile_id"] for r in reports} == {"default", "work"}
     assert [r["rebuilt"] for r in reports if r["profile_id"] == "work"] == [True]
     assert regraph(db, orch, profile="nobody", heal=True) == []
+
+
+def test_the_check_never_takes_the_writer(world, monkeypatch):
+    """Found live: counting 378k edges inside raw_connection() held the store's single writer
+    for minutes on a busy machine, so every save waited behind a read-only check."""
+    db, cozo, orch = world
+
+    def writer(*_a, **_kw):
+        raise AssertionError("a read-only check must not take the writer connection")
+
+    monkeypatch.setattr(db, "raw_connection", writer)
+    report = check_graph_projection(db, orch, "default", heal=False)
+    assert report.in_step and report.stored == 2 and not report.error

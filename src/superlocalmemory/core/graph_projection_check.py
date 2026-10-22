@@ -63,10 +63,13 @@ class GraphCheck:
 
 def _counts(db: Any, cozo: Any, profile_id: str) -> tuple[int, int, int]:
     """(edges in the store, edges in the copy, facts still queued) for one profile."""
-    from superlocalmemory.storage.logical_edges import count_logical_edges
+    from superlocalmemory.storage.logical_edges import logical_edge_count_select
 
-    with db.raw_connection() as conn:
-        stored = count_logical_edges(conn, profile_id)
+    # A plain SELECT goes to a read connection; the writer stays free for saves.
+    stored_rows = db.execute(
+        logical_edge_count_select(db.visible_fact_clause(prefix="f")), (profile_id,),
+    )
+    stored = int(stored_rows[0][0]) if stored_rows else 0
     rows = cozo._db.run(
         "?[count(a)] := *edge{from_id: a, profile_id: $pid}", {"pid": profile_id},
     )

@@ -85,6 +85,17 @@ def fact_edge_select(visible_clause: str) -> str:
     )
 
 
+def logical_edge_count_select(visible_clause: str) -> str:
+    """``count_logical_edges`` as one plain SELECT, for the store's read connections.
+
+    Params: ``(profile_id,)``. ``visible_clause`` is
+    ``DatabaseManager.visible_fact_clause(prefix="f")``. A check that counted inside
+    ``raw_connection()`` held the single writer while it scanned every edge.
+    """
+    return ("SELECT COUNT(*) FROM ("
+            + _LOGICAL_EDGE_SELECT.format(visible=_standalone(visible_clause), scope="") + ")")
+
+
 def iter_logical_edges(
     conn: sqlite3.Connection, profile_id: str
 ) -> Iterator[tuple[Any, ...]]:
