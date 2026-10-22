@@ -138,10 +138,7 @@ def close_stale_sessions(
     if idle_hours <= 0 or max_per_pass <= 0:
         return 0
 
-    from superlocalmemory.core.store_pipeline import (
-        _session_already_summarised,
-        run_close_session,
-    )
+    from superlocalmemory.core.store_pipeline import run_close_session
 
     cutoff = (datetime.now(UTC) - timedelta(hours=float(idle_hours))).isoformat()
     # Over-fetch slightly so already-closed rows in the window do not starve
@@ -176,9 +173,7 @@ def close_stale_sessions(
         sid = str(d.get("session_id") or "")
         if not sid:
             continue
-        if _session_already_summarised(db, profile_id, sid):
-            continue
-        try:
+        try:  # an already summarised session returns 0 and is not counted
             n = run_close_session(sid, profile_id, db=db)
         except Exception as exc:
             logger.warning("stale session close failed for %s: %s", sid, exc)

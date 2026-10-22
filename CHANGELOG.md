@@ -35,6 +35,13 @@ drifted is rebuilt by the daemon on its own within about ten minutes.
   checks the copy each maintenance cycle and rebuilds a drifted profile, and
   `slm db regraph` works while the daemon runs.
 - **`slm db scale promote` and `rollback` refuse while the daemon runs.**
+- **The daemon keeps answering while a session closes.** Every agent session
+  end asked the daemon to summarise the session, and it did so on the thread
+  that answers requests, reading every memory in the store and every past
+  summary. On a store of 30,000 memories the daemon stopped answering for
+  seconds to minutes, many times an hour. Closing now reads only that
+  session's memories, off the request thread, and an older session is no
+  longer skipped on a store larger than 50,000 memories.
 - **Recall returns an applied correction.** 4.2.10 indexed edited memories,
   but recall's source check compared the new text with the text it replaced
   and withheld every edit. An applied correction now counts as your own

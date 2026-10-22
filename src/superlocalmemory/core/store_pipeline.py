@@ -1260,15 +1260,21 @@ def _session_already_summarised(
     db: DatabaseManager,
     profile_id: str,
     session_id: str,
+    entity_ids: list[str],
 ) -> bool:
-    """True if close_session already wrote temporal summaries for this session."""
-    if not session_id:
+    """True if close_session already wrote temporal summaries for this session.
+
+    Its summaries carry the session's entities, so the LIKE runs only over those
+    entities' events (idx_tevents_entity), not every event in the profile.
+    """
+    if not session_id or not entity_ids:
         return False
+    marks = ", ".join("?" * len(entity_ids))
     try:
         rows = db.execute(
             "SELECT 1 FROM temporal_events "
-            "WHERE profile_id = ? AND description LIKE ? LIMIT 1",
-            (profile_id, f"Session {session_id}:%"),
+            f"WHERE profile_id = ? AND entity_id IN ({marks}) AND description LIKE ? LIMIT 1",
+            (profile_id, *entity_ids, f"Session {session_id}:%"),
         )
         return bool(rows)
     except Exception:
@@ -1297,12 +1303,10 @@ def run_close_session(
     if not session_id:
         return 0
 
-    if _session_already_summarised(db, profile_id, session_id):
-        logger.debug("Session %s already summarised — skip close", session_id)
-        return 0
-
-    facts = db.get_all_facts(profile_id)
-    session_facts = [f for f in facts if f.session_id == session_id]
+    # The session's own facts through idx_facts_session: reading the whole store
+    # here held the daemon for seconds on every session end, and its fetch
+    # ceiling dropped older sessions entirely.
+    session_facts = db.get_session_facts(profile_id, session_id)
     if not session_facts:
         return 0
 
@@ -1311,6 +1315,12 @@ def run_close_session(
     for f in session_facts:
         for eid in f.canonical_entities:
             entity_facts.setdefault(eid, []).append(f)
+    if not entity_facts:
+        return 0
+
+    if _session_already_summarised(db, profile_id, session_id, list(entity_facts)):
+        logger.debug("Session %s already summarised — skip close", session_id)
+        return 0
 
     count = 0
     session_date = session_facts[0].observation_date or ""

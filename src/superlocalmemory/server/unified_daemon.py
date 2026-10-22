@@ -6670,27 +6670,34 @@ def _register_daemon_routes(application: FastAPI) -> None:
             source_agent_id="http-session-close",
             profile_id=pid,
         )
-        sid = req.session_id
-        if not sid:
-            # Fall back to the most recent session that has memories.
-            try:
-                db = getattr(engine, "_db", None) or getattr(engine, "db", None)
-                if db is not None and hasattr(db, "execute"):
-                    rows = db.execute(
-                        "SELECT session_id FROM memories "
-                        "WHERE session_id != '' AND profile_id = ? "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        (pid,),
-                    )
-                    if rows:
-                        sid = str(rows[0][0])
-            except Exception as exc:
-                logger.debug("session_close fallback lookup failed: %s", exc)
-        if not sid:
-            return {"ok": True, "session_id": "", "summary_events_created": 0,
-                    "message": "no session to close"}
+        def _close() -> tuple[str, int | None]:
+            sid = req.session_id
+            if not sid:
+                # Fall back to the most recent session that has memories.
+                try:
+                    db = getattr(engine, "_db", None) or getattr(engine, "db", None)
+                    if db is not None and hasattr(db, "execute"):
+                        rows = db.execute(
+                            "SELECT session_id FROM memories "
+                            "WHERE session_id != '' AND profile_id = ? "
+                            "ORDER BY created_at DESC LIMIT 1",
+                            (pid,),
+                        )
+                        if rows:
+                            sid = str(rows[0][0])
+                except Exception as exc:
+                    logger.debug("session_close fallback lookup failed: %s", exc)
+            if not sid:
+                return "", None
+            return sid, engine.close_session(sid, profile_id=pid)
+
         try:
-            created = engine.close_session(sid, profile_id=pid)
+            # Every agent session end lands here; on the event loop its database
+            # reads kept the daemon from answering anything else until they finished.
+            sid, created = await asyncio.to_thread(_close)
+            if created is None:
+                return {"ok": True, "session_id": "", "summary_events_created": 0,
+                        "message": "no session to close"}
             authorization.complete()
             return {"ok": True, "session_id": sid,
                     "summary_events_created": int(created)}

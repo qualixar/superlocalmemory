@@ -1536,6 +1536,15 @@ class DatabaseManager:
         )
         return [self._row_to_fact(r) for r in rows]
 
+    def get_session_facts(self, profile_id: str, session_id: str) -> list[AtomicFact]:
+        """One session's visible facts, newest first, read through idx_facts_session."""
+        rows = self.execute(
+            "SELECT * FROM atomic_facts WHERE profile_id = ? AND session_id = ?"
+            f"{self.visible_fact_clause()} ORDER BY created_at DESC",
+            (profile_id, session_id),
+        )
+        return [self._row_to_fact(r) for r in rows]
+
     def get_external_visible_facts(
         self,
         profile_id: str,

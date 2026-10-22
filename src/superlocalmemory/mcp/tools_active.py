@@ -670,8 +670,9 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 profile_id=pid,
                 content_preview=sid,
             )
-            count = (
-                engine.close_session(sid, profile_id=named) if named else engine.close_session(sid)
+            count = await asyncio.to_thread(
+                (lambda: engine.close_session(sid, profile_id=named))
+                if named else (lambda: engine.close_session(sid))
             )
             authorization.complete()
             return {
