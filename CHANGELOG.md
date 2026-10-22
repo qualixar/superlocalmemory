@@ -42,6 +42,12 @@ drifted is rebuilt by the daemon on its own within about ten minutes.
   seconds to minutes, many times an hour. Closing now reads only that
   session's memories, off the request thread, and an older session is no
   longer skipped on a store larger than 50,000 memories.
+- **A remote MCP call no longer stalls the daemon after a restart.** The MCP
+  endpoint inside the daemon built a second memory engine on its first call,
+  re-checking every migration on the thread that answers requests. It now uses
+  the daemon's own engine.
+- **The graph check no longer holds up saves.** It counted the store's
+  connections on the connection used for writing; it now reads on its own.
 - **Recall returns an applied correction.** 4.2.10 indexed edited memories,
   but recall's source check compared the new text with the text it replaced
   and withheld every edit. An applied correction now counts as your own

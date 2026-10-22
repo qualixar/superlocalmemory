@@ -56,6 +56,9 @@ def get_engine():
     instances over the same DB file.
     """
     global _engine
+    resident = _daemon_engine()
+    if resident is not None:
+        return _request_engine(resident)
     if _engine is not None:
         return _request_engine(_engine)
     with _engine_lock:
@@ -70,6 +73,21 @@ def get_engine():
         new_engine.initialize()
         _engine = new_engine
     return _request_engine(_engine)
+
+
+def _daemon_engine():
+    """The daemon's resident engine when this server runs inside the daemon, else None.
+
+    Building a second engine there ran deferred migrations and every verify() on the
+    daemon's event loop, so /health went unanswered for minutes on a large store. Read
+    at call time, so the engine a mode switch puts in place is the one used.
+    """
+    if _os.environ.get("SLM_MCP_EMBEDDED") != "1":
+        return None
+    import sys
+
+    daemon = sys.modules.get("superlocalmemory.server.unified_daemon")
+    return getattr(daemon, "_engine", None) if daemon is not None else None
 
 
 def _request_engine(engine):
