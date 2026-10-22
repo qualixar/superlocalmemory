@@ -27,7 +27,10 @@ def _damage_index(path: Path) -> None:
     c = sqlite3.connect(path)
     c.execute("DELETE FROM atomic_facts_fts_data WHERE id > 10 AND rowid % 2 = 0")
     c.commit()
-    assert "malformed inverted index" in c.execute("PRAGMA quick_check").fetchone()[0]
+    # SQLite 3.54 reports this damage as an unreadable blob instead of a malformed
+    # index; integrity_diagnosis accepts both.
+    report = c.execute("PRAGMA quick_check").fetchone()[0]
+    assert "malformed inverted index" in report or "fts5: corruption found" in report
     c.close()
 
 

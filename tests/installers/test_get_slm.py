@@ -167,7 +167,7 @@ def test_new_names_do_not_collide_with_repo_clone_installers() -> None:
         hits = [
             p.relative_to(ROOT).as_posix()
             for p in ROOT.rglob(name)
-            if not {".backup", ".claude", ".venv", "node_modules"} & set(p.relative_to(ROOT).parts)
+            if not {".backup", ".claude", ".venv", ".worktrees", "node_modules"} & set(p.relative_to(ROOT).parts)
         ]
         assert hits == [f"scripts/{name}"]
 

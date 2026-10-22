@@ -103,7 +103,15 @@ def test_whole_doctor_has_one_deadline_naming_unfinished_check(monkeypatch, caps
         release.wait(10)
         return {"enabled": False}
 
+    def checks(_args, state):
+        # The real checks before Surface B probe the host's daemon and store and can
+        # outlast a 1 s budget on their own, so the deadline would name one of them.
+        state["checks"].append({"name": "Python", "status": "PASS", "detail": "ok", "fix": ""})
+        state["stage"] = "Optimize (Surface B)"
+        commands._gather_optimize_surface_b()
+
     monkeypatch.setattr(commands, "_gather_optimize_surface_b", hang)
+    monkeypatch.setattr(commands, "_cmd_doctor_checks", checks)
     monkeypatch.setattr(commands, "DOCTOR_TIMEOUT", 1.0, raising=False)
     began = time.monotonic()
     try:

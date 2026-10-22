@@ -110,7 +110,7 @@ def scan_source(source: str, rel: str = "<string>") -> list[Site]:
 def scan_tree(root: Path, base: Path) -> Counter[Site]:
     sites: Counter[Site] = Counter()
     for path in sorted(root.rglob("*.py")):
-        if any(part in {"node_modules", "__pycache__", "tests"} for part in path.parts):
+        if any(part in {"node_modules", "__pycache__", "tests", ".venv", ".worktrees"} for part in path.parts):
             continue
         rel = path.relative_to(base).as_posix()
         sites.update(scan_source(path.read_text(encoding="utf-8"), rel))
