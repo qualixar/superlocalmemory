@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-import superlocalmemory.mcp.server as mcp_server
-import superlocalmemory.server.unified_daemon as daemon
+# The daemon module first: it marks the MCP server as embedded, so importing the server
+# never starts the stand-alone warm-up thread (real daemon start, mesh registration).
+import superlocalmemory.server.unified_daemon as daemon  # isort: skip
+import superlocalmemory.mcp.server as mcp_server  # isort: skip
 
 
 @pytest.fixture

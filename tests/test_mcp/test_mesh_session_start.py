@@ -13,6 +13,7 @@ def test_warmup_registers_with_heartbeat_and_broker_id(monkeypatch):
     calls = []
     monkeypatch.setattr("superlocalmemory.cli.daemon.ensure_daemon", lambda: True)
     monkeypatch.setattr(tools_mesh, "_REGISTERED", False)
+    monkeypatch.setattr(tools_mesh, "_PROJECT_PATH", "")  # another test may have cached one
     monkeypatch.setenv("SLM_SESSION_ID", "host-session")
     monkeypatch.setenv("SLM_PROJECT_PATH", "/work/project")
     monkeypatch.setattr(
