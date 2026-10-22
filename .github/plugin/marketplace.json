@@ -9,7 +9,7 @@
       "name": "superlocalmemory",
       "source": "./vscode-agent-plugin",
       "description": "SuperLocalMemory for VS Code agents: local-first agent memory, SLM-Mesh, skills and sub-agents, served by the `slm mcp` you installed.",
-      "version": "4.2.10",
+      "version": "4.2.11",
       "license": "AGPL-3.0-or-later",
       "homepage": "https://superlocalmemory.com",
       "keywords": [

@@ -143,4 +143,4 @@ These subcommands control daemon-level cache settings and bulk removal. They do 
 
 ---
 
-SuperLocalMemory v4.2.10 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.11 · Qualixar · AGPL-3.0-or-later

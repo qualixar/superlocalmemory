@@ -6,7 +6,7 @@ authors:
   - family-names: "Bhardwaj"
     given-names: "Varun Pratap"
     orcid: "https://orcid.org/0009-0002-8726-4289"
-version: "4.2.10"
+version: "4.2.11"
 # RELEASE-DAY PLACEHOLDER: the date below is carried over from 4.1.24 and is not the
 # publish date. On release day edit it by hand to the publish date (YYYY-MM-DD);
 # scripts/bump_version.py leaves any valid past date alone. It must stay a real ISO

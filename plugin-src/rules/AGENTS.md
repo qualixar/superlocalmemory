@@ -187,4 +187,4 @@ Using this memory from a web assistant or another computer: see the slm-web-acce
 - **slm-governance-advisor** — scope/role compliance, retention and lifecycle, GDPR
 - **slm-loop-runner** — bounded, gate-verified loops (the `/slm-loop` command delegates to it)
 
-SuperLocalMemory v4.2.10 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.11 · Qualixar · AGPL-3.0-or-later
