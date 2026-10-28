@@ -252,21 +252,31 @@ def test_the_wait_ends_inside_the_hook_budget(monkeypatch) -> None:
 @posix_only
 def test_an_oversized_socket_request_is_cut_off_unanswered(data_root, hook_socket) -> None:
     """The socket used to buffer a request line without bound."""
+    import errno
     import socket as _socket
 
     from superlocalmemory.hooks.hook_daemon import _MAX_REQUEST_BYTES, owned_socket_path
+
+    def hung_up(exc: OSError) -> bool:
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError)) or exc.errno == errno.ENOTCONN
 
     client = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     client.settimeout(5)
     client.connect(str(owned_socket_path()))
     try:
+        # Every way the OS reports "the daemon hung up mid-request" is the
+        # answer under test: Linux resets a socket closed with unread data, and
+        # macOS under load reports it as no longer connected (errno 57).
         try:
             client.sendall(b"x" * (_MAX_REQUEST_BYTES + 65536))
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except OSError as exc:
+            if not hung_up(exc):
+                raise
         try:
             answer = client.recv(64)
-        except ConnectionResetError:  # Linux resets a socket closed with unread data
+        except OSError as exc:
+            if not hung_up(exc):
+                raise
             answer = b""
         assert answer == b""  # closed, no answer
     finally:
