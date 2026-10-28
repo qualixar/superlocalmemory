@@ -78,13 +78,34 @@ def _stop(proc: Any) -> None:
     proc.join(_STOP_WAIT_SECONDS)
 
 
-def run_in_child(fn: Callable[..., Any], *args: Any, timeout: float) -> Any:
-    """``fn(*args)`` in a fresh child process. Raises what it raised, or TimeoutError."""
+#: Memory limits (MB) the daemon's watchdog applies to particular children, by PID.
+#: A ``spawn`` child's command line looks like every other worker's, so a child that
+#: needs more than the default (the graph-metrics helper on a large graph, #304)
+#: carries its own limit here for as long as it runs.
+_MEMORY_LIMITS: dict[int, int] = {}
+_LIMITS_LOCK = threading.Lock()
+
+
+def memory_limits() -> dict[int, int]:
+    """A copy of the PID -> MB limits of the children running now."""
+    with _LIMITS_LOCK:
+        return dict(_MEMORY_LIMITS)
+
+
+def run_in_child(fn: Callable[..., Any], *args: Any, timeout: float,
+                 memory_limit_mb: int | None = None) -> Any:
+    """``fn(*args)`` in a fresh child process. Raises what it raised, or TimeoutError.
+
+    ``memory_limit_mb`` replaces the watchdog's per-worker limit for this child.
+    """
     ctx = multiprocessing.get_context("spawn")
     receive, send = ctx.Pipe(duplex=False)
     proc = ctx.Process(target=_child_main, args=(send, os.getpid(), fn, args), daemon=True)
     proc.start()
     send.close()
+    if memory_limit_mb and proc.pid:
+        with _LIMITS_LOCK:
+            _MEMORY_LIMITS[proc.pid] = int(memory_limit_mb)
     try:
         if not receive.poll(timeout):
             raise TimeoutError(f"background computation exceeded {timeout:.0f}s")
@@ -95,9 +116,11 @@ def run_in_child(fn: Callable[..., Any], *args: Any, timeout: float) -> Any:
     finally:
         receive.close()
         _stop(proc)
+        with _LIMITS_LOCK:
+            _MEMORY_LIMITS.pop(proc.pid, None)
     if ok:
         return value
     raise value
 
 
-__all__ = ["NICE_INCREMENT", "PARENT_CHECK_SECONDS", "run_in_child"]
+__all__ = ["NICE_INCREMENT", "PARENT_CHECK_SECONDS", "memory_limits", "run_in_child"]

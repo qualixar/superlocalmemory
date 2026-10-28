@@ -61,6 +61,45 @@ def child_compute(db_path: str, profile_id: str, damping: float) -> dict[str, An
     return computed
 
 
+#: The watchdog's per-worker default (``SLM_MAX_WORKER_MB``); the helper never gets less.
+_DEFAULT_LIMIT_MB = 2500
+#: networkx holds the whole graph: the helper reached 2,927 MB on 3.6 M edges when
+#: the watchdog killed it (#304), so this allows ~1.2 KB per edge over a fixed base.
+_BASE_MB = 800
+_MB_PER_EDGE = 0.0012
+
+
+def _memory_budget_mb() -> int:
+    """The daemon's whole-process memory budget: 40% of RAM (``health_monitor``)."""
+    try:
+        import psutil
+
+        return max(_DEFAULT_LIMIT_MB, int(psutil.virtual_memory().total / 1048576 * 0.40))
+    except Exception:  # noqa: BLE001 -- the same fallback the health monitor uses
+        return 8000
+
+
+def helper_limit_mb(edge_count: int) -> int:
+    """The helper's memory limit for a graph this size, within the daemon's budget (#304)."""
+    import os
+
+    try:
+        default = int(os.environ.get("SLM_MAX_WORKER_MB", _DEFAULT_LIMIT_MB))
+    except ValueError:
+        default = _DEFAULT_LIMIT_MB
+    wanted = int(_BASE_MB + max(0, edge_count) * _MB_PER_EDGE)
+    return max(default, min(wanted, _memory_budget_mb()))
+
+
+def _edge_count(db: Any, profile_id: str) -> int:
+    try:
+        rows = db.execute("SELECT COUNT(*) AS n FROM graph_edges WHERE profile_id = ?",
+                          (profile_id,))
+        return int(dict(rows[0])["n"]) if rows else 0
+    except Exception:  # noqa: BLE001 -- unknown size keeps the default limit
+        return 0
+
+
 def compute_rows_in_child(db: Any, profile_id: str, damping: float) -> dict[str, Any]:
     """The child's result, or ``{"error": ...}``. Never computes in this process."""
     db_path = getattr(db, "db_path", None)
@@ -68,7 +107,8 @@ def compute_rows_in_child(db: Any, profile_id: str, damping: float) -> dict[str,
         return {"error": "no store path to compute from", "engine": "networkx"}
     try:
         return run_in_child(child_compute, str(db_path), profile_id, float(damping),
-                            timeout=TIMEOUT_SECONDS)
+                            timeout=TIMEOUT_SECONDS,
+                            memory_limit_mb=helper_limit_mb(_edge_count(db, profile_id)))
     except (concurrent.futures.TimeoutError, TimeoutError):
         return {"error": f"graph metrics process exceeded {TIMEOUT_SECONDS:.0f}s",
                 "engine": "networkx"}
@@ -77,4 +117,5 @@ def compute_rows_in_child(db: Any, profile_id: str, damping: float) -> dict[str,
                 "engine": "networkx"}
 
 
-__all__ = ["NICE_INCREMENT", "TIMEOUT_SECONDS", "child_compute", "compute_rows_in_child"]
+__all__ = ["NICE_INCREMENT", "TIMEOUT_SECONDS", "child_compute", "compute_rows_in_child",
+           "helper_limit_mb"]

@@ -6724,8 +6724,18 @@ _mcp_app = None
 # Server entry point
 # ---------------------------------------------------------------------------
 
-def _worker_limit_mb(cmdline: list[str], default: int) -> int:
-    """The watchdog limit for one child; the picture worker has a larger one of its own (0 = none)."""
+def _worker_limit_mb(cmdline: list[str], default: int, pid: int | None = None) -> int:
+    """The watchdog limit for one child; the picture worker has a larger one of its own (0 = none).
+
+    A background child that registered its own limit (the graph-metrics helper,
+    sized to the graph, #304) is held to that one.
+    """
+    if pid is not None:
+        from superlocalmemory.core.background_process import memory_limits
+
+        own = memory_limits().get(pid)
+        if own:
+            return own
     if any(str(part).endswith("multimodal_worker.py") for part in cmdline):
         from superlocalmemory.runtimes.media_models import watchdog_limit_mb
 
@@ -6746,7 +6756,7 @@ def _watchdog_pass(parent_pid: int, max_worker_mb: int) -> None:
     for child in psutil.Process(parent_pid).children(recursive=True):
         try:
             held_mb = proc_memory.process_memory_mb(child.pid)
-            limit_mb = _worker_limit_mb(child.cmdline(), max_worker_mb)
+            limit_mb = _worker_limit_mb(child.cmdline(), max_worker_mb, pid=child.pid)
             if 0 < limit_mb < held_mb:
                 logger.warning(
                     "Memory watchdog: killing %s (PID %d, %.0f MB > %d MB limit)",
