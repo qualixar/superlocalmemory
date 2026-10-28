@@ -431,16 +431,21 @@ class ProjectionDrain:
         # stays out, or every re-projection of a visible neighbour would put it back (#296).
         from superlocalmemory.storage.logical_edges import fact_edge_select
 
-        for row in self._db.execute(
-            fact_edge_select(self._db.visible_fact_clause(prefix="f")),
-            (profile_id, fact.fact_id, fact.fact_id),
-        ):
-            edge = dict(row)
-            graph.add_edge(
-                edge["source_id"], edge["target_id"],
-                edge.get("edge_type") or "related",
-                float(edge.get("weight") or 1.0), profile_id=profile_id,
-            )
+        edges = [
+            (e["source_id"], e["target_id"], e.get("edge_type") or "related",
+             float(e.get("weight") or 1.0))
+            for e in map(dict, self._db.execute(
+                fact_edge_select(self._db.visible_fact_clause(prefix="f")),
+                (profile_id, fact.fact_id, fact.fact_id),
+            ))
+        ]
+        # #306: one write for all of this fact's edges, not one per edge.
+        add_edges = getattr(graph, "add_edges", None)
+        if add_edges is not None:
+            add_edges(edges, profile_id=profile_id)
+            return
+        for source_id, target_id, edge_type, weight in edges:
+            graph.add_edge(source_id, target_id, edge_type, weight, profile_id=profile_id)
 
     def _project_vector(self, fact: Any, batch: "_VectorBatch") -> None:
         """Buffer this fact's embedding for the pass's single vector write.

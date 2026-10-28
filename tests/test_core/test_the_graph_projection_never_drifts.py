@@ -158,3 +158,46 @@ def test_a_merged_fact_is_queued_and_the_copy_stays_equal_to_the_store(setup):
     assert projection_outbox.depth(db) == 1
     _drain(db, drain)
     assert _projected(graph) == _canonical(db)
+
+
+def _reverse(graph) -> set[tuple[str, str, str]]:
+    rows = graph._db.run("?[a, b, t] := *edge_rev{to_id: b, from_id: a, edge_type: t}").values.tolist()
+    return {tuple(r) for r in rows}
+
+
+def test_a_fact_with_many_edges_is_written_in_one_transaction(setup, monkeypatch):
+    """#306: one native transaction per edge (40 on average, 203 at most on a
+    reporter's store) made the drain disk-bound. One per fact now, same edges."""
+    db, graph, drain = setup
+    hub = _fact(db, "the hub everything links to")
+    spokes = [_fact(db, f"spoke number {i}") for i in range(30)]
+    _drain(db, drain)
+    for spoke in spokes:
+        _edge(db, hub, spoke)
+    writes: list[int] = []
+    real = graph._put_edges
+    monkeypatch.setattr(graph, "_put_edges", lambda rows: writes.append(len(rows)) or real(rows))
+    drain._project_graph(db.get_fact(hub), graph)
+    assert writes == [30]
+    assert _projected(graph) == _canonical(db)
+    assert _reverse(graph) == _projected(graph)
+
+
+def test_a_backend_without_batch_writes_still_gets_every_edge(setup):
+    db, graph, drain = setup
+
+    class OneAtATime:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "add_edges":
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    a, b, c = (_fact(db, t) for t in ("alpha note", "beta note", "gamma note"))
+    _drain(db, drain)
+    _edge(db, a, b)
+    _edge(db, a, c)
+    drain._project_graph(db.get_fact(a), OneAtATime(graph))
+    assert _projected(graph) == _canonical(db)

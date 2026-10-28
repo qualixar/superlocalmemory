@@ -303,6 +303,23 @@ class CozoDBGraphBackend:
         meta = json.dumps(metadata or {})
         self._put_edges([[from_id, to_id, edge_type, float(weight), meta, profile_id, now]])
 
+    def add_edges(
+        self,
+        edges: list[tuple[str, str, str, float]],
+        profile_id: str = "default",
+    ) -> None:
+        """Insert many ``(from_id, to_id, edge_type, weight)`` edges in one transaction.
+
+        #306: one transaction per edge made projecting a fact with hundreds of
+        edges disk-bound. A key given twice keeps its last weight, as calling
+        ``add_edge`` in order did.
+        """
+        now = datetime.now().isoformat()
+        latest: dict[tuple[str, str, str], float] = {}
+        for from_id, to_id, edge_type, weight in edges:
+            latest[(from_id, to_id, edge_type)] = float(weight)
+        self._put_edges([[f, t, k, w, "{}", profile_id, now] for (f, t, k), w in latest.items()])
+
     def _put_edges(self, rows: list[list[Any]]) -> None:
         """Upsert edges and their ``edge_rev`` mirror in one transaction.
 
