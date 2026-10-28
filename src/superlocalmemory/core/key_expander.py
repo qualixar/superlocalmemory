@@ -73,7 +73,8 @@ class KeyExpander:
             if not name:
                 continue
             try:
-                ent = self._db.get_entity_by_name(name, profile_id)
+                # Facts hold entity IDs; a name lookup missed every one (#306).
+                ent = self._db.get_entity_by_id_or_name(name, profile_id)
             except Exception:
                 ent = None
             if ent is None:

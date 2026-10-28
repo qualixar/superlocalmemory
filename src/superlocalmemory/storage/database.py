@@ -1873,12 +1873,32 @@ class DatabaseManager:
         )
         return entity.entity_id
 
+    # COLLATE NOCASE, not LOWER(): it is the same ASCII case fold, and it is the
+    # one idx_entities_name_lower is built on. LOWER(canonical_name) made every
+    # lookup scan the profile's entities (#306: ~3 s per 45 lookups at 38k).
+    _ENTITY_BY_NAME_SQL = (
+        "SELECT * FROM canonical_entities "
+        "WHERE profile_id = ? AND canonical_name = ? COLLATE NOCASE"
+    )
+
     def get_entity_by_name(self, name: str, profile_id: str) -> CanonicalEntity | None:
         """Look up entity by name (case-insensitive)."""
+        return self._entity_row(self.execute(self._ENTITY_BY_NAME_SQL, (profile_id, name)))
+
+    def get_entity_by_id_or_name(self, key: str, profile_id: str) -> CanonicalEntity | None:
+        """An entity by its ID, else by its name (case-insensitive), in one profile.
+
+        Facts store canonical entity IDs (#306), while older rows may hold
+        names; the ID is tried first because it is the primary key.
+        """
         rows = self.execute(
-            "SELECT * FROM canonical_entities WHERE profile_id = ? AND LOWER(canonical_name) = LOWER(?)",
-            (profile_id, name),
+            "SELECT * FROM canonical_entities WHERE entity_id = ? AND profile_id = ?",
+            (key, profile_id),
         )
+        return self._entity_row(rows) or self.get_entity_by_name(key, profile_id)
+
+    @staticmethod
+    def _entity_row(rows: list) -> CanonicalEntity | None:
         if not rows:
             return None
         d = dict(rows[0])

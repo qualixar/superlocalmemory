@@ -186,3 +186,34 @@ class TestExpansionBackfill:
         db.upsert_fact_expansion("f1", "preexisting")  # already populated
         counts = run_maintenance(db, SLMConfig(), "default")
         assert counts["expansion_backfilled"] == 0  # skipped
+
+
+class TestEntityIdsResolve:
+    """#306: facts store canonical entity IDs, which were looked up as names.
+
+    Every lookup missed (0 of 45 on a reporter's store) and, through LOWER(),
+    bypassed the name index (about 3 s for 45 lookups on 38k entities).
+    """
+
+    def test_an_entity_id_finds_its_aliases(self, db: DatabaseManager) -> None:
+        _seed_entity_with_aliases(db)
+        keys = KeyExpander(db).expand(_fact("I visited the city", ["e1"]), "default", mode="a")
+        for key in ("NYC", "Big Apple", "New York City"):
+            assert key in keys  # expand() returns the keys space-joined
+
+    def test_a_name_still_resolves_case_insensitively(self, db: DatabaseManager) -> None:
+        _seed_entity_with_aliases(db)
+        assert db.get_entity_by_id_or_name("new york city", "default").entity_id == "e1"
+        assert db.get_entity_by_id_or_name("e1", "default").entity_id == "e1"
+        assert db.get_entity_by_id_or_name("nowhere", "default") is None
+
+    def test_another_profile_is_never_read(self, db: DatabaseManager) -> None:
+        _seed_entity_with_aliases(db)
+        db.execute("INSERT INTO profiles(profile_id, name) VALUES ('other', 'Other')")
+        assert db.get_entity_by_id_or_name("e1", "other") is None
+        assert db.get_entity_by_name("New York City", "other") is None
+
+    def test_the_name_lookup_uses_the_name_index(self, db: DatabaseManager) -> None:
+        plan = " ".join(str(tuple(r)) for r in db.execute(
+            "EXPLAIN QUERY PLAN " + db._ENTITY_BY_NAME_SQL, ("default", "NYC")))
+        assert "idx_entities_name_lower" in plan, plan
