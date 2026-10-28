@@ -15,8 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, DESTROYS_ONCE, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.request_profile import tool_profile
@@ -31,7 +31,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 1. report_outcome
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Report Recall Outcome", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def report_outcome(
         memory_ids: str,
@@ -139,7 +139,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 2. get_lifecycle_status
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Lifecycle Status", annotations=READ_ONLY)
     async def get_lifecycle_status(limit: int = 50, profile_id: str = "") -> dict:
         """Get lifecycle state distribution for stored memories.
 
@@ -192,7 +192,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 3. set_retention_policy
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Set Retention Policy", annotations=DESTROYS_ONCE)
     @admits(OperationKind.CONSOLIDATE)
     async def set_retention_policy(
         cold_after_days: int = 30,
@@ -235,7 +235,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 4. compact_memories
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Compact Memories", annotations=DESTROYS)
     @admits(OperationKind.CONSOLIDATE)
     async def compact_memories(dry_run: bool = True) -> dict:
         """Compact memory store by archiving cold/stale facts.
@@ -288,7 +288,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 5. get_behavioral_patterns
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Behavioral Patterns", annotations=READ_ONLY)
     async def get_behavioral_patterns(limit: int = 20, profile_id: str = "") -> dict:
         """Get detected behavioral patterns for the active profile (or ``profile_id``).
 
@@ -321,7 +321,7 @@ def register_v28_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 6. audit_trail
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Audit Trail", annotations=READ_ONLY)
     async def audit_trail(limit: int = 50) -> dict:
         """Get compliance audit trail for the active profile.
 

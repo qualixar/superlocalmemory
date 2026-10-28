@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import READ_ONLY
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,7 @@ def register_prestage_tool(server, recall_fn: PrestageRecallFn,
     # Module-level pure function (avoid UnboundLocalError from nested def name).
     _pure_prestage = globals()["prestage_context"]
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Prestage Context", annotations=READ_ONLY)
     async def prestage_context(  # noqa: F811 — MCP tool surface name
         query: str,
         limit: int = 5,

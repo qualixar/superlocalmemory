@@ -26,8 +26,8 @@ import logging
 import urllib.parse
 from typing import Any, Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 
@@ -127,7 +127,7 @@ def register_kind_tools(server, get_engine: Callable) -> None:
     daemon's HTTP routes, never through ``get_engine()`` directly.
     """
 
-    @server.tool()
+    @server.tool(title="Set Memory Kind", annotations=SETS)
     @admits(OperationKind.CORRECT)
     async def set_memory_kind(fact_id: str, kind: str, profile_id: str = "") -> dict:
         """Set (confirm) the kind of one memory you already know the type of.
@@ -160,14 +160,14 @@ def register_kind_tools(server, get_engine: Callable) -> None:
                     "error": result.get("error", "Memory not found.")}
         return result
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Memory Kind Status", annotations=READ_ONLY)
     async def memory_kinds_status(profile_id: str = "") -> dict:
         """Memory-kind status for the active profile (or ``profile_id``): counts
         per kind (confirmed/suggested), which backend classifies new memories,
         and any classification run in progress."""
         return await _kinds_request("GET", _with_profile("/status", profile_id))
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Review Memory Kind Suggestions", annotations=READ_ONLY)
     async def review_memory_kinds(kind: str = "", limit: int = 20,
                                   profile_id: str = "") -> dict:
         """List memory-kind suggestions awaiting confirmation.
@@ -191,7 +191,7 @@ def register_kind_tools(server, get_engine: Callable) -> None:
         return await _kinds_request(
             "GET", with_view(_with_profile("/suggestions" + qs, profile_id)))
 
-    @server.tool()
+    @server.tool(title="Confirm Memory Kinds", annotations=SETS)
     @admits(OperationKind.CORRECT)
     async def confirm_memory_kinds(items: list[dict], profile_id: str = "") -> dict:
         """Confirm kinds for 1-200 facts at once.

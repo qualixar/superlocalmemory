@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.remote_visibility import visible_facts
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_expand_tool(server, get_engine: Callable) -> None:
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Expand Memory", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
     async def expand(memory_id: str, depth: int = 2, max_tokens: int = 0,
                      profile_id: str = "") -> dict:

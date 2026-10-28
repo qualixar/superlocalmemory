@@ -19,10 +19,10 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from mcp.types import ToolAnnotations
 
 logger = logging.getLogger(__name__)
 
+from superlocalmemory.mcp.tool_hints import DESTROYS, DESTROYS_ONCE, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
@@ -93,7 +93,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 1. forget — Ebbinghaus forgetting decay cycle
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(destructiveHint=True))
+    @server.tool(title="Run Forgetting Cycle", annotations=DESTROYS)
     @admits(OperationKind.FORGET)
     async def forget(
         dry_run: bool = True,
@@ -164,7 +164,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 2. quantize — EAP embedding quantization cycle
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Quantize Embeddings", annotations=DESTROYS)
     @admits(OperationKind.CONSOLIDATE)
     async def quantize(
         dry_run: bool = True,
@@ -237,7 +237,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 3. consolidate_cognitive — CCQ cognitive consolidation
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Consolidate Memories", annotations=DESTROYS)
     @admits(OperationKind.CONSOLIDATE)
     async def consolidate_cognitive() -> dict:
         """Run CCQ cognitive consolidation pipeline.
@@ -312,7 +312,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 4. get_soft_prompts — Retrieve active soft prompts
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Soft Prompts", annotations=READ_ONLY)
     async def get_soft_prompts(profile_id: str = "") -> dict:
         """Get active soft prompts (auto-learned user patterns).
 
@@ -366,7 +366,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 5. reap_processes — Find and kill orphaned SLM processes
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Reap Orphan Processes", annotations=DESTROYS_ONCE)
     @admits(OperationKind.CONSOLIDATE)
     async def reap_processes(
         dry_run: bool = True,
@@ -416,7 +416,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 6. get_retention_stats — Memory retention zone distribution
     # ------------------------------------------------------------------
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Retention Stats", annotations=READ_ONLY)
     async def get_retention_stats(profile_id: str = "") -> dict:
         """Get memory retention statistics (zone distribution, decay rates).
 
@@ -472,7 +472,7 @@ def register_v33_tools(server, get_engine: Callable) -> None:
     # ------------------------------------------------------------------
     # 7. run_maintenance — V3.3.12: Combined periodic maintenance cycle
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(title="Run Maintenance", annotations=DESTROYS)
     @admits(OperationKind.CONSOLIDATE)
     async def run_maintenance() -> dict:
         """Run all periodic maintenance tasks in a single call.

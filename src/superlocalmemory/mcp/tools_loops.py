@@ -37,8 +37,8 @@ import inspect
 import logging
 from typing import Any, Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.loops import (
@@ -105,7 +105,7 @@ def register_loop_tools(
     Compatible with FastMCP, _FilteredServer, and the test mock server.
     """
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    @server.tool(title="Run Bounded Loop", annotations=hints(open_world=True))
     @admits(OperationKind.REMEMBER)
     async def slm_loop_run(
         name: str,
@@ -152,7 +152,7 @@ def register_loop_tools(
             gate_contract,
         )
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="List Bounded Loop Runs", annotations=READ_ONLY)
     async def slm_loop_history(name: str, limit: int = 20, profile_id: str = "") -> dict:
         """List recorded bounded-loop runs for a loop name, newest laps summarised.
 
@@ -198,7 +198,7 @@ def register_loop_tools(
             logger.exception("slm_loop_history failed (fail-open)")
             return {"ok": False, "error": str(exc)}
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Show Bounded Loop Run", annotations=READ_ONLY)
     async def slm_loop_show(run_id: str, limit: int = 200, profile_id: str = "") -> dict:
         """Show every lap of one bounded-loop run, in order, from SLM memory.
 

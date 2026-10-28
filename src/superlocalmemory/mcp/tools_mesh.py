@@ -24,8 +24,8 @@ import time
 import uuid
 from typing import Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp import tools_mesh_remote
@@ -329,7 +329,7 @@ def auto_register_mesh() -> None:
 def register_mesh_tools(server, get_engine: Callable) -> None:
     """Register all 9 mesh MCP tools."""
 
-    @server.tool()
+    @server.tool(title="Set Session Summary", annotations=SETS)
     @admits(OperationKind.MESH_SEND)
     async def mesh_summary(summary: str = "") -> dict:
         """Register this session and describe what you're working on.
@@ -366,7 +366,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             "broker_response": result,
         }
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="List Mesh Peers", annotations=READ_ONLY)
     async def mesh_peers() -> dict:
         """List all active peer sessions on this machine.
 
@@ -386,7 +386,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             "my_peer_id": _PEER_ID,
         }
 
-    @server.tool()
+    @server.tool(title="Send Mesh Message", annotations=ADDS)
     @admits(OperationKind.MESH_SEND)
     async def mesh_send(
         to: str, message: str, refs: list[str] | None = None, reply_to: int | None = None
@@ -457,7 +457,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             )
         return len(unread_ids)
 
-    @server.tool()
+    @server.tool(title="Read Mesh Inbox", annotations=ADDS)
     @admits(OperationKind.MESH_SEND)
     async def mesh_inbox(ack: list[int] | None = None) -> dict:
         """Read messages sent to this session.
@@ -498,7 +498,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             "preface": PREFACE,
         }
 
-    @server.tool()
+    @server.tool(title="Wait for Mesh Messages", annotations=ADDS)
     @admits(OperationKind.MESH_SEND)
     async def mesh_wait(timeout_s: int = 20, ack: list[int] | None = None) -> dict:
         """Wait for new messages, up to 20 seconds, then return what arrived.
@@ -557,7 +557,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
             "preface": PREFACE,
         }
 
-    @server.tool()
+    @server.tool(title="Get or Set Shared State", annotations=DESTROYS_ONCE)
     @admits(OperationKind.MESH_SEND)
     async def mesh_state(key: str = "", value: str = "", action: str = "get") -> dict:
         """Get or set shared state across all sessions.
@@ -600,7 +600,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         result = await asyncio.to_thread(_mesh_request, "GET", "/state")
         return result or {"state": {}}
 
-    @server.tool()
+    @server.tool(title="Manage File Lock", annotations=SETS)
     @admits(OperationKind.MESH_LOCK)
     async def mesh_lock(
         file_path: str,
@@ -631,7 +631,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         )
         return result or {"ok": False, "error": "Lock operation failed"}
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="List Mesh Events", annotations=READ_ONLY)
     async def mesh_events() -> dict:
         """Get recent mesh events (peer joins, leaves, messages, state changes).
 
@@ -642,7 +642,7 @@ def register_mesh_tools(server, get_engine: Callable) -> None:
         result = await asyncio.to_thread(_mesh_request, "GET", "/events")
         return result or {"events": []}
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Mesh Status", annotations=READ_ONLY)
     async def mesh_status() -> dict:
         """Get mesh broker health and statistics.
 

@@ -27,8 +27,8 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import DESTROYS, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.views import ViewError, default_store
@@ -96,7 +96,7 @@ def _run_through_daemon(name: str, profile_id: str = "") -> dict[str, Any]:
 def register_view_tools(server: Any, get_engine: Callable[[], Any]) -> None:
     """Register ``run_view`` and ``manage_view``."""
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Run Saved View", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
     async def run_view(name: str = "", profile_id: str = "") -> dict[str, Any]:
         """Run one of your saved views, or list them.
@@ -126,7 +126,7 @@ def register_view_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             logger.exception("run_view failed")
             return {"success": False, "error": f"run_view failed: {exc}"}
 
-    @server.tool(annotations=ToolAnnotations(destructiveHint=True))
+    @server.tool(title="Manage Saved View", annotations=DESTROYS)
     @admits(OperationKind.REMEMBER)
     async def manage_view(
         action: str,

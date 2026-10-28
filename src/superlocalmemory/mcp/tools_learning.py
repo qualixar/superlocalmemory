@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Callable
 from contextlib import closing
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.request_profile import tool_profile
@@ -111,7 +111,7 @@ def settle_pending_session_outcomes(
 def register_learning_tools(server, get_engine: Callable) -> None:
     """Register learning MCP tools for two-way intelligence."""
 
-    @server.tool()
+    @server.tool(title="Log Tool Event", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def log_tool_event(
         tool_name: str,
@@ -181,7 +181,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             logger.debug("log_tool_event failed: %s", exc)
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(title="Settle Session Outcomes", annotations=SETS)
     @admits(OperationKind.REMEMBER)
     async def settle_session_outcomes(
         session_id: str, agent_id: str = "", finalize: bool = False,
@@ -228,7 +228,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             logger.debug("settle_session_outcomes failed: %s", exc)
             return {"success": False, "error": str(exc)}
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Behavioral Assertions", annotations=READ_ONLY)
     async def get_assertions(
         min_confidence: float = 0.0,
         category: str = "",
@@ -283,7 +283,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
             logger.debug("get_assertions failed: %s", exc)
             return {"assertions": [], "count": 0, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(title="Reinforce Assertion", annotations=ADDS)
     @admits(OperationKind.CORRECT)
     async def reinforce_assertion(assertion_id: str, profile_id: str = "") -> dict:
         """Reinforce a behavioral assertion (increase confidence).
@@ -316,7 +316,7 @@ def register_learning_tools(server, get_engine: Callable) -> None:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    @server.tool()
+    @server.tool(title="Contradict Assertion", annotations=DESTROYS)
     @admits(OperationKind.FORGET)
     async def contradict_assertion(assertion_id: str, profile_id: str = "") -> dict:
         """Contradict a behavioral assertion (decrease confidence).

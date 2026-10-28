@@ -28,9 +28,10 @@ import re
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import WithJsonSchema
 
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.media_fetch import MAX_REMOTE_BASE64_BYTES, too_large_for_remote
@@ -348,7 +349,7 @@ async def _get(media_id: str, variant: str, profile_id: str) -> CallToolResult:
 def register_media_tools(server: Any) -> None:
     """Register ``remember_media`` and ``get_media`` on *server*."""
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False),
+    @server.tool(title="Remember Image", annotations=hints(open_world=True),
                  meta=FILE_PARAMS_META)
     @admits(OperationKind.REMEMBER)
     async def remember_media(
@@ -369,7 +370,7 @@ def register_media_tools(server: Any) -> None:
             "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key,
             "scope": scope, "shared_with": _profiles(shared_with)})
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+    @server.tool(title="Get Image Thumbnail", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
     async def get_media(media_id: str, variant: str = "thumb", profile_id: str = "") -> CallToolResult:
         """Show the thumbnail of a saved image as an image. Apps on other computers need the owner's permission."""
@@ -379,7 +380,7 @@ def register_media_tools(server: Any) -> None:
 def register_document_tools(server: Any) -> None:
     """Register ``remember_document`` and ``media_status`` on *server*."""
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False),
+    @server.tool(title="Remember PDF", annotations=hints(open_world=True),
                  meta=FILE_PARAMS_META)
     @admits(OperationKind.REMEMBER)
     async def remember_document(
@@ -401,7 +402,7 @@ def register_document_tools(server: Any) -> None:
             "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key,
             "scope": scope, "shared_with": _profiles(shared_with)})
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+    @server.tool(title="Get Document Job Status", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
     async def media_status(job_id: str, profile_id: str = "") -> dict:
         """How far a saved document's background work has got. Apps on other computers need the owner's permission."""

@@ -16,8 +16,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
-from mcp.types import ToolAnnotations
 
+from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY
 from superlocalmemory.brain.truth import BrainTruthService
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
@@ -169,7 +169,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
     keeps multi-profile data isolated at the public boundary.
     """
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    @server.tool(title="Get Brain Evidence Status", annotations=READ_ONLY)
     async def get_brain_evidence_status(profile_id: str = "") -> dict[str, Any]:
         """Get profile-scoped, observation-only Living Brain evidence totals.
 
@@ -192,7 +192,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             "control_plane": truth["control_plane"],
         }
 
-    @server.tool()
+    @server.tool(title="Record Agent Experience", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def record_agent_experience(payload: dict[str, Any],
                                       profile_id: str = "") -> dict[str, Any]:
@@ -220,7 +220,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             return {"success": False, "durable": False, "error": str(exc)}
         return {"success": True, "durable": True, "created": created}
 
-    @server.tool()
+    @server.tool(title="Record Cognitive Turn", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def record_cognitive_turn(payload: dict[str, Any],
                                     profile_id: str = "") -> dict[str, Any]:
@@ -250,7 +250,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             return {"success": False, "durable": False, "error": str(exc)}
         return {"success": True, "durable": True, "created": created}
 
-    @server.tool()
+    @server.tool(title="Finalize Cognitive Turn", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def finalize_cognitive_turn(receipt_id: str, outcome: dict[str, Any],
                                       profile_id: str = "") -> dict[str, Any]:
@@ -278,7 +278,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             return {"success": False, "durable": False, "error": str(exc)}
         return {"success": True, "durable": True, "finalized": finalized}
 
-    @server.tool()
+    @server.tool(title="Import Bounded Loop Evidence", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def observe_bounded_loop_evidence(workspace: str) -> dict[str, Any]:
         """Import one explicit, read-only snapshot from installed Bounded Loops.
@@ -324,7 +324,7 @@ def register_brain_tools(server: Any, get_engine: Callable[[], Any]) -> None:
             "control_plane": "observation_only",
         }
 
-    @server.tool()
+    @server.tool(title="Import Loop Execution Learning", annotations=ADDS)
     @admits(OperationKind.REMEMBER)
     async def observe_bounded_loop_execution_learning(workspace: str) -> dict[str, Any]:
         """Ingest negotiated bridge-v2 terminal evidence into the execution plane.
