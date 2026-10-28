@@ -5,6 +5,43 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.12] — Large stores answer, purges finish, the mode says where data goes
+
+Fixes for six reports filed after 4.2.11. No migration and no command to run.
+
+### Fixed
+
+- **A slow recall answers instead of saying busy** (#304). On a store of 37,000
+  memories every explicit recall ran past its time limit and came back as HTTP
+  503 "ask again in 2 seconds", on an idle daemon, and every retry did the same.
+  A recall that runs out of time now answers with keyword matches, labelled
+  `degraded_lexical` and unchecked. "Busy" is kept for when every slot really is
+  taken, the one case where asking again helps.
+- **Recall does a third of the vector work** (#304). Three search channels ran
+  the same nearest-neighbour search at the same moment on every recall. They
+  now share one, and the channel phase stops waiting before the caller gives up.
+- **A purge finishes after fast note changes** (#297). Editing or deleting a
+  note while its save was still being enriched made that save fail three times
+  with "queryable fact profile mismatch or missing fact", and
+  `sources remove --purge` refused until the retries ran out. Such a save now
+  settles at once and puts nothing back.
+- **A custom embedding endpoint keeps the model you chose** (#302). In Modes A
+  and B a blank model name was filled with the local model's id and width, which
+  an endpoint like Ollama's does not serve, so every embedding call failed.
+  Saving such an endpoint without a model name or width is now refused with a
+  message saying what to fill in.
+- **Modes A and B say when data leaves this computer** (#303). A remote
+  embedding endpoint, or a hosted language model in Mode B, was accepted while
+  the mode still reported local-only. The dashboard card, the mode status, the
+  configuration warnings and the EU AI Act check now follow the configuration.
+- **Every MCP tool has a title and all four behaviour hints** (#300), as the
+  Claude and ChatGPT directories require. `slm_cache_set` no longer claims to be
+  read-only.
+- **The web sign-in tells identical connections apart** (#301). After
+  reinstalls the connection picker listed several identical entries. Each now
+  shows a short ID and its expiry, and an opt-in box removes the older ones for
+  that profile and app. Patch by @DannyGi82.
+
 ## [4.2.11] — Removed notes stay removed, the graph copy stays in step, edits are recalled
 
 Three fixes for things that looked done but were not. Upgrading runs one

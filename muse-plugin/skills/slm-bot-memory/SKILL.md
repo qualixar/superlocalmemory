@@ -177,4 +177,4 @@ store every local bot on that computer can reach.
 
 ---
 
-*SuperLocalMemory v4.2.11 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.12 · Qualixar · AGPL-3.0-or-later*

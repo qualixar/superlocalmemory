@@ -1,7 +1,7 @@
 ---
 name: slm-bot-memory
 description: Cross-bot memory on a shared computer (Grok Bot, Cursor plugin, any host where several agents share one machine). Explains agent_id attribution vs. profile/scope access, how to namespace by agent_id + profile + scope, and what must never be written to memory. Read this before the first remember/recall on a new Grok-Bot-style host.
-version: "4.2.11"
+version: "4.2.12"
 agent: agent
 tools:
   - remember
@@ -177,4 +177,4 @@ store every local bot on that computer can reach.
 
 ---
 
-*SuperLocalMemory v4.2.11 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.12 · Qualixar · AGPL-3.0-or-later*
