@@ -14,6 +14,8 @@ import {tokenHash} from './device-proof.ts';
 import type {BootstrapBinding} from './bootstrap-do.ts';
 import type {AuthProps,Scope} from './contracts.ts';
 import {toolsForScopes} from './request-policy.ts';
+import {renderConnectionSelector} from './owner-selection.ts';
+import {pruneOtherOwnerConnections} from './prune-owner-connections.ts';
 export interface AuthWorkerEnv extends AuthorizationEnv,IssuedTokenEnv,ConnectEnv,SetupAdmissionEnv {GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string;DEVICE_WRAP_KEY:string;}
 interface ConsentContext {request:AuthRequest;bootstrapId?:string;ownerId?:string;}
 const LOOPBACK_HOSTS=['127.0.0.1','localhost','[::1]'];
@@ -109,8 +111,7 @@ async function githubCallback(request:Request,env:AuthWorkerEnv):Promise<Respons
  if(!connections.length)return html(renderAuthPage('Link your computer first','<h1>Link your computer first</h1><p>No active computer connection is available for this GitHub account. Open your local SLM dashboard, enable a web connection, then reconnect this application using the same GitHub account.</p>'),resumed.headers,resumed.request.redirectUri);
  const consent=await api.beginConsent(resumed.request);
  await env.OAUTH_KV.put('slm-consent:'+consent.handle,JSON.stringify({request:resumed.request,ownerId}),{expirationTtl:900});
- const options=connections.map(c=>'<option value="'+escapeHtml(c.connectionId)+'">'+escapeHtml(c.profileId)+' ('+escapeHtml(c.host)+')</option>').join('');
- return html(renderAuthPage('Choose your SLM connection','<h1>Choose your SLM connection</h1><p>GitHub sign-in is complete. Select the local profile this application may use.</p><form method="post" action="/select"><input type="hidden" name="handle" value="'+escapeHtml(consent.handle)+'"><label>Local profile <select name="connection_id">'+options+'</select></label><div class="actions"><button name="decision" value="allow">Connect</button><button name="decision" value="deny">Cancel</button></div></form><details><summary>Approved permissions</summary><p>'+resumed.request.scope.map(escapeHtml).join(', ')+'</p></details>'),consent.headers,resumed.request.redirectUri);
+ return html(renderAuthPage('Choose your SLM connection',renderConnectionSelector(connections,consent.handle,resumed.request.scope)),consent.headers,resumed.request.redirectUri);
 }
 async function selectConnection(request:Request,env:AuthWorkerEnv):Promise<Response>{
  const fields=await form(request);const handle=fields.get('handle')??'';const saved=await consentContext(handle,env);if(!saved?.ownerId)return missingConsent(request,handle,env);
@@ -123,6 +124,19 @@ async function selectConnection(request:Request,env:AuthWorkerEnv):Promise<Respo
  const scopes=selectedScopes(saved.request.scope,connection.permissions);if(!scopes.length)return response(403,'insufficient_scope');
  const approved=await api.approveConsent(request,handle,{scope:scopes});await finishConsent(handle,env);
  if(approved.request.clientId!==saved.request.clientId||approved.request.resource!==MCP_RESOURCE)return response(400,'consent_unavailable');
+ // GitHub-authenticated owner expressly opts in to account-scoped pruning, and
+ // only once this consent is approved: a refused consent must not leave older
+ // connections revoked with no new one. Cleanup is optional, so a failure is
+ // logged and the chosen connection still completes. No cleanup happens on the
+ // normal Connect path.
+ if(fields.get('remove_duplicates')==='yes'){
+  try{
+   await pruneOtherOwnerConnections({
+    owner:env.OWNERS.getByName(saved.ownerId),ownerId:saved.ownerId,
+    selectedId:connectionId,env,
+   });
+  }catch(error){console.warn('owner connection cleanup incomplete',error instanceof Error?error.message:'unknown');}
+ }
  const authorizationId=crypto.randomUUID();const props:AuthProps={ownerId:saved.ownerId,authorizationId,connectionId};
  const tools=toolsForScopes(scopes);
  await env.REGISTRIES.getByName(connectionId).addAuthorization({authorizationId,ownerId:saved.ownerId,connectionId,clientId:approved.request.clientId,audience:MCP_RESOURCE,consentedTools:tools,consentedScopes:scopes as Scope[],consentedCorrection:false,consentedSharedRead:false,consentedGlobalRead:false,authorizationVersion:1,revokedAt:null});
