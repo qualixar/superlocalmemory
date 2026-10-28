@@ -29,11 +29,15 @@ pytestmark = [
 
 
 @pytest.fixture
-def backend():
-    """Create temporary LanceDB backend."""
+def backend(tmp_path):
+    """Create temporary LanceDB backend.
+
+    Its own directory per test: a fixed /tmp path was shared by every xdist
+    worker, so one worker's table went missing or already existed for another.
+    """
     from superlocalmemory.vector.lancedb_backend import LanceDBVectorBackend
 
-    path = "/tmp/test_lancedb_backend"
+    path = str(tmp_path / "lancedb_backend")
     be = LanceDBVectorBackend(path)
     yield be
     be.close()

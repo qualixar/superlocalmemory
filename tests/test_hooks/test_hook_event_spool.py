@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import sys
 import textwrap
 from pathlib import Path
@@ -118,10 +119,14 @@ _WRITER = textwrap.dedent("""
 def test_concurrent_hook_processes_never_tear_a_line(tmp_path: Path) -> None:
     procs = [subprocess.Popen([sys.executable, "-c", _WRITER, str(tmp_path), str(n)])
              for n in range(6)]
-    # Claims racing the writers is the daemon's normal life.
+    # Claims racing the writers is the daemon's normal life, at the daemon's
+    # fastest pace (hook_event_writer floors its interval at 50 ms). A claim
+    # loop with no pause starved the writers past their 1 s lock wait on a
+    # loaded test host, which no daemon does.
     claimed: dict[Path, None] = {}
     while any(p.poll() is None for p in procs):
         claimed.update(dict.fromkeys(event_spool.claim_ready(tmp_path)))
+        time.sleep(0.05)
     assert all(p.wait(timeout=120) == 0 for p in procs)
     claimed.update(dict.fromkeys(event_spool.claim_ready(tmp_path)))
     ids = [e["event_id"] for p in claimed for e in _lines(p)]
