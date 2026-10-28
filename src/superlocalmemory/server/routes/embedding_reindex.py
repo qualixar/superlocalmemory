@@ -107,17 +107,33 @@ def target_config(live: Any, body: dict) -> Any:
     """The embedding config a request asks for, starting from the live one."""
     from dataclasses import replace
 
+    from superlocalmemory.core.embedding_endpoint_check import (
+        INCOMPLETE_ENDPOINT_CODE,
+        incomplete_endpoint_error,
+    )
     from superlocalmemory.core.embedding_providers import resolve_embedding_provider
 
-    model = str(body.get("model_name") or body.get("model") or live.model_name).strip()
+    named = str(body.get("model_name") or body.get("model") or "").strip()
+    model = named or live.model_name.strip()
     provider = resolve_embedding_provider(str(body.get("provider") or ""), model, live.provider)
-    dim = int(body.get("dimension") or 0) or (live.dimension if model == live.model_name else 0)
+    endpoint = str(body.get("api_endpoint", live.api_endpoint) or "")
+    # An endpoint serves its own models: the live model id and width are its to
+    # inherit only when the live config is already such an endpoint (#302).
+    borrowed = provider == "openai" and bool(endpoint) and not live.is_openai_compatible
+    if borrowed and not named:
+        model = ""
+    dim = int(body.get("dimension") or 0) or (
+        live.dimension if model == live.model_name and not borrowed else 0)
+    if provider == "openai" and endpoint:
+        problem = incomplete_endpoint_error(replace(
+            live, provider=provider, model_name=model, dimension=dim, api_endpoint=endpoint))
+        if problem:
+            raise ValueError(f"{INCOMPLETE_ENDPOINT_CODE}: {problem}")
     if not model:
         raise ValueError("a model name is required")
     if not 64 <= dim <= 8192:
         raise ValueError("the new model's vector size is needed: pass --dimension N "
                          "(64-8192), for example 768 or 384")
-    endpoint = str(body.get("api_endpoint", live.api_endpoint) or "")
     same_place = provider == live.provider and endpoint == live.api_endpoint
     return replace(
         live, provider=provider, model_name=model, dimension=dim, api_endpoint=endpoint,

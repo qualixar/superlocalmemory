@@ -2031,9 +2031,13 @@ class SLMConfig:
             # endpoint/model/dimension. Otherwise use local defaults.
             _a_provider = embedding_provider or "sentence-transformers"
             if _a_provider == "openai" and embedding_endpoint:
+                # #302: a provider gets its own model id or none at all, never
+                # another provider's. The bundle's nomic id and 768 are not
+                # something an endpoint is known to serve, so blank stays blank
+                # and the save doors ask for both (embedding_endpoint_check).
                 _a_emb = EmbeddingConfig(
-                    model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
-                    dimension=embedding_dimension or 768,
+                    model_name=embedding_model_name,
+                    dimension=embedding_dimension,
                     provider="openai",
                     api_endpoint=embedding_endpoint,
                     api_key=embedding_key,
@@ -2083,9 +2087,10 @@ class SLMConfig:
             # (e.g. local vLLM, LiteLLM, Ollama /v1), honour it.
             _b_provider = embedding_provider or "ollama"
             if _b_provider == "openai" and embedding_endpoint:
+                # #302: same rule as Mode A above.
                 _b_emb = EmbeddingConfig(
-                    model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
-                    dimension=embedding_dimension or 768,
+                    model_name=embedding_model_name,
+                    dimension=embedding_dimension,
                     provider="openai",
                     api_endpoint=embedding_endpoint,
                     api_key=embedding_key,

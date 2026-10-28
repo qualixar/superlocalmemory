@@ -604,7 +604,8 @@ async def set_full_config(request: Request):
                 api_endpoint=body.get("embedding_endpoint", ""),
                 api_key=body.get("embedding_key", ""),
                 model_name=_new_model,
-                dimension=_new_dim or _old_emb.dimension,
+                dimension=_new_dim or _inherited_embedding_dimension(
+                    _old_emb, _new_provider, _new_model),
                 # Not naming these reset them to defaults, so every embedding
                 # save from the dashboard silently put the local model back to
                 # whatever ships — the exact defect the other route had.
@@ -616,9 +617,12 @@ async def set_full_config(request: Request):
                 api_version=_old_emb.api_version,
                 deployment_name=_old_emb.deployment_name,
             )
+            _incomplete = _incomplete_endpoint_response(_new_emb)  # #302
+            if _incomplete is not None:
+                return _incomplete
             # 4.1.22: a new space is re-indexed in the background; the rest applies now.
             from superlocalmemory.server.routes.embedding_reindex import queue_if_new_space
-            _queued = queue_if_new_space(request, _old_emb, _new_emb, force=bool(body.get("force")))
+            _queued =queue_if_new_space(request, _old_emb, _new_emb, force=bool(body.get("force")))
             if _queued is not None and _queued.status_code != 202:
                 return _queued
             _refusal = None if _queued is not None or bool(body.get("force")) or getattr(
@@ -699,6 +703,36 @@ def get_embedding_config(request: Request):
         }
     except Exception as e:
         return _internal_error()
+
+
+def _incomplete_endpoint_response(emb):
+    """The 400 for an OpenAI-compatible endpoint saved without a model or a width (#302).
+
+    Both save doors and the re-index target ask ``core.embedding_endpoint_check``,
+    so one config cannot get different answers from different doors.
+    """
+    from superlocalmemory.core.embedding_endpoint_check import (
+        INCOMPLETE_ENDPOINT_CODE,
+        incomplete_endpoint_error,
+    )
+
+    message = incomplete_endpoint_error(emb)
+    if message is None:
+        return None
+    return JSONResponse({"error": message, "code": INCOMPLETE_ENDPOINT_CODE}, status_code=400)
+
+
+def _inherited_embedding_dimension(old_emb, new_provider, new_model) -> int:
+    """The width a save that names none keeps from the live config.
+
+    A custom endpoint keeps it only while it is the same endpoint model: the
+    local bundle's 768 is not the width of whatever the endpoint serves.
+    """
+    if new_provider != "openai":
+        return old_emb.dimension
+    if old_emb.is_openai_compatible and new_model == old_emb.model_name:
+        return old_emb.dimension
+    return 0
 
 
 def _refuse_incompatible_embedding(
@@ -798,8 +832,15 @@ async def set_embedding_config(request: Request):
                 body.get("provider", ""), new_model, config.embedding.provider)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        new_dim = int(body.get("dimension", config.embedding.dimension) or 768)
-        if not (64 <= new_dim <= 8192):
+        # A blank width is 768 only for the providers that ship at 768; an
+        # endpoint's width is its own and is asked for, never assumed (#302).
+        new_dim = (
+            int(body["dimension"] or 0) if "dimension" in body
+            else _inherited_embedding_dimension(config.embedding, new_provider, new_model)
+        )
+        if not new_dim and new_provider != "openai":
+            new_dim = 768
+        if new_dim and not (64 <= new_dim <= 8192):
             return JSONResponse({"error": f"Dimension must be 64-8192, got {new_dim}"}, status_code=400)
         new_endpoint = body.get("api_endpoint", config.embedding.api_endpoint)
         new_key = body.get("api_key", config.embedding.api_key)
@@ -830,9 +871,12 @@ async def set_embedding_config(request: Request):
             api_version=old_emb.api_version,
             deployment_name=old_emb.deployment_name,
         )
+        incomplete = _incomplete_endpoint_response(new_emb)  # #302
+        if incomplete is not None:
+            return incomplete
         # 4.1.22: a new embedding space is re-indexed in the background (202 + job).
         from superlocalmemory.server.routes.embedding_reindex import queue_if_new_space
-        queued = queue_if_new_space(request, old_emb, new_emb, force=bool(body.get("force")))
+        queued =queue_if_new_space(request, old_emb, new_emb, force=bool(body.get("force")))
         if queued is not None:
             return queued
         refusal = None if bool(body.get("force")) or getattr(request.app.state, "embedding_reindex", None) else (

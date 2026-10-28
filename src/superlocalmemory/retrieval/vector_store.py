@@ -235,6 +235,22 @@ class VectorStore:
         Same-dimension opens are a no-op (IF NOT EXISTS guard).
         """
         dim = self._config.dimension
+        try:
+            known_width = int(dim) > 0
+        except (TypeError, ValueError):
+            known_width = False
+        if not known_width:
+            # A width that is not known (an endpoint saved without one, #302) is
+            # not a width to rebuild at: the comparison below would read it as
+            # "the model changed" and drop every vector the store holds. Leave
+            # the tables as they are and fall back to the ANN index.
+            logger.warning(
+                "Embedding dimension %r is not a positive width; vector store "
+                "left untouched and disabled until the embedding config names one",
+                dim,
+            )
+            self._available = False
+            return
         vec0_ddl = (
             f"CREATE VIRTUAL TABLE IF NOT EXISTS fact_embeddings USING vec0("
             f"profile_id TEXT PARTITION KEY, "
