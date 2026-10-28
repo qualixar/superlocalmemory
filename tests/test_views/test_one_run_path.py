@@ -102,9 +102,9 @@ def test_one_view_gives_one_answer_on_every_surface(daemon, capsys) -> None:
 
 
 def test_the_over_budget_answer_is_shared_too(daemon, monkeypatch) -> None:
-    """Past its budget an explicit question is told to ask again (503 busy),
-    never handed a keyword guess; a view runs the same function, so it says the
-    same thing."""
+    """Past its budget an explicit question answers with keyword matches labelled
+    unchecked (#304: a 503 "ask again" on an overrun never succeeded on retry);
+    a view runs the same function, so it says the same thing."""
     import time
 
     from superlocalmemory.server import recall_core
@@ -119,10 +119,10 @@ def test_the_over_budget_answer_is_shared_too(daemon, monkeypatch) -> None:
     view = daemon.client.get("/api/v3/views/run", params={"name": "Widget"})
     direct = daemon.client.get("/recall", params={"q": "widget release", "limit": 4})
     for res in (view, direct):
-        assert res.status_code == 503, res.text
-        assert int(res.headers["Retry-After"]) >= 1
-        assert res.json()["code"] == "RECALL_BUSY"
-        assert res.json()["results"] == []
+        assert res.status_code == 200, res.text
+        assert "Retry-After" not in res.headers
+        assert res.json().get("code") != "RECALL_BUSY"
+        assert res.json()["retrieval_mode"] == "degraded_lexical"
 
 
 def test_the_history_says_which_surface_ran_the_view(daemon, capsys, monkeypatch) -> None:

@@ -308,6 +308,40 @@ def test_a_started_run_keeps_its_slot_until_the_work_ends(monkeypatch, runtime):
         return out, held_after_busy, gate.locked()
 
     out, held_after_busy, held_at_end = asyncio.run(run())
-    assert out["code"] == "RECALL_BUSY"
+    assert out.get("code") != "RECALL_BUSY"  # #304: an overrun is not a full house
     assert held_after_busy is True     # the thread still runs: the slot stays taken
     assert held_at_end is False        # and is given back when it ends
+
+
+def test_an_overrun_answers_with_labelled_keyword_matches_not_503(monkeypatch, runtime):
+    """#304: a started run that cannot finish is not "busy".
+
+    On a 37k-fact store every explicit recall overran and was told to ask again
+    in 2 seconds, forever: retrying never helps an overrun, only a full house.
+    The keyword fallback answers instead, labelled as unchecked keyword matches.
+    """
+    release = threading.Event()
+
+    def stuck(*a):
+        release.wait(5)
+        return object()
+
+    monkeypatch.setattr(recall_core, "_engine_call", stuck)
+    monkeypatch.setattr(recall_core, "effective_budget_s", lambda call: 0.05)
+    monkeypatch.setattr(recall_core, "EXPLICIT_RUN_GRACE_S", 0.05)
+    monkeypatch.setattr(recall_core, "EXPLICIT_CEILING_S", 0.6)
+    monkeypatch.setattr(recall_core, "RECALL_BUDGET_FLOOR_S", 0.3)
+    async def run():
+        start = time.monotonic()
+        out = await recall_core.run_recall(object(), _call(), app_state=SimpleNamespace())
+        return out, time.monotonic() - start  # not the loop's wait for the stuck thread
+
+    try:
+        out, elapsed = asyncio.run(run())
+    finally:
+        release.set()
+    assert out["answerability"] == "unjudged"
+    assert out["results"] == [{"content": "keyword guess"}]
+    assert "keyword" in out["answer_check_note"].lower()
+    runtime.assert_called_once()
+    assert elapsed < 1.5  # answered near its own ceiling, not after the stuck run

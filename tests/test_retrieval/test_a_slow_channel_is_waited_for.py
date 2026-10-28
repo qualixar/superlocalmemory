@@ -231,3 +231,36 @@ class TestTheCallerIsToldWhenTheAnswerIsIncomplete:
             "a mutable default would accumulate across every recall in the "
             "process and report channels that this query never lost"
         )
+
+
+class TestTheWaitEndsBeforeTheCallerStopsListening:
+    """#304: the guard never outlasts the caller.
+
+    On a 37k-fact store three channels ran past the explicit recall's deadline,
+    so the server gave up and the engine kept waiting for an answer nobody would
+    read. With the caller's deadline known, the wait ends in time to fuse what
+    finished, and the dropped channels are named as for any other timeout.
+    """
+
+    def test_no_caller_deadline_keeps_the_full_guard(self) -> None:
+        assert engine_mod._channel_wait_s() == CHANNEL_HANG_GUARD_SECONDS
+
+    def test_a_distant_deadline_keeps_the_full_guard(self) -> None:
+        from superlocalmemory.retrieval.answer_check_status import caller_deadline
+
+        with caller_deadline(time.monotonic() + 60.0):
+            assert engine_mod._channel_wait_s() == CHANNEL_HANG_GUARD_SECONDS
+
+    def test_a_near_deadline_leaves_room_to_answer(self) -> None:
+        from superlocalmemory.retrieval.answer_check_status import caller_deadline
+
+        with caller_deadline(time.monotonic() + 5.0):
+            wait = engine_mod._channel_wait_s()
+        assert wait <= 5.0 - engine_mod.CHANNEL_RESERVE_S + 0.05
+        assert wait >= engine_mod.CHANNEL_WAIT_FLOOR_S
+
+    def test_a_passed_deadline_still_gives_the_floor(self) -> None:
+        from superlocalmemory.retrieval.answer_check_status import caller_deadline
+
+        with caller_deadline(time.monotonic() - 1.0):
+            assert engine_mod._channel_wait_s() == engine_mod.CHANNEL_WAIT_FLOOR_S

@@ -451,7 +451,15 @@ async def _run_admitted(engine, call, app_state, runtime, snapshot,
         future = submit(loop, hold, runtime, app_state, engine, _engine_call, engine, call)
         hedge = None
         if explicit:
-            response = await wait_until(future, run_deadline)
+            # #304: a run still going when only the fallback's floor is left
+            # starts the keyword fallback beside it, so an overrun answers with
+            # labelled keyword matches. It used to say "busy, ask again in 2 s"
+            # on an idle daemon; on a 37k-fact store every retry overran too.
+            response = await wait_until(future, run_deadline - RECALL_BUDGET_FLOOR_S)
+            if response is None:
+                hedge = submit(loop, hold, runtime, app_state, engine,
+                               _fallback, engine, call, app_state)
+                response = await wait_until(future, run_deadline)
         else:
             # Delayed hedge: a short-clock run still going near its deadline
             # starts the keyword fallback beside it, so an overrun answers with
@@ -465,10 +473,13 @@ async def _run_admitted(engine, call, app_state, runtime, snapshot,
                                _fallback, engine, call, app_state)
                 response = await wait_until(future, worker_deadline)
         if response is None:
+            # Busy is only the answer when no slot was free (above): asking
+            # again helps a full house, never a run that overran.
             if explicit:
-                logger.warning("Explicit recall overran its run budget; reporting busy")
-                return busy(call, snapshot, retry_after_s=_retry_after())
-            logger.warning("Recall deadline reached; serving unjudged keyword fallback")
+                logger.warning("Explicit recall overran its run budget; "
+                               "serving unjudged keyword fallback")
+            else:
+                logger.warning("Recall deadline reached; serving unjudged keyword fallback")
             return await _bounded_fallback(
                     engine, call, app_state, public_deadline, snapshot, hold, runtime,
                     started=hedge)

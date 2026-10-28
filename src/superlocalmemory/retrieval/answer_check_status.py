@@ -148,6 +148,11 @@ def caller_deadline(deadline: float | None) -> Iterator[None]:
         _CALLER_DEADLINE.reset(token)
 
 
+def caller_deadline_at() -> float | None:
+    """The monotonic instant this recall's caller stops waiting, or ``None``."""
+    return _CALLER_DEADLINE.get()
+
+
 @dataclass(frozen=True)
 class JudgeOutcome:
     """A verdict (or None) and the status that explains it."""

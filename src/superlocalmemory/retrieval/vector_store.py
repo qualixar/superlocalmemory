@@ -19,6 +19,7 @@ import logging
 import re
 import sqlite3
 import threading
+from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,11 @@ from superlocalmemory.storage.erasure_visibility import erasure_clause_for_conne
 from superlocalmemory.storage.write_lock import get_write_lock
 
 logger = logging.getLogger(__name__)
+
+#: Searches asking for this many or fewer share one scan (#304). Hopfield asks
+#: for 500, semantic for 100, spreading activation for 10; on a 37k-vector store
+#: k=500 measured 113 ms against 93-113 ms for each of the three separately.
+SHARED_SEARCH_K = 512
 
 
 class VectorDelete(enum.Enum):
@@ -95,6 +101,8 @@ class VectorStore:
         self._db_path = Path(db_path)
         self._config = config
         self._lock = threading.Lock()
+        self._flights_lock = threading.Lock()
+        self._flights: dict[tuple, Future] = {}
         self._available = False
 
         if not config.enabled:
@@ -499,12 +507,38 @@ class VectorStore:
         if len(query_embedding) != self._config.dimension:
             return []
 
+        if top_k <= 0:
+            return []
         vec_bytes = self._serialize_f32(query_embedding)
+        # #304: semantic, hopfield and spreading activation ask with the same
+        # vector at the same moment, and vec0 scans every vector whatever k is.
+        # A small k asks for the shared k and cuts (the rows are ranked, so its
+        # head is exactly what a smaller k returns), and an identical search
+        # already running answers the others. Only searches in flight are
+        # shared: one that has finished is never reused, so writes are seen.
+        k = max(top_k, SHARED_SEARCH_K)
+        key = (profile_id, vec_bytes, k)
+        with self._flights_lock:
+            flight = self._flights.get(key)
+            leader = flight is None
+            if leader:
+                flight = self._flights[key] = Future()
+        if leader:
+            try:
+                flight.set_result(self._search_rows(vec_bytes, k, profile_id))
+            except BaseException as exc:  # noqa: BLE001 -- the waiters get it too
+                flight.set_exception(exc)
+            finally:
+                with self._flights_lock:
+                    self._flights.pop(key, None)
+        return flight.result()[:top_k]
 
+    def _search_rows(
+        self, vec_bytes: bytes, top_k: int, profile_id: str | None,
+    ) -> list[tuple[str, float]]:
+        """The ranked nearest ``top_k`` (fact_id, cosine) pairs; ``[]`` on error."""
         try:
             with self._managed_connection() as conn:
-                if top_k <= 0:
-                    return []
                 # A withheld fact must not occupy a nearest-neighbour slot.
                 #
                 # Its vector stays in the index — quarantine is reversible and

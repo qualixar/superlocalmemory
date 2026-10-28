@@ -106,6 +106,25 @@ logger = logging.getLogger(__name__)
 # measure what it costs in answer quality first and record the number.
 CHANNEL_HANG_GUARD_SECONDS = 8.0
 
+# #304: the guard never outlasts the caller. A channel still running when the
+# caller is about to stop listening costs the whole answer, not just its own
+# candidates, so the wait ends early enough to fuse, rerank and check what
+# finished (the reserve), and the dropped channels are named as for any other
+# timeout. Explicit recalls have ~16 s, so this binds only near their end.
+CHANNEL_RESERVE_S = 1.5
+CHANNEL_WAIT_FLOOR_S = 1.0
+
+
+def _channel_wait_s() -> float:
+    """How long the channel phase may wait: the guard, or less near the caller's deadline."""
+    from superlocalmemory.retrieval.answer_check_status import caller_deadline_at
+
+    caller = caller_deadline_at()
+    if caller is None:
+        return CHANNEL_HANG_GUARD_SECONDS
+    left = caller - time.monotonic() - CHANNEL_RESERVE_S
+    return max(CHANNEL_WAIT_FLOOR_S, min(CHANNEL_HANG_GUARD_SECONDS, left))
+
 # How long a recall waits for a query vector from a model that has NEVER loaded
 # in this process (a fresh daemon). Only that case: a model that loaded before
 # is waited for unbounded, exactly as in 4.1.19 (retrieval/query_embedding.py).
@@ -1414,9 +1433,8 @@ class RetrievalEngine:
         # One shared limit keeps parallel dispatch genuinely bounded.  A
         # per-future timeout here would serialise the wait and turn five slow
         # channels into five seconds of UI latency.
-        done, pending = concurrent.futures.wait(
-            futures.values(), timeout=CHANNEL_HANG_GUARD_SECONDS,
-        )
+        wait_s = _channel_wait_s()
+        done, pending = concurrent.futures.wait(futures.values(), timeout=wait_s)
         for name, fut in futures.items():
             if fut in pending:
                 # Not a latency notice: this answer is missing whatever this
@@ -1425,7 +1443,7 @@ class RetrievalEngine:
                 logger.error(
                     "Channel %s did not finish within %.1fs; this recall is "
                     "answering without it",
-                    name, CHANNEL_HANG_GUARD_SECONDS,
+                    name, wait_s,
                 )
                 if dropped_channels is not None:
                     dropped_channels.add(name)
