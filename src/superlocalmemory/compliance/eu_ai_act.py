@@ -17,6 +17,10 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from superlocalmemory.core.data_locality import (
+    effective_data_locality,
+    remote_parts_sentence,
+)
 from superlocalmemory.core.modes import get_capabilities
 from superlocalmemory.storage.models import Mode
 
@@ -42,24 +46,37 @@ class ComplianceReport:
 class EUAIActChecker:
     """Report mode-level technical posture without giving legal certification."""
 
-    def check_compliance(self, mode: Mode) -> ComplianceReport:
-        """Generate compliance report for a mode."""
+    def check_compliance(
+        self, mode: Mode, *, embedding: object = None, llm: object = None,
+    ) -> ComplianceReport:
+        """Generate compliance report for a mode.
+
+        With the configured ``embedding`` and ``llm`` blocks (#303) the data
+        locality is the effective one, so a remote embedding endpoint under
+        Mode A or B is reported as data leaving the device. Without them it is
+        the mode's default.
+        """
         caps = get_capabilities(mode)
+        locality = effective_data_locality(mode, embedding, llm)
         findings: list[str] = []
 
         # Data locality
-        data_local = caps.data_stays_local
+        data_local = locality.stays_local
         if not data_local:
-            findings.append(
-                "Data leaves device for cloud LLM processing. "
-                "Requires Data Processing Agreement (DPA) with provider."
-            )
+            if caps.data_stays_local:
+                findings.append(remote_parts_sentence(locality))
+            else:
+                findings.append(
+                    "Data leaves device for cloud LLM processing. "
+                    "Requires Data Processing Agreement (DPA) with provider."
+                )
 
         # Generative AI usage
         uses_gen_ai = caps.llm_fact_extraction or caps.llm_answer_generation
-        local_gen_ai = uses_gen_ai and data_local
+        cloud_gen_ai = uses_gen_ai and (not caps.data_stays_local or locality.llm_remote)
+        local_gen_ai = uses_gen_ai and not cloud_gen_ai
 
-        if uses_gen_ai and not data_local:
+        if cloud_gen_ai:
             findings.append(
                 "Uses cloud generative AI. EU AI Act Art. 52 requires "
                 "transparency: users must be informed AI generates content."

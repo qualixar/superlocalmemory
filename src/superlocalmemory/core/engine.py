@@ -397,6 +397,7 @@ class MemoryEngine:
         _llm_up = getattr(self, "_llm", None) is not None
         for _warning in validate_mode_config(
             self._config.mode, has_llm=_llm_up, has_cloud_llm=_llm_up,
+            embedding=self._config.embedding, llm=self._config.llm,
         ):
             logger.warning("Mode config: %s", _warning)
 

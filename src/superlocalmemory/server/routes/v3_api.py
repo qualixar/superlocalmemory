@@ -212,7 +212,10 @@ def dashboard(request: Request):
             "projection_queue_depth": queue_depth,
             **counts,
         }
-        payload.update(dashboard_mode_fields(config.mode))
+        # #303: the mode's default, made true to the endpoints actually configured.
+        payload.update(dashboard_mode_fields(
+            config.mode, getattr(config, "embedding", None), getattr(config, "llm", None),
+        ))
         return payload
     except Exception as e:
         return _internal_error()
@@ -692,6 +695,10 @@ def get_embedding_config(request: Request):
         # that live truth, never silently replace it with disk defaults.
         config = getattr(request.app.state, "config", None) or SLMConfig.load()
         emb = config.embedding
+        from superlocalmemory.core.data_locality import (
+            effective_data_locality,
+            is_local_endpoint,
+        )
         return {
             "provider": emb.provider,
             "model_name": emb.model_name,
@@ -700,6 +707,13 @@ def get_embedding_config(request: Request):
             "has_key": bool(emb.api_key),
             "is_openai_compatible": emb.is_openai_compatible,
             "mode": config.mode.value,
+            # #303: a custom endpoint is allowed in any mode, so say whether it
+            # is on this computer or network and what that does to the mode's claim.
+            "endpoint_is_local": (
+                is_local_endpoint(emb.api_endpoint) if emb.is_openai_compatible else True
+            ),
+            "data_stays_local": effective_data_locality(
+                config.mode, emb, config.llm).stays_local,
         }
     except Exception as e:
         return _internal_error()

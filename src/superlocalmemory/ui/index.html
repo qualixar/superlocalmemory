@@ -1116,7 +1116,7 @@
                             <div class="btn-group w-100" role="group">
                                 <input type="radio" class="btn-check" name="settings-mode-radio" id="mode-a-radio" value="a" checked>
                                 <label class="btn btn-outline-success" for="mode-a-radio">
-                                    <strong>Mode A</strong><br><small>Zero Cloud</small>
+                                    <strong>Mode A</strong><br><small id="mode-a-card-note">Zero Cloud</small>
                                 </label>
                                 <input type="radio" class="btn-check" name="settings-mode-radio" id="mode-b-radio" value="b">
                                 <label class="btn btn-outline-info" for="mode-b-radio">
@@ -1209,6 +1209,10 @@
                                     <label class="form-label small">API Key (optional)</label>
                                     <input type="password" id="settings-emb-key" class="form-control form-control-sm" placeholder="not-needed">
                                 </div>
+                            </div>
+                            <div id="settings-emb-locality-note" class="small text-warning mb-2" style="display:none;">
+                                If this endpoint is not on this computer or your local network, your
+                                memory text leaves this computer every time a memory is saved or recalled.
                             </div>
                             <div id="settings-emb-test-row" style="display:none;">
                                 <button class="btn btn-sm btn-outline-info" id="settings-emb-test-btn">

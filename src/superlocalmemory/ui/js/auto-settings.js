@@ -509,6 +509,14 @@ async function loadEmbeddingSettings() {
 
         updateEmbeddingUI();
 
+        // "Zero Cloud" is a claim about the configuration, not the mode name:
+        // the server says whether the active mode's data stays on this computer.
+        var modeANote = document.getElementById('mode-a-card-note');
+        if (modeANote) {
+            modeANote.textContent = (data.mode === 'a' && data.data_stays_local === false)
+                ? 'Remote endpoint set' : 'Zero Cloud';
+        }
+
         var info = document.getElementById('settings-emb-info');
         if (info) {
             var _name = (data.model_name || 'unknown').replace(/[<>&"']/g, function(c) {
@@ -548,6 +556,8 @@ function updateEmbeddingUI() {
     if (dimCol) dimCol.style.display = isCustom ? 'block' : 'none';
     if (endpointRow) endpointRow.style.display = isCustom ? 'flex' : 'none';
     if (testRow) testRow.style.display = isCustom ? 'block' : 'none';
+    var localityNote = document.getElementById('settings-emb-locality-note');
+    if (localityNote) localityNote.style.display = isCustom ? 'block' : 'none';
 
     var info = document.getElementById('settings-emb-info');
     if (info && !isCustom) {

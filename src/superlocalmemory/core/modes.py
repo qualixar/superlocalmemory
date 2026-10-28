@@ -192,22 +192,37 @@ def get_capabilities(mode: Mode) -> ModeCapabilities:
     return _map[mode]
 
 
-def dashboard_mode_fields(mode: Mode | str) -> dict[str, object]:
-    """Fields the dashboard API must surface from the mode record.
+def dashboard_mode_fields(
+    mode: Mode | str, embedding: object = None, llm: object = None,
+) -> dict[str, object]:
+    """Fields the dashboard API must surface about where data goes.
 
     Keeps UI locality claims bound to :class:`ModeCapabilities` so Mode C
-    cannot be labeled local-only by a divergent hardcode.
+    cannot be labeled local-only by a divergent hardcode. With the embedding
+    and language-model configuration given (#303), the answer is the effective
+    one: a remote endpoint turns a local-only mode into provider-assisted. The
+    parts are named, never their hosts, since this payload reaches viewers.
     """
+    from superlocalmemory.core.data_locality import effective_data_locality
+
     if isinstance(mode, str):
         mode = Mode(mode.strip().lower())
-    caps = get_capabilities(mode)
+    locality = effective_data_locality(mode, embedding, llm)
     return {
-        "data_locality_label": caps.data_locality_label,
-        "data_stays_local": caps.data_stays_local,
+        "data_locality_label": locality.label,
+        "data_stays_local": locality.stays_local,
+        "data_remote_parts": list(locality.remote_parts),
     }
 
 
-def validate_mode_config(mode: Mode, *, has_llm: bool = False, has_cloud_llm: bool = False) -> list[str]:
+def validate_mode_config(
+    mode: Mode,
+    *,
+    has_llm: bool = False,
+    has_cloud_llm: bool = False,
+    embedding: object = None,
+    llm: object = None,
+) -> list[str]:
     """Validate that required services are available for the chosen mode.
 
     ``has_llm`` reports whether Mode B's model-on-this-machine is reachable —
@@ -215,6 +230,11 @@ def validate_mode_config(mode: Mode, *, has_llm: bool = False, has_cloud_llm: bo
     (#112). Naming it ``has_ollama`` baked one vendor into the check itself;
     the capability Mode B needs is "a local model answers", not "Ollama
     answers".
+
+    ``embedding`` and ``llm`` are the configured blocks (#303). Given them, a
+    local mode whose embedding endpoint or language model is not on this
+    computer gets a warning saying so, since the mode's local-only default no
+    longer holds.
 
     Returns list of warnings/errors. Empty list = all good.
     """
@@ -231,5 +251,18 @@ def validate_mode_config(mode: Mode, *, has_llm: bool = False, has_cloud_llm: bo
 
     if caps.agentic_retrieval and not has_cloud_llm:
         issues.append("Mode C agentic retrieval requires cloud LLM but none configured.")
+
+    if caps.data_stays_local and (embedding is not None or llm is not None):
+        from superlocalmemory.core.data_locality import (
+            effective_data_locality,
+            remote_parts_sentence,
+        )
+
+        locality = effective_data_locality(mode, embedding, llm)
+        if not locality.stays_local:
+            issues.append(
+                f"Mode {mode.value.upper()} is local by default. "
+                f"{remote_parts_sentence(locality)}"
+            )
 
     return issues
