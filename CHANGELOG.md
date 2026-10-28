@@ -5,6 +5,27 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.13] — Lighter ingestion on large stores, fresh graph scores
+
+Three fixes for large stores, from reports on #306 and #304. No migration and
+no command to run.
+
+### Fixed
+
+- **Alias keys find their entities** (#306). Facts store entity IDs, and the
+  key expander looked each one up as a name, so every lookup missed and no
+  alias reached the keyword index. The name lookup also skipped its index and
+  scanned every entity: about 3 seconds for 45 lookups on a store with 38,000
+  entities. IDs now resolve directly and names use the index.
+- **The graph copy gets a fact's edges in one write** (#306). Projecting a
+  fact wrote each of its edges in its own database transaction, 40 on average
+  and up to 203, which kept the disk busy during ingestion. It is now one write
+  per fact.
+- **Graph scores are recomputed on large stores** (#304). The memory watchdog
+  stopped the graph-metrics helper at 2.5 GB, which a graph of 3.6 million
+  edges passes, so PageRank and communities were never refreshed. The helper
+  now gets a limit sized to the graph, within the daemon's memory budget.
+
 ## [4.2.12] — Large stores answer, purges finish, the mode says where data goes
 
 Fixes for six reports filed after 4.2.11. No migration and no command to run.

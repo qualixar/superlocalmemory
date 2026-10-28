@@ -1,6 +1,6 @@
 {
   "name": "superlocalmemory",
-  "version": "4.2.12",
+  "version": "4.2.13",
   "description": "The governed memory brain for AI agents: one local memory for Claude Code, Codex, Cursor, Copilot, ChatGPT and any MCP client. Honest recall, documents and pictures, roles, audit and GDPR erasure.",
   "keywords": [
     "agent-memory",

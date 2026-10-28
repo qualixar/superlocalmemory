@@ -81,4 +81,4 @@ slm-scope · slm-governance · slm-profile · slm-remember · slm-recall · slm-
 # What NOT to do
 Never session_init twice; never forget without dry-run preview; never run `slm gdpr erase --yes` unasked; never store secrets; never bypass role checks; never claim an erasure succeeded without verifying via recall.
 
-SuperLocalMemory v4.2.12 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later
