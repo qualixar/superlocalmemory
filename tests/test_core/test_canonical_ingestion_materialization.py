@@ -887,6 +887,65 @@ def test_materializer_rejects_queryable_facts_from_another_profile(
     assert "profile" in failed.last_error.lower()
 
 
+def _queryable_save(engine, key: str):
+    _install_m018(engine)
+    command = build_engine_ingestion_command(engine)
+    receipt = command.submit(IngestionRequest(
+        content="Fictional EmberRail-731 uses CopperLake version 3 for 11 days.",
+        profile_id=engine._profile_id,
+        source_type="folder",
+        idempotency_key=key,
+        trusted_actor_id="daemon-capability:owned-instance",
+    ))
+    assert receipt.state is IngestionState.QUERYABLE
+    return command, receipt
+
+
+@pytest.mark.parametrize("retire", ["archived", "erased"])
+def test_a_save_retired_before_enrichment_settles_instead_of_failing(
+    engine_with_mock_deps, retire,
+) -> None:
+    """#297 follow-up: a note revised or deleted while its save was still
+    queryable had its facts hidden or erased; enrichment then failed three
+    times with "queryable fact profile mismatch or missing fact", and the purge
+    could not finish until every retry ran out. Nothing is left to enrich: the
+    operation settles at once, says why, and enriches nothing back."""
+    engine = engine_with_mock_deps
+    command, receipt = _queryable_save(engine, f"folder:retired-{retire}")
+    fact_id = receipt.queryable_fact_ids[0]
+    if retire == "archived":
+        engine._db.execute(
+            "UPDATE atomic_facts SET archive_status='archived' WHERE fact_id=?", (fact_id,))
+    else:
+        engine._db.execute("DELETE FROM atomic_facts WHERE fact_id=?", (fact_id,))
+
+    with patch.object(engine._fact_extractor, "extract_facts") as extract:
+        settled = command.materialize(receipt.operation_id)
+
+    assert settled.state is IngestionState.COMPLETE
+    assert settled.attempt_count == 1 and settled.last_error == ""
+    assert settled.derivation_state == {"superseded": True}
+    assert settled.final_fact_ids == ()
+    assert settled.queryable_fact_ids == (fact_id,)  # erasure scrubs still find it
+    extract.assert_not_called()
+    live = engine._db.execute(
+        "SELECT COUNT(*) AS n FROM atomic_facts WHERE profile_id=? "
+        "AND COALESCE(archive_status, 'live')='live'", (engine._profile_id,))
+    assert dict(live[0])["n"] == 0  # nothing came back
+
+
+def test_a_save_with_a_live_fact_left_is_still_an_error(engine_with_mock_deps) -> None:
+    """Superseded only when nothing of the save is live: a fact moved to another
+    profile is a real mismatch and still fails loudly."""
+    engine = engine_with_mock_deps
+    command, receipt = _queryable_save(engine, "folder:moved")
+    engine._db.execute("INSERT INTO profiles(profile_id, name) VALUES ('foreign', 'Foreign')")
+    engine._db.execute("UPDATE atomic_facts SET profile_id='foreign' WHERE fact_id=?",
+                       (receipt.queryable_fact_ids[0],))
+    failed = command.materialize(receipt.operation_id)
+    assert failed.state is IngestionState.FAILED
+
+
 @pytest.mark.parametrize(
     ("component", "stage", "error_text"),
     [

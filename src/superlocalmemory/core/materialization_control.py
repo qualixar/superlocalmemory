@@ -18,3 +18,12 @@ class MaterializationDeferred(RuntimeError):
     The queryable projection is already durable.  This signal must be handled
     by :class:`IngestionCommand` as a requeue, never as a failed attempt.
     """
+
+
+class MaterializationSuperseded(RuntimeError):
+    """Nothing of a queryable save is live any more: it was retired before enrichment.
+
+    A folder note revised or deleted while its save was still queryable has its
+    facts archived or erased (#297). Enriching it would put retired content back,
+    so :class:`IngestionCommand` settles the operation instead of failing it.
+    """

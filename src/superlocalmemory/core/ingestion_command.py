@@ -23,7 +23,10 @@ from enum import Enum
 from typing import Any, Callable
 
 from superlocalmemory.core.ingestion_lease_owner import owner_token, release_dead_owner_leases
-from superlocalmemory.core.materialization_control import MaterializationDeferred
+from superlocalmemory.core.materialization_control import (
+    MaterializationDeferred,
+    MaterializationSuperseded,
+)
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.idempotency_identity import same_principal
 
@@ -1006,6 +1009,19 @@ class IngestionCommand:
             return self.repository.defer_enriching(
                 operation_id,
                 owner=self._owner,
+            )
+        except MaterializationSuperseded:
+            # #297: the save was retired before it was enriched. Done, with
+            # nothing enriched back; its queryable ids stay on the row for the
+            # erasure scrubs, and "superseded" says why it has no final facts.
+            logger.info("ingestion %s was retired before enrichment; settled", operation_id)
+            return self.repository.finish_enriching(
+                operation_id,
+                owner=self._owner,
+                target=IngestionState.COMPLETE,
+                final_fact_ids=(),
+                derivation_version=self._derivation_version,
+                derivation_state={"superseded": True},
             )
         except Exception as exc:
             return self.repository.finish_enriching(
