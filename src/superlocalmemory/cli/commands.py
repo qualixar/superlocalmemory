@@ -558,6 +558,14 @@ def _cmd_outcome_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_hide_dispatch(args: Namespace) -> None:
+    """4.2.17: keep memories out of answers, or show them again (cli/hide_cmd.py)."""
+    from superlocalmemory.cli.hide_cmd import cmd_hide
+    code = cmd_hide(args)
+    if code:
+        sys.exit(code)
+
+
 def _cmd_corrections_dispatch(args: Namespace) -> None:
     """4.1.22: corrections a user action overtook (cli/corrections_cmd.py)."""
     from superlocalmemory.cli.corrections_cmd import run
@@ -738,6 +746,7 @@ def dispatch(args: Namespace) -> None:
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "outcome": _cmd_outcome_dispatch,
+        "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
         "embedder": _cmd_embedder_dispatch,
     }
@@ -3031,6 +3040,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
+        ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
     ]),
     ("Privacy & compliance", [
         # gdpr shipped in 4.0.6 but was never listed here, so `slm help` did not
