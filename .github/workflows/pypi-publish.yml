@@ -123,7 +123,7 @@ jobs:
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: https://registry.npmjs.org
 
       - name: Resolve and verify one release version
@@ -262,7 +262,7 @@ jobs:
           test -s dist/SHA256SUMS
 
       - name: Retain candidate artifacts and evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: superlocalmemory-${{ steps.version.outputs.version }}-candidates
           path: |
@@ -356,7 +356,7 @@ jobs:
       - name: Build, test and package the extension
         run: scripts/release/build-vsix.sh --version "${{ needs.release.outputs.version }}" --dist "$GITHUB_WORKSPACE/dist"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: superlocalmemory-${{ needs.release.outputs.version }}-vsix
           path: dist/vscode/*.vsix
@@ -405,14 +405,14 @@ jobs:
 
       - name: Download release artifacts
         if: ${{ matrix.release_assets }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: superlocalmemory-${{ needs.release.outputs.version }}-candidates
           path: dist
 
       - name: Download the VS Code extension
         if: ${{ matrix.vsix && needs.vsix.result == 'success' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: superlocalmemory-${{ needs.release.outputs.version }}-vsix
           path: dist/vscode
@@ -439,7 +439,7 @@ jobs:
 
       - name: Upload channel result
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: channel-result-${{ matrix.channel }}
           path: ${{ runner.temp }}/results/${{ matrix.channel }}.json
@@ -459,7 +459,7 @@ jobs:
           ref: ${{ needs.release.outputs.tag_sha }}
           sparse-checkout: scripts/release
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: channel-result-*
           path: results
