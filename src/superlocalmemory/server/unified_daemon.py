@@ -62,6 +62,9 @@ from superlocalmemory.daemon.materializer import (
     PendingMaterializer,
 )
 from superlocalmemory.daemon.materializer import (
+    PendingProfileMismatchError as _PendingProfileMismatchError,  # noqa: F401 - re-exported
+)
+from superlocalmemory.daemon.materializer import (
     ingestion_pass as _ingestion_pass,
 )
 from superlocalmemory.daemon.materializer import (

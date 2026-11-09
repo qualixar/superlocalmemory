@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import plistlib
 import re
 import shlex
 import subprocess
@@ -18,6 +17,8 @@ def _run(argv: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
 
 
 def _macos(row: ServiceDefinition) -> bool:
+    import plistlib  # macOS path only: the other platforms never load it
+
     from superlocalmemory.cli.service_inventory import _port
 
     result = _run(["launchctl", "list", row.name])
