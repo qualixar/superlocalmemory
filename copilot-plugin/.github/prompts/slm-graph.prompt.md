@@ -1,7 +1,7 @@
 ---
 name: slm-graph
 description: >
-version: "4.2.15"
+version: "4.2.16"
 agent: agent
 tools:
   - build_code_graph
@@ -313,4 +313,4 @@ All are host-only: a remote caller cannot use them.
 
 ---
 
-SuperLocalMemory v4.2.15 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.16 · Qualixar · AGPL-3.0-or-later
