@@ -129,7 +129,7 @@ def test_one_workflow_coordinates_both_registries_and_supports_recovery() -> Non
     assert "verify-release-registries" in source
     # 4.2.9: one gate script for PRs and releases, on macOS, before publication.
     gate = workflow["jobs"]["gate"]
-    assert gate["runs-on"] == "macos-14"
+    assert gate["runs-on"] == "macos-15"
     assert release["needs"] == "gate"
     assert "uv run bash scripts/ci-gate.sh" in source
     assert "uv run bash scripts/ci-gate.sh" in (

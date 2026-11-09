@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "installer-matrix.yml"
 # 4.2.9: CI runs macOS only, so it stays fast and green; the Windows steps
 # remain in the workflow, guarded, for the day the OS is added back.
-SUPPORTED_OS = {"macos-14"}
+SUPPORTED_OS = {"macos-15"}
 
 
 def _workflow() -> dict:

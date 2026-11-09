@@ -95,7 +95,7 @@ jobs:
 
   gate:
     name: Release-contract gate (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     # uv-managed Python only: the runner's python.org build cannot load
     # SQLite extensions, and uv prefers a system Python when it finds one.
     env:
@@ -120,7 +120,7 @@ jobs:
 
   native-lancedb:
     name: Native LanceDB (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     # uv-managed Python only: the runner's python.org build cannot load
     # SQLite extensions, and uv prefers a system Python when it finds one.
     env:
