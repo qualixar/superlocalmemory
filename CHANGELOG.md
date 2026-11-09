@@ -5,7 +5,19 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.2.15] — Clean session starts, patched dependencies
+
+A small follow-up to 4.2.14. No migration, no new settings, nothing to
+re-index. The next daily refresh retires stale auto-learned prompts on its own.
+
+### Security
+
+- Raised the floors for four packages SuperLocalMemory pulls in indirectly,
+  so clean installs and upgrades both get the patched releases: `filelock`
+  4.2.1 or later (via huggingface_hub, torch, transformers), `dnspython` 2.9.0
+  or later (via email-validator), `opentelemetry-api` 1.45.1 or later (via
+  mcp) and `setuptools` 84.1.0 or later (via torch). SuperLocalMemory does not
+  import any of them directly.
 
 ### Fixed
 

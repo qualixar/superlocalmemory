@@ -1,6 +1,6 @@
 [project]
 name = "superlocalmemory"
-version = "4.2.14"
+version = "4.2.15"
 description = "The governed memory brain for AI agents: one local memory for Claude Code, Codex, Cursor, Copilot, ChatGPT and any MCP client"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -114,10 +114,13 @@ dependencies = [
     # exact pins, so they never conflict with the packages that pull them in.
     "accelerate>=1.15.0",   # via llmlingua
     "anyio>=4.14.2",        # via mcp, httpx, starlette
+    "dnspython>=2.9.0",     # via email-validator (fastapi, pydantic)
+    "filelock>=4.2.1",      # via huggingface_hub, torch, transformers
     "fsspec>=2026.6.0",     # via huggingface_hub, torch
     "httpx2>=2.12.0",       # via mcp; carries the patched httpcore2
+    "opentelemetry-api>=1.45.1",  # via mcp
     "pyjwt>=2.15.0",        # via mcp
-    "setuptools>=83.0.0",   # via torch
+    "setuptools>=84.1.0",   # via torch
     "urllib3>=2.8.0",       # via requests, lancedb
 ]
 
