@@ -432,7 +432,7 @@ class ConsolidationEngine:
 
         # 4. active_decisions: signal_type='decision' with min access
         # CRITICAL: uses signal_type NOT fact_type (HIGH-2 fix)
-        not_prompt, not_prompt_params = source_filter()
+        not_prompt, not_prompt_params = source_filter(self._db)
         decision_facts = self._db.execute(
             "SELECT f.fact_id, f.content FROM atomic_facts f "
             "LEFT JOIN fact_access_log a ON f.fact_id = a.fact_id "
@@ -903,7 +903,7 @@ class ConsolidationEngine:
         """Get top facts by type and sort criteria."""
         type_placeholders = ",".join("?" * len(fact_types))
         # 4.2.14: never a captured prompt or bookkeeping (core/block_sources).
-        not_prompt, not_prompt_params = source_filter()
+        not_prompt, not_prompt_params = source_filter(self._db)
 
         if sort_by == "recency":
             query = (

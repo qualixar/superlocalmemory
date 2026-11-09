@@ -22,6 +22,13 @@ the 15 facts behind them were not memories at all:
 A session summary with real content (a branch, commits, the last action) is
 not bookkeeping by that definition and stays a source. Everything excluded
 here stays stored and searchable; it is only never a block's source.
+
+A fact the store has RETIRED (``fact_temporal_validity.system_expired_at``,
+set by ``remember(replaces=...)`` or a correction) is not a source either
+(4.2.17). ``get_pinned`` and recall already left it out; this module's own SQL
+did not, so a replaced "open item" stayed under "Core Memory (pinned)" at every
+session start. The check is the store's own (``storage/database``), guarded by
+the table's presence like every other reader of it.
 """
 
 from __future__ import annotations
@@ -46,9 +53,31 @@ _NOT_A_SOURCE = (
 )
 
 
-def source_filter() -> tuple[str, tuple[str, ...]]:
-    """``(" AND NOT ...", params)`` to append to a query over ``atomic_facts f``."""
-    return " AND NOT " + _NOT_A_SOURCE, (REQUEST_SOURCE,)
+def source_filter(store: Any) -> tuple[str, tuple[str, ...]]:
+    """``(" AND NOT ...", params)`` to append to a query over ``atomic_facts f``.
+
+    ``store`` is the DatabaseManager or sqlite3 connection the query runs on;
+    it decides whether the retirement check can be applied.
+    """
+    return " AND NOT " + _NOT_A_SOURCE + _not_retired(store), (REQUEST_SOURCE,)
+
+
+def _not_retired(store: Any) -> str:
+    from superlocalmemory.storage.database import _compose_current_clause
+
+    return _compose_current_clause("f", has_temporal=_has_temporal(store))
+
+
+def _has_temporal(store: Any) -> bool:
+    probe = getattr(store, "_has_temporal_validity_table", None)
+    if callable(probe):
+        return bool(probe())
+    try:
+        return bool(store.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='fact_temporal_validity'").fetchall())
+    except Exception:
+        return False
 
 
 def keep_sources(rows: Iterable[Any], limit: int) -> list[Any]:
@@ -63,10 +92,13 @@ def not_sources(conn: Any, fact_ids: Iterable[str]) -> set[str]:
     if not ids:
         return set()
     marks = ",".join("?" for _ in ids)
+    current = "1 = 1" + _not_retired(conn)  # 0 once the fact is retired
     rows = conn.execute(
-        f"SELECT f.fact_id, f.content, {_NOT_A_SOURCE} AS excluded "
+        f"SELECT f.fact_id, f.content, {_NOT_A_SOURCE} AS excluded, "
+        f"({current}) AS is_current "
         f"FROM atomic_facts f WHERE f.fact_id IN ({marks})", (REQUEST_SOURCE, *ids))
-    return {str(r[0]) for r in rows if r[2] or is_stub(str(r[1] or ""))}
+    return {str(r[0]) for r in rows
+            if r[2] or not r[3] or is_stub(str(r[1] or ""))}
 
 
 def _content(row: Any) -> Any:

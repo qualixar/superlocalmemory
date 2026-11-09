@@ -5,6 +5,19 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A replaced memory no longer stays pinned at session start. When
+  `remember(replaces=...)` or a correction retired a fact, recall and pinned
+  facts already left it out, but the session-start context (`slm
+  session-context`, which the Claude Code and Codex SessionStart hooks print)
+  and the Core Memory blocks read the store with their own queries and kept
+  showing the old fact under "Core Memory (pinned, high-value)". Both now skip
+  retired facts, and a block compiled before its fact was retired is no longer
+  shown. Nothing is deleted: the retired fact stays in history and audit.
+
 ## [4.2.16] — Session starts without bookkeeping
 
 A small follow-up to 4.2.15. No new settings. One automatic data repair runs

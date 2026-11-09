@@ -5125,15 +5125,17 @@ def cmd_session_context(args: Namespace) -> None:
         try:
             from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
 
-            not_prompt, not_prompt_params = source_filter()  # 4.2.14
-            fact_rows = _read_rows(
-                "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
-                "FROM atomic_facts f WHERE f.profile_id = ? "
-                f"{age_clause.replace('created_at', 'f.created_at')}"
-                "AND f.lifecycle = 'active'" + not_prompt + " "
-                "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
-                (pid, *not_prompt_params, 10 * OVERSAMPLE),
-            )
+            # 4.2.14 prompts and bookkeeping; 4.2.17 retired (replaced) facts.
+            with memory_read(db_path) as conn:
+                not_prompt, not_prompt_params = source_filter(conn)
+                fact_rows = conn.execute(
+                    "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
+                    "FROM atomic_facts f WHERE f.profile_id = ? "
+                    f"{age_clause.replace('created_at', 'f.created_at')}"
+                    "AND f.lifecycle = 'active'" + not_prompt + " "
+                    "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
+                    (pid, *not_prompt_params, 10 * OVERSAMPLE),
+                ).fetchall()
             fact_rows = keep_sources(fact_rows, 10)
             for r in fact_rows:
                 inj_mems.append(InjectableMemory(
@@ -5152,13 +5154,15 @@ def cmd_session_context(args: Namespace) -> None:
             # <date>") says nothing and is left out (4.2.14, non_answer).
             from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources
 
-            sess_rows = keep_sources(_read_rows(
-                "SELECT fact_id, content, importance, access_count FROM atomic_facts "
-                "WHERE profile_id = ? AND content LIKE 'Session%' "
-                "AND COALESCE(non_answer, 0) = 0 "
-                "ORDER BY created_at DESC LIMIT ?",
-                (pid, 3 * OVERSAMPLE),
-            ), 3)
+            with memory_read(db_path) as conn:
+                not_source, not_source_params = source_filter(conn)
+                sess_rows = keep_sources(conn.execute(
+                    "SELECT f.fact_id, f.content, f.importance, f.access_count "
+                    "FROM atomic_facts f "
+                    "WHERE f.profile_id = ? AND f.content LIKE 'Session%'" + not_source + " "
+                    "ORDER BY f.created_at DESC LIMIT ?",
+                    (pid, *not_source_params, 3 * OVERSAMPLE),
+                ).fetchall(), 3)
             for r in sess_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
