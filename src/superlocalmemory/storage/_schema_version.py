@@ -72,7 +72,8 @@ from pathlib import Path
 #: M065 removes made-up dates (data + an undo table), floor 51.
 #: M066 restores wrongly archived memories (data, same undo table), floor 51.
 #: M067 adds one trigger that queues fact changes for the projections, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 67
+#: M068 runs M062's stub pass again for the newer shapes (data only), floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 68
 
 
 class SchemaVersionError(RuntimeError):

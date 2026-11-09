@@ -5,6 +5,27 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Session-end lines with only git details no longer count as memories.** The
+  end-of-session summary that names just the branch and the uncommitted-file
+  total ("session ended ... | branch: main | uncommitted: 2 files changed, 0
+  insertions(+), 0 deletions(-)") was treated as real content, so these lines
+  were returned by recall and shown at session start. They are now bookkeeping
+  like the plain "session ended" line, as are the copies made from them ("the
+  user's session ended ...", a bare "2 files changed, ..." line). A summary that
+  lists recent commits still counts: that is what "what did I ship last
+  session?" needs.
+- **Bookkeeping saved before the rule learned its shape is now flagged too.**
+  A one-time migration (M068, no command needed) checks the rows already in
+  the store against every shape the rule knows, including the agent checkpoint
+  and "the session ended" forms added in 4.2.14 and 4.2.15. On one real store
+  it flagged 1,015 rows. Nothing is deleted or edited: flagged rows stay in
+  lists and on the dashboard and only leave recall answers, and a row you
+  marked yourself is never touched.
+
 ## [4.2.15] — Clean session starts, patched dependencies
 
 A small follow-up to 4.2.14. No migration, no new settings, nothing to
