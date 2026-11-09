@@ -182,7 +182,7 @@ the user's behalf without showing the dry run first.
 
 In Mode B and C, each stored fact costs one model call for its context sentence
 and up to five for contradiction checks. Two settings trade that for speed. Both
-default to what 4.2.13 did (5 and true), so nothing changes until the user
+default to the earlier behaviour (5 and true), so nothing changes until the user
 chooses, and each mode keeps its own value:
 
 ```bash
