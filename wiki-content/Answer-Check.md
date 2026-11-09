@@ -39,6 +39,8 @@ Inside **Online with Jev** there is one more switch, **Also use Jev to reorder r
 
 On the project's benchmark of long conversations (LoCoMo, 1,531 questions), the memory that answers the question came first 62 percent of the time with reordering on against 49 percent without it, and reordering adds about 0.4 seconds to a recall. That figure is from the project documentation; the repository's `docs/benchmarks.md` has the protocol.
 
+**At session start (4.2.17).** With reordering on, a session start uses it too: the SessionStart hook (`slm session-context`) and `session_init` ask Jev once for the order of the memories they load, against your first message or, without one, the project ("project context <folder>"). Only the order is used. The answer check in that request is discarded, because loading context is not a question, so a session start never says "That isn't in SuperLocalMemory" and nothing is hidden. It waits at most 1.5 seconds and keeps the usual order on any failure. With reordering off nothing is sent.
+
 The reorder switches itself off, and stays off until you tick it again, when you switch to On this Mac or Off, remove the key, untick the Jev notice or change provider.
 
 ## Privacy, by choice
