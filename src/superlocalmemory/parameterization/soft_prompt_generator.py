@@ -72,14 +72,29 @@ CATEGORY_TEMPLATES: dict[str, str] = {
     ),
 }
 
+#: What ``soft_prompt_templates.category`` accepts (its CHECK constraint in
+#: storage/schema_v32.py; a test keeps the two equal). A category outside it
+#: raised IntegrityError mid-run, which ended the run before the lifecycle
+#: review: stale prompts were never retired (4.2.15).
+STORABLE_CATEGORIES: frozenset[str] = frozenset({
+    "identity", "tech_preference", "communication_style", "workflow_pattern",
+    "project_context", "decision_history", "avoidance", "custom",
+})
+
+#: Not put in a session's context: tool-usage statistics ("frequently uses Read
+#: (6816 times)") tell an agent nothing it can act on. Still stored and shown
+#: on the dashboard.
+SESSION_EXCLUDED_CATEGORIES: frozenset[str] = frozenset({"workflow_pattern"})
+
+#: ``behavioral`` and ``topic_interest`` prompts were never storable (see
+#: above), so no store ever held one; their patterns are still extracted for
+#: the dashboard and analytics, they just do not become prompts.
 CATEGORY_PRIORITY_ORDER: list[str] = [
     "identity",
     "tech_preference",
     "communication_style",
-    "behavioral",  # v3.4.7: behavioral assertions after communication style
     "workflow_pattern",
     "project_context",
-    "topic_interest",
     "decision_history",
     "avoidance",
 ]

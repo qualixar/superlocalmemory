@@ -27,7 +27,7 @@ import re
 
 _EMPTY = re.compile(r'^[\s\[\]{}(),;:]*$')
 _DATE = r'\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?'
-_SESSION = re.compile(r'^(?:\[\]\s*)?session\s+(?:ended|closed)(?:\s+at)?\s+'
+_SESSION = re.compile(r'^(?:\[\]\s*)?(?:the\s+)?session\s+(?:ended|closed)(?:\s+at)?\s+'
                       + _DATE + r'[.!]?$', re.I)
 # "[Agentic_official] session ended 2026-10-13 09:54 | files: NOTICE, formats.md".
 # The "[project]" is optional: ingestion also derives the same line without it
