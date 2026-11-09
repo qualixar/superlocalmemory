@@ -504,7 +504,7 @@ async def set_full_config(request: Request):
             # does, so switching back never restores a stale profile.
             config.save(SLMConfig._mode_config_path(config.base_dir, config.mode))
         provider_input = _nonblank("provider")
-        model_input = _nonblank("model")
+        _nonblank("model")  # validation only (raises on non-string); value applied via apply_settings_update
         api_key_input = _nonblank("api_key")
         base_url_input = _nonblank("base_url")
         endpoint_input = _nonblank("endpoint")
@@ -1160,7 +1160,10 @@ async def test_provider(request: Request):
                 found = any(m == model or m.split(":")[0] == model_base for m in models) if model else len(models) > 0
                 return {
                     "success": found,
-                    "message": f"Ollama OK, {len(models)} models" + (f", '{model}' available" if found and model else ""),
+                    "message": (
+                        f"Ollama OK, {len(models)} models"
+                        + (f", '{model}' available" if found and model else "")
+                    ),
                 }
 
         if provider == "openrouter":
@@ -1188,7 +1191,11 @@ async def test_provider(request: Request):
                     base = f"{base}/chat/completions"
                 with httpx.Client(timeout=httpx.Timeout(10.0)) as c:
                     # Probe with a minimal chat request (models list not universal on local servers)
-                    probe = {"model": body.get("model", "test"), "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                    probe = {
+                        "model": body.get("model", "test"),
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 1,
+                    }
                     resp = c.post(base, headers=headers_test, json=probe)
                     if resp.status_code in (200, 400, 422):
                         return {"success": True, "message": f"Custom endpoint reachable (HTTP {resp.status_code})"}

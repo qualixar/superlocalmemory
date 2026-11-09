@@ -88,7 +88,10 @@ def _compute(store: Any, db: Any, profile_id: str, limit: int, cursor: str) -> d
     documents = [{**{k: d[k] for k in _VIEW}, "entities": _entities(db, profile_id, facts[d["document_id"]])}
                  for d in page]
     more = len(rows) > limit
-    return {"documents": documents, "next_cursor": _encode(page[-1]["created_at"], page[-1]["document_id"]) if more else None}
+    return {
+        "documents": documents,
+        "next_cursor": _encode(page[-1]["created_at"], page[-1]["document_id"]) if more else None,
+    }
 
 
 def document_index(profile_id: str, limit: int = 50, cursor: str = "", *, store: Any = None, db: Any = None,

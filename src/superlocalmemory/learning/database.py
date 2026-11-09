@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_engagement_profile_metric
 
 
 
-from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL
+from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL  # noqa: E402 - late import, order kept
 
 
 class LearningDatabase:

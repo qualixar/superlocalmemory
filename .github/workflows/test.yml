@@ -30,6 +30,17 @@ jobs:
       - run: pip install "import-linter==2.15"
       - name: Import contracts
         run: PYTHONPATH=src lint-imports
+  # 4.2.17: src/ and tests/ were brought to zero ruff findings; this keeps them
+  # there. The version is pinned so a new ruff release cannot fail main.
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
+      - name: ruff check
+        run: uvx --from ruff==0.15.12 ruff check src tests
   # The plugin folders (plugin/, cursor-plugin/, codex-plugin/, copilot-plugin/,
   # antigravity-plugin/, hermes-plugin/, muse-plugin/, vscode-agent-plugin/ ...)
   # are generated from plugin-src/ but tracked, because hosts install them

@@ -14,7 +14,8 @@
 Every subcommand is a thin client of ``/api/v3/sources`` (the routes the dashboard uses). Nothing
 here reads the folder. ``add`` shows what would be read and asks first; ``--purge`` erases the
 memories the folder gave and needs the typed word ``erase``. ``forget-empty`` is for a folder
-you emptied on purpose (shown offline as ``empty_folder``): it hides the memories of its files. ``--yes`` answers both questions;
+you emptied on purpose (shown offline as ``empty_folder``): it hides the memories of its files. ``--yes``
+answers both questions;
 without a terminal and without ``--yes`` the command refuses. ``--json`` gives JSON.
 """
 

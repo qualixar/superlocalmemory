@@ -181,5 +181,8 @@ def check_status(*, hooks_path: Path = DEFAULT_HOOKS_PATH) -> dict[str, Any]:
     hooks = data.get("hooks", {})
     if not isinstance(hooks, dict):
         return {"installed": None, "hook_types": [], "error": "hooks field is not an object", "path": str(hooks_path)}
-    found = [event for event, entries in hooks.items() if isinstance(entries, list) and any(is_slm_hook_entry(entry) for entry in entries)]
+    found = [
+        event for event, entries in hooks.items()
+        if isinstance(entries, list) and any(is_slm_hook_entry(entry) for entry in entries)
+    ]
     return {"installed": set(EVENTS).issubset(found), "hook_types": found, "path": str(hooks_path)}

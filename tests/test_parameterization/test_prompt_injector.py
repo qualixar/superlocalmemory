@@ -283,3 +283,17 @@ def test_inject_with_total_budget():
     mem = "word " * 200
     result = injector.inject_into_context(soft, mem, total_budget=200)
     assert len(result) > 0
+
+
+def test_a_total_budget_override_is_honoured():
+    """4.2.17: ``total_budget`` was documented and silently ignored."""
+    config = _make_config(max_prompt_tokens=500, max_memory_tokens=1500)
+    injector = PromptInjector(
+        db=MagicMock(), generator=SoftPromptGenerator(config=config), config=config,
+    )
+    long_soft = "word " * 3000
+    long_mem = "memory " * 3000
+    small = injector.inject_into_context(long_soft, long_mem, total_budget=400)
+    default = injector.inject_into_context(long_soft, long_mem)
+    assert SoftPromptGenerator._estimate_tokens(small) <= 400 + 20
+    assert SoftPromptGenerator._estimate_tokens(default) > 1500

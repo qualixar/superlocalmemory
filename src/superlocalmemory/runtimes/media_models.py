@@ -44,7 +44,8 @@ class ModelProfile:
 #: still global and were tuned on the built-in text model: they need the same calibration
 #: for this model before they are made per model.
 MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
-    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000, 0.60),  # the model's own processor bounds image tokens; recall was measured without a pre-shrink
+    # the model's own processor bounds image tokens; recall was measured without a pre-shrink
+    EG2_REPO: ModelProfile(EG2_REPO, EG2_REVISION, 768, 4500, 0.69, 0, 3000, 0.60),
     "nomic-ai/nomic-embed-vision-v1.5": ModelProfile(
         "nomic-ai/nomic-embed-vision-v1.5", "", 768, DEFAULT_RSS_LIMIT_MB, 0.084, 0, 1500),
 })
@@ -110,5 +111,7 @@ def watchdog_limit_mb(default: int) -> int:
     return max(wanted, 0)
 
 
-__all__ = ["DEFAULT_LOAD_MB", "ONE_MODEL_DEFAULT_ENABLED", "ONE_MODEL_MIN_RAM_GB", "PROVISIONAL_SECONDS_PER_MEMORY", "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES", "ModelProfile",
-           "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for", "text_min_semantic_for", "watchdog_limit_mb"]
+__all__ = ["DEFAULT_LOAD_MB", "ONE_MODEL_DEFAULT_ENABLED", "ONE_MODEL_MIN_RAM_GB", "PROVISIONAL_SECONDS_PER_MEMORY",
+           "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES",
+           "ModelProfile", "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for",
+           "text_min_semantic_for", "watchdog_limit_mb"]

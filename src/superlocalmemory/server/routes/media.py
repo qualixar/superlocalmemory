@@ -6,7 +6,8 @@
 
 ``POST /api/v3/media/remember`` saves an image from a file path on this machine,
 base64 data or an https download link, and ``POST /api/v3/documents`` queues a
-PDF (from a file path, base64 data or an https download link); neither is part of any remote tool list. The thumbnail, job-status and
+PDF (from a file path, base64 data or an https download link); neither is part of any remote tool list. The
+thumbnail, job-status and
 document-removal routes answer only for the profile the item belongs to.
 """
 

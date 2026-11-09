@@ -67,7 +67,7 @@ _DDL_STATEMENTS: tuple[str, ...] = (
         created_at      REAL NOT NULL,
         updated_at      REAL NOT NULL
     )
-    """,
+    """,  # noqa: E501
 
     # ── Table 3: graph_files ──────────────────────────────────────────
     """

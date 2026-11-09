@@ -475,7 +475,10 @@ def remember_media(
         return _run(client, store_ref, cache, config, data, src_sha, dict(
             content=content, profile_id=profile_id, actor_id=actor_id, runtime=runtime, tags=tags,
             session_date=session_date, idempotency_key=idempotency_key, folder=folder,
-            scope=scope, shared_with=tuple(shared_with), remote=not (can_wait if can_wait is not None else not getattr(inp, "remote", False))))
+            scope=scope, shared_with=tuple(shared_with),
+            remote=not (
+                can_wait if can_wait is not None else not getattr(inp, "remote", False)
+            )))
     except _Stop as stop:
         return stop.receipt
     finally:

@@ -335,7 +335,10 @@ def connect_google_drive(auth_code: str, redirect_uri: str) -> dict[str, Any]:
         from google.oauth2.credentials import Credentials  # noqa: F401
         from google_auth_oauthlib.flow import Flow
     except ImportError:
-        return {"error": "google-auth-oauthlib not installed. Run: pip install google-auth-oauthlib google-api-python-client"}
+        return {"error": (
+            "google-auth-oauthlib not installed. "
+            "Run: pip install google-auth-oauthlib google-api-python-client"
+        )}
 
     # OAuth2 client config (public client — no secret needed for installed apps)
     client_config = {
@@ -642,7 +645,10 @@ def sync_to_github(backup_files: list[Path] | Path, dest_config: dict) -> bool:
             json={
                 "tag_name": tag_name,
                 "name": f"SLM Backup {timestamp}",
-                "body": f"Automated encrypted backup — {len(backup_files)} databases ({total_mb:.1f} MB total)\n\n{file_list}",
+                "body": (
+                    f"Automated encrypted backup — {len(backup_files)} databases ({total_mb:.1f} MB total)"
+                    f"\n\n{file_list}"
+                ),
                 "draft": False,
                 "prerelease": False,
             },
@@ -759,7 +765,6 @@ def sync_all_destinations(db_path: Path | None = None) -> dict[str, Any]:
                 "encryption": encryption}
 
     synced = 0
-    db_names = [f.name for f in backup_set]
     total_size_mb = sum(f.stat().st_size for f in backup_set) / (1024 * 1024)
 
     for dest in destinations:
@@ -789,4 +794,4 @@ def sync_all_destinations(db_path: Path | None = None) -> dict[str, Any]:
             results[dest_id] = {"type": dest_type, "status": "failed", "error": str(exc)}
 
     return {"synced": synced, "total": len(destinations), "results": results,
-            "encryption": encryption}
+            "encryption": encryption, "size_mb": round(total_size_mb, 2)}

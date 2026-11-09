@@ -208,7 +208,7 @@ class SourceStore:
                          (source_id, relpath))
             conn.executemany(
                 "INSERT OR IGNORE INTO source_links(source_id, from_relpath, target, link_kind, label)"
-                " VALUES (?, ?, ?, ?, ?)", [(source_id, relpath, l.target, l.kind, l.label) for l in found])
+                " VALUES (?, ?, ?, ?, ?)", [(source_id, relpath, lk.target, lk.kind, lk.label) for lk in found])
 
     def delete_links(self, source_id: str, relpath: str) -> None:
         self.replace_links(source_id, relpath, [])

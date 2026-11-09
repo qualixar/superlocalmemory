@@ -1,5 +1,7 @@
 """Sample Python module for testing."""
 
+import os
+from pathlib import Path
 from typing import Optional
 
 from utils.helpers import validate_token

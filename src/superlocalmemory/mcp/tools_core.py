@@ -687,7 +687,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         ``project`` it never falls back to unfiltered results — an empty
         answer says why in ``tag_scope`` (nobody ever saved that tag, versus
         something has it but not among this question's matches).
-        """
+        """  # noqa: W293
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
             from superlocalmemory.mcp.agent_context import get_current_agent_id

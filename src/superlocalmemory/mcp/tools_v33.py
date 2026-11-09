@@ -21,11 +21,11 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-from superlocalmemory.core.admission import admits
-from superlocalmemory.core.operation_request import OperationKind
-from superlocalmemory.infra.data_root import state_path
-from superlocalmemory.mcp.shared import authorize_mcp_mutation
-from superlocalmemory.mcp.tool_hints import DESTROYS, DESTROYS_ONCE, READ_ONLY
+from superlocalmemory.core.admission import admits  # noqa: E402 - late import, order kept
+from superlocalmemory.core.operation_request import OperationKind  # noqa: E402 - late import, order kept
+from superlocalmemory.infra.data_root import state_path  # noqa: E402 - late import, order kept
+from superlocalmemory.mcp.shared import authorize_mcp_mutation  # noqa: E402 - late import, order kept
+from superlocalmemory.mcp.tool_hints import DESTROYS, DESTROYS_ONCE, READ_ONLY  # noqa: E402 - late import, order kept
 
 
 class DaemonDidNotComplete(RuntimeError):

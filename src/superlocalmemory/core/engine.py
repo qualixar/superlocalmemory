@@ -37,7 +37,7 @@ from superlocalmemory.storage.models import (
 
 logger = logging.getLogger(__name__)
 
-from superlocalmemory.core.hooks import HookRegistry
+from superlocalmemory.core.hooks import HookRegistry  # noqa: E402 - late import, order kept
 
 
 def _verify_ingestion_schema(memory_db: Path) -> bool:

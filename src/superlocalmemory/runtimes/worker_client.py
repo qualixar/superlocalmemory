@@ -142,7 +142,8 @@ class MediaWorkerClient(MediaEmbedderPort):
     def _spawn(self) -> None:
         root = Path(self._env.root)
         proc = subprocess.Popen([str(self._env.python()), "-I", str(WORKER_PATH)], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                                errors="replace",
                                 cwd=str(root) if root.is_dir() else None, env=self._worker_env())
         replies: queue.Queue = queue.Queue()
 
@@ -246,7 +247,8 @@ class MediaWorkerClient(MediaEmbedderPort):
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):
                 self._spawn()
                 reply = self._roundtrip({"cmd": "load", "model": self._model_arg(), "revision": self.revision,
-                                         "role": self.role, "max_pixels": self._max_pixels(), "hf_home": str(self._env.weights_dir()), "device": "auto"},
+                                         "role": self.role, "max_pixels": self._max_pixels(),
+                                         "hf_home": str(self._env.weights_dir()), "device": "auto"},
                                         self.load_timeout_s, cap_mb=self._load_cap_mb())
         except RuntimeError as exc:
             if isinstance(exc, MediaWorkerError):
@@ -505,5 +507,6 @@ def text_embedder(*, env: Any, data_root: str | Path | None, model_id: str,
     return _shared_client(env, model_id, revision, role, stop_hook=False)
 
 
-__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients", "media_embedder",
+__all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients",
+           "media_embedder",
            "text_embedder", "text_loadout_role"]

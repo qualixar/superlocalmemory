@@ -78,7 +78,8 @@ class Guard:
 class GuardVerdict:
     name: str
     describes: str
-    #: LIVE = requirements present, so the path is reachable now. DEAD /     #: SATISFIED_ELSEWHERE = a requirement is absent, so the path cannot have run
+    #: LIVE = requirements present, so the path is reachable now. DEAD /
+    #: SATISFIED_ELSEWHERE = a requirement is absent, so the path cannot have run
     #: against this store. LIVE is NOT evidence of past execution.
     verdict: str
     missing: tuple[str, ...] = field(default=())

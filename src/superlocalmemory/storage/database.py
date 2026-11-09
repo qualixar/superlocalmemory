@@ -556,7 +556,8 @@ class DatabaseManager:
     def _enable_wal(self) -> None:
         conn = sqlite3.connect(str(self.db_path))
         try:
-            conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")  # FIRST — so WAL pragma below uses configured timeout
+            # FIRST — so WAL pragma below uses configured timeout
+            conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             # Fix D: synchronous=NORMAL is safe under WAL — the WAL ensures

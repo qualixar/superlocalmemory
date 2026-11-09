@@ -126,7 +126,8 @@ class DocumentsMixin:
         with self._write() as conn:
             conn.execute(
                 "UPDATE documents SET updated_at = ?,"
-                " pages_text_layer = (SELECT COUNT(*) FROM doc_pages WHERE document_id = ? AND text_origin = 'text_layer'),"
+                " pages_text_layer = (SELECT COUNT(*) FROM doc_pages WHERE document_id = ?"
+                " AND text_origin = 'text_layer'),"
                 " pages_ocr = (SELECT COUNT(*) FROM doc_pages WHERE document_id = ? AND text_origin = 'ocr'),"
                 " pages_empty = (SELECT COUNT(*) FROM doc_pages WHERE document_id = ? AND text_origin = 'none')"
                 " WHERE document_id = ?", (utc_stamp(), document_id, document_id, document_id, document_id))

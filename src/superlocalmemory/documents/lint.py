@@ -95,7 +95,10 @@ def _duplicate_pages(store: Any, profile_id: str, titles: dict[str, str]) -> lis
         out.append({"a": {"document_id": first[0], "page_no": first[1], "title": titles[first[0]]},
                     "b": {"document_id": second[0], "page_no": second[1], "title": titles[second[0]]},
                     "distance": distance})
-    return sorted(out, key=lambda x: (x["a"]["document_id"], x["a"]["page_no"], x["b"]["document_id"], x["b"]["page_no"]))
+    return sorted(
+        out,
+        key=lambda x: (x["a"]["document_id"], x["a"]["page_no"], x["b"]["document_id"], x["b"]["page_no"]),
+    )
 
 
 def _contradicted(store: Any, db: Any, profile_id: str, titles: dict[str, str]) -> list[dict[str, Any]] | None:

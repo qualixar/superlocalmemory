@@ -85,7 +85,7 @@ def _parse_gemini_sse_to_json(sse_bytes: bytes) -> bytes | None:
     Completeness gate: returns None if no candidate ever emits a non-null
     finishReason — ensures incomplete streams are not cached.  This is the
     Gemini equivalent of checking 'message_stop' (Anthropic) or '[DONE]' (OpenAI).
-    """
+    """  # noqa: E501
     parts_by_idx: dict[int, list[str]] = {}
     finish_reasons: dict[int, str] = {}
     usage_metadata: dict = {}

@@ -210,7 +210,6 @@ class DegradationTrigger:
                     skill_name = m.group(1)
                 else:
                     skill_name = tc.replace("when considering skill ", "")
-                confidence = d["confidence"]
                 evidence = d["evidence_count"]
 
                 if evidence < MIN_INVOCATIONS:

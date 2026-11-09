@@ -285,6 +285,9 @@ directory = "htmlcov"
 target-version = "py312"
 line-length = 120
 src = ["src"]
+# Source files that are test INPUT (a parser reads them): their "unused" imports
+# are the data under test, so lint must never touch them.
+extend-exclude = ["tests/test_code_graph/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

@@ -12,8 +12,8 @@ from enum import StrEnum
 MANIFEST_V1: int = 1
 MANIFEST_V2: int = 2
 
-from superlocalmemory.core.transactions.obligations import Obligation
-from superlocalmemory.core.transactions.owners import (
+from superlocalmemory.core.transactions.obligations import Obligation  # noqa: E402 - late import, order kept
+from superlocalmemory.core.transactions.owners import (  # noqa: E402 - late import, order kept
     ObligationKind,
     ObligationState,
     is_terminal_success,

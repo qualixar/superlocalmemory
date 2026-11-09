@@ -118,7 +118,7 @@ class ConsolidationWorker:
                         ("INSERT", "UPDATE", "DELETE", "ALTER", "CREATE"),
                     ):
                         with _ga_write_lock:
-                            cursor = self._conn.execute(sql, params)
+                            self._conn.execute(sql, params)
                             self._conn.commit()
                         return []
                     return self._conn.execute(sql, params).fetchall()

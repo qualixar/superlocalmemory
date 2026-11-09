@@ -538,7 +538,7 @@ async function saveAndConnect() {
     document.getElementById('saveBtn').disabled = false;
   }
 }
-</script></body></html>""")
+</script></body></html>""")  # noqa: E501
     # Build the Google OAuth URL
     base_url = str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/backup/oauth/google/callback"
@@ -581,7 +581,8 @@ def google_oauth_callback(
     return HTMLResponse(_oauth_success_page(
         icon="&#x2601;&#xFE0F;",
         title="Google Drive Connected!",
-        message=f"Signed in as {result.get('email', 'unknown')}. The destination is configured; sync status will appear after an upload."
+        message=f"Signed in as {result.get('email', 'unknown')}. The destination is configured; "
+        "sync status will appear after an upload."
         + recovery_key_page_text(result),
     ))
 # ---- GitHub OAuth SSO Flow ------------------------------------------------
@@ -705,7 +706,7 @@ async function doConnect() {
     btn.disabled = false; btn.textContent = 'Connect';
   }
 }
-</script></body></html>""")
+</script></body></html>""")  # noqa: E501
 @router.get("/api/backup/oauth/github/callback")
 def github_oauth_callback(
     request: Request,
@@ -744,7 +745,9 @@ def github_oauth_callback(
         data = resp.json()
         access_token = data.get("access_token")
         if not access_token:
-            return HTMLResponse(_oauth_error_page(icon="&#x274C;", error=data.get("error_description", "Failed to get access token")))
+            return HTMLResponse(_oauth_error_page(
+                icon="&#x274C;", error=data.get("error_description", "Failed to get access token"),
+            ))
         # Use the token to connect
         result = connect_github(access_token, "slm-backup")
         if "error" in result:
@@ -752,7 +755,8 @@ def github_oauth_callback(
         return HTMLResponse(_oauth_success_page(
             icon="&#x2705;",
             title="GitHub Connected!",
-            message=f"Repository: {result.get('repo', 'slm-backup')}. The destination is configured; sync status will appear after an upload."
+            message=f"Repository: {result.get('repo', 'slm-backup')}. The destination is configured; "
+            "sync status will appear after an upload."
             + recovery_key_page_text(result),
         ))
     except Exception:

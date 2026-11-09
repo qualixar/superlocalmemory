@@ -316,7 +316,11 @@ def _filter_discovery(body: bytes) -> bytes:
             return _redact_call_answer(body)
         source = payload["result"]
         versions = source["supportedVersions"]
-        if not isinstance(versions, list) or len(versions) > 32 or not all(isinstance(v, str) and len(v) <= 32 for v in versions):
+        if (
+            not isinstance(versions, list)
+            or len(versions) > 32
+            or not all(isinstance(v, str) and len(v) <= 32 for v in versions)
+        ):
             raise ValueError("invalid_discovery")
         result = {"cacheScope": "private", "ttlMs": 0, "resultType": "complete",
                   "supportedVersions": versions, "capabilities": {"tools": {}},

@@ -228,7 +228,7 @@ def _memory_db_for_config(config) -> Path:
     base = getattr(config, "base_dir", None)
     root = canonical_data_root(configured_base_dir=base)
     return root / "memory.db"
-from superlocalmemory.learning.source_quality import (
+from superlocalmemory.learning.source_quality import (  # noqa: E402 - late import, order kept
     SourceQualityRepairUnavailable,
     enumerate_source_quality_repair_profiles,
     repair_historical_source_quality,
@@ -1062,10 +1062,10 @@ def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> No
 # See ``superlocalmemory.core.recall_gate``.
 # ---------------------------------------------------------------------------
 
-from superlocalmemory.core.recall_gate import (
+from superlocalmemory.core.recall_gate import (  # noqa: E402 - late import, order kept
     in_flight as _recalls_in_flight,
 )
-from superlocalmemory.core.recall_gate import (
+from superlocalmemory.core.recall_gate import (  # noqa: E402 - late import, order kept
     recalls_needing_embedder as _recalls_needing_embedder,
 )
 
@@ -1486,7 +1486,7 @@ async def _consolidation_timer_loop(application: FastAPI) -> None:
 from superlocalmemory.server.legacy_port import (  # noqa: E402 - re-exported
     maybe_start_legacy_redirect as _maybe_start_legacy_redirect,
 )
-from superlocalmemory.server.legacy_port import (
+from superlocalmemory.server.legacy_port import (  # noqa: E402 - late import, order kept
     start_legacy_redirect as _start_legacy_redirect,  # noqa: F401 - re-exported
 )
 
@@ -3241,7 +3241,9 @@ async def lifespan(application: FastAPI):
             global_rss_budget_mb=_env_budget or _cfg_budget or 0,
             heartbeat_timeout_sec=getattr(health_config, 'heartbeat_timeout_sec', 60) if health_config else 60,
             check_interval_sec=getattr(health_config, 'health_check_interval_sec', 15) if health_config else 15,
-            enable_structured_logging=getattr(health_config, 'enable_structured_logging', True) if health_config else True,
+            enable_structured_logging=(
+                getattr(health_config, 'enable_structured_logging', True) if health_config else True
+            ),
         )
         monitor.start()
         application.state.health_monitor = monitor
@@ -4818,7 +4820,10 @@ def _register_dashboard_routes(application: FastAPI) -> None:
             pass
 
     # Optional routers
-    for _mod_name in ("learning", "learning_readiness", "lifecycle", "behavioral", "compliance", "insights", "timeline", "abstraction", "integrity", "overtaken"):
+    for _mod_name in (
+        "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
+        "insights", "timeline", "abstraction", "integrity", "overtaken",
+    ):
         try:
             _mod = __import__(
                 f"superlocalmemory.server.routes.{_mod_name}", fromlist=["router"],

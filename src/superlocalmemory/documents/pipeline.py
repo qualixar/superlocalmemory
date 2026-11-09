@@ -386,4 +386,6 @@ class JobRunner:
         else:
             segments.insert(0, (DOCUMENT + "\n\n", ContentOrigin.DERIVED_TEXT))
         saved = self._save(tuple(segments), f"doc:{self.doc_id}:doc", {"type": "document", "document_id": self.doc_id})
-        self.store.update_document(self.doc_id, memory_id=saved.memory_id, fact_ids_json=json.dumps(list(saved.fact_ids)))
+        self.store.update_document(
+            self.doc_id, memory_id=saved.memory_id, fact_ids_json=json.dumps(list(saved.fact_ids)),
+        )

@@ -183,7 +183,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
             }
             if languages:
                 config_kwargs["languages"] = frozenset(
-                    l.strip() for l in languages.split(",") if l.strip()
+                    lang.strip() for lang in languages.split(",") if lang.strip()
                 )
             if exclude_patterns:
                 config_kwargs["exclude_patterns"] = tuple(

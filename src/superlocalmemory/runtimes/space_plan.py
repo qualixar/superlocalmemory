@@ -151,5 +151,6 @@ def current_space_plan(data_root: str | Path | None = None, *, requested: str | 
                               separate_model=(MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION, 768))
 
 
-__all__ = ["DEFAULT_SPACE_MODE", "MIN_SCORE_ENV", "MODE_ENV", "PAIRED_MIN_SCORE", "PAIRED_VISION", "SpaceMode", "SpacePlan",
+__all__ = ["DEFAULT_SPACE_MODE", "MIN_SCORE_ENV", "MODE_ENV", "PAIRED_MIN_SCORE", "PAIRED_VISION", "SpaceMode",
+           "SpacePlan",
            "compatible", "current_space_plan", "resolve_space_plan"]

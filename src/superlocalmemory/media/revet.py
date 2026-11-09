@@ -72,7 +72,8 @@ def _contents(conn: sqlite3.Connection, profile_id: str, memory_ids: list[str]) 
     for i in range(0, len(memory_ids), _IN_CLAUSE):
         chunk = memory_ids[i:i + _IN_CLAUSE]
         rows = conn.execute(
-            f"SELECT memory_id, content FROM memories WHERE profile_id = ? AND memory_id IN ({','.join('?' * len(chunk))})",
+            f"SELECT memory_id, content FROM memories WHERE profile_id = ? "
+            f"AND memory_id IN ({','.join('?' * len(chunk))})",
             [profile_id, *chunk]).fetchall()
         found.update({r[0]: str(r[1] or "") for r in rows})
     return found

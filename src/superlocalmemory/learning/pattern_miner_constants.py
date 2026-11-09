@@ -38,7 +38,7 @@ TECH_KEYWORDS: dict[str, str] = {
     "vuejs": "Vue", "vue.js": "Vue",
     "next.js": "Next.js", "nuxtjs": "Nuxt", "nuxt": "Nuxt",
     "postgres": "PostgreSQL", "k8s": "Kubernetes",
-    "typescript": "TypeScript", "ts": "TypeScript",
+    "ts": "TypeScript",
     "golang.org": "Go",
 }
 

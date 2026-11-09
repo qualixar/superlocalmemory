@@ -337,7 +337,10 @@ class WorkerPool:
             )
             logger.info("Recall worker spawned (PID %d)", self._proc.pid)
         except Exception as exc:
-            logger.error("Failed to spawn recall worker: %s. Run 'slm doctor' to diagnose. Python: %s", exc, sys.executable)
+            logger.error(
+                "Failed to spawn recall worker: %s. Run 'slm doctor' to diagnose. Python: %s",
+                exc, sys.executable,
+            )
             self._proc = None
 
     def _kill(self) -> None:

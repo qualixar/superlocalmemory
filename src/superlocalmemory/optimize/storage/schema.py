@@ -73,7 +73,8 @@ _DDL_STATEMENTS: tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_llmcache_ccr_hash ON llmcache_ccr_originals (compressed_hash)",
     "CREATE INDEX IF NOT EXISTS idx_llmcache_ccr_tenant ON llmcache_ccr_originals (tenant_id)",
-    "CREATE INDEX IF NOT EXISTS idx_llmcache_ccr_ttl ON llmcache_ccr_originals (ttl_expires) WHERE ttl_expires IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_llmcache_ccr_ttl ON llmcache_ccr_originals (ttl_expires) "
+    "WHERE ttl_expires IS NOT NULL",
     """
     CREATE TABLE IF NOT EXISTS llmcache_tags (
         tag         TEXT NOT NULL,

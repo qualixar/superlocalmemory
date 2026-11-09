@@ -80,7 +80,6 @@ def verify(conn: sqlite3.Connection) -> bool:
             "SELECT name FROM sqlite_master WHERE type='index'"
         ).fetchall()
     }
-    required = {"idx_facts_content_dedup", "idx_mesh_events_created_at"}
     # Only require indexes whose tables exist (fresh vs partial installs).
     ok = True
     if _table_exists(conn, "atomic_facts"):

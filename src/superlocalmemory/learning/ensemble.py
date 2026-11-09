@@ -263,8 +263,8 @@ def ensemble_rerank(
     n_bandit = _softmax_unit(bandit_scores)
 
     blended = [
-        weights.bandit * b + weights.lgbm * l
-        for b, l in zip(n_bandit, n_lgbm)
+        weights.bandit * b + weights.lgbm * lgbm_score
+        for b, lgbm_score in zip(n_bandit, n_lgbm)
     ]
 
     # Retain the model/policy utility for auditability without overwriting the

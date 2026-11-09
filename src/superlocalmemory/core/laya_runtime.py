@@ -769,12 +769,12 @@ from superlocalmemory.core.laya_jobs import (  # noqa: E402
     LayaAdoptJob,
     LayaInstallJob,
 )
-from superlocalmemory.core.laya_jobs import (
+from superlocalmemory.core.laya_jobs import (  # noqa: E402 - late import, order kept
     LayaTestJob as LayaTestJob,
 )
 from superlocalmemory.core.laya_remove import (  # noqa: E402
     forget_adopted as forget_adopted,
 )
-from superlocalmemory.core.laya_remove import (
+from superlocalmemory.core.laya_remove import (  # noqa: E402 - late import, order kept
     remove as remove,
 )

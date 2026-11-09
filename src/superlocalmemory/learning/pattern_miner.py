@@ -28,10 +28,10 @@ __all__ = ("generate_patterns",)
 
 # Keyword + stopword dictionaries live in a sibling constants module
 # so this file stays within the 400-LOC per-file cap.
-from superlocalmemory.learning.pattern_miner_constants import (
+from superlocalmemory.learning.pattern_miner_constants import (  # noqa: E402 - late import, order kept
     STOPWORDS as _STOPWORDS,
 )
-from superlocalmemory.learning.pattern_miner_constants import (
+from superlocalmemory.learning.pattern_miner_constants import (  # noqa: E402 - late import, order kept
     TECH_KEYWORDS as _TECH_KEYWORDS,
 )
 

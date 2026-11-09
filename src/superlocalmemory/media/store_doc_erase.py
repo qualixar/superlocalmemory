@@ -42,7 +42,7 @@ class DocumentEraseMixin:
         return sorted({r["media_id"] for r in self._pages_of_memories(profile_id, memory_ids) if r["media_id"]})
 
     def drop_page_memories(self, profile_id: str, memory_ids: Sequence[str], fact_ids: Sequence[str]) -> list[str]:
-        """Forget erased memories and facts in the page and document rows (a page left with no memory goes); returns the documents touched."""
+        """Forget erased memories and facts in the page and document rows (a page left with no memory goes); returns the documents touched."""  # noqa: E501
         erased_m, erased_f = {str(m) for m in memory_ids}, {str(f) for f in fact_ids}
         touched = {r["document_id"] for r in self._pages_of_memories(profile_id, memory_ids)}
         with self._write() as conn:
@@ -52,7 +52,8 @@ class DocumentEraseMixin:
                 where = (page["document_id"], page["page_no"])
                 if keep_m:
                     conn.execute("UPDATE doc_pages SET memory_ids_json = ?, fact_ids_json = ? "
-                                 "WHERE document_id = ? AND page_no = ?", (json.dumps(keep_m), json.dumps(keep_f), *where))
+                                 "WHERE document_id = ? AND page_no = ?",
+                                 (json.dumps(keep_m), json.dumps(keep_f), *where))
                 else:
                     conn.execute("DELETE FROM doc_pages WHERE document_id = ? AND page_no = ?", where)
             for chunk in _chunks(memory_ids):

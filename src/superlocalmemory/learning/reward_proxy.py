@@ -481,7 +481,6 @@ def settle_stale_plays(
 
     # tool_events lives in memory.db; if missing, evidence lookups simply fail.
     memory_conn = _open(Path(tool_events_db))
-    owns_bandit = bandit is None
     if bandit is None:
         bandit = ContextualBandit(Path(db_path), profile_id=str(profile_id))
 
