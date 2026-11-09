@@ -5,7 +5,15 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.2.16] — Session starts without bookkeeping
+
+A small follow-up to 4.2.15. No new settings. One automatic data repair runs
+on first start (M068, no command): it only marks machine-written session lines
+so they stop being returned as answers. Nothing is deleted or edited.
+
+Upgrade every copy of SuperLocalMemory on a machine together: once 4.2.16 has
+opened a store, an older copy refuses to open it and its error lists every copy
+it finds. To go back to 4.2.15, run `slm db prepare-downgrade` first.
 
 ### Fixed
 
@@ -23,9 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A one-time migration (M068, no command needed) checks the rows already in
   the store against every shape the rule knows, including the agent checkpoint
   and "the session ended" forms added in 4.2.14 and 4.2.15. On one real store
-  it flagged 2,030 rows, every one a bare session-end time or git total. Nothing is deleted or edited: flagged rows stay in
-  lists and on the dashboard and only leave recall answers, and a row you
-  marked yourself is never touched.
+  it flagged 2,030 rows, every one a bare session-end time or git total.
+  Nothing is deleted or edited: flagged rows stay in lists and on the
+  dashboard and only leave recall answers, and a row you marked yourself is
+  never touched.
 
 ## [4.2.15] — Clean session starts, patched dependencies
 

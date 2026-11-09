@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally. Local data root; optional networked features have separate behavior."
-version: "4.2.15"
+version: "4.2.16"
 author: "Varun Pratap Bhardwaj"
 license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
