@@ -722,6 +722,11 @@ class RetrievalEngine:
             from superlocalmemory.retrieval.project_scope import boost_order
             top = boost_order(top, preferred)
 
+        # 4.2.17: a question naming a version is not answered by another
+        # version; before the cut, so a memory naming it can still be chosen.
+        from superlocalmemory.retrieval.version_scope import prefer_named_versions_in_pool
+        top = prefer_named_versions_in_pool(top, facts, query)
+
         # V3.4.11: Channel diversity — guarantee entity_graph results appear in
         # the final output. Applied AFTER reranking and evidence qualification
         # so an associative-only candidate cannot be reintroduced after the gate.

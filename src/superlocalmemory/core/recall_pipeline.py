@@ -251,7 +251,7 @@ def _behavioral_entities(results: list[Any], limit: int = 20) -> list[str]:
 _RANKING_MODES: frozenset[str] = frozenset({"off", "v1", "v2", "v2-ensemble"})
 
 
-from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL
+from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL  # noqa: E402 - late import, order kept
 
 
 class _ReadOnlyLearningView:
@@ -1544,6 +1544,16 @@ def run_recall(
             response.results, _project_scope.preferred_in(db, response.results, facets))
         _resettle_shown_after_bias(play_sink, profile_id, response.results,
                                    _shown_before_project)
+
+    # 4.2.17: a question naming a version is not answered by another version.
+    # Ordering only, before the exact-hit pin so that guarantee still holds.
+    if response.results:
+        from superlocalmemory.retrieval import version_scope
+
+        _shown_before_version = _top_ids(response.results)
+        response.results = version_scope.prefer_named_versions(response.results, query)
+        _resettle_shown_after_bias(play_sink, profile_id, response.results,
+                                   _shown_before_version)
 
     _preserve_exact_lexical_evidence(response, query)
 
