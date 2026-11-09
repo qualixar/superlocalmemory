@@ -48,8 +48,8 @@ from superlocalmemory.learning.ranker_common import (  # noqa: E402
     split_by_query,
 )
 from superlocalmemory.learning.ranker_retrain_legacy import (  # noqa: E402
-    _retrain_ranker_impl,
     _LEGACY_RETRAIN_DEPRECATED,
+    _retrain_ranker_impl,
 )
 from superlocalmemory.learning.ranker_retrain_online import (  # noqa: E402
     RETRAIN_HOURS_THRESHOLD,
@@ -66,7 +66,6 @@ from superlocalmemory.learning.ranker_retrain_online import (  # noqa: E402
     _promote_candidate,
     _train_booster,
 )
-
 
 __all__ = (
     "ConsolidationWorker",

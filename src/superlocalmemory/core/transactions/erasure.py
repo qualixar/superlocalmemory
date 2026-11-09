@@ -14,14 +14,14 @@ from dataclasses import dataclass
 _RECEIPT_V1: int = 1
 _RECEIPT_V2: int = 2
 
-from superlocalmemory.core.transactions.obligations import ObligationLedger
-from superlocalmemory.core.transactions.owners import (
+from superlocalmemory.core.transactions.obligations import ObligationLedger  # noqa: E402 - late import, order kept
+from superlocalmemory.core.transactions.owners import (  # noqa: E402 - late import, order kept
     ObligationKind,
     ObligationState,
     OperationContext,
     ProjectionOwner,
 )
-from superlocalmemory.core.transactions.tombstones import (
+from superlocalmemory.core.transactions.tombstones import (  # noqa: E402 - late import, order kept
     TOMBSTONE_ABSENT,
     TOMBSTONE_CONFLICT,
     TOMBSTONE_WRITTEN,

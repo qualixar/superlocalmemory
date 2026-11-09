@@ -18,10 +18,6 @@ Covers the S9-SKEP findings closed in W6:
 from __future__ import annotations
 
 import sqlite3
-import time
-
-import pytest
-
 
 # S9-SKEP-01 (_critical_t + scipy cache) retired in 4.1.25: the paired t-test
 # it guarded could never reach a decision (audit BRN-01). The always-valid
@@ -145,7 +141,8 @@ def test_s9_skep_14_unroutable_model_fails_closed() -> None:
     """A model id that is neither ``claude-*`` nor ``ollama:*`` returns
     the fail-closed backend, not a silent Claude API route."""
     from superlocalmemory.evolution.llm_dispatch import (
-        _fail_closed_backend, _pick_backend,
+        _fail_closed_backend,
+        _pick_backend,
     )
 
     backend = _pick_backend("gemini-future-model-x")

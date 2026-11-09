@@ -54,11 +54,11 @@ from superlocalmemory.views import (
     ViewError,
     ViewStore,
     default_store,
+    model,
     recall_arguments,
     shape_run,
     view_session_id,
 )
-from superlocalmemory.views import model
 
 logger = logging.getLogger("superlocalmemory.routes.views")
 router = APIRouter(prefix="/api/v3/views", tags=["views"])
@@ -209,8 +209,8 @@ async def run_view(request: Request, name: _Name, via: _VIA = "dashboard",
     surface, keyword fallback included.
     """
     from superlocalmemory.server.routes.memories import (
-        _UnknownRoutedProfile,
         _unknown_profile_response,
+        _UnknownRoutedProfile,
     )
 
     try:

@@ -276,11 +276,15 @@ class HookDaemon:
     def _process_request(self, payload: dict) -> dict:
         if payload.get("type") == HOOK_EVENTS_TYPE:
             return _accept_hook_events(payload)
-        from superlocalmemory.hooks.auto_recall_hook import (
-            _is_ack, _get_mode_timeout, _detect_mode, _format_envelope,
-            _DEFAULT_LIMIT, _switched_off,
-        )
         from superlocalmemory.core.recall_queue import QueueTimeoutError
+        from superlocalmemory.hooks.auto_recall_hook import (
+            _DEFAULT_LIMIT,
+            _detect_mode,
+            _format_envelope,
+            _get_mode_timeout,
+            _is_ack,
+            _switched_off,
+        )
 
         prompt = payload.get("prompt", "")
         session_id = payload.get("session_id", "")

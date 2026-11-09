@@ -262,7 +262,8 @@ def test_http_recall_passes_facets_to_the_engine(engine_with_mock_deps, monkeypa
     with _client(engine_with_mock_deps) as client:
         r1 = client.get("/recall", params={"q": "decisions", "project": "SLM",
                                            "saved_by": "claude-desktop", "about": "Pallavi"})
-        plain = dict(seen); seen.clear()
+        plain = dict(seen)
+        seen.clear()
         r2 = client.get("/recall", params={"q": "decisions"})
         facets_page = client.get("/api/v3/facets")
     assert r1.status_code == 200, r1.text and r2.status_code == 200

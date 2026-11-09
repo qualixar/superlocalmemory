@@ -1,5 +1,6 @@
 """Tests for Engine Lifecycle Hooks -- Task 7 of V3 build."""
 import pytest
+
 from superlocalmemory.core.hooks import HookRegistry
 
 

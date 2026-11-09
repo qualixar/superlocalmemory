@@ -23,7 +23,6 @@ from superlocalmemory.storage import _restore_boot as rb
 from superlocalmemory.storage import backup
 from superlocalmemory.storage import upgrade_restore as ur
 from superlocalmemory.storage._durable_json import write_json_atomic
-
 from tests.test_storage._upgrade_store import add_memory, current_store
 
 

@@ -372,7 +372,7 @@ class ReindexRunner:
                      "stays active", job["job_id"], state, message)
 
     def _run(self, job: dict) -> None:
-        from superlocalmemory.core.embedding_reindex_activate import ActivationFailed, activate_job
+        from superlocalmemory.core.embedding_reindex_activate import ActivationFailed
 
         target = sp.config_from_public(job["to_config"], self._key_for(job))
         embedder = self._prebuilt.pop(job["job_id"], None)

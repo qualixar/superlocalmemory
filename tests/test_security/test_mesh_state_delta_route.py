@@ -9,6 +9,8 @@ routes must resolve, and WP9's read authorization must still apply to both
 (the denial cases live in test_mesh_read_permission.py and run unchanged).
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from tests.test_security.test_mesh_read_permission import (  # noqa: F401  (fixture)

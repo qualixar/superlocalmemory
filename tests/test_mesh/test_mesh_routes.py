@@ -191,7 +191,9 @@ def test_owner_mute_rename_retire(client, broker) -> None:
     assert r.status_code == 200
     assert rows(broker, "SELECT display_name FROM mesh_peer_profiles")[0]["display_name"] == "Renamed"
     assert client.patch(f"{OWNER}/peers/{w}", json={"display_name": ""}, headers=DAEMON_HEADERS).status_code == 422
-    assert client.patch(f"{OWNER}/peers/{w}", json={"display_name": "x" * 65}, headers=DAEMON_HEADERS).status_code == 422
+    assert (
+        client.patch(f"{OWNER}/peers/{w}", json={"display_name": "x" * 65}, headers=DAEMON_HEADERS).status_code == 422
+    )
     broker.send_message(b, w, "queued")
     r = client.delete(f"{OWNER}/peers/{w}", headers=DAEMON_HEADERS)
     assert r.status_code == 200 and r.json()["dropped"] == 1

@@ -13,15 +13,15 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from superlocalmemory.core.config import ParameterizationConfig
     from superlocalmemory.parameterization.pattern_extractor import PatternExtractor
-    from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
     from superlocalmemory.parameterization.prompt_injector import PromptInjector
     from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
-    from superlocalmemory.core.config import ParameterizationConfig
+    from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
 
 logger = logging.getLogger(__name__)
 

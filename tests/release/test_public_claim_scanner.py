@@ -2,7 +2,6 @@ from pathlib import Path
 
 from scripts.claim_scanner import scan_paths
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

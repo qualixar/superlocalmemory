@@ -61,7 +61,10 @@ class SavingsEstimator:
         tokens_saved_total = cache_tokens + compress_tokens
 
         # Cache skip: input + output tokens saved (whole call avoided)
-        savings_cache_usd = (snap.tokens_saved_input / 1_000_000) * input_rate + (snap.tokens_saved_output / 1_000_000) * output_rate
+        savings_cache_usd = (
+            (snap.tokens_saved_input / 1_000_000) * input_rate
+            + (snap.tokens_saved_output / 1_000_000) * output_rate
+        )
         # Compression: input tokens only
         savings_compress_usd = (compress_tokens / 1_000_000) * input_rate
         total_usd = savings_cache_usd + savings_compress_usd

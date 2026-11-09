@@ -37,7 +37,10 @@ def test_windows_without_appdata_falls_back_to_the_default_roaming_folder() -> N
 
 def test_other_hosts_are_unchanged_on_windows() -> None:
     cursor = IDE_MATRIX["cursor"]
-    assert global_config_path(cursor, HOME, platform="win32", environ={"APPDATA": "X:\\a"}) == HOME / cursor.mcp_path_global
+    assert (
+        global_config_path(cursor, HOME, platform="win32", environ={"APPDATA": "X:\\a"})
+        == HOME / cursor.mcp_path_global
+    )
 
 
 def test_connect_on_windows_writes_under_appdata(monkeypatch, tmp_path: Path) -> None:

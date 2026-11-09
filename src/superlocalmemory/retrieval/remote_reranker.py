@@ -224,7 +224,7 @@ def _extract_results_array(payload: Any) -> list[Any]:
         raise RemoteRerankerError(
             "rerank response has no 'results' array. Is "
             "cross_encoder_endpoint pointing at a "
-            f"rerank route and not, say, /v1/embeddings?"
+            "rerank route and not, say, /v1/embeddings?"
         )
     if not isinstance(results, list):
         raise RemoteRerankerError(

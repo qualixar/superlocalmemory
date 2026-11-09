@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -75,8 +75,8 @@ async def test_loop_inactive_adapter_not_synced():
 
 @pytest.mark.asyncio
 async def test_sync_log_row_per_sync_attempt(tmp_path, fake_recall):
-    from superlocalmemory.hooks.cursor_adapter import CursorAdapter
     from superlocalmemory.hooks import context_payload as cp
+    from superlocalmemory.hooks.cursor_adapter import CursorAdapter
 
     os.environ["SLM_CURSOR_FORCE"] = "1"
     adapter = CursorAdapter(

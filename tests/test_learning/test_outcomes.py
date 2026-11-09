@@ -21,11 +21,10 @@ from pathlib import Path
 
 import pytest
 
+from superlocalmemory.learning.outcomes import OutcomeTracker
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import ActionOutcome
-from superlocalmemory.learning.outcomes import OutcomeTracker
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

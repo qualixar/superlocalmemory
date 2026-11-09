@@ -49,7 +49,9 @@ def make(monkeypatch, *, actor="authenticated:test", client=LOCAL, runtime=True)
 
     monkeypatch.setattr(routes, "remember_media", fake)
     app = FastAPI()
-    app.state.engine = SimpleNamespace(_profile_id="default", _config=SimpleNamespace(pii_redaction=False), _db=Db(), _hooks=Hooks())
+    app.state.engine = SimpleNamespace(
+        _profile_id="default", _config=SimpleNamespace(pii_redaction=False), _db=Db(), _hooks=Hooks()
+    )
     if runtime:
         app.state.canonical_remember_runtime = object()
 

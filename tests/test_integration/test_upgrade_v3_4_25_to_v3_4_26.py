@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 
-
 MEMORY_DB_MAGIC = b"SQLite format 3\x00"
 
 

@@ -30,7 +30,6 @@ from superlocalmemory.storage.models import (
 )
 from superlocalmemory.trust.provenance import ProvenanceTracker
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

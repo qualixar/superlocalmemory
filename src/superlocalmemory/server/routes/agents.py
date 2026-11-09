@@ -264,6 +264,7 @@ def get_trust_stats(request: Request):
 
         # Direct DB query (dashboard runs without engine subprocess)
         import sqlite3
+
         from .helpers import get_active_profile
         pid = get_active_profile()
 

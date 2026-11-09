@@ -66,7 +66,9 @@ def test_plugin_registers_all_skills_agents_and_lifecycle_hooks() -> None:
 def test_all_cli_commands_have_router_and_generated_slash_aliases() -> None:
     inventory = json.loads((PLUGIN / "command-inventory.json").read_text(encoding="utf-8"))
     commands = inventory["primary_commands"]
-    assert len(commands) == 76  # includes outcome reporting, Memory health (enrich), `slm tools` and `slm repair-speaker`
+    assert (
+        len(commands) == 77
+    )  # includes outcome reporting, Memory health (enrich), `slm tools`, `slm repair-speaker` and `slm hide`
     assert len(set(commands)) == len(commands)
     runtime = _runtime()
     assert 'ctx.register_command("slm", plugin.slash_router' in runtime
@@ -158,7 +160,9 @@ def test_plugin_redacts_sensitive_hook_payloads_and_capture_is_explicit() -> Non
     context = Context()
     plugin = module.SlmHermesPlugin(context)
     canary = "sk-live-DO_NOT_STORE_1234567890"
-    plugin.post_tool_call(session_id="s", tool_name="terminal", args={"token": canary, "email": "person@example.com"}, result=canary)
+    plugin.post_tool_call(
+        session_id="s", tool_name="terminal", args={"token": canary, "email": "person@example.com"}, result=canary
+    )
     plugin.post_llm_call(session_id="s", user_message=canary, assistant_response=canary)
     plugin.pre_llm_call(session_id="s", user_message=canary)
     assert [name for name, _ in context.calls] == ["log_tool_event", "recall"]
@@ -242,13 +246,33 @@ def test_subagent_handle_round_trips_and_cli_refuses_stale_slm(monkeypatch) -> N
 
     class Handle:
         def to_dict(self):
-            return {"contract_version": 1, "subagent_id": "child", "parent_session_id": "s", "correlation_id": "c", "created_at": 1.0, "provider": None, "model": None, "role": "leaf", "depth": 1, "capability": "opaque"}
+            return {
+                "contract_version": 1,
+                "subagent_id": "child",
+                "parent_session_id": "s",
+                "correlation_id": "c",
+                "created_at": 1.0,
+                "provider": None,
+                "model": None,
+                "role": "leaf",
+                "depth": 1,
+                "capability": "opaque",
+            }
 
     class Lifecycle:
         def __init__(self): self.seen = None
-        def status(self, handle): self.seen = handle; return {"state": "RUNNING"}
-        def cancel(self, handle, reason): self.seen = handle; return {"accepted": True}
-        def result(self, handle): self.seen = handle; return {"ready": True}
+
+        def status(self, handle):
+            self.seen = handle
+            return {"state": "RUNNING"}
+
+        def cancel(self, handle, reason):
+            self.seen = handle
+            return {"accepted": True}
+
+        def result(self, handle):
+            self.seen = handle
+            return {"ready": True}
 
     class Context:
         def __init__(self): self.subagent_lifecycle = Lifecycle()

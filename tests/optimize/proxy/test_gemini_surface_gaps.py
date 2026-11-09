@@ -17,11 +17,10 @@ from superlocalmemory.optimize.proxy.gemini_surface import (
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,
     HookChain,
-    ProxyRequest,
     ProviderResponse,
+    ProxyRequest,
 )
 from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -129,7 +129,7 @@ class TestDrillDown:
         _seed(db)
         pa = ProgressiveAbstraction(db)
         pa.compute_and_store("default")
-        comms = EntityCommunityBuilder(db).get_communities("default")
+        EntityCommunityBuilder(db).get_communities("default")
         # Pick the community that owns f1 (the work cluster).
         summaries = CommunitySummaryBuilder(db).get_summaries("default")
         import json

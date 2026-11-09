@@ -92,6 +92,8 @@ def test_shrink_keeps_aspect_and_leaves_small_pictures_alone(worker):
         def resize(self, size):
             return Pic(size)
 
-    assert worker._shrunk(Pic((2000, 1500)), 262144).size[0] * worker._shrunk(Pic((2000, 1500)), 262144).size[1] <= 262144
+    assert (
+        worker._shrunk(Pic((2000, 1500)), 262144).size[0] * worker._shrunk(Pic((2000, 1500)), 262144).size[1] <= 262144
+    )
     small = Pic((100, 100))
     assert worker._shrunk(small, 262144) is small and worker._shrunk(Pic((4000, 4000)), 0).size == (4000, 4000)

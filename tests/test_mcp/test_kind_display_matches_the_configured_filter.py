@@ -16,9 +16,9 @@ from dataclasses import dataclass
 import pytest
 
 from superlocalmemory.mcp import tools_core
+from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
-from superlocalmemory.storage import schema
 
 _PROFILE = "default"
 

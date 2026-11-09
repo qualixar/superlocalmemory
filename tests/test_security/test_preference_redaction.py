@@ -4,6 +4,8 @@
 
 """Tests for deep-iteration secret redaction on preferences (LLD-04 §4.1)."""
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import pytest
@@ -11,7 +13,6 @@ import pytest
 fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 from superlocalmemory.server.routes.brain import redact_secrets_in_preferences
-
 
 # ---------------------------------------------------------------------------
 # Known-pattern redaction

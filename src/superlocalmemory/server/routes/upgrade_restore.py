@@ -31,7 +31,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from superlocalmemory.storage import upgrade_restore as ur
 from superlocalmemory.storage._restore_public import public_view
 from superlocalmemory.storage._restore_types import (
-    OUTCOME_NAME, REPAIR_RECORD, DowngradeRefusedError, RestoreRefusedError,
+    OUTCOME_NAME,
+    REPAIR_RECORD,
+    DowngradeRefusedError,
+    RestoreRefusedError,
 )
 
 logger = logging.getLogger(__name__)

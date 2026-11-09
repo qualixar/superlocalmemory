@@ -16,8 +16,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY
 from superlocalmemory.brain.truth import BrainTruthService
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
@@ -27,16 +25,17 @@ from superlocalmemory.integrations.bounded_loops_mcp import (
     observe_installed,
     observe_installed_v2,
 )
-from superlocalmemory.storage.execution_learning import (
-    ExecutionLearningStore,
-    ExecutionLearningValidationError,
-)
+from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY
 from superlocalmemory.storage.agent_experience import (
     AgentExperienceConflictError,
     AgentExperienceStore,
     CognitiveTurnTransitionError,
     LearningWriteBusyError,
     ProfileAdmissionError,
+)
+from superlocalmemory.storage.execution_learning import (
+    ExecutionLearningStore,
+    ExecutionLearningValidationError,
 )
 from superlocalmemory.storage.external_evidence import (
     ExternalEvidenceConflictError,

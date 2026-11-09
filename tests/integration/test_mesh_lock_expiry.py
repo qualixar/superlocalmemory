@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from superlocalmemory.mesh.broker import MeshBroker, _NEVER_EXPIRES
+from superlocalmemory.mesh.broker import _NEVER_EXPIRES, MeshBroker
 
 
 @pytest.fixture
@@ -13,7 +13,9 @@ def broker(tmp_path):
     db_path = tmp_path / "mesh_lock.db"
     conn = sqlite3.connect(str(db_path))
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn.executescript(_MESH_DDL)
     for alter_sql in _MESH_V346_ALTERS:
@@ -47,7 +49,8 @@ def test_expired_lock_is_free(broker):
     conn = sqlite3.connect(db)
     conn.execute("UPDATE mesh_locks SET expires_at=? WHERE file_path=?",
                  ("2000-01-01T00:00:00+00:00", "f.py"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     r = b.lock_action("f.py", "peerB", "acquire")
     assert r.get("ok") and r["action"] == "acquired"
 
@@ -58,6 +61,7 @@ def test_legacy_never_expires_lock_does_not_deadlock(broker):
     conn = sqlite3.connect(db)
     conn.execute("UPDATE mesh_locks SET expires_at=? WHERE file_path=?",
                  (_NEVER_EXPIRES, "g.py"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     r = b.lock_action("g.py", "peerB", "acquire")
     assert r.get("ok") and r["action"] == "acquired"

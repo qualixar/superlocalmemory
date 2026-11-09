@@ -13,14 +13,12 @@ Covers:
 
 from __future__ import annotations
 
-
 from superlocalmemory.encoding.foresight import (
     extract_foresight_signals,
     foresight_to_temporal_events,
     has_foresight,
 )
 from superlocalmemory.storage.models import AtomicFact, TemporalEvent
-
 
 # ---------------------------------------------------------------------------
 # extract_foresight_signals

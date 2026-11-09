@@ -17,11 +17,10 @@ import pytest
 
 from superlocalmemory.learning.arm_catalog import ARM_CATALOG
 from superlocalmemory.learning.bandit import (
-    BanditChoice,
-    ContextualBandit,
     _ENTITY_BINS,
     _QUERY_TYPES,
     _TIME_BUCKETS,
+    ContextualBandit,
     compute_stratum,
     current_time_bucket,
 )

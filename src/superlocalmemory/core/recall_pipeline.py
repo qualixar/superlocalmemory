@@ -14,12 +14,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from dataclasses import replace
-
-from superlocalmemory.core.session_identity import is_conversation
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from superlocalmemory.core.session_identity import is_conversation
 
 if TYPE_CHECKING:
     import os
@@ -101,6 +101,43 @@ def _apply_markers_to_response(response: RecallResponse) -> None:
     """
     for r in response.results:
         r.marker = _emit_marker(r.fact.fact_id)
+
+
+def _log_recall_exposure(access_log: Any, results: list, profile_id: str) -> None:
+    """Queue a record of which memories this recall returned (``fact_access_log``).
+
+    Recall itself stays write-free (the 3.8.6 contract): the batched insert is
+    handed to the shared background writer (``storage.deferred_writes``), the
+    same route spreading activation uses for its cache, so recall never waits
+    on the write lock. Retention's access clock and the "active decisions" Core
+    Memory block read this table; without the record, on the author's store the
+    last recall row was dated 26 Jul 2026. Never raises, and skipped for SLM's
+    own warm-up recalls (``answer_check_scope.not_a_read``).
+    """
+    if access_log is None or not results:
+        return
+    from superlocalmemory.core.answer_check_scope import is_a_read
+
+    if not is_a_read():
+        return
+    fact_ids = [r.fact.fact_id for r in results if getattr(r, "fact", None)]
+    if not fact_ids:
+        return
+
+    def _write() -> None:
+        try:
+            access_log.store_access_batch(
+                fact_ids=fact_ids, profile_id=profile_id, access_type="recall",
+            )
+        except Exception as exc:  # noqa: BLE001 - bookkeeping never fails anything
+            logger.debug("recall exposure log failed: %s", exc)
+
+    try:
+        from superlocalmemory.storage import deferred_writes
+
+        deferred_writes.submit_background(_write)
+    except Exception as exc:  # noqa: BLE001 - logging a read never fails a recall
+        logger.debug("recall exposure log not queued: %s", exc)
 
 
 def _preserve_exact_lexical_evidence(
@@ -251,7 +288,8 @@ def _behavioral_entities(results: list[Any], limit: int = 20) -> list[str]:
 _RANKING_MODES: frozenset[str] = frozenset({"off", "v1", "v2", "v2-ensemble"})
 
 
-from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL
+from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL  # noqa: E402 - late import, order kept
+
 
 class _ReadOnlyLearningView:
     """Minimal learning-model reader that cannot initialise or mutate a DB."""
@@ -1544,6 +1582,16 @@ def run_recall(
         _resettle_shown_after_bias(play_sink, profile_id, response.results,
                                    _shown_before_project)
 
+    # 4.2.17: a question naming a version is not answered by another version.
+    # Ordering only, before the exact-hit pin so that guarantee still holds.
+    if response.results:
+        from superlocalmemory.retrieval import version_scope
+
+        _shown_before_version = _top_ids(response.results)
+        response.results = version_scope.prefer_named_versions(response.results, query)
+        _resettle_shown_after_bias(play_sink, profile_id, response.results,
+                                   _shown_before_version)
+
     _preserve_exact_lexical_evidence(response, query)
 
     # Kind-aware ordering: "what did we decide" favours decisions, "current
@@ -1621,6 +1669,8 @@ def run_recall(
     # starts from what was actually shown.
     if _sid:
         _admit_to_working_memory(response.results, profile_id, _sid)
+
+    _log_recall_exposure(access_log, response.results, profile_id)
 
     _mark("TOTAL(fisher+trust+markers)")
     response.answer_check_trace = build_trace(  # 4.1.20: Answer Check history

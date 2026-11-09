@@ -20,9 +20,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from superlocalmemory import sources
+from superlocalmemory.server.routes.media import _profile, _require_local
 from superlocalmemory.sources import api as sources_api
 from superlocalmemory.sources import picker
-from superlocalmemory.server.routes.media import _profile, _require_local
 from superlocalmemory.sources.roots import RootRefused
 
 router = APIRouter(prefix="/api/v3/sources", tags=["sources"])
@@ -100,7 +100,8 @@ async def pick_folder(request: Request):
         path = await asyncio.to_thread(picker.pick_folder)
     except picker.PickerUnavailable:
         raise HTTPException(501, detail={"code": "picker_unavailable",
-                                         "message": "This computer cannot open a folder dialog. Type the path instead."}) from None
+                                         "message": "This computer cannot open a folder dialog. "
+                                                    "Type the path instead."}) from None
     except picker.PickerBusy:
         raise HTTPException(409, detail={"code": "picker_busy",
                                          "message": "A folder dialog is already open."}) from None

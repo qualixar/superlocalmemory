@@ -24,7 +24,7 @@ def test_fresh_migration_creates_queue_and_marker(tmp_path: Path) -> None:
 
 def test_migration_is_idempotent(tmp_path: Path) -> None:
     mig = _imports()
-    r1 = mig.migrate(tmp_path)
+    mig.migrate(tmp_path)
     r2 = mig.migrate(tmp_path)
     # Second run creates nothing new
     assert r2["created"] == []

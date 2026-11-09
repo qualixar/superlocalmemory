@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -22,7 +21,6 @@ from superlocalmemory.optimize.proxy.lifecycle import (
     ProviderResponse,
     ProxyRequest,
 )
-
 
 # ---- _filter_response_headers ----
 

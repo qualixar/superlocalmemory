@@ -68,9 +68,10 @@ class TestAutoInvokeConfig:
     def test_get_auto_invoke_config_returns_defaults(self, tmp_path):
         """GET /api/v3/auto-invoke/config returns sensible defaults."""
         with _patch_memory_dir(tmp_path):
-            from superlocalmemory.server.routes.v3_api import router
             from fastapi import FastAPI
             from fastapi.testclient import TestClient
+
+            from superlocalmemory.server.routes.v3_api import router
 
             app = FastAPI()
             app.include_router(router)
@@ -91,9 +92,10 @@ class TestAutoInvokeConfig:
     def test_put_auto_invoke_config_updates(self, tmp_path):
         """PUT then GET round-trips config updates correctly."""
         with _patch_memory_dir(tmp_path):
-            from superlocalmemory.server.routes.v3_api import router
             from fastapi import FastAPI
             from fastapi.testclient import TestClient
+
+            from superlocalmemory.server.routes.v3_api import router
 
             app = FastAPI()
             app.include_router(router)
@@ -119,9 +121,10 @@ class TestAutoInvokeConfig:
     def test_put_auto_invoke_config_validates_weights(self, tmp_path):
         """PUT with arbitrary weight values is accepted (multipliers, not probabilities)."""
         with _patch_memory_dir(tmp_path):
-            from superlocalmemory.server.routes.v3_api import router
             from fastapi import FastAPI
             from fastapi.testclient import TestClient
+
+            from superlocalmemory.server.routes.v3_api import router
 
             app = FastAPI()
             app.include_router(router)
@@ -138,9 +141,10 @@ class TestAutoInvokeConfig:
     def test_put_auto_invoke_config_rejects_invalid_min_score(self, tmp_path):
         """PUT with negative min_score returns 400."""
         with _patch_memory_dir(tmp_path):
-            from superlocalmemory.server.routes.v3_api import router
             from fastapi import FastAPI
             from fastapi.testclient import TestClient
+
+            from superlocalmemory.server.routes.v3_api import router
 
             app = FastAPI()
             app.include_router(router)

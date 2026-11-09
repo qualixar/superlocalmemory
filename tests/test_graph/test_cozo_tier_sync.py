@@ -5,7 +5,7 @@
 # preserves other columns, is a no-op for unknown IDs, and is injection-safe.
 import pytest
 
-from superlocalmemory.graph.cozo_backend import CozoDBGraphBackend, _COZO_AVAILABLE
+from superlocalmemory.graph.cozo_backend import _COZO_AVAILABLE, CozoDBGraphBackend
 
 pytestmark = pytest.mark.skipif(not _COZO_AVAILABLE, reason="cozo not installed")
 

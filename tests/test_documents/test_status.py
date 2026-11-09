@@ -40,7 +40,9 @@ def test_soft_remove_hides_pages_and_archives_their_memories(store, tmp_path):
     assert remove_document(r.document_id, "p2", runtime=runtime, store=store) is False
     assert remove_document(r.document_id, "p1", runtime=runtime, store=store) is True
     assert store.get_document(r.document_id)["state"] == "tombstoned"
-    assert store.list_items("p1", kind="page") == [] and len(store.list_items("p1", kind="page", state="tombstoned")) == 2
+    assert (
+        store.list_items("p1", kind="page") == [] and len(store.list_items("p1", kind="page", state="tombstoned")) == 2
+    )
     assert sorted(f for _, f in runtime.archived) == ["fact1", "fact2", "fact3"]
     assert remove_document(r.document_id, "p1", runtime=runtime, store=store) is False   # already gone
 

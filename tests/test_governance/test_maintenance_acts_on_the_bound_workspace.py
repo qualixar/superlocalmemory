@@ -364,7 +364,6 @@ def test_daemon_request_sends_an_empty_json_body(monkeypatch):
 def test_a_running_daemon_that_does_not_complete_is_not_replaced_by_a_local_run(
         monkeypatch, tool):
     from superlocalmemory.cli import daemon
-    from superlocalmemory.mcp import tools_v33
 
     monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
     monkeypatch.setattr(daemon, "daemon_request", lambda *a, **k: None)

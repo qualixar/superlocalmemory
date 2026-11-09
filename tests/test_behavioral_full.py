@@ -1,5 +1,6 @@
 """Tests for Behavioral System — Task 13 of V3 build."""
 import pytest
+
 from superlocalmemory.learning.behavioral import BehavioralPatternStore
 from superlocalmemory.learning.outcomes import OutcomeTracker
 
@@ -10,8 +11,8 @@ def pattern_store(tmp_path):
 
 @pytest.fixture
 def outcomes(tmp_path):
-    from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage import schema as real_schema
+    from superlocalmemory.storage.database import DatabaseManager
     db = DatabaseManager(tmp_path / "outcomes.db")
     db.initialize(real_schema)
     return OutcomeTracker(db)

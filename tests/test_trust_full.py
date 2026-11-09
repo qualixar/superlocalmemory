@@ -14,10 +14,12 @@ real DatabaseManager in tests/test_trust/test_scorer.py, which is the
 canonical copy for that behavior.
 """
 from __future__ import annotations
+
 import pytest
+
+from superlocalmemory.trust.gate import TrustError, TrustGate
 from superlocalmemory.trust.scorer import TrustScorer
-from superlocalmemory.trust.signals import SignalRecorder, VALID_SIGNAL_TYPES
-from superlocalmemory.trust.gate import TrustGate, TrustError
+from superlocalmemory.trust.signals import VALID_SIGNAL_TYPES, SignalRecorder
 
 
 class _DictRow:

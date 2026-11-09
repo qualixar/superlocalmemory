@@ -17,10 +17,9 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-
-from superlocalmemory.mcp.tool_hints import DESTROYS, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
+from superlocalmemory.mcp.tool_hints import DESTROYS, READ_ONLY
 
 logger = logging.getLogger(__name__)
 

@@ -13,8 +13,8 @@ import pytest
 
 from superlocalmemory.core import engine_upgrade as eu
 from superlocalmemory.core.config import EmbeddingConfig
-from superlocalmemory.runtimes import features as feat
 from superlocalmemory.retrieval import support_recipe as sr
+from superlocalmemory.runtimes import features as feat
 from superlocalmemory.runtimes import media_models
 
 EG2 = "google/embeddinggemma-2"

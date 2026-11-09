@@ -78,7 +78,8 @@ class Guard:
 class GuardVerdict:
     name: str
     describes: str
-    #: LIVE = requirements present, so the path is reachable now. DEAD /     #: SATISFIED_ELSEWHERE = a requirement is absent, so the path cannot have run
+    #: LIVE = requirements present, so the path is reachable now. DEAD /
+    #: SATISFIED_ELSEWHERE = a requirement is absent, so the path cannot have run
     #: against this store. LIVE is NOT evidence of past execution.
     verdict: str
     missing: tuple[str, ...] = field(default=())
@@ -226,9 +227,9 @@ def _evaluate(conn: sqlite3.Connection, guard: Guard) -> GuardVerdict:
         cov = best[3]
         if cov < 0:
             remedy = (
-                f"Re-keying the join onto that table would make the path "
-                f"executable; coverage over the guarded table could not be "
-                f"measured here, so confirm it before relying on the remedy."
+                "Re-keying the join onto that table would make the path "
+                "executable; coverage over the guarded table could not be "
+                "measured here, so confirm it before relying on the remedy."
             )
         elif cov >= 99.5:
             remedy = (

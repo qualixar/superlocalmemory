@@ -24,7 +24,9 @@ from typing import Any, Iterator, Sequence
 
 from superlocalmemory.media.generation import bump_generation
 from superlocalmemory.media.schema import (
-    MEDIA_SCHEMA_VERSION, apply_schema, stored_version,
+    MEDIA_SCHEMA_VERSION,
+    apply_schema,
+    stored_version,
 )
 from superlocalmemory.media.store_doc_erase import DocumentEraseMixin
 from superlocalmemory.media.store_documents import DocumentsMixin

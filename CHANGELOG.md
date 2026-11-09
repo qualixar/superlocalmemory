@@ -5,6 +5,61 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.17] — Replaced memories leave session start; one command to hide a memory
+
+The last fixes of this cycle, batched into one release. No new settings and no
+data migration: the store stays at schema 68, so 4.2.16 and 4.2.17 can open
+each other's stores.
+
+### Added
+
+- `slm hide <fact_id>...` keeps memories out of recall answers and session
+  starts without deleting or editing them; `slm hide --undo` shows them again.
+  Both are stored as your own decision, which the automatic bookkeeping rule
+  and every repair leave alone. Until now this needed hand-written SQL.
+- Jev can order the memories a session starts with. If you chose Jev as the
+  answer check and turned on its reordering (with its consent), the SessionStart
+  hook and `session_init` ask Jev once for the order of their memories, against
+  your first message or the project. Only the order is used: the answer-check
+  verdict is discarded, so a session start never says "that isn't in
+  SuperLocalMemory", and nothing is hidden. It waits at most 1.5 seconds and
+  keeps the usual order on any failure. With reordering off, a session start
+  makes no Jev request and nothing changes.
+
+### Fixed
+
+- A replaced memory no longer stays pinned at session start. When
+  `remember(replaces=...)` or a correction retired a fact, recall and pinned
+  facts already left it out, but the session-start context (`slm
+  session-context`, which the Claude Code and Codex SessionStart hooks print)
+  and the Core Memory blocks read the store with their own queries and kept
+  showing the old fact under "Core Memory (pinned, high-value)". Both now skip
+  retired facts, and a block compiled before its fact was retired is not shown.
+  Nothing is deleted: the retired fact stays in history and audit.
+- A question that names a version is no longer answered by another version.
+  "SLM 4.2.15 release" ranked "SLM 4.2.0 released" and six more other-version
+  notes first, because embeddings and the entity graph see 4.2.0 and 4.2.15 as
+  the same thing. A result that names only other versions now goes below the
+  rest, both before recall cuts to your limit and in the final order. An exact
+  match still comes first, and nothing is dropped.
+- Recall records which memories it returned again. 3.8.6 made recall
+  write-free so it never waits behind `remember`, and the record in
+  `fact_access_log` went with it; on one store the last recall row was dated
+  26 July 2026. Retention's access clock and the "active decisions" Core Memory
+  block read that table, so every recall since then counted as unread: a memory
+  you kept recalling still aged as unused, and no new decision reached the
+  block. The record is now queued on SLM's background writer, so recall itself
+  stays write-free. SLM's own warm-up recalls are not counted.
+- `PromptInjector.inject_into_context` ignored its documented `total_budget`
+  override; it is now split between soft prompts and memories in the configured
+  ratio.
+- Cloud backup sync reports the size it uploaded (`size_mb`).
+
+### Changed
+
+- The code base is lint-clean (`ruff check src tests` reports nothing), and CI
+  now runs a pinned ruff on every change. Line length is 120.
+
 ## [4.2.16] — Session starts without bookkeeping
 
 A small follow-up to 4.2.15. No new settings. One automatic data repair runs

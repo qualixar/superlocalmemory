@@ -574,7 +574,6 @@ def test_a_copy_that_drops_rowid_is_caught(gapped_store, monkeypatch):
     say so. Here the rowid is deliberately left out of the copy — exactly the
     edit a future refactor might make — and the assertion above must fail.
     """
-    real_rebuild = M046._rebuild
     monkeypatch.setattr(M046, "_rebuild_fts", lambda conn: None)
 
 

@@ -162,6 +162,7 @@ def test_ram_block_shape_when_the_worker_is_not_running(ctx, monkeypatch):
 
 def test_ram_block_with_a_running_worker_reports_its_size_and_cap(ctx, monkeypatch):
     import os
+
     from superlocalmemory.runtimes import worker_client
 
     client, _root, _env, _calls = ctx

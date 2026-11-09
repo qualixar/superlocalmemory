@@ -27,7 +27,6 @@ from superlocalmemory.retrieval.remote_reranker import (
     validate_remote_reranker_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Unit tests for _is_private_lan_host
 # ---------------------------------------------------------------------------

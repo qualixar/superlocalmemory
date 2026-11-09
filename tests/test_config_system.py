@@ -1,5 +1,6 @@
 """Tests for Config System — Task 4 of V3 build."""
 import json
+
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.storage.models import Mode
 

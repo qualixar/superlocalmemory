@@ -619,7 +619,7 @@ def run_maintenance(
     # drops bloat. Future writes go through ObservationBuilder.SUMMARY_*
     # bounds and stay clean.
     try:
-        consolidated = db.execute(
+        db.execute(
             """
             UPDATE entity_profiles
                SET knowledge_summary = SUBSTR(knowledge_summary, 1, 2047) || '…',

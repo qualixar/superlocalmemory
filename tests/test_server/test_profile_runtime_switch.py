@@ -11,9 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
-from fastapi.testclient import TestClient
 
 _CANONICAL_RUNTIMES = []
 

@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from tests._portable import assert_owner_only
 
 from superlocalmemory.infra.local_diagnostics import LocalDiagnostics

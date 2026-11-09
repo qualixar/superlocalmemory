@@ -4,12 +4,13 @@
 
 """Tests for Learning Advanced Modules -- Task 12 of V3 build."""
 
+
 import pytest
-from pathlib import Path
+
 from superlocalmemory.learning.bootstrap import SyntheticBootstrap
-from superlocalmemory.learning.workflows import WorkflowMiner
 from superlocalmemory.learning.cross_project import CrossProjectAggregator
 from superlocalmemory.learning.project_context import ProjectContextManager
+from superlocalmemory.learning.workflows import WorkflowMiner
 
 
 @pytest.fixture

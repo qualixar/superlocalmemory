@@ -1,5 +1,7 @@
 """The re-embed loads its model under the shared RAM reservation: one model load at a time."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import threading
@@ -11,7 +13,9 @@ from superlocalmemory.core import embedding_reindex as er
 from superlocalmemory.core import embedding_reindex_steps as steps
 from superlocalmemory.core import ram_lock
 from tests.test_storage.test_embedding_reindex_units import (  # noqa: F401 - fixture + helpers
-    FakeEmbedder, _target, store,
+    FakeEmbedder,
+    _target,
+    store,
 )
 
 

@@ -11,7 +11,9 @@ from superlocalmemory.mesh.broker import MeshBroker
 
 def init_mesh_schema(db_path: str) -> None:
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn = sqlite3.connect(db_path)
     conn.executescript(_MESH_DDL)

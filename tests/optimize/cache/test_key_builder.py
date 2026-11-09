@@ -20,7 +20,8 @@ def test_two_tenants_same_prompt_produce_different_keys() -> None:
         messages=[{"role": "user", "content": "What is 2+2?"}],
         raw_params={"max_tokens": 100},
     )
-    args_b = dict(args_a); args_b["tenant_id"] = _tenant(2)
+    args_b = dict(args_a)
+    args_b["tenant_id"] = _tenant(2)
     key_a = kb.build(**args_a)
     key_b = kb.build(**args_b)
     assert key_a is not None

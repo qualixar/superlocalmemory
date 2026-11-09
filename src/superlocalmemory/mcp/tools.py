@@ -12,7 +12,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
 
 from superlocalmemory.mcp.tools_core import register_core_tools
-from superlocalmemory.mcp.tools_v28 import register_v28_tools
 from superlocalmemory.mcp.tools_v3 import register_v3_tools
+from superlocalmemory.mcp.tools_v28 import register_v28_tools
 
 __all__ = ["register_core_tools", "register_v28_tools", "register_v3_tools"]

@@ -25,12 +25,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from superlocalmemory.core.config import (  # noqa: E402
-    DeploymentConfig,
-    DEPLOYMENT_PERSONAL,
     DEPLOYMENT_ENTERPRISE,
+    DEPLOYMENT_PERSONAL,
+    DeploymentConfig,
     load_deployment_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # DeploymentConfig dataclass

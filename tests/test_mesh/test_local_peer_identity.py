@@ -1,7 +1,6 @@
 """Local agent sessions register with an app and a name, and come back after a lost row."""
 
 from superlocalmemory.mcp import tools_mesh
-from tests.test_mesh.conftest import rows
 
 
 def test_registration_stores_app_and_display_name(broker) -> None:
@@ -28,9 +27,11 @@ def test_overview_reports_stale_and_hides_expired(broker) -> None:
         ts = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         c = broker._conn()
         c.execute("UPDATE mesh_peers SET last_heartbeat=? WHERE peer_id=?", (ts, peer))
-        c.commit(); c.close()
+        c.commit()
+        c.close()
 
-    beat(old, 10); beat(gone, 45)
+    beat(old, 10)
+    beat(gone, 45)
     status = {p["peer_id"]: p["status"] for p in broker.list_peer_overview()}
     assert status == {fresh: "active", old: "stale"}
 

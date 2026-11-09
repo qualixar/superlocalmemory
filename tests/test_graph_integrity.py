@@ -12,14 +12,18 @@ Locks the invariants fixed in this release:
 
 from __future__ import annotations
 
-import pytest
-
 import sqlite3
+
+import pytest
 
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import (
-    GraphEdge, EdgeType, AtomicFact, FactType, MemoryRecord,
+    AtomicFact,
+    EdgeType,
+    FactType,
+    GraphEdge,
+    MemoryRecord,
 )
 
 
@@ -75,7 +79,9 @@ def _raw_insert_edge(c, eid, src, tgt, w):
 class TestDegreeCap:
     def test_caps_in_degree_to_max(self, db: DatabaseManager) -> None:
         from superlocalmemory.core.graph_pruner import _cap_node_degree
-        conn = sqlite3.connect(str(db.db_path)); conn.row_factory = sqlite3.Row
+
+        conn = sqlite3.connect(str(db.db_path))
+        conn.row_factory = sqlite3.Row
         c = conn.cursor()
         # 150 distinct sources → one hub target (each source out-degree 1).
         for i in range(150):
@@ -92,7 +98,9 @@ class TestDegreeCap:
 
     def test_still_caps_out_degree(self, db: DatabaseManager) -> None:
         from superlocalmemory.core.graph_pruner import _cap_node_degree
-        conn = sqlite3.connect(str(db.db_path)); conn.row_factory = sqlite3.Row
+
+        conn = sqlite3.connect(str(db.db_path))
+        conn.row_factory = sqlite3.Row
         c = conn.cursor()
         for i in range(150):
             _raw_insert_edge(c, f"e{i}", "hubsrc", f"t{i}", i / 150.0)
@@ -138,7 +146,8 @@ class TestAssociationOrphanPrune:
             "INSERT INTO graph_edges (edge_id, profile_id, source_id, target_id, "
             "edge_type, weight) VALUES ('g3','default','vanished','also','semantic',0.9)"
         )
-        raw.commit(); raw.close()
+        raw.commit()
+        raw.close()
 
         prune_graph(db.db_path, profile_id="default")
 
@@ -168,7 +177,8 @@ class TestAssociationOrphanPrune:
             "target_fact_id, association_type, weight) "
             "VALUES ('a2','default','real','ghost','hebbian',0.5)"
         )
-        raw.commit(); raw.close()
+        raw.commit()
+        raw.close()
 
         stats = prune_graph(db.db_path, profile_id="default")
         assert stats.get("association_orphans_removed") == 1

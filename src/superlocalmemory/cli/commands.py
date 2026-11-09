@@ -558,6 +558,14 @@ def _cmd_outcome_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_hide_dispatch(args: Namespace) -> None:
+    """4.2.17: keep memories out of answers, or show them again (cli/hide_cmd.py)."""
+    from superlocalmemory.cli.hide_cmd import cmd_hide
+    code = cmd_hide(args)
+    if code:
+        sys.exit(code)
+
+
 def _cmd_corrections_dispatch(args: Namespace) -> None:
     """4.1.22: corrections a user action overtook (cli/corrections_cmd.py)."""
     from superlocalmemory.cli.corrections_cmd import run
@@ -656,7 +664,9 @@ def dispatch(args: Namespace) -> None:
         "list": cmd_list,
         "remember": cmd_remember,
         "recall": cmd_recall,
-        "search": cmd_recall,  # v3.6.12 (parity-3): MCP exposes a `search` verb; give the CLI parity (recall is multi-channel incl. BM25/keyword).
+        # v3.6.12 (parity-3): MCP exposes a `search` verb; give the CLI parity
+        # (recall is multi-channel incl. BM25/keyword).
+        "search": cmd_recall,
         "forget": cmd_forget,
         "delete": cmd_delete,
         "update": cmd_update,
@@ -738,6 +748,7 @@ def dispatch(args: Namespace) -> None:
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "outcome": _cmd_outcome_dispatch,
+        "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
         "embedder": _cmd_embedder_dispatch,
     }
@@ -792,8 +803,8 @@ def _cmd_wrap(args: Namespace) -> None:
     optimize.adapters._agent_registry for the full agent table.
     """
     if getattr(args, "list", False):
-        from superlocalmemory.optimize.adapters.wrap import list_agents
         from superlocalmemory.optimize.adapters._agent_registry import AGENT_REGISTRY
+        from superlocalmemory.optimize.adapters.wrap import list_agents
         print("Registered agents for `slm wrap`:")
         for key in list_agents():
             spec = AGENT_REGISTRY.get(key, {})
@@ -823,9 +834,12 @@ def _cmd_wrap(args: Namespace) -> None:
 def cmd_serve(args: Namespace) -> None:
     """Start/stop the SLM daemon for instant CLI response."""
     from superlocalmemory.cli.daemon import (
-        is_daemon_running, ensure_daemon, stop_daemon,
-        read_descriptor, _descriptor_process_is_alive,
+        _descriptor_process_is_alive,
+        ensure_daemon,
+        is_daemon_running,
         owned_daemon_process_alive,
+        read_descriptor,
+        stop_daemon,
     )
 
     action = getattr(args, 'action', 'start')
@@ -1023,6 +1037,7 @@ def cmd_restart(args: Namespace) -> None:
       5. Optionally open dashboard
     """
     import time
+
     from superlocalmemory.infra.daemon_identity import canonical_data_root
 
     use_json = getattr(args, "json", False)
@@ -1211,6 +1226,7 @@ def cmd_restart(args: Namespace) -> None:
     if open_dashboard:
         try:
             import webbrowser
+
             from superlocalmemory.cli.daemon import _get_port
             port = _get_port()
             url = f"http://localhost:{port}"
@@ -1612,7 +1628,6 @@ def cmd_mode(args: Namespace) -> None:
       - Embedding / retrieval / evolution / forgetting / math: untouched.
     """
     from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.storage.models import Mode
 
     config = SLMConfig.load()
 
@@ -1645,7 +1660,7 @@ def cmd_mode(args: Namespace) -> None:
         print(f"  Embedding: {updated.embedding.provider}/{updated.embedding.model_name}")
         if args.value.lower() != "a":
             print(f"  LLM: {updated.llm.provider}/{updated.llm.model}")
-        print(f"  Reranker: ONNX cross-encoder (enabled)")
+        print("  Reranker: ONNX cross-encoder (enabled)")
 
         # V3.3.4: Warn if Mode C has neither a cloud key nor a configured
         # custom endpoint (#112). A keyless custom endpoint — llama.cpp,
@@ -1696,8 +1711,8 @@ def _agents_md_source_factory():
     Source: plugin-src/rules/AGENTS.md (relative to package root).
     Gracefully skips if absent — never fails the MCP write.
     """
-    from pathlib import Path
     import sysconfig
+    from pathlib import Path
 
     # Resolve relative to the package root (src/superlocalmemory/../../)
     _pkg_root = Path(__file__).resolve().parents[3]
@@ -1782,9 +1797,9 @@ def _tags_qs(args: Namespace) -> str:
 
 def cmd_list(args: Namespace) -> None:
     """List recent memories chronologically."""
+    from superlocalmemory.core import tag_query
     from superlocalmemory.core.config import CANONICAL_LIST_LIMIT, SLMConfig
     from superlocalmemory.core.engine import MemoryEngine
-    from superlocalmemory.core import tag_query
     from superlocalmemory.core.kind_query import (
         InvalidKind,
         engine_display_min_confidence,
@@ -1955,7 +1970,8 @@ def cmd_remember(args: Namespace) -> None:
         replaces = getattr(args, "replaces", None)
         if replaces is not None:
             from superlocalmemory.core.replaces_input import (
-                ReplacesRejected, normalize_replaces,
+                ReplacesRejected,
+                normalize_replaces,
             )
 
             try:
@@ -2147,7 +2163,7 @@ def cmd_recall(args: Namespace) -> None:
     # grouped. The Stop hook on session end won't fire for CLI, so
     # these outcomes are closed by the reaper (TTL → neutral reward).
     try:
-        from superlocalmemory.cli.daemon import is_daemon_running, daemon_request, ensure_daemon
+        from superlocalmemory.cli.daemon import daemon_request, ensure_daemon, is_daemon_running
         if is_daemon_running() or ensure_daemon():
             from urllib.parse import quote
             session_id = f"cli:{os.getppid()}"
@@ -2653,6 +2669,7 @@ def _admission_status_text(daemon_status: dict) -> str:
 def cmd_status(args: Namespace) -> None:
     """Show system status."""
     from superlocalmemory.core.config import SLMConfig
+
     # Same source the other two status surfaces read, so all three cannot
     # disagree about which version answered.
     from superlocalmemory.server.routes.helpers import SLM_VERSION
@@ -2925,7 +2942,7 @@ def _gather_optimize_surface_b() -> dict:
             result["tokens_saved"] = snap.tokens_saved_compress
             result["cache_hits"] = snap.hits
             result["cache_misses"] = snap.misses
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         prior = result["error"]
         result["error"] = (prior + "; " if prior else "") + "metrics read failed"
 
@@ -3025,6 +3042,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
+        ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
     ]),
     ("Privacy & compliance", [
         # gdpr shipped in 4.0.6 but was never listed here, so `slm help` did not
@@ -3440,8 +3458,8 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
         # Removes provably-dead lock/PID files so the doctor report below
         # reflects the healed state.  Fail-open — never blocks doctor.
         try:
-            from superlocalmemory.infra.self_heal import reap_stale_artifacts
             from superlocalmemory.infra.data_root import canonical_data_root
+            from superlocalmemory.infra.self_heal import reap_stale_artifacts
 
             _sh_report = reap_stale_artifacts(canonical_data_root())
             if not use_json:
@@ -3596,8 +3614,8 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
         _check("Embedding worker", "PASS", "skipped (--quick)")
     else:
         try:
-            import subprocess as _sp
             import json as _json
+            import subprocess as _sp
 
             env = {
                 **__import__("os").environ,
@@ -4207,7 +4225,9 @@ def cmd_trace(args: Namespace) -> None:
     # graph, and retrieval state intact while returning the same score detail.
     try:
         from superlocalmemory.cli.daemon import (
-            daemon_request, ensure_daemon, is_daemon_running,
+            daemon_request,
+            ensure_daemon,
+            is_daemon_running,
         )
         if is_daemon_running() or ensure_daemon():
             result = daemon_request(
@@ -4283,8 +4303,8 @@ def cmd_trace(args: Namespace) -> None:
         # unavailable or a local transport error occurs.
         pass
 
-    from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
@@ -4435,14 +4455,15 @@ def cmd_warmup(_args: Namespace) -> None:
     print("SuperLocalMemory V4 — Embedding Model Warmup")
     print("=" * 50)
     print(f"  Python: {sys.executable}")
-    print(f"  Model:  nomic-ai/nomic-embed-text-v1.5 (~500MB)")
+    print("  Model:  nomic-ai/nomic-embed-text-v1.5 (~500MB)")
     print()
 
     # v3.4.42 — daemon-aware path. When the daemon is up it owns the
     # machine-wide embedding worker; a local one would be refused anyway.
     try:
         from superlocalmemory.cli.daemon import (
-            is_daemon_running, daemon_request,
+            daemon_request,
+            is_daemon_running,
         )
         daemon_up = is_daemon_running()
     except Exception:
@@ -4508,7 +4529,8 @@ def _warmup_via_daemon(daemon_request, args: Namespace) -> None:
     the command exits 1 so a script does not mistake it for success.
     """
     from superlocalmemory.cli.warmup_readiness import (
-        DEFAULT_WAIT_SECONDS, wait_until_warm,
+        DEFAULT_WAIT_SECONDS,
+        wait_until_warm,
     )
 
     timeout = getattr(args, "timeout", None)
@@ -4580,14 +4602,14 @@ def cmd_dashboard(args: Namespace) -> None:
     port = getattr(args, "port", None) or runtime_port()
 
     print("  SuperLocalMemory V4 — Web Dashboard")
-    print(f"  Starting daemon if needed...")
+    print("  Starting daemon if needed...")
 
     if not ensure_daemon(port=port):
         print("  ✗ Could not start daemon. Run `slm doctor` to diagnose.")
         sys.exit(1)
 
     url = f"http://localhost:{port}"
-    print(f"  ✓ Daemon running")
+    print("  ✓ Daemon running")
     print(f"  Dashboard: {url}")
     print(f"  API Docs:  {url}/docs")
 
@@ -4664,11 +4686,11 @@ def cmd_profile(args: Namespace) -> None:
         )
 
     from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.storage import schema
     from superlocalmemory.server.routes.helpers import (
         ensure_profile_in_json,
     )
+    from superlocalmemory.storage import schema
+    from superlocalmemory.storage.database import DatabaseManager
 
     config = SLMConfig.load()
     db = DatabaseManager(config.db_path)
@@ -4765,6 +4787,7 @@ def _cmd_init_auto(
     No TTY required.  Does NOT run IDE connect (AC6).
     """
     from pathlib import Path
+
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.storage.models import Mode
 
@@ -4845,7 +4868,7 @@ def cmd_init(args: Namespace) -> None:
     # Step 2: Install hooks (gate always OFF by default)
     print()
     print("Installing Claude Code hooks...")
-    from superlocalmemory.hooks.claude_code_hooks import install_hooks, check_status
+    from superlocalmemory.hooks.claude_code_hooks import check_status, install_hooks
 
     status = check_status()
 
@@ -4915,7 +4938,9 @@ def cmd_init(args: Namespace) -> None:
 def cmd_hooks(args: Namespace) -> None:
     """Manage additive Claude Code or Codex memory lifecycle hooks."""
     from superlocalmemory.hooks.claude_code_hooks import (
-        install_hooks, remove_hooks, check_status,
+        check_status,
+        install_hooks,
+        remove_hooks,
     )
 
     action = getattr(args, "action", "status")
@@ -4923,9 +4948,13 @@ def cmd_hooks(args: Namespace) -> None:
     dry_run = getattr(args, "dry_run", False)
     if agent == "codex":
         from superlocalmemory.hooks.codex_hooks import (
-            install_hooks as install_codex_hooks,
-            remove_hooks as remove_codex_hooks,
             check_status as check_codex_hooks,
+        )
+        from superlocalmemory.hooks.codex_hooks import (
+            install_hooks as install_codex_hooks,
+        )
+        from superlocalmemory.hooks.codex_hooks import (
+            remove_hooks as remove_codex_hooks,
         )
         if action == "install":
             result = install_codex_hooks(dry_run=dry_run)
@@ -4994,15 +5023,20 @@ def cmd_hooks(args: Namespace) -> None:
 def cmd_codex(args: Namespace) -> None:
     """Manage explicit, SLM-owned Codex skills, agents, and lifecycle hooks."""
     from superlocalmemory.hooks.codex_assets import (
-        AGENTS, SKILLS, install_assets, remove_assets, status_assets,
+        AGENTS,
+        SKILLS,
+        install_assets,
+        remove_assets,
+        status_assets,
     )
-    from superlocalmemory.hooks.codex_hooks import install_hooks, remove_hooks, check_status
+    from superlocalmemory.hooks.codex_hooks import check_status, install_hooks, remove_hooks
 
     action, dry_run = getattr(args, "action", "status"), getattr(args, "dry_run", False)
     if action == "install":
         assets, hooks = install_assets(dry_run=dry_run), install_hooks(dry_run=dry_run)
         if assets.get("success") and hooks.get("success"):
-            print(f"SLM Codex add-ons {'would be installed' if dry_run else 'installed'}: {len(SKILLS)} skills, {len(AGENTS)} subagents, 4 lifecycle hooks.")
+            print(f"SLM Codex add-ons {'would be installed' if dry_run else 'installed'}: "
+                  f"{len(SKILLS)} skills, {len(AGENTS)} subagents, 4 lifecycle hooks.")
             print("MCP wiring remains explicit: run `slm connect codex` if it is not already configured.")
             print("Review and trust newly installed hooks in Codex with /hooks.")
         else:
@@ -5036,6 +5070,7 @@ def cmd_session_context(args: Namespace) -> None:
     output across MCP and CLI surfaces. --json flag returns structured JSON.
     """
     import sqlite3
+
     from superlocalmemory.core.config import SLMConfig
 
     use_json = getattr(args, "json", False)
@@ -5054,8 +5089,8 @@ def cmd_session_context(args: Namespace) -> None:
     if use_full:
         # Full engine path (slow, requires Ollama) — for explicit CLI use
         try:
-            from superlocalmemory.hooks.auto_recall import AutoRecall
             from superlocalmemory.core.engine import MemoryEngine
+            from superlocalmemory.hooks.auto_recall import AutoRecall
             config = SLMConfig.load()
             engine = MemoryEngine(config)
             engine.initialize()
@@ -5125,16 +5160,21 @@ def cmd_session_context(args: Namespace) -> None:
         try:
             from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
 
-            not_prompt, not_prompt_params = source_filter()  # 4.2.14
-            fact_rows = _read_rows(
-                "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
-                "FROM atomic_facts f WHERE f.profile_id = ? "
-                f"{age_clause.replace('created_at', 'f.created_at')}"
-                "AND f.lifecycle = 'active'" + not_prompt + " "
-                "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
-                (pid, *not_prompt_params, 10 * OVERSAMPLE),
-            )
+            # 4.2.14 prompts and bookkeeping; 4.2.17 retired (replaced) facts.
+            with memory_read(db_path) as conn:
+                not_prompt, not_prompt_params = source_filter(conn)
+                fact_rows = conn.execute(
+                    "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
+                    "FROM atomic_facts f WHERE f.profile_id = ? "
+                    f"{age_clause.replace('created_at', 'f.created_at')}"
+                    "AND f.lifecycle = 'active'" + not_prompt + " "
+                    "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
+                    (pid, *not_prompt_params, 10 * OVERSAMPLE),
+                ).fetchall()
             fact_rows = keep_sources(fact_rows, 10)
+            # 4.2.17: Jev orders them when the person chose Jev reordering
+            # (core/session_jev: order only, 1.5 s budget, else unchanged).
+            fact_rows = _jev_session_order(args, config, fact_rows)
             for r in fact_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -5152,13 +5192,15 @@ def cmd_session_context(args: Namespace) -> None:
             # <date>") says nothing and is left out (4.2.14, non_answer).
             from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources
 
-            sess_rows = keep_sources(_read_rows(
-                "SELECT fact_id, content, importance, access_count FROM atomic_facts "
-                "WHERE profile_id = ? AND content LIKE 'Session%' "
-                "AND COALESCE(non_answer, 0) = 0 "
-                "ORDER BY created_at DESC LIMIT ?",
-                (pid, 3 * OVERSAMPLE),
-            ), 3)
+            with memory_read(db_path) as conn:
+                not_source, not_source_params = source_filter(conn)
+                sess_rows = keep_sources(conn.execute(
+                    "SELECT f.fact_id, f.content, f.importance, f.access_count "
+                    "FROM atomic_facts f "
+                    "WHERE f.profile_id = ? AND f.content LIKE 'Session%'" + not_source + " "
+                    "ORDER BY f.created_at DESC LIMIT ?",
+                    (pid, *not_source_params, 3 * OVERSAMPLE),
+                ).fetchall(), 3)
             for r in sess_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -5294,7 +5336,7 @@ def cmd_observe(args: Namespace) -> None:
     # This is the P0 fix for the memory blast incident of April 7, 2026.
     from superlocalmemory.cli.daemon import DaemonRefused
     try:
-        from superlocalmemory.cli.daemon import is_daemon_running, daemon_request, ensure_daemon
+        from superlocalmemory.cli.daemon import daemon_request, ensure_daemon, is_daemon_running
         if is_daemon_running() or ensure_daemon():
             result = daemon_request("POST", "/observe", {"content": content})
             if result is not None:
@@ -5322,10 +5364,10 @@ def cmd_observe(args: Namespace) -> None:
     # Fallback: direct engine (only if daemon unavailable).
     # Acquires a system-wide file lock to prevent concurrent worker spawns.
     try:
-        from superlocalmemory.hooks.auto_capture import AutoCapture
         from superlocalmemory.core.config import SLMConfig
-        from superlocalmemory.core.engine import MemoryEngine
         from superlocalmemory.core.embeddings import acquire_embedding_lock
+        from superlocalmemory.core.engine import MemoryEngine
+        from superlocalmemory.hooks.auto_capture import AutoCapture
 
         if not acquire_embedding_lock():
             logger.debug("observe: another embedding worker active, skipping")
@@ -5384,10 +5426,10 @@ def cmd_decay(args: Namespace) -> None:
         engine.initialize()
         pid = profile or engine.profile_id
 
-        from superlocalmemory.math.ebbinghaus import EbbinghausCurve
         from superlocalmemory.learning.forgetting_scheduler import (
             ForgettingScheduler,
         )
+        from superlocalmemory.math.ebbinghaus import EbbinghausCurve
 
         ebbinghaus = EbbinghausCurve(config.forgetting)
         scheduler = ForgettingScheduler(
@@ -5457,14 +5499,13 @@ def cmd_quantize(args: Namespace) -> None:
         engine.initialize()
         pid = profile or engine.profile_id
 
-        from superlocalmemory.math.ebbinghaus import EbbinghausCurve
         from superlocalmemory.dynamics.eap_scheduler import EAPScheduler
+        from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+        from superlocalmemory.math.polar_quant import PolarQuantEncoder
+        from superlocalmemory.math.qjl import QJLEncoder
         from superlocalmemory.storage.quantized_store import (
             QuantizedEmbeddingStore,
         )
-
-        from superlocalmemory.math.polar_quant import PolarQuantEncoder
-        from superlocalmemory.math.qjl import QJLEncoder
 
         ebbinghaus = EbbinghausCurve(config.forgetting)
         polar = PolarQuantEncoder(replace(config.quantization.polar,
@@ -5659,8 +5700,8 @@ def cmd_reap(args: Namespace) -> None:
 
     try:
         from superlocalmemory.infra.process_reaper import (
-            cleanup_all_orphans,
             ReaperConfig,
+            cleanup_all_orphans,
         )
 
         config = ReaperConfig()
@@ -5695,9 +5736,9 @@ def cmd_reap(args: Namespace) -> None:
     skipped = result.get("skipped", 0)
 
     if dry_run:
-        print(f"Process reaper (dry run)")
+        print("Process reaper (dry run)")
     else:
-        print(f"Process reaper")
+        print("Process reaper")
     print(f"  Total SLM processes: {total}")
     print(f"  Orphans found:       {orphans}")
     print(f"  Killed:              {killed}")
@@ -5710,6 +5751,25 @@ def cmd_reap(args: Namespace) -> None:
 #: 4.2.14: compiled for the dashboard and soft prompts, never put in a session:
 #: "time_of_day: hour_21", "query_type: general" are telemetry, not memory.
 _BLOCKS_NOT_FOR_SESSIONS = frozenset({"behavioral_patterns"})
+
+
+def _jev_session_order(args: Namespace, config: object, rows: list) -> list:
+    """The session start's memories in Jev's order for this project, or unchanged."""
+    import os
+
+    from superlocalmemory.core.project_identity import session_context_query
+    from superlocalmemory.core.session_jev import jev_order
+
+    # The Claude and Codex hooks pass the project's folder name ("general" when
+    # there is none); a real question has spaces and is used as it is.
+    given = (getattr(args, "query", "") or "").strip()
+    if not given or (" " not in given and given != "general"):
+        query = session_context_query(given or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    elif given == "general":
+        query = session_context_query(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    else:
+        query = given
+    return jev_order(query, rows, lambda row: row["content"], getattr(config, "retrieval", None))
 
 
 def _core_block_rows(db_path: object, profile_id: str) -> list:

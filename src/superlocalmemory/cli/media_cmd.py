@@ -18,7 +18,11 @@ from typing import Any
 
 from superlocalmemory.cli.daemon import DaemonConflict, daemon_request, ensure_daemon, is_daemon_running
 from superlocalmemory.cli.features_cmd import (
-    EXIT_DAEMON_DOWN, FEATURES_PATH, NOT_RUNNING, die, media_line,
+    EXIT_DAEMON_DOWN,
+    FEATURES_PATH,
+    NOT_RUNNING,
+    die,
+    media_line,
 )
 
 SIZE_TEXT = "about 1.5 GB"

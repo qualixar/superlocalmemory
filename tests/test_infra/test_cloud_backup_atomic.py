@@ -26,9 +26,7 @@ import types
 from pathlib import Path
 
 import pytest
-
 from tests._portable import assert_owner_only
-
 
 # ---------------------------------------------------------------------------
 # Helpers — redirect MEMORY_DIR to a tmp path per test
@@ -220,7 +218,7 @@ class TestCorruptJsonLogsWarning:
 
         with caplog.at_level(logging.WARNING, logger="superlocalmemory.cloud_backup"):
             # _delete_credential should not raise, but may log a warning
-            result = cb._delete_credential("missing_key")
+            cb._delete_credential("missing_key")
 
         # Should not raise; return value may be False or True depending on keyring
         # The key is that it doesn't crash
@@ -241,7 +239,9 @@ class TestParentDirMode:
     """The parent directory of .credentials.json should be 0700."""
 
     def test_parent_dir_created_with_0700(self, tmp_path, monkeypatch):
-        import sys, types
+        import sys
+        import types
+
         import superlocalmemory.infra.cloud_backup as cb
 
         # Point to a sub-dir that does NOT yet exist

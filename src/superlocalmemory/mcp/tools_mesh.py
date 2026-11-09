@@ -24,12 +24,11 @@ import time
 import uuid
 from typing import Callable
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp import tools_mesh_remote
 from superlocalmemory.mcp.remote_caller import current_remote_key_id, current_remote_peer
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 from superlocalmemory.mesh.envelope import PREFACE
 
 logger = logging.getLogger(__name__)

@@ -93,6 +93,7 @@ def engine_db(tmp_path, monkeypatch):
 def _make_app_with_entity_routes():
     """Build a FastAPI app with just the entity routes wired up."""
     from fastapi import FastAPI
+
     from superlocalmemory.server.routes.entity import router as entity_router
 
     app = FastAPI()
@@ -223,6 +224,7 @@ class TestRequireEngineHelper:
     def test_require_engine_raises_503_when_db_missing(self, tmp_path, monkeypatch):
         """If the DB is genuinely missing, require_engine should raise 503."""
         from fastapi import HTTPException
+
         from superlocalmemory.server.routes.helpers import require_engine
 
         monkeypatch.setattr("superlocalmemory.core.config.DEFAULT_BASE_DIR", tmp_path / "nonexistent")

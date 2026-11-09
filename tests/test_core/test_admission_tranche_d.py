@@ -13,9 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -105,6 +102,7 @@ class TestHttpRecallScopeClamped:
     def test_enforce_read_scope_called_in_http_handler(self):
         """enforce_read_scope must be imported and invoked in the HTTP recall body."""
         import pathlib
+
         import superlocalmemory
         src = (
             pathlib.Path(superlocalmemory.__file__).parent

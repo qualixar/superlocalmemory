@@ -25,13 +25,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-
-from superlocalmemory.mcp.tool_hints import ADDS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.remote_caller import (
-    current_remote_grant, current_remote_key_id, current_remote_media_allowed,
+    current_remote_grant,
+    current_remote_key_id,
+    current_remote_media_allowed,
 )
+from superlocalmemory.mcp.tool_hints import ADDS
 from superlocalmemory.media.upload_links import UPLOAD_BASE_URL, UploadError, default_links
 
 logger = logging.getLogger("slm.mcp.tools_media_upload")

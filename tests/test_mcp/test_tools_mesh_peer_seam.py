@@ -7,8 +7,8 @@ import asyncio
 import pytest
 
 from superlocalmemory.mcp import tools_mesh
-from superlocalmemory.mesh.broker import MeshBroker  # noqa: F401
 from superlocalmemory.mcp.remote_caller import RemotePeer, current_remote_peer, remote_peer
+from superlocalmemory.mesh.broker import MeshBroker  # noqa: F401
 
 
 class _Collector:
@@ -29,7 +29,10 @@ def tools(monkeypatch):
     def request(method, path, body=None, **kw):
         calls.append((method, path, body))
         if path == "/register":
-            return {"peer_id": "web-peer-id" if body.get("session_id") == "ref-1" else "other-web", "pending_messages": 0}
+            return {
+                "peer_id": "web-peer-id" if body.get("session_id") == "ref-1" else "other-web",
+                "pending_messages": 0,
+            }
         if "/wait" in path:
             return {"messages": [{"id": 3, "read": False, "content": "hello"}], "timed_out": False}
         if path.startswith("/inbox/"):
@@ -91,7 +94,6 @@ def test_a_web_caller_without_an_in_process_broker_is_refused_and_never_uses_the
 
 def test_web_caller_never_stores_a_message(monkeypatch) -> None:
     """Even with the daemon wired to a real broker, a web caller stores nothing."""
-    from superlocalmemory.mesh.broker import MeshBroker
     stored = []
     real = MeshBroker.send_message
 

@@ -21,6 +21,8 @@ CRIT-2 (LLD §CRIT): SLM_RATE_LIMIT_* are read at create_app() time.
 All env vars MUST be set before create_app() is called.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -30,7 +32,6 @@ import pytest
 fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,7 +153,7 @@ class TestWritesOverLimit:
             return_value=True,
         ):
             # write_limit=2 — IP A hits limit on request 3
-            app = _build_app(monkeypatch, write=2, window=60)
+            _build_app(monkeypatch, write=2, window=60)
 
         # Each _make_client adds middleware to the app — build separate apps
         # to avoid middleware stack accumulation.

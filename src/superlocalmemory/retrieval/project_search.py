@@ -38,7 +38,7 @@ import time
 from typing import Any
 
 from superlocalmemory.core.project_identity import project_key
-from superlocalmemory.retrieval.kind_scope import _Within, _merge
+from superlocalmemory.retrieval.kind_scope import _merge, _Within
 
 logger = logging.getLogger(__name__)
 

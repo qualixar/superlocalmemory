@@ -27,7 +27,6 @@ import re
 import sqlite3
 from collections import Counter
 from pathlib import Path
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 

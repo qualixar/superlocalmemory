@@ -15,8 +15,6 @@ from argparse import Namespace
 from pathlib import Path
 
 from superlocalmemory.hooks.antigravity_adapter import AntigravityAdapter
-from superlocalmemory.hooks.copilot_adapter import CopilotAdapter
-from superlocalmemory.hooks.cursor_adapter import CursorAdapter
 from superlocalmemory.hooks.context_payload import (
     RecallFn,
     build_payload,
@@ -25,9 +23,11 @@ from superlocalmemory.hooks.context_payload import (
     format_memories,
     format_topics,
 )
+from superlocalmemory.hooks.copilot_adapter import CopilotAdapter
 from superlocalmemory.hooks.cross_platform_connector import (
     CrossPlatformConnector,
 )
+from superlocalmemory.hooks.cursor_adapter import CursorAdapter
 from superlocalmemory.mcp.tools_context import prestage_context
 
 

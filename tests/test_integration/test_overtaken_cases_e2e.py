@@ -12,6 +12,8 @@ on a private port and a synthetic store.
 Needs ``SLM_TEST_MODEL_CACHE`` (see test_erasure_integrity_e2e.py).
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json
@@ -30,7 +32,6 @@ from tests.test_integration.test_erasure_integrity_e2e import (  # noqa: F401 - 
     daemon,
     stub_embedder,
 )
-
 
 # One topic per memory: near-duplicates (even with a different tag) are merged
 # into the existing fact on save, so every memory here is about something else.

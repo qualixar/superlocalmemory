@@ -9,17 +9,17 @@ TDD RED phase: tests written before implementation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 from superlocalmemory.core.config import ParameterizationConfig
-from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
 from superlocalmemory.parameterization.pattern_extractor import (
     PatternAssertion,
     PatternCategory,
 )
+from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
 
 
 def _make_config(**overrides) -> ParameterizationConfig:
@@ -105,7 +105,7 @@ def test_prompt_ebbinghaus_decay():
             "updated_at": past,
         }
     ]
-    r_high = lifecycle.compute_prompt_retention("p_high")
+    lifecycle.compute_prompt_retention("p_high")
 
     # High effectiveness + more versions = slower decay = higher retention
     # Both use 48h floor, but p_high: S_raw = 2*0.8*5 = 8 -> S=48 (floored)

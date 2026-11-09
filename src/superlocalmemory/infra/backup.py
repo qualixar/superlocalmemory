@@ -16,8 +16,8 @@ import hashlib
 import json
 import logging
 import shutil
-import tempfile
 import sqlite3
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager

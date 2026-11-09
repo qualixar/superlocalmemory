@@ -10,7 +10,8 @@ governance checks live in one place. Apps on this computer always work; a caller
 computer is refused here, before any daemon call, as well as by the remote tool
 policy, unless the remote app has the signed media grant and its key allows media; such an app
 cannot name a file on this computer, sends at most 512 KB of pasted data, and its links go through
-the remote fetch rules (the daemon is told, so it can only become stricter). A thumbnail goes back only as an MCP ``image`` content block, never
+the remote fetch rules (the daemon is told, so it can only become stricter). A thumbnail goes back only as an
+MCP ``image`` content block, never
 inside ``structuredContent``. An error never repeats a link's query string.
 
 ``remember_media`` and ``remember_document`` also take a ``file`` object, which ChatGPT fills in for
@@ -31,12 +32,12 @@ from urllib.parse import quote
 from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import WithJsonSchema
 
-from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
-from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.media_fetch import MAX_REMOTE_BASE64_BYTES, too_large_for_remote
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.remote_caller import current_remote_key_id, current_remote_media_allowed
 from superlocalmemory.mcp.remote_visibility import with_view
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 
 logger = logging.getLogger("slm.mcp.tools_media")
 
@@ -364,7 +365,7 @@ def register_media_tools(server: Any) -> None:
         the chat (ChatGPT fills it in). ``scope`` (personal, project, shared or
         global) and ``shared_with`` (comma-separated profile ids) work as they do for remember. Apps on other computers need the
         owner's permission.
-        """
+        """  # noqa: E501
         return await _remember({
             "path": path, "download_url": download_url, "base64": base64, "file": file, "content": content,
             "tags": tags, "profile_id": profile_id, "idempotency_key": idempotency_key,

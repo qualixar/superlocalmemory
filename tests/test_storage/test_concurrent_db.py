@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import pytest
 
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import (
-    AtomicFact, FactType, MemoryRecord,
+    AtomicFact,
+    FactType,
+    MemoryRecord,
 )
 
 

@@ -6,6 +6,8 @@ The repair runs inside the daemon (the only writer), refuses any data folder
 but the one it serves, and remember/recall keep working around it.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

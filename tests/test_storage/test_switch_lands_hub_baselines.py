@@ -20,6 +20,8 @@ Here a switch measures every memory in the target space before the swap, in
 the same job, and publishes the rows inside the swap's own transaction.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json
@@ -30,6 +32,10 @@ import pytest
 
 pytest.importorskip("sqlite_vec")
 
+from superlocalmemory.core import embedding_reindex as er  # noqa: E402
+from superlocalmemory.core import embedding_reindex_steps as steps  # noqa: E402
+from superlocalmemory.retrieval import hub_baseline  # noqa: E402
+from superlocalmemory.storage import embedding_spaces as sp  # noqa: E402
 from tests.test_storage.test_embedding_reindex_units import (  # noqa: E402,F401
     FakeEmbedder,
     _run,
@@ -37,11 +43,6 @@ from tests.test_storage.test_embedding_reindex_units import (  # noqa: E402,F401
     _target,
     store,
 )
-
-from superlocalmemory.core import embedding_reindex as er  # noqa: E402
-from superlocalmemory.core import embedding_reindex_steps as steps  # noqa: E402
-from superlocalmemory.retrieval import hub_baseline  # noqa: E402
-from superlocalmemory.storage import embedding_spaces as sp  # noqa: E402
 
 
 @pytest.fixture()

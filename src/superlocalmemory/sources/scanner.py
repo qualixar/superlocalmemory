@@ -15,10 +15,10 @@ from typing import Any, Callable
 
 from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources import locks
+from superlocalmemory.sources.folder_watch import DEBOUNCE_S, SourceWatcher
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.reconcile import scan_source
 from superlocalmemory.sources.store import SourceStore
-from superlocalmemory.sources.folder_watch import DEBOUNCE_S, SourceWatcher
 
 logger = logging.getLogger(__name__)
 

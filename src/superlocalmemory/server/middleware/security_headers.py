@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-
 # Deterministic, module-level, immutable.  Every request gets the same bytes.
 # Keeping the declaration as a tuple of (name, value) bytes pairs avoids any
 # per-request allocation in the hot path.

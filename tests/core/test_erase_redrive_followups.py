@@ -292,10 +292,8 @@ def _write_receipt_without_fact_list(engine, erasure_id: str, subject: str) -> N
 
 
 def test_receipt_without_a_fact_list_is_reported_plainly(engine_with_mock_deps):
-    from superlocalmemory.core.ops_remediation import resolve_operation
+    from superlocalmemory.core.ops_remediation import list_failed_operations, resolve_operation
     from superlocalmemory.core.transactions.erasure import verify_receipt
-
-    from superlocalmemory.core.ops_remediation import list_failed_operations
 
     engine = engine_with_mock_deps
     _seed_unconfirmed(engine, "erase-no-list", "Acme Corp", verify_attempts=9)

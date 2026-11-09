@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from superlocalmemory.sources.ignore import GitIgnore, IgnoreRules, DEFAULT_TYPES
+from superlocalmemory.sources.ignore import DEFAULT_TYPES, GitIgnore, IgnoreRules
 
 CASES = [
     # (patterns, path, is_dir, ignored)

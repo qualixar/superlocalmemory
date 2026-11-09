@@ -374,7 +374,6 @@ class PythonExtractor(BaseExtractor):
         matches = _run_query(CALL_QUERY_SRC, self._root)
         for _pat, captures in matches:
             call_names = captures.get("call.name", [])
-            call_exprs = captures.get("call.expr", [])
             for i, name_node in enumerate(call_names):
                 call_name = _node_text(name_node, self._source)
                 line = name_node.start_point[0]

@@ -287,7 +287,10 @@ async def test_kv_set_get_hit_miss_and_tenant_isolation(tools, monkeypatch):
     mock_db = MagicMock()
     mock_db.set.side_effect = _set
     mock_db.get_value.side_effect = _get_value
-    monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
+    monkeypatch.setattr(
+        "superlocalmemory.mcp.tools_optimize.CacheDB",
+        type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}),
+    )
 
     monkeypatch.setenv("SLM_AGENT_ID", "agent_a")
     set_r = await tools["slm_cache_set"](key="my_key", value="agent_a_value")
@@ -316,7 +319,10 @@ async def test_kv_set_get_hit_miss_and_tenant_isolation(tools, monkeypatch):
 async def test_cache_set_oversized_value(tools, monkeypatch):
     """Value > 1MB → ok:False, stored:False (CWE-400 guard), DB not touched."""
     mock_db = MagicMock()
-    monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
+    monkeypatch.setattr(
+        "superlocalmemory.mcp.tools_optimize.CacheDB",
+        type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}),
+    )
 
     result = await tools["slm_cache_set"](key="big", value="x" * 1_000_001)
     assert result["ok"] is False
@@ -330,7 +336,10 @@ async def test_cache_set_oversized_value(tools, monkeypatch):
 async def test_cache_set_key_too_long(tools, monkeypatch):
     """Key > 512 chars → ok:False, stored:False, DB not touched."""
     mock_db = MagicMock()
-    monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
+    monkeypatch.setattr(
+        "superlocalmemory.mcp.tools_optimize.CacheDB",
+        type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}),
+    )
 
     result = await tools["slm_cache_set"](key="k" * 513, value="value")
     assert result["ok"] is False
@@ -348,7 +357,10 @@ async def test_stats_fresh_all_int_fields_present(tools, monkeypatch):
     mock_db = MagicMock()
     mock_db.metrics_load.return_value = MetricsSnapshot()
     mock_db.kv_counters_load.return_value = {}  # M2: fall back to session counters
-    monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
+    monkeypatch.setattr(
+        "superlocalmemory.mcp.tools_optimize.CacheDB",
+        type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}),
+    )
 
     result = await tools["slm_optimize_stats"]()
 
@@ -392,7 +404,10 @@ async def test_stats_after_kv_hit_increments_counter(tools, monkeypatch):
     mock_db.metrics_load.return_value = MetricsSnapshot()
     mock_db.kv_counter_incr.side_effect = _kv_incr
     mock_db.kv_counters_load.side_effect = lambda: dict(kv_counters)
-    monkeypatch.setattr("superlocalmemory.mcp.tools_optimize.CacheDB", type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}))
+    monkeypatch.setattr(
+        "superlocalmemory.mcp.tools_optimize.CacheDB",
+        type("FakeCDB", (), {"get_default": staticmethod(lambda: mock_db)}),
+    )
 
     await tools["slm_cache_set"](key="stat_key", value="stat_val")
     await tools["slm_cache_get"](key="stat_key")
@@ -456,7 +471,7 @@ async def test_integration_filtered_server_five_tools_all_slm_branded():
     every registered tool is SLM-branded (no foreign-branded name leaks into the
     MCP surface) — fulfills AUDIT L-03.
     """
-    from superlocalmemory.mcp.tools_optimize import register_optimize_tools, _OPTIMIZE_TOOL_NAMES
+    from superlocalmemory.mcp.tools_optimize import _OPTIMIZE_TOOL_NAMES, register_optimize_tools
 
     inner = _MockServer()
 

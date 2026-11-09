@@ -23,8 +23,9 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 def _make_app():
     """Create a minimal FastAPI app with v3 routes."""
-    from superlocalmemory.server.routes.v3_api import router
     from fastapi import FastAPI
+
+    from superlocalmemory.server.routes.v3_api import router
     app = FastAPI()
     app.state.engine = MagicMock(profile_id="default")
 
@@ -81,7 +82,6 @@ class TestConsolidationTrigger:
         from fastapi.testclient import TestClient
 
         mock_cfg = _mock_slm_config()
-        mock_cfg_copy = _mock_slm_config()
 
         # Mock the consolidation engine to avoid needing full deps
         mock_engine = MagicMock()

@@ -13,13 +13,11 @@ TDD RED suite. Tests for:
 
 from __future__ import annotations
 
-
 from superlocalmemory.core.injection import (
     _PROMPT_TEMPLATE_PATTERNS,
     is_prompt_template,
 )
 from superlocalmemory.server.recall_serializer import apply_source_content_discipline
-
 
 # ---------------------------------------------------------------------------
 # F-3-A: _PROMPT_TEMPLATE_PATTERNS lives in injection.py

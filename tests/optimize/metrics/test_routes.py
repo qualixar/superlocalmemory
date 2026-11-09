@@ -10,16 +10,17 @@ from fastapi.testclient import TestClient
 def _client(tmp_path, monkeypatch):
     """Create a test client with isolated config + db."""
     from fastapi import FastAPI
-    from superlocalmemory.server.routes.optimize import router
+
     from superlocalmemory.optimize.config.store import ConfigStore
-    from superlocalmemory.optimize.storage.db import CacheDB
     from superlocalmemory.optimize.metrics.counters import MetricsCollector
+    from superlocalmemory.optimize.storage.db import CacheDB
+    from superlocalmemory.server.routes.optimize import router
 
     # Reset singleton
     MetricsCollector._instance = None
 
     store = ConfigStore(config_path=tmp_path / "optimize.json")
-    db = CacheDB(tmp_path / "llmcache.db")
+    CacheDB(tmp_path / "llmcache.db")
 
     monkeypatch.setattr(
         "superlocalmemory.server.routes.optimize.__name__", "optimize"
@@ -28,7 +29,6 @@ def _client(tmp_path, monkeypatch):
     # Patch the imports inside the route handlers
     import superlocalmemory.server.routes.optimize as mod
 
-    original_get_store = None
     try:
         monkeypatch.setattr(mod, "ConfigStore", lambda: store)
     except Exception:

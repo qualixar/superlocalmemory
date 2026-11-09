@@ -16,7 +16,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from tests.test_compliance.test_gdpr_erasure_wins import _live_index_has, _person_edits
 
 _WORDS = "Quorvantel stores the synthetic copper compass in the attic chest."
@@ -57,7 +56,6 @@ def _age(engine, fact_id: str, seconds: float) -> None:
 
 
 def _state(engine, fact_id: str) -> dict:
-    index = engine._retrieval_engine._bm25
     return {
         "fact": _n(engine, "SELECT COUNT(*) AS n FROM atomic_facts WHERE fact_id = ?", (fact_id,)),
         "bm25": _n(engine, "SELECT COUNT(*) AS n FROM bm25_tokens WHERE fact_id = ?", (fact_id,)),

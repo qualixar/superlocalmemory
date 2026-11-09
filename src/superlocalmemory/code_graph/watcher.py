@@ -133,8 +133,8 @@ class CodeGraphWatcher:
     def start(self) -> None:
         """Start watching. Non-blocking — spawns a daemon thread."""
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
         except ImportError:
             raise ImportError(
                 "watchdog not installed. Install with: pip install superlocalmemory[code-graph]"

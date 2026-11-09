@@ -29,18 +29,18 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections.abc import Sequence
 from typing import Any
 
 from superlocalmemory.learning.arm_catalog import ARM_CATALOG
-from superlocalmemory.learning.bandit_draw import draw_rng
 from superlocalmemory.learning.bandit_cache import (
     _BanditCache,
     get_shared_cache,
 )
+from superlocalmemory.learning.bandit_draw import draw_rng
 
 logger = logging.getLogger(__name__)
 

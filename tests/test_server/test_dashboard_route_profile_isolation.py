@@ -18,11 +18,11 @@ rebinds synchronously — and that ``WorkerPool`` is never touched by them.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 _CANONICAL_RUNTIMES = []
 
@@ -149,11 +149,11 @@ def test_recall_via_resident_engine_fallback_reads_current_profile(
 ) -> None:
     """Direct unit coverage of the no-adapter fallback path in chat.py."""
     from superlocalmemory.core.worker_pool import WorkerPool
-    from superlocalmemory.server.routes import chat as chat_module
     from superlocalmemory.server.profile_runtime import (
         ProfileSnapshot,
         commit_daemon_profile_switch,
     )
+    from superlocalmemory.server.routes import chat as chat_module
 
     engine = engine_with_mock_deps
     engine.profile_id = "alpha"

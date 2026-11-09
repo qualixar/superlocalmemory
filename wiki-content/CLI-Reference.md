@@ -54,6 +54,7 @@ The data folder is `~/.superlocalmemory` unless `SLM_DATA_DIR`, `SL_MEMORY_PATH`
 | `slm update FACT_ID CONTENT` | Replace the text of one memory. The corrected fact is re-indexed everywhere. A review-gated change returns a correction case id | `--json` |
 | `slm delete FACT_ID` | Delete one memory by exact id | `--yes` or `-y`, `--json` |
 | `slm outcome success, partial or failure FACT_ID...` | Tell SLM how using recalled memories went; it is the command-line twin of the `report_outcome` tool ([Active Memory](Active-Memory)) | `--query-id ID` (from `slm recall --json`), `--note TEXT`, `--agent NAME`, `--report-id KEY` (a retry with it records nothing new), `--json` |
+| `slm hide FACT_ID...` | Keep memories out of recall answers and session starts without deleting them; your decision, which no automatic rule changes | `--undo` (show them again), `--json` |
 | `slm forget QUERY` | Delete every memory whose text contains the query (case-insensitive), after a confirmation | `--dry-run` preview only (with no query it previews everything), `--yes` or `-y`, `--json` |
 | `slm observe [CONTENT]` | Offer content for automatic capture; SLM decides whether it holds a decision, bug fix or preference worth storing. Reads a pipe or an argument | none |
 

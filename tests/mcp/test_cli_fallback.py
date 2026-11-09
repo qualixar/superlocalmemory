@@ -19,7 +19,6 @@ import unittest.mock as mock
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Lazy import helper — avoids hard failure before file is created
 # ---------------------------------------------------------------------------

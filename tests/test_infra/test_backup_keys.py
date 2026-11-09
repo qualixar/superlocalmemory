@@ -4,6 +4,8 @@
 """Backup key management: one key per machine, kept in the credential store,
 shown to the user as a recovery key, never logged, never silently replaced."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import base64
@@ -12,10 +14,10 @@ import logging
 import threading
 
 import pytest
+from _backup_key_env import files_containing, key_env  # noqa: F401
 
 from superlocalmemory.infra import backup_crypto as bc
 from superlocalmemory.infra import backup_keys as bk
-from _backup_key_env import files_containing, key_env  # noqa: F401
 
 _KEY = bytes(range(32))
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+
 import pytest
 
 from superlocalmemory.cli.commands import _tags_qs
@@ -24,8 +25,9 @@ def test_no_tag_sends_nothing_and_all_is_not_sent() -> None:
 
 
 def test_the_flags_parse() -> None:
-    from superlocalmemory.cli.main import _add_tag_args
     import argparse
+
+    from superlocalmemory.cli.main import _add_tag_args
 
     parser = argparse.ArgumentParser()
     _add_tag_args(parser)
@@ -37,8 +39,9 @@ def test_the_flags_parse() -> None:
 
 
 def test_recall_and_list_parsers_carry_the_flags() -> None:
-    import superlocalmemory.cli.main as cli_main
     import inspect
+
+    import superlocalmemory.cli.main as cli_main
 
     src = inspect.getsource(cli_main)
     assert "_add_tag_args(recall_p)" in src and "_add_tag_args(list_p)" in src

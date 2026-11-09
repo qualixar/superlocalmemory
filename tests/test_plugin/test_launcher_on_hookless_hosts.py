@@ -19,7 +19,6 @@ what each test sets. Every program it may call is a stub that logs its argv.
 from __future__ import annotations
 
 import json
-
 import os
 import platform
 import subprocess

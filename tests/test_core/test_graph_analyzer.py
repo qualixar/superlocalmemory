@@ -199,7 +199,7 @@ def test_degree_centrality_computed(ga_db, mock_db):
     ga_db.commit()
 
     ga = GraphAnalyzer(mock_db)
-    result = ga.compute_and_store("default")
+    ga.compute_and_store("default")
 
     rows = ga_db.execute(
         "SELECT fact_id, degree_centrality FROM fact_importance "

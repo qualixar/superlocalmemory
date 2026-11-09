@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from superlocalmemory.media import files, media_db_path
 from superlocalmemory.media.gc import gc
-
 from tests.test_media._erase_support import add_image, make_root
 
 
@@ -16,7 +15,8 @@ def _setup(tmp_path, file_age=3600):
     stray = files.media_root(root) / "ab" / ("ab" + "0" * 62 + ".png")
     stray.parent.mkdir(parents=True, exist_ok=True)
     stray.write_bytes(b"x")
-    import os, time
+    import os
+    import time
     old = time.time() - file_age
     os.utime(stray, (old, old))
     db.add_memory("m9", media_id="c" * 32)  # media-sourced memory, no row
@@ -81,7 +81,8 @@ def test_a_real_run_keeps_the_stored_pdf_of_a_document(tmp_path):
 
 def test_operational_files_under_media_are_never_collected(tmp_path):
     """Audit round 2 (CX7): uploads.db lives in media/ and is not an original; gc must never touch it."""
-    import os, time
+    import os
+    import time
     root, db, store, *_rest, stray = _setup(tmp_path)
     base = files.media_root(root)
     kept = [base / "uploads.db", base / "uploads.db-wal", base / "uploads.db-shm",

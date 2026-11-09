@@ -17,12 +17,12 @@ from __future__ import annotations
 import pytest
 
 from superlocalmemory.retrieval.fusion import FusionResult
-from superlocalmemory.storage.models import Mode
 from superlocalmemory.retrieval.time_window import (
     has_primary_evidence,
     semantic_floor_on_channel_scale,
     windowed_candidates,
 )
+from superlocalmemory.storage.models import Mode
 from tests.test_retrieval.test_evidence_floor import _build_engine, _make_fact
 
 FLOOR = 0.60  # raw cosine, the shipped default

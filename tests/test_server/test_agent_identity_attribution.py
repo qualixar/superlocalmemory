@@ -143,7 +143,8 @@ class TestIdentityGrouping:
             "INSERT INTO ingestion_operations VALUES (?,?,?,?,?)",
             ("op0", "default", "http", "claude", "2026-08-17T10:00:00Z"),
         )
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
 
         has_meta = any(
             r[1] == "raw_metadata_json"

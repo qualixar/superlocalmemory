@@ -271,8 +271,13 @@ def test_unchanged_schema_is_not_applicable():
 
 
 def test_additive_only_diff_is_n_a_additive_with_evidence():
-    after = sig(T, IDX, ("table", "new", "CREATE TABLE new (y)"), ("index", "idx_new", "CREATE INDEX idx_new ON new(y)"),
-                ("trigger", "trg_t", TRG[2] + " "))
+    after = sig(
+        T,
+        IDX,
+        ("table", "new", "CREATE TABLE new (y)"),
+        ("index", "idx_new", "CREATE INDEX idx_new ON new(y)"),
+        ("trigger", "trg_t", TRG[2] + " "),
+    )
     r = v.snapshotless_verdict({"memory.db": sig(T, IDX, TRG)}, {"memory.db": after}, CORE, CORE)
     assert r["status"] == "n/a-additive" and r["passed"] is None and r["errors"] == []
     assert r["diff"]["memory.db"]["added"] == ["idx_new", "new"]

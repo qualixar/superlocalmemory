@@ -204,7 +204,11 @@ from superlocalmemory.storage.migrations import (
 )
 from superlocalmemory.storage.migrations import (
     M066_wrongly_archived_memories_are_restored as _M066,
+)
+from superlocalmemory.storage.migrations import (
     M067_projection_follows_every_fact_change as _M067,
+)
+from superlocalmemory.storage.migrations import (
     M068_newer_bookkeeping_shapes_are_flagged as _M068,
 )
 

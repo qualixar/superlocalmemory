@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 # Rebuild stdout and stderr the way Python does on Windows for a pipe: the

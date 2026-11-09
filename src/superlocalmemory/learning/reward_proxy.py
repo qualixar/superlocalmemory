@@ -32,15 +32,14 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
+from superlocalmemory.core.topic_signature import compute_topic_signature
+from superlocalmemory.learning.bandit import ContextualBandit
 from superlocalmemory.learning.engagement_features import (
     EngagementFeatures,
     extract_features,
 )
 from superlocalmemory.learning.reward_model import score
-from superlocalmemory.core.topic_signature import compute_topic_signature
-from superlocalmemory.learning.bandit import ContextualBandit
 
 logger = logging.getLogger(__name__)
 
@@ -482,7 +481,6 @@ def settle_stale_plays(
 
     # tool_events lives in memory.db; if missing, evidence lookups simply fail.
     memory_conn = _open(Path(tool_events_db))
-    owns_bandit = bandit is None
     if bandit is None:
         bandit = ContextualBandit(Path(db_path), profile_id=str(profile_id))
 

@@ -49,7 +49,8 @@ class EraseMixin:
         for i in range(0, len(ids), _CHUNK):
             chunk = ids[i:i + _CHUNK]
             rows = self._read().execute(
-                f"SELECT document_id FROM documents WHERE state != 'tombstoned' AND document_id IN ({_marks(len(chunk))})",
+                f"SELECT document_id FROM documents WHERE state != 'tombstoned' "
+                f"AND document_id IN ({_marks(len(chunk))})",
                 chunk).fetchall()
             live.update(r[0] for r in rows)
         return live

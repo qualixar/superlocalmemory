@@ -25,15 +25,14 @@ from __future__ import annotations
 import logging
 
 from superlocalmemory.core.ram_lock import ram_reservation  # noqa: F401
-
 from superlocalmemory.learning.dedup_hnsw import (  # noqa: F401
     HnswDeduplicator,
-    get_hnsw_degraded_count,
-    reset_hnsw_degraded_count,
     _cosine,
     _jaccard,
     _parse_embedding,
     _pick_canonical,
+    get_hnsw_degraded_count,
+    reset_hnsw_degraded_count,
 )
 from superlocalmemory.learning.reward_archive import (  # noqa: F401
     ARCHIVE_REWARD_THRESHOLD,

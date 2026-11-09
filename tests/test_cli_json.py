@@ -16,12 +16,12 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import json
-import pytest
 from unittest.mock import patch
 
-from superlocalmemory.cli.main import main
-from superlocalmemory.cli.json_output import json_print
+import pytest
 
+from superlocalmemory.cli.json_output import json_print
+from superlocalmemory.cli.main import main
 
 # -- JSON Envelope Helper Tests -------------------------------------------
 

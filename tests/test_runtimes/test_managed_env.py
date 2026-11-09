@@ -12,7 +12,10 @@ import pytest
 
 from superlocalmemory.runtimes import managed_env as me
 from superlocalmemory.runtimes.managed_env import (
-    EnvSpec, HuggingFaceSource, LocalDirSource, ManagedEnv,
+    EnvSpec,
+    HuggingFaceSource,
+    LocalDirSource,
+    ManagedEnv,
 )
 
 LOCK_TEXT = "# --index-url https://example.invalid/cpu\nfoo==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
@@ -115,7 +118,7 @@ def test_canary_exception_fails_without_raising(tmp_path, src, lock):
 
 def test_second_concurrent_install_does_nothing(tmp_path, src, lock):
     runner = Runner()
-    env = make(tmp_path, src, runner)
+    make(tmp_path, src, runner)
     other = make(tmp_path, src, Runner())
     from superlocalmemory.infra.instance_lock import InstanceLock
 

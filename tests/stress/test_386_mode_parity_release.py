@@ -41,7 +41,7 @@ def _bootstrap_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         M018_ingestion_operations,
         M032_write_coordinator_admission,
         M033_projection_transactions,  # required: _record_projection_obligations fail-closed
-        M034_obligation_integrity,      # required: obligation FK + index
+        M034_obligation_integrity,  # required: obligation FK + index
     )
 
     data_dir = tmp_path / "isolated-slm-data"

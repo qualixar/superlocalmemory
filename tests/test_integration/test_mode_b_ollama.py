@@ -481,7 +481,11 @@ class TestModeBBenchmarkMini:
 
     _QUESTIONS: list[dict[str, Any]] = [
         {"q": "What is Alice's job?", "category": "single_hop", "keywords": ["engineer", "google", "senior"]},
-        {"q": "When did Alice get promoted and where does she hike?", "category": "multi_hop", "keywords": ["march", "rainier"]},
+        {
+            "q": "When did Alice get promoted and where does she hike?",
+            "category": "multi_hop",
+            "keywords": ["march", "rainier"],
+        },
         {"q": "What is Bob's appointment in March?", "category": "temporal", "keywords": ["dentist", "march 15", "15"]},
         {"q": "What does Alice think about Python?", "category": "opinion", "keywords": ["python", "better", "java"]},
     ]

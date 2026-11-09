@@ -22,13 +22,12 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from superlocalmemory.core.store_pipeline import _init_langevin_position
 from superlocalmemory.core.maintenance import (
     _compute_equilibrium_radius,
     _seed_langevin_position,
     run_maintenance,
 )
-
+from superlocalmemory.core.store_pipeline import _init_langevin_position
 
 # ---------------------------------------------------------------------------
 # Strategy A: _init_langevin_position
@@ -153,10 +152,12 @@ class TestSeedLangevinPosition:
 class TestEnrichFactSetsLangevinPosition:
     def test_enriched_fact_has_langevin_position(self) -> None:
         """enrich_fact should set langevin_position on every new fact."""
-        from superlocalmemory.storage.models import (
-            AtomicFact, FactType, MemoryRecord,
-        )
         from superlocalmemory.core.store_pipeline import enrich_fact
+        from superlocalmemory.storage.models import (
+            AtomicFact,
+            FactType,
+            MemoryRecord,
+        )
 
         fact = AtomicFact(
             fact_id="test-f1", memory_id="m0", content="Test fact",

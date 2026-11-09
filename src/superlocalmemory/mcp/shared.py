@@ -73,7 +73,6 @@ def authorize_mcp_mutation(
 
     from superlocalmemory.core.actor_context import Transport
     from superlocalmemory.core.admission import (
-        AdmissionDenied,
         _resolve_deployment,
         admit,
         resolve_actor,

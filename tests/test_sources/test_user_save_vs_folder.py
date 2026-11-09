@@ -1,5 +1,7 @@
 """A picture the user saves is never merged into a folder-owned one."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from tests.test_sources.test_real_picture import media_rows, pics, png  # noqa: F401

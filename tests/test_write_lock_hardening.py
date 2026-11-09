@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -130,8 +129,8 @@ def test_ensure_and_delete_profile_in_db(tmp_path, monkeypatch):
     # memory_write calls str(db_path) and Path(db_path) — both work via __str__/__fspath__.
 
     from superlocalmemory.server.routes.helpers import (
-        ensure_profile_in_db,
         delete_profile_from_db,
+        ensure_profile_in_db,
     )
 
     # Insert (idempotent x2).

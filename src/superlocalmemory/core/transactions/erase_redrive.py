@@ -195,7 +195,6 @@ def _covered_fact_ids(
     Entity and profile erasures: the sealed receipt's ``fact_ids``.
     """
     from superlocalmemory.core.transactions.erasure import verify_receipt
-
     from superlocalmemory.core.transactions.tombstones import _table_exists
 
     with db.raw_connection() as conn:

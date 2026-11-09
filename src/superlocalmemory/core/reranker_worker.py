@@ -133,7 +133,10 @@ def _worker_main() -> None:
                     # compilation for the actual workload. 3 pairs compiled a
                     # different execution plan that got recompiled on 60 pairs.
                     dummy_pairs = [
-                        (f"What happened to person {i}?", f"Person {i} went to location {i} and did activity {i} last summer with friends.")
+                        (
+                            f"What happened to person {i}?",
+                            f"Person {i} went to location {i} and did activity {i} last summer with friends.",
+                        )
                         for i in range(60)
                     ]
                     try:

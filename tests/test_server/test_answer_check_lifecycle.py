@@ -23,14 +23,9 @@ from types import SimpleNamespace
 
 import pytest
 
-# Writes Laya runtime state: pin the data root to tmp_path even without the
-# root conftest (--noconftest), see tests/isolation_guard.py.
-from ..isolation_guard import explicit_slm_root  # noqa: F401
-
 from superlocalmemory.core import engine_wiring, judge_keys, judge_selection, laya_runtime
 from superlocalmemory.retrieval import judge_recipe
 from superlocalmemory.server.routes import answer_check
-
 from tests.test_server.test_answer_check_api import (  # noqa: F401 — fixtures
     FAKE_KEY,
     _FakeKeyStore,
@@ -40,6 +35,10 @@ from tests.test_server.test_answer_check_api import (  # noqa: F401 — fixtures
     call_order,
     client,
 )
+
+# Writes Laya runtime state: pin the data root to tmp_path even without the
+# root conftest (--noconftest), see tests/isolation_guard.py.
+from ..isolation_guard import explicit_slm_root  # noqa: F401
 
 #: The real functions, captured before the suite's fixture replaces them.
 REAL_DETECT = laya_runtime.detect

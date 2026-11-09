@@ -16,9 +16,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
-from .helpers import MEMORY_DIR, get_active_profile
 from superlocalmemory.storage.memory_write import memory_write
 from superlocalmemory.storage.read_connection import ReadConnectionFactory
+
+from .helpers import MEMORY_DIR, get_active_profile
 
 logger = logging.getLogger("superlocalmemory.routes.behavioral")
 router = APIRouter()

@@ -169,7 +169,6 @@ def check_interpreter(python: str, *, strict_location: bool = True) -> str:
 # (and tests that replace it) have always found it.
 from superlocalmemory.core.laya_verify import VERIFY_BUSY, verify  # noqa: E402
 
-
 # detect() — fast, offline, never raises.
 
 def _record_matches(record: dict[str, Any] | None, python: str, model_path: str) -> bool:
@@ -764,15 +763,18 @@ def adopt(python: str, hf_home: str, model_path: str = "") -> LayaRuntimeStatus:
 
 # remove() lives in core/laya_remove.py; re-exported here, where callers
 # (and tests that replace it) have always found it.
-from superlocalmemory.core.laya_remove import (  # noqa: E402
-    forget_adopted as forget_adopted,
-    remove as remove,
-)
-
 # The background jobs the dashboard starts and polls live in core/laya_jobs.py;
 # re-exported here, where callers have always found them.
 from superlocalmemory.core.laya_jobs import (  # noqa: E402
     LayaAdoptJob,
     LayaInstallJob,
+)
+from superlocalmemory.core.laya_jobs import (  # noqa: E402 - late import, order kept
     LayaTestJob as LayaTestJob,
+)
+from superlocalmemory.core.laya_remove import (  # noqa: E402
+    forget_adopted as forget_adopted,
+)
+from superlocalmemory.core.laya_remove import (  # noqa: E402 - late import, order kept
+    remove as remove,
 )

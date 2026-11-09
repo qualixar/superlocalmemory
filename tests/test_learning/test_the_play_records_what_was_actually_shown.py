@@ -57,6 +57,8 @@ def learning_db(tmp_path):
     from superlocalmemory.learning.bandit import ContextualBandit
     from superlocalmemory.storage.migrations import (
         M005_bandit_tables as _M005,
+    )
+    from superlocalmemory.storage.migrations import (
         M044_play_carries_its_own_evidence as _M044,
     )
 

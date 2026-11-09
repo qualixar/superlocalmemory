@@ -15,7 +15,6 @@ import pytest
 from superlocalmemory.cli import upgrade_cmd
 from superlocalmemory.storage import backup
 from superlocalmemory.storage import upgrade_restore as ur
-
 from tests.test_storage._upgrade_store import add_memory, current_store, fact_ids
 
 

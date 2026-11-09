@@ -77,6 +77,8 @@ def test_idempotent_and_missing_table_safe(tmp_path):
     assert M.verify(empty) is True
     M.apply(empty)  # no raise
     conn = _legacy(tmp_path / "m.db")
-    M.apply(conn); conn.commit()
-    M.apply(conn); conn.commit()  # second apply no-op
+    M.apply(conn)
+    conn.commit()
+    M.apply(conn)
+    conn.commit()  # second apply no-op
     assert M.verify(conn) is True

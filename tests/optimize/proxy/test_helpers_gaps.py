@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from superlocalmemory.optimize.proxy._helpers import (
-    _MockTransport,
     _filter_response_headers,
+    _MockTransport,
     _parse_sse_to_json,
     _safe_compress,
     _stream_and_cache_forward,
@@ -19,7 +19,6 @@ from superlocalmemory.optimize.proxy.lifecycle import (
     HookChain,
     ProxyRequest,
 )
-
 
 # ---------------------------------------------------------------------------
 # _filter_response_headers — else branch (line 121)
@@ -61,7 +60,8 @@ def _build_text_sse(text: str = "Hello world", stop_reason: str = "end_turn") ->
         'data: {"type":"content_block_stop","index":0}',
         "",
         "event: message_delta",
-        f'data: {{"type":"message_delta","delta":{{"stop_reason":"{stop_reason}","stop_sequence":null}},"usage":{{"output_tokens":5}}}}',
+        f'data: {{"type":"message_delta","delta":{{"stop_reason":"{stop_reason}","stop_sequence":null}},'
+        f'"usage":{{"output_tokens":5}}}}',
         "",
         "event: message_stop",
         'data: {"type":"message_stop"}',
@@ -168,9 +168,11 @@ def test_parse_sse_to_json_tool_use_block() -> None:
         b'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use",'
         b'"id":"toolu_01","name":"bash","input":{}}}\n\n'
         b"event: content_block_delta\n"
-        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\\"cmd\\\": "}}\n\n'
+        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"cmd\\": '
+        b'"}}\n\n'
         b"event: content_block_delta\n"
-        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\\"ls\\\"}"}}\n\n'
+        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta",'
+        b'"partial_json":"\\"ls\\"}"}}\n\n'
         b"event: message_delta\n"
         b'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},'
         b'"usage":{"output_tokens":20}}\n\n'
@@ -199,7 +201,8 @@ def test_parse_sse_to_json_tool_use_invalid_input_json() -> None:
         b'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use",'
         b'"id":"t1","name":"fn","input":{}}}\n\n'
         b"event: content_block_delta\n"
-        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{{broken"}}\n\n'
+        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta",'
+        b'"partial_json":"{{broken"}}\n\n'
         b"event: message_delta\n"
         b'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}\n\n'
         b"event: message_stop\n"

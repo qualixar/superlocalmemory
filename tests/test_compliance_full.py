@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
-import time
 from pathlib import Path
 
 import pytest
@@ -20,7 +19,6 @@ from superlocalmemory.compliance.abac import ABACEngine, AccessDenied
 from superlocalmemory.compliance.audit import AuditChain
 from superlocalmemory.compliance.retention import RetentionEngine
 from superlocalmemory.compliance.scheduler import RetentionScheduler
-
 
 # ==================================================================
 # ABAC Engine Tests

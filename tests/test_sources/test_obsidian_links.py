@@ -10,7 +10,7 @@ from superlocalmemory.sources.links import CanvasError, NameIndex, extract_links
 
 
 def kinds(found):
-    return {(l.kind, l.target, l.label) for l in found}
+    return {(link.kind, link.target, link.label) for link in found}
 
 
 def test_link_table():
@@ -33,14 +33,14 @@ def test_link_table():
 
 def test_links_in_code_are_ignored_and_count_is_bounded():
     body = "```\n[[inside fence]]\n```\n`[[inline]]` [[real]]"
-    assert {l.target for l in extract_links(body, "a.md", None)} == {"real"}
+    assert {link.target for link in extract_links(body, "a.md", None)} == {"real"}
     many = " ".join(f"[[n{i}]]" for i in range(5000))
     assert len(extract_links(many, "a.md", None)) <= 2000
 
 
 def test_hostile_targets_are_dropped():
     found = extract_links("[[../../etc/passwd]] [[/abs]] [[ok]]", "a.md", None)
-    assert {l.target for l in found} == {"ok"}
+    assert {link.target for link in found} == {"ok"}
 
 
 def test_embed_resolves_by_shortest_path_then_lexical():
@@ -50,7 +50,7 @@ def test_embed_resolves_by_shortest_path_then_lexical():
     assert names.resolve("Idea") == "Notes/Idea.md"
     assert names.resolve("missing.png") is None
     found = extract_links("![[pic.png]] ![[gone.png]]", "x.md", names)
-    assert {(l.kind, l.target) for l in found} == {("embed", "a/pic.png"), ("embed", "gone.png")}
+    assert {(link.kind, link.target) for link in found} == {("embed", "a/pic.png"), ("embed", "gone.png")}
 
 
 def test_canvas_good():

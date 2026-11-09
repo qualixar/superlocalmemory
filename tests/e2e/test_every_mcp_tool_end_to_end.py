@@ -22,13 +22,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import tempfile
-import re
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -353,7 +352,11 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
     repo, doc = str(work / "repo"), str(work / "doc.txt")
     subprocess.run(["git", "init", "-q", repo], check=False, capture_output=True)
     subprocess.run(["git", "-C", repo, "add", "."], check=False, capture_output=True)
-    subprocess.run(["git", "-C", repo, "-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-qm", "init"], check=False, capture_output=True)
+    subprocess.run(
+        ["git", "-C", repo, "-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-qm", "init"],
+        check=False,
+        capture_output=True,
+    )
 
     # ---- seed ~20 memories
     ids: list[str] = []
@@ -438,7 +441,11 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
     run_id = None
     if isinstance(lr, dict):
         run_id = lr.get("run_id") or (lr.get("data") or {}).get("run_id")
-    await go("slm_loop_show", {"run_id": run_id or "missing"}, note="id from slm_loop_run" if run_id else "NO run_id returned")
+    await go(
+        "slm_loop_show",
+        {"run_id": run_id or "missing"},
+        note="id from slm_loop_run" if run_id else "NO run_id returned",
+    )
 
     # ---- views, corrections, assertions, skills, brain
     await go("manage_view", {"action": "create", "name": "e2e-view", "query": "ferry"})
@@ -451,7 +458,11 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
     lc = await go("list_corrections")
     case = (lc or {}).get("corrections", [{}])[0] if isinstance(lc, dict) and lc.get("corrections") else {}
     if case:
-        await go("review_correction", {"case_id": case["case_id"], "action": "reject", "expected_version": case["version"]}, note="real case from update_memory")
+        await go(
+            "review_correction",
+            {"case_id": case["case_id"], "action": "reject", "expected_version": case["version"]},
+            note="real case from update_memory",
+        )
     await go("review_correction", {"case_id": "e2e-none", "action": "reject", "expected_version": 1},
              note="unknown case: error expected", expect_error=True)
     await go("get_assertions")
@@ -461,13 +472,47 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
     await go("skill_lineage")
     await go("evolve_skill", {"skill_name": "e2e-skill"}, note="feature off by default", expect_error=True)
     await go("get_brain_evidence_status")
-    await go("record_agent_experience", {"payload": {"experience_id": "e2e-exp-1", "profile_id": "default", "occurred_at": "2026-10-13T00:00:00+00:00", "task_class": "code", "project_scope": "project-digest", "route": {"harness": "claude", "provider": "anthropic", "model": "m", "effort": "high", "machine": "m"}, "verification": {"authority": "deterministic_gate", "evidence_digest": "a" * 64}, "producer_claim": "success", "terminal_status": "succeeded"}})
-    rct = await go("record_cognitive_turn", {"payload": {"receipt_id": "e2e-turn-1", "task_id": "e2e-task-1", "profile_id": "default", "project_scope": "project-digest", "query_digest": "b" * 64, "fact_decisions": {c["fid"]: "used"}, "state": "open"}})
+    await go(
+        "record_agent_experience",
+        {
+            "payload": {
+                "experience_id": "e2e-exp-1",
+                "profile_id": "default",
+                "occurred_at": "2026-10-13T00:00:00+00:00",
+                "task_class": "code",
+                "project_scope": "project-digest",
+                "route": {"harness": "claude", "provider": "anthropic", "model": "m", "effort": "high", "machine": "m"},
+                "verification": {"authority": "deterministic_gate", "evidence_digest": "a" * 64},
+                "producer_claim": "success",
+                "terminal_status": "succeeded",
+            }
+        },
+    )
+    rct = await go(
+        "record_cognitive_turn",
+        {
+            "payload": {
+                "receipt_id": "e2e-turn-1",
+                "task_id": "e2e-task-1",
+                "profile_id": "default",
+                "project_scope": "project-digest",
+                "query_digest": "b" * 64,
+                "fact_decisions": {c["fid"]: "used"},
+                "state": "open",
+            }
+        },
+    )
     rid = None
     if isinstance(rct, dict):
         rid = "e2e-turn-1" if rct.get("success") else None
-    await go("finalize_cognitive_turn", {"receipt_id": rid or "e2e-turn-1", "outcome": {"authority": "deterministic_gate", "receipt_digest": "c" * 64, "reference": "gate-1"}},
-             note="id from record_cognitive_turn" if rid else "NO receipt_id returned")
+    await go(
+        "finalize_cognitive_turn",
+        {
+            "receipt_id": rid or "e2e-turn-1",
+            "outcome": {"authority": "deterministic_gate", "receipt_digest": "c" * 64, "reference": "gate-1"},
+        },
+        note="id from record_cognitive_turn" if rid else "NO receipt_id returned",
+    )
     await go("observe_bounded_loop_evidence", {"workspace": repo})
     await go("observe_bounded_loop_execution_learning", {"workspace": repo})
     await go("consolidate_cognitive")
@@ -480,8 +525,18 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
               "audit_trail", "consistency_check", "get_learned_patterns", "backup_status", "get_attribution",
               "list_failed_operations", "list_graph_stats"):
         await go(n)
-    await go("resolve_operation", {"operation_id": "e2e-none", "action": "cancel"}, note="unknown id: error expected", expect_error=True)
-    await go("correct_pattern", {"pattern_id": "e2e-none", "correction": "x"}, note="unknown id: error expected", expect_error=True)
+    await go(
+        "resolve_operation",
+        {"operation_id": "e2e-none", "action": "cancel"},
+        note="unknown id: error expected",
+        expect_error=True,
+    )
+    await go(
+        "correct_pattern",
+        {"pattern_id": "e2e-none", "correction": "x"},
+        note="unknown id: error expected",
+        expect_error=True,
+    )
     await go("compact_memories", {"dry_run": True})
     await go("quantize", {"dry_run": True})
     await go("reap_processes", {"dry_run": True})
@@ -539,7 +594,14 @@ async def sweep(session, rec: list, listing: dict, home: Path) -> None:
 
 #: (hook name as the plugin's hooks.json runs it, stdin payload builder, text that must appear
 #: in stdout, or None when only a clean exit and parseable output are required)
-JSON_HOOKS = {"auto_recall", "user_prompt_submit", "post_tool_outcome", "post_tool_async", "user_prompt_rehash", "stop_outcome"}
+JSON_HOOKS = {
+    "auto_recall",
+    "user_prompt_submit",
+    "post_tool_outcome",
+    "post_tool_async",
+    "user_prompt_rehash",
+    "stop_outcome",
+}
 
 
 def hook_cases(repo: str) -> list[tuple[str, dict, str | None]]:

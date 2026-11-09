@@ -33,7 +33,6 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -185,10 +184,11 @@ def test_search_falls_back_to_keyword_when_recall_exceeds_budget(
     concurrent maintenance pass / busy embedder, semantic recall can run tens
     of seconds; the UI must still get results.
     """
-    from superlocalmemory.server.unified_daemon import create_app
     from superlocalmemory.core.engine_ingestion import (
-        canonical_store, local_trusted_actor_id,
+        canonical_store,
+        local_trusted_actor_id,
     )
+    from superlocalmemory.server.unified_daemon import create_app
 
     engine = engine_with_mock_deps
     _add_profile(engine, "default")
@@ -278,7 +278,6 @@ def test_concurrent_recalls_do_not_corrupt_each_others_disabled_channels(
         barrier.wait(timeout=2)  # synchronize both recalls at channel-execution
         return original_run_channels(query, profile_id, strat, **kwargs)
 
-    results: dict[str, object] = {}
     exc_holder: dict[str, Exception] = {}
 
     def _fast_recall() -> None:
@@ -337,8 +336,8 @@ def test_search_returns_new_profile_data_after_switch(
     The engine.profile_id setter + profile_id column filtering ensures
     the correct isolation once the fast=True fix is in place.
     """
-    from superlocalmemory.server.unified_daemon import create_app
     from superlocalmemory.core.engine_ingestion import canonical_store, local_trusted_actor_id
+    from superlocalmemory.server.unified_daemon import create_app
 
     engine = engine_with_mock_deps
     engine.profile_id = "alpha"
@@ -350,7 +349,7 @@ def test_search_returns_new_profile_data_after_switch(
     app.state.engine = engine
     app.state.config = engine._config
     client = TestClient(app)
-    headers = _daemon_headers(app)
+    _daemon_headers(app)
 
     # Store alpha-only content
     canonical_store(
@@ -417,8 +416,8 @@ def test_search_profile_isolation_memory_counts(
     profile's data — 0 results when the new profile is empty and the
     search token exists only in the old profile.
     """
-    from superlocalmemory.server.unified_daemon import create_app
     from superlocalmemory.core.engine_ingestion import canonical_store, local_trusted_actor_id
+    from superlocalmemory.server.unified_daemon import create_app
 
     engine = engine_with_mock_deps
     engine.profile_id = "default"

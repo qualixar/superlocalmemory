@@ -34,7 +34,6 @@ from unittest.mock import patch
 
 from superlocalmemory.mcp.tools_active import register_active_tools
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

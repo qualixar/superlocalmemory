@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from superlocalmemory.optimize.config.store import ConfigStore
 from superlocalmemory.optimize.config.schema import OptimizeConfig
+from superlocalmemory.optimize.config.store import ConfigStore
 
 
 def test_get_returns_default_when_no_file(tmp_config_store) -> None:

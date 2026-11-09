@@ -15,7 +15,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from superlocalmemory.storage.models import AtomicFact, MemoryLifecycle
 

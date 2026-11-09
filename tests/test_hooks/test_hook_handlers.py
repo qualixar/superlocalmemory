@@ -27,9 +27,8 @@ import pytest
 
 from superlocalmemory.core import context_cache as cc
 from superlocalmemory.core import security_primitives as sp
-from superlocalmemory.hooks import user_prompt_hook, post_tool_async_hook
+from superlocalmemory.hooks import post_tool_async_hook, user_prompt_hook
 from tests._urlopen_fake import setattr_urlopen
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

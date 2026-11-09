@@ -900,7 +900,7 @@ CREATE TABLE IF NOT EXISTS persona_summary (
 
 #: Imported rather than restated so the table has exactly one definition; the
 #: module that owns the queue owns its shape.
-from superlocalmemory.storage.projection_outbox import DDL as _PROJECTION_OUTBOX_DDL
+from superlocalmemory.storage.projection_outbox import DDL as _PROJECTION_OUTBOX_DDL  # noqa: E402
 
 _DDL_ORDERED: Final[tuple[str, ...]] = (
     _SQL_SCHEMA_VERSION,
@@ -1043,7 +1043,8 @@ def create_all_tables(conn: sqlite3.Connection) -> None:
     # V32 DDL: its triggers sit on association_edges and empty activation_cache.
     from superlocalmemory.storage import fact_search_changes, graph_generation
     conn.executescript(graph_generation.DDL + fact_search_changes.ddl(conn))
-    from superlocalmemory.core.overtaken_cases import ensure_table; ensure_table(conn)  # noqa: E702
+    from superlocalmemory.core.overtaken_cases import ensure_table
+    ensure_table(conn)
 
     # Additive columns on tables that predate them.
     #
@@ -1090,7 +1091,8 @@ def drop_all_tables(conn: sqlite3.Connection) -> None:
     from superlocalmemory.storage import fact_search_changes, graph_generation
     for trigger in (*graph_generation.trigger_names(), *fact_search_changes.trigger_names()):
         conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
-    for table in (graph_generation.TABLE, fact_search_changes.TABLE, "correction_cases_overtaken"): conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: E701
+    for table in (graph_generation.TABLE, fact_search_changes.TABLE, "correction_cases_overtaken"):
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     # V32 tables first (they may FK to base tables)
     from superlocalmemory.storage.schema_v32 import V32_ROLLBACK

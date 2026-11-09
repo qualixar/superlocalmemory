@@ -10,10 +10,10 @@ import time
 from dataclasses import replace
 from typing import Callable
 
+from superlocalmemory.remote_connections import peer_names, peer_sync
 from superlocalmemory.remote_connections.async_state import finish_on_cancel, mutate
 from superlocalmemory.remote_connections.companion import Companion
 from superlocalmemory.remote_connections.credentials import ConnectorCredential, CredentialVault
-from superlocalmemory.remote_connections import peer_names, peer_sync
 from superlocalmemory.remote_connections.gateway_provider import CloudGatewayProvider
 from superlocalmemory.remote_connections.grant_keys import GrantKeyStore
 from superlocalmemory.remote_connections.journal import EnrollmentJournal, JournalConflict

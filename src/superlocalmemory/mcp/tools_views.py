@@ -27,10 +27,9 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import DESTROYS, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
+from superlocalmemory.mcp.tool_hints import DESTROYS, READ_ONLY
 from superlocalmemory.views import ViewError, default_store
 
 logger = logging.getLogger("superlocalmemory.mcp.views")

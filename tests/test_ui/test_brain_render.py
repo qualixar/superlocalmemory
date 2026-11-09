@@ -14,9 +14,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
-
 _UI_JS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "js" / "brain.js"
 _OD_BRAIN_JS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "js" / "od-brain.js"
 _UI_CSS = Path(__file__).resolve().parents[2] / "src" / "superlocalmemory" / "ui" / "css" / "brain.css"

@@ -22,9 +22,9 @@ import sqlite3
 import pytest
 
 from superlocalmemory.storage.schema import (
-    SCHEMA_VERSION,
-    _TABLES,
     _FTS_TABLES,
+    _TABLES,
+    SCHEMA_VERSION,
     create_all_tables,
     drop_all_tables,
     get_fts_table_names,

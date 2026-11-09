@@ -38,9 +38,6 @@ from pathlib import Path
 from superlocalmemory.storage.database import visible_fact_clause_for_connection
 
 from .base import (
-    clean_llm_summary,
-    format_highlight,
-    SUMMARY_SYSTEM_PROMPT,
     COVERAGE_INSUFFICIENT,
     COVERAGE_NO_SESSION,
     COVERAGE_PARTIAL,
@@ -48,10 +45,13 @@ from .base import (
     GENERATED_BY_EXTRACTIVE,
     GENERATED_BY_LLM_B,
     GENERATED_BY_LLM_C,
+    SUMMARY_SYSTEM_PROMPT,
     HiddenOf,
     SummaryResult,
-    without_hidden,
+    clean_llm_summary,
+    format_highlight,
     get_mode_str,
+    without_hidden,
 )
 
 logger = logging.getLogger("superlocalmemory.summaries.session")
@@ -214,7 +214,7 @@ def _build_extractive_content(
     lines = [
         f"Session: {session_id}",
         f"Facts recorded: {fact_count}",
-        f"Coverage: partial (session facts are a subset of the full store)",
+        "Coverage: partial (session facts are a subset of the full store)",
         "",
         "Top recorded facts:",
     ]

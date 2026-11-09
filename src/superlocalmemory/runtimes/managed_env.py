@@ -33,7 +33,10 @@ from typing import Any
 from superlocalmemory.core import laya_paths, laya_process
 from superlocalmemory.infra.instance_lock import InstanceLock
 from superlocalmemory.runtimes.model_sources import (
-    HuggingFaceSource, LocalDirSource, ModelSource, classify_error,
+    HuggingFaceSource,
+    LocalDirSource,
+    ModelSource,
+    classify_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -411,7 +414,9 @@ class ManagedEnv:
         say(0.15, "Installing the packages")
         cmd = [str(self.python()), "-m", "pip", "install", "--disable-pip-version-check", "--isolated",
                "--only-binary=:all:", "--require-hashes", "--no-deps", *_lock_index_args(text), "-r", str(lock)]
-        ok, kind, detail = self._run(cmd, timeout_s=_PIP_TIMEOUT_S, env={**os.environ, "TOKENIZERS_PARALLELISM": "false"})
+        ok, kind, detail = self._run(
+            cmd, timeout_s=_PIP_TIMEOUT_S, env={**os.environ, "TOKENIZERS_PARALLELISM": "false"},
+        )
         if not ok:
             logger.warning("package install failed (%s): %s", kind, detail)
             return kind if kind in ("network", "cancelled", "disk", "stalled") else "pip"

@@ -21,12 +21,11 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Callable
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
+from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY, SETS
 from superlocalmemory.storage.database import (
     current_fact_clause_for_connection,
 )

@@ -50,8 +50,8 @@ from superlocalmemory.optimize.proxy._helpers import (
     capture_passthrough_forward,
 )
 from superlocalmemory.optimize.proxy.capture import capture_enabled
-from superlocalmemory.optimize.proxy.openai_surface import _parse_openai_sse_to_json
 from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse, ProxyRequest
+from superlocalmemory.optimize.proxy.openai_surface import _parse_openai_sse_to_json
 
 logger = logging.getLogger("slm.optimize.proxy.gemini")
 
@@ -85,7 +85,7 @@ def _parse_gemini_sse_to_json(sse_bytes: bytes) -> bytes | None:
     Completeness gate: returns None if no candidate ever emits a non-null
     finishReason — ensures incomplete streams are not cached.  This is the
     Gemini equivalent of checking 'message_stop' (Anthropic) or '[DONE]' (OpenAI).
-    """
+    """  # noqa: E501
     parts_by_idx: dict[int, list[str]] = {}
     finish_reasons: dict[int, str] = {}
     usage_metadata: dict = {}

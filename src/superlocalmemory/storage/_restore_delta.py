@@ -41,10 +41,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from superlocalmemory.storage._durable_json import (
-    read_json, read_jsonl, write_json_atomic, write_jsonl_atomic,
+    read_json,
+    read_jsonl,
+    write_json_atomic,
+    write_jsonl_atomic,
 )
 from superlocalmemory.storage._restore_intent import (
-    deleted_facts_sql, deleted_memories_sql, returning_facts_sql, returning_memories_sql,
+    deleted_facts_sql,
+    deleted_memories_sql,
+    returning_facts_sql,
+    returning_memories_sql,
 )
 
 logger = logging.getLogger(__name__)

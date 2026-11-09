@@ -18,7 +18,6 @@ import pytest
 
 from superlocalmemory.core import remote_mode as rm
 
-
 # ---------------------------------------------------------------------------
 # _host_matches — invalid CIDR ValueError path (lines 94, 100-101)
 # ---------------------------------------------------------------------------

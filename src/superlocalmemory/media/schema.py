@@ -75,7 +75,7 @@ _DDL = (
       kind TEXT NOT NULL CHECK (kind IN ('document','source_scan','media_reembed','gc','env_install')),
       state TEXT NOT NULL CHECK (state IN ('queued','running','done','failed','cancelled')),
       done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, error TEXT,
-      payload_json TEXT NOT NULL DEFAULT '{}', lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+      payload_json TEXT NOT NULL DEFAULT '{}', lease_owner TEXT, lease_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",  # noqa: E501
     "CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_at)",
     """CREATE TABLE IF NOT EXISTS sources (
       source_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,

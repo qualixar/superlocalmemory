@@ -52,8 +52,8 @@ class TestWriterStalledError:
 
     def test_writer_stalled_error_importable(self):
         from superlocalmemory.storage.write_coordinator import (
-            WriterStalledError,
             WriteCoordinatorError,
+            WriterStalledError,
         )
         assert issubclass(WriterStalledError, WriteCoordinatorError)
 

@@ -11,6 +11,8 @@ person can go back to (restore points, and the copy taken before going back to
 an older version) are never pushed out by copies of learning.db alone.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import logging

@@ -29,10 +29,10 @@ import pytest
 # Module under test — import the internals we need to exercise
 from superlocalmemory.hooks.hook_handlers import (
     _ACTIVITY_LOG,
+    _LEARN_INTERVAL,
     _MARKER,
     _OBSERVE_COOLDOWN,
     _RECALL_INTERVAL,
-    _LEARN_INTERVAL,
     _START_TIME,
     _cooldown_elapsed,
     _maybe_consolidate,
@@ -41,7 +41,6 @@ from superlocalmemory.hooks.hook_handlers import (
     _write_timestamp,
     handle_hook,
 )
-
 
 # ───────────────────────────────────────────────────────────────────
 # Fixtures

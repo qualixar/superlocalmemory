@@ -15,13 +15,11 @@ TDD RED suite. Tests for:
 
 from __future__ import annotations
 
-
 from superlocalmemory.core.config import RetrievalConfig
 from superlocalmemory.server.recall_serializer import (
-    clamp_fact_content,
     apply_recall_budget,
+    clamp_fact_content,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

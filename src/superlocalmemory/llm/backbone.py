@@ -29,8 +29,8 @@ from typing import Any
 
 import httpx
 
-from superlocalmemory.core.config import LLMConfig
 from superlocalmemory.core import outbound_http
+from superlocalmemory.core.config import LLMConfig
 from superlocalmemory.core.outbound_redaction import for_endpoint, is_local_endpoint
 
 logger = logging.getLogger(__name__)

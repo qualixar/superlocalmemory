@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import multiprocessing
 import os
 import time
-import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from fnmatch import fnmatch
 from pathlib import Path

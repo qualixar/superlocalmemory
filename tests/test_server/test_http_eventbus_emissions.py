@@ -13,12 +13,11 @@ All tests mock the EventBus so no database or daemon is required.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest.mock as mock
+from types import SimpleNamespace
 
 from superlocalmemory.infra.event_bus import VALID_EVENT_TYPES
 from superlocalmemory.server.unified_daemon import ObserveBuffer, _emit_event
-
 
 # ---------------------------------------------------------------------------
 # VALID_EVENT_TYPES coverage

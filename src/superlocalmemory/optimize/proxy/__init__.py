@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,
-    CompressHook,
     CacheHook,
+    CompressHook,
     HookChain,
     ProviderResponse,
     ProxyRequest,

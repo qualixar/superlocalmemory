@@ -24,7 +24,6 @@ from superlocalmemory.core.config import (
 from superlocalmemory.math.fisher import FisherRaoMetric
 from superlocalmemory.storage.embedding_codec import decode_float_vector
 
-
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -450,8 +449,9 @@ class TestHopfieldChannelCountAlignment:
 
     def test_engine_wiring_docstring_says_six_channels(self) -> None:
         """init_retrieval docstring must mention 'six' candidate producers."""
-        from superlocalmemory.core import engine_wiring
         import inspect
+
+        from superlocalmemory.core import engine_wiring
 
         doc = inspect.getdoc(engine_wiring.init_retrieval) or ""
         assert "six" in doc.lower(), (
@@ -461,8 +461,9 @@ class TestHopfieldChannelCountAlignment:
 
     def test_hopfield_channel_docstring_identifies_sixth_channel(self) -> None:
         """HopfieldChannel class docstring must clearly state it is the 6th of 6 channels."""
-        from superlocalmemory.retrieval.hopfield_channel import HopfieldChannel
         import inspect
+
+        from superlocalmemory.retrieval.hopfield_channel import HopfieldChannel
 
         doc = inspect.getdoc(HopfieldChannel) or ""
         assert "6th" in doc or "sixth" in doc.lower(), (

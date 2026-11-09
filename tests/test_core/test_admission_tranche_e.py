@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -79,13 +78,12 @@ class TestE1GatedToolsAfterRegistration:
     def _gate_set_after_registration(self) -> set:
         """Trigger all registrations and return current _GATED_MCP_TOOLS."""
         from superlocalmemory.core.admission import _GATED_MCP_TOOLS
-
+        from superlocalmemory.mcp.tools_active import register_active_tools
+        from superlocalmemory.mcp.tools_code_graph import register_code_graph_tools
+        from superlocalmemory.mcp.tools_learning import register_learning_tools
         from superlocalmemory.mcp.tools_loops import register_loop_tools
         from superlocalmemory.mcp.tools_v28 import register_v28_tools
         from superlocalmemory.mcp.tools_v33 import register_v33_tools
-        from superlocalmemory.mcp.tools_learning import register_learning_tools
-        from superlocalmemory.mcp.tools_active import register_active_tools
-        from superlocalmemory.mcp.tools_code_graph import register_code_graph_tools
 
         _trigger_registration(register_loop_tools)
         _trigger_registration(register_v28_tools)

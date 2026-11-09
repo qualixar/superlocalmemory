@@ -1,9 +1,11 @@
 """Stored originals belong to one profile: the same bytes saved by two profiles are two files."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
-from tests.test_media.test_ingest import env, png, root, save, store  # noqa: F401  (fixtures)
 from superlocalmemory.media import erasure, files
+from tests.test_media.test_ingest import env, png, root, save, store  # noqa: F401  (fixtures)
 
 
 def _paths(env, profile):

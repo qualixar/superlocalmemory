@@ -1,6 +1,5 @@
 """Tests for run_bounded_loop — the gate-decides-not-the-agent orchestrator."""
 
-import pytest
 
 from superlocalmemory.loops.engine import run_bounded_loop
 from superlocalmemory.loops.ledger import InMemoryLedger

@@ -6,7 +6,6 @@ from superlocalmemory.cli import setup_wizard
 from superlocalmemory.core.embedding_worker import _trusts_remote_code
 from superlocalmemory.server import write_identity
 
-
 # --- H-02: trust_remote_code allowlist -------------------------------------
 
 def test_trust_remote_code_only_for_pinned_models():

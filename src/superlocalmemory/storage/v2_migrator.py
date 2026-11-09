@@ -14,7 +14,7 @@ import logging
 import shutil
 import sqlite3
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root

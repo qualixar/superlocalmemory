@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-
-from superlocalmemory.storage.embedding_codec import encode_embedding
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from superlocalmemory.storage.embedding_codec import encode_embedding
 
 BUNDLE_FORMAT = "superlocalmemory-evidence-bundle"
 BUNDLE_SCHEMA_VERSION = 1

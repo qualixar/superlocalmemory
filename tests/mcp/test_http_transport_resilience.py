@@ -113,8 +113,8 @@ class TestStatelessDefaultContract:
         SLM serves stateless by default; SLM_MCP_STATEFUL opts into sessions,
         and those must not accumulate without bound.
         """
-        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from mcp.server.lowlevel import Server
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
         sm = StreamableHTTPSessionManager(app=Server("probe"), stateless=False)
         assert sm.session_idle_timeout is not None and sm.session_idle_timeout > 0
@@ -166,11 +166,12 @@ class TestDaemonKwargsWiring:
     def test_configure_does_not_mutate_settings_object(self, monkeypatch):
         """Helper must not write to a FastMCP-style settings.stateless_http attr."""
         monkeypatch.delenv("SLM_MCP_STATEFUL", raising=False)
+        import ast
+        import inspect
+
         from superlocalmemory.server.unified_daemon import (
             _configure_mcp_transport_settings,
         )
-        import inspect
-        import ast
         src = inspect.getsource(_configure_mcp_transport_settings)
         tree = ast.parse(src)
         # No attribute assignments of the form x.settings.stateless_http = ...

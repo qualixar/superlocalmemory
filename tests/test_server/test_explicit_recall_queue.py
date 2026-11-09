@@ -16,7 +16,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from superlocalmemory.server import profile_runtime, recall_cache, recall_core, recall_fallback
+from superlocalmemory.server import profile_runtime, recall_core, recall_fallback
 from superlocalmemory.server.recall_ingress import explicit_scope
 from superlocalmemory.storage import write_generation
 

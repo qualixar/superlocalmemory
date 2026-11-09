@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Helpers — lightweight mock objects
 # ---------------------------------------------------------------------------
@@ -297,7 +296,7 @@ class TestCacheInvalidation:
         query = _random_embedding(DIM, seed=1)
 
         # First search populates cache
-        result1 = channel.search(query, "default")
+        channel.search(query, "default")
         assert channel._cached_matrix is not None
 
         # Invalidate
@@ -306,7 +305,7 @@ class TestCacheInvalidation:
         assert channel._cached_count == 0
 
         # Second search repopulates cache
-        result2 = channel.search(query, "default")
+        channel.search(query, "default")
         assert channel._cached_matrix is not None
 
 

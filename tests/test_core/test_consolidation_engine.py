@@ -17,9 +17,8 @@ import pytest
 
 from superlocalmemory.core.config import ConsolidationConfig, SLMConfig
 from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage import schema
-
+from superlocalmemory.storage.database import DatabaseManager
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -72,7 +71,10 @@ def _seed_facts(
 ) -> list[str]:
     """Insert sample facts and return their fact_ids."""
     from superlocalmemory.storage.models import (
-        AtomicFact, FactType, MemoryRecord, SignalType,
+        AtomicFact,
+        FactType,
+        MemoryRecord,
+        SignalType,
     )
     record = MemoryRecord(
         profile_id=profile_id, content="test memory",
@@ -253,7 +255,11 @@ class TestConsolidationModeA:
     ) -> None:
         """active_decisions block queries signal_type='decision', not fact_type."""
         from superlocalmemory.storage.models import (
-            AtomicFact, FactType, MemoryRecord, SignalType, _new_id,
+            AtomicFact,
+            FactType,
+            MemoryRecord,
+            SignalType,
+            _new_id,
         )
         # Create a fact and set signal_type='decision' via SQL
         # (signal_type column is free-text; 'decision' is not in SignalType enum)
@@ -309,7 +315,7 @@ class TestConsolidationPromote:
         # Mark as expired
         tmp_db.store_temporal_validity(fid, "default", valid_until="2020-01-01T00:00:00")
 
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         # The expired fact should NOT have been promoted
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"  # Not promoted to 'warm'
@@ -328,7 +334,7 @@ class TestConsolidationPromote:
                 (_new_id(), fid, "default"),
             )
         # No temporal validity record = valid
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "warm"
         retention = tmp_db.execute(
@@ -350,7 +356,7 @@ class TestConsolidationPromote:
             "VALUES (?, ?, ?)",
             (_new_id(), fid, "default"),
         )
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"
 
@@ -373,7 +379,7 @@ class TestConsolidationPromote:
                 "VALUES (?, ?, ?)",
                 (_new_id(), fid, "default"),
             )
-        result = eng._step3_promote("default")
+        eng._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"  # confidence 0.8 < 0.99
 

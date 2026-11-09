@@ -76,7 +76,7 @@ def split_markdown(text: str, limit: int = SECTION_LIMIT) -> list[str]:
     for line in text.splitlines(keepends=True):
         if _FENCE.match(line):
             fenced = not fenced
-        if not fenced and _HEADING.match(line) and any(l.strip() for l in sections[-1]):
+        if not fenced and _HEADING.match(line) and any(ln.strip() for ln in sections[-1]):
             sections.append([])
         sections[-1].append(line)
     parts: list[str] = []
@@ -377,6 +377,7 @@ def any_archived(runtime: Any, memory_ids: list[str]) -> bool:
     return len(rows) > 0
 
 
-__all__ = ["Ingested", "KeyFacts", "SCREEN_BYTES", "SaveBudgetSpent", "any_archived", "facts_of", "ingest_image", "ingest_pdf", "ingest_text",
+__all__ = ["Ingested", "KeyFacts", "SCREEN_BYTES", "SaveBudgetSpent", "any_archived", "facts_of", "ingest_image",
+           "ingest_pdf", "ingest_text",
            "load_verified", "provenance", "resolve_keys", "save_parts", "screen", "split_markdown", "split_text",
            "unfinished_keys"]

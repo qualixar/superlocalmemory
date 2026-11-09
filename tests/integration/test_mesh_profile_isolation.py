@@ -27,7 +27,9 @@ B = "globex"
 def _build_current_mesh_db(path) -> None:
     """Current schema: born with profile_id (see schema_v343._MESH_DDL)."""
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn = sqlite3.connect(str(path))
     conn.executescript(_MESH_DDL)

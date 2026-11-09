@@ -7,15 +7,15 @@
 Routes: /api/export, /api/import
 """
 import asyncio
-import io
 import gzip
 import hashlib
+import io
 import json
 import logging
-from typing import Optional
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
 from .export_delivery import export_response
 from .export_memories import write_memories_export
@@ -146,11 +146,10 @@ async def import_memories(request: Request, file: UploadFile = File(...)):
             build_engine_ingestion_command,
         )
         from superlocalmemory.core.ingestion_command import (
+            IdempotencyConflict,
             IngestionRequest,
             IngestionState,
         )
-
-        from superlocalmemory.core.ingestion_command import IdempotencyConflict
         from superlocalmemory.core.metadata_guard import strip_reserved_metadata
         from superlocalmemory.memory_core import (
             find_redacted_duplicate,

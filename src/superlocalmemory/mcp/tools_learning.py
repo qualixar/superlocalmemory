@@ -24,18 +24,16 @@ import json
 import logging
 import os
 import sqlite3
-import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from contextlib import closing
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.request_profile import tool_profile
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, READ_ONLY, SETS
 
 logger = logging.getLogger(__name__)
 

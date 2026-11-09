@@ -111,7 +111,7 @@ def test_an_interrupted_promotion_is_left_for_repair(manager) -> None:
 
 
 def test_a_failure_never_stops_the_store_working(manager) -> None:
-    m = manager(_Manager(raise_on="prepare"))
+    manager(_Manager(raise_on="prepare"))
     result = auto.auto_promote_scale_backends(_Config())   # must not raise
 
     assert result.promoted is False

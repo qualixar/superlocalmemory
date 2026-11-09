@@ -83,7 +83,9 @@ def test_a_page_limit_below_the_page_count_is_refused_by_the_script_contract(sto
 def test_stop_mid_job_then_restart_resumes_without_duplicates(store, tmp_path):
     receipt = submit(store)
     holder = {}
-    runtime = Runtime(on_remember=lambda adm: holder["service"].request_stop() if adm.idempotency_key.endswith(":1:1") else None)
+    runtime = Runtime(
+        on_remember=lambda adm: holder["service"].request_stop() if adm.idempotency_key.endswith(":1:1") else None
+    )
     service = holder["service"] = make_service(store, runtime, FakeClient(), fake_script(tmp_path, PAGES))
     service.process_next()
     job = store.get_job(receipt.job_id)

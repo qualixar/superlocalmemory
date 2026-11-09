@@ -301,7 +301,6 @@ def test_boundary_store_load_all_skip_empty_eid(tmp_path):
     store = BoundaryStore(db=db)
 
     # Simulate a row with empty entry_id
-    monkeypatch = __import__("pytest").MonkeyPatch()
     original = store._db.get_all_boundaries
 
     def _fake_boundaries():

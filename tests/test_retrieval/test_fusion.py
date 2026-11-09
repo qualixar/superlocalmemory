@@ -19,7 +19,6 @@ import pytest
 
 from superlocalmemory.retrieval.fusion import FusionResult, weighted_rrf
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -194,7 +194,11 @@ def _extract_tool_events_from_record(record: dict) -> list[dict]:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tool_name = block.get("name", "unknown")
                         raw_input = block.get("input", {})
-                        input_str = json.dumps(raw_input, default=str)[:500] if isinstance(raw_input, dict) else str(raw_input)[:500]
+                        input_str = (
+                            json.dumps(raw_input, default=str)[:500]
+                            if isinstance(raw_input, dict)
+                            else str(raw_input)[:500]
+                        )
                         events.append({
                             "tool_name": tool_name,
                             "event_type": "complete",

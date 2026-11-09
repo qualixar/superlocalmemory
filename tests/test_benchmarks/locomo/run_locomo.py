@@ -55,8 +55,8 @@ def _seed_profile_with_conversation(
     temporary profile. Uses SLM's Python API so the runner does not
     depend on the daemon being up.
     """
-    from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
 
     cfg = SLMConfig.load()
     cfg.profile_id = profile_id  # type: ignore[attr-defined]
@@ -83,8 +83,8 @@ def _recall_fact_ids(
     profile_id: str, query: str, limit: int = 10,
 ) -> list[str]:
     """Recall top-K fact_ids for ``query`` under ``profile_id``."""
-    from superlocalmemory.core.engine import MemoryEngine
     from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
 
     cfg = SLMConfig.load()
     cfg.profile_id = profile_id  # type: ignore[attr-defined]

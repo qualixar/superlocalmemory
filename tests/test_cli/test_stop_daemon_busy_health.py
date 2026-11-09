@@ -62,7 +62,6 @@ import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.infra.daemon_identity import build_descriptor, write_descriptor
 from tests._urlopen_fake import patch_urlopen
 
@@ -125,7 +124,7 @@ class TestBusyHealthIsNotDeath:
         """Negative control: a genuinely dead process must still read False."""
         from superlocalmemory.cli import daemon
 
-        descriptor = _owned_descriptor()
+        _owned_descriptor()
         with patch.object(daemon, "_descriptor_process_is_alive", return_value=False):
             assert daemon.owned_daemon_process_alive() is False
 

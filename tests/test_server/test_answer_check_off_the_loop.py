@@ -22,7 +22,6 @@ import pytest
 
 from superlocalmemory.core import engine_wiring, judge_selection, laya_runtime
 from superlocalmemory.retrieval import jev_judge, sufficiency
-
 from tests.test_server.test_answer_check_api import (  # noqa: F401 — fixtures
     FAKE_KEY,
     _FakeKeyStore,
@@ -32,7 +31,6 @@ from tests.test_server.test_answer_check_api import (  # noqa: F401 — fixtures
     call_order,
     client,
 )
-
 
 #: /ping must answer well inside the slow call; generous for a loaded laptop.
 

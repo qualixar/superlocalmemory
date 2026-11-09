@@ -163,7 +163,7 @@ class TestEvidenceFloor:
         f1 = _make_fact("f1")
         # entity_graph uses score_candidates post-RRF; need semantic hit too so fact
         # enters the pool, then entity_graph annotates it
-        engine = _build_engine(
+        _build_engine(
             facts=[f1],
             semantic_results=[("f1", 0.0)],
             bm25_results=[("f1", 0.0)],  # get into pool via bm25 rank

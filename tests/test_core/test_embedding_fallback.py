@@ -19,14 +19,12 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
 from superlocalmemory.core.embeddings import EmbeddingService
 from superlocalmemory.core.engine_wiring import init_embedder
 from superlocalmemory.storage.models import Mode
-
 
 # ---------------------------------------------------------------------------
 # EmbeddingConfig provider field
@@ -111,7 +109,10 @@ class TestEngineEmbedderAutoDetect:
         )
         return MemoryEngine(cfg)
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: True),
+    )
     def test_auto_detects_ollama_when_llm_ollama(self, _mock, tmp_path: Path) -> None:
         """v3.4.55: When LLM=ollama and provider=ollama, use OllamaEmbedder directly.
 
@@ -127,10 +128,12 @@ class TestEngineEmbedderAutoDetect:
         # v3.4.55: provider=ollama + Ollama available → OllamaEmbedder returned directly
         assert isinstance(embedder, OllamaEmbedder)
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: False),
+    )
     def test_falls_back_to_st_when_ollama_unavailable(self, _mock, tmp_path: Path) -> None:
         """When Ollama is down → fall back to sentence-transformers."""
-        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(tmp_path=tmp_path)
         # Also mock EmbeddingService to avoid real model load
         with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
@@ -140,7 +143,10 @@ class TestEngineEmbedderAutoDetect:
             embedder = init_embedder(engine._config)
         assert embedder is mock_instance
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: False),
+    )
     def test_returns_none_when_all_fail(self, _mock, tmp_path: Path) -> None:
         """When both Ollama and sentence-transformers fail → None (BM25-only)."""
         engine = self._make_engine(tmp_path=tmp_path)
@@ -151,7 +157,10 @@ class TestEngineEmbedderAutoDetect:
             embedder = init_embedder(engine._config)
         assert embedder is None
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: True),
+    )
     def test_explicit_ollama_provider_mode_b_hybrid(self, _mock, tmp_path: Path) -> None:
         """v3.4.55: Explicit provider=ollama → OllamaEmbedder when Ollama is available.
 
@@ -168,7 +177,10 @@ class TestEngineEmbedderAutoDetect:
         # v3.4.55: explicit provider=ollama + Ollama up → OllamaEmbedder (not EmbeddingService)
         assert isinstance(embedder, OllamaEmbedder)
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: True),
+    )
     def test_explicit_ollama_provider_mode_a_prefers_ollama(self, _mock, tmp_path: Path) -> None:
         """v3.4.55: Mode A with explicit provider=ollama → OllamaEmbedder when Ollama is up.
 
@@ -210,7 +222,10 @@ class TestEngineEmbedderAutoDetect:
             embedder = init_embedder(engine._config)
         assert embedder is mock_instance
 
-    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
+    @patch(
+        "superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available",
+        new_callable=lambda: property(lambda self: False),
+    )
     def test_mode_a_no_ollama_falls_back_to_st(self, _mock, tmp_path: Path) -> None:
         """Mode A with no Ollama → falls back to sentence-transformers."""
         engine = self._make_engine(
@@ -323,6 +338,7 @@ class TestEmbeddingServiceTimeout:
     ) -> None:
         """A broken local ML stack must emit a protocol error, not exit silently."""
         import builtins
+
         from superlocalmemory.core import embedding_worker
 
         real_import = builtins.__import__

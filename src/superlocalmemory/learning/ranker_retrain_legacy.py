@@ -91,8 +91,8 @@ def _retrain_ranker_impl(
     _emit_deprecation_once()
 
     try:
-        import numpy as np
         import lightgbm as lgb  # noqa: PLC0415
+        import numpy as np
     except ImportError:
         logger.info("lightgbm or numpy missing; skipping retrain")
         return False

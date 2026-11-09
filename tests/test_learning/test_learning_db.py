@@ -4,8 +4,9 @@
 
 """Tests for Learning Database — Task 8 of V3 build."""
 
+
 import pytest
-from pathlib import Path
+
 from superlocalmemory.learning.database import LearningDatabase
 
 

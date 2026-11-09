@@ -1,5 +1,7 @@
 """A picture or page is saved with the same scope rules as typed text."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import base64

@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Schema fixture — action_outcomes shape that mirrors post-M007/M010
 # ---------------------------------------------------------------------------

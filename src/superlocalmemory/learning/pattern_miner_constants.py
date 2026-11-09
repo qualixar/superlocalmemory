@@ -8,7 +8,6 @@ main module stays under the 400-LOC cap.
 
 from __future__ import annotations
 
-
 TECH_KEYWORDS: dict[str, str] = {
     "python": "Python", "javascript": "JavaScript",
     "typescript": "TypeScript", "react": "React",
@@ -39,7 +38,7 @@ TECH_KEYWORDS: dict[str, str] = {
     "vuejs": "Vue", "vue.js": "Vue",
     "next.js": "Next.js", "nuxtjs": "Nuxt", "nuxt": "Nuxt",
     "postgres": "PostgreSQL", "k8s": "Kubernetes",
-    "typescript": "TypeScript", "ts": "TypeScript",
+    "ts": "TypeScript",
     "golang.org": "Go",
 }
 

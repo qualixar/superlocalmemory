@@ -1,7 +1,7 @@
 """Remote enrollment metadata only; fixtures never open the live memory root."""
+import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-import os
 
 import pytest
 
@@ -37,7 +37,8 @@ def test_retry_and_restart_preserve_identity(journal, tmp_path):
 
 def test_changed_intent_conflicts(journal):
     journal.begin("owner", "default", "a" * 32, intent())
-    changed = intent(); changed["permissions"]["write"] = True
+    changed = intent()
+    changed["permissions"]["write"] = True
     with pytest.raises(JournalConflict, match="intent_conflict"):
         journal.begin("owner", "default", "a" * 32, changed)
     assert len(journal.list("owner", "default")) == 1
@@ -111,14 +112,16 @@ def test_cancel_requires_current_version(journal):
     lambda x: x["permissions"].update(correction=True),
 ])
 def test_invalid_consent_never_creates_record(journal, change):
-    payload = intent(); change(payload)
+    payload = intent()
+    change(payload)
     with pytest.raises(ValueError):
         journal.begin("owner", "default", "a" * 32, payload)
     assert journal.list("owner", "default") == []
 
 
 def test_input_mutation_does_not_enlarge_persisted_consent(journal):
-    payload = intent(); original = deepcopy(payload)
+    payload = intent()
+    original = deepcopy(payload)
     row = journal.begin("owner", "default", "a" * 32, payload)
     payload["permissions"]["write"] = True
     assert journal.get("owner", "default", row.connection_id).intent == original
@@ -129,7 +132,8 @@ def test_owner_only_files_and_symlink_rejection(journal, tmp_path):
         pytest.skip("POSIX modes; Windows ACL covered separately")
     assert (journal.path.stat().st_mode & 0o777) == 0o600
     assert (journal.path.parent.stat().st_mode & 0o777) == 0o700
-    link = tmp_path / "link"; link.symlink_to(journal.path.parent, target_is_directory=True)
+    link = tmp_path / "link"
+    link.symlink_to(journal.path.parent, target_is_directory=True)
     with pytest.raises(ValueError, match="unsafe_journal_path"):
         EnrollmentJournal(link)
 
@@ -167,6 +171,7 @@ def test_cancel_before_dispatch_needs_no_remote_cleanup(journal):
     assert journal.cancel("owner", "default", row.connection_id, 1) == cancelled
 
 def test_generic_compatible_mcp_client_uses_same_explicit_consent_boundary(journal):
-    payload=intent();payload['host']='other_mcp'
+    payload = intent()
+    payload["host"] = "other_mcp"
     row=journal.begin('owner','default','a'*32,payload)
     assert row.host=='other_mcp' and row.state=='pending'

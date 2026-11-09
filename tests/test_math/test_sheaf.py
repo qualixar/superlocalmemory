@@ -24,15 +24,14 @@ import numpy as np
 import pytest
 
 from superlocalmemory.math.sheaf import (
+    TEMPORAL_TOLERANCE,
     ContradictionResult,
     SheafConsistencyChecker,
-    TEMPORAL_TOLERANCE,
     _restriction_for_edge_type,
     coboundary_norm,
     edge_residual,
 )
 from superlocalmemory.storage.models import AtomicFact, EdgeType, GraphEdge
-
 
 # ---------------------------------------------------------------------------
 # ContradictionResult
@@ -299,7 +298,7 @@ class TestCheckConsistency:
 
         checker = SheafConsistencyChecker(db)
         fact = _make_fact()
-        results = checker.check_consistency(fact, "default")
+        checker.check_consistency(fact, "default")
         # Only checked once despite two edges to f2
         assert db.get_fact.call_count == 1
 

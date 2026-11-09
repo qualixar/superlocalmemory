@@ -211,7 +211,9 @@ def snapshotless_verdict(before: dict[str, list[tuple]], after: dict[str, list[t
         errors += [f"{db}: table {n} {'removed' if n not in a else 'changed'} without a snapshot"
                    for n in diff[db]["removed"] + diff[db]["changed"] if b[n][0] == "table"]
     lost = sorted(t for t in CORE_MEMORY_TABLES if t in counts_before and counts_after.get(t) != counts_before[t])
-    errors += [f"user-data table {t}: {counts_before[t]} -> {counts_after.get(t)} rows without a snapshot" for t in lost]
+    errors += [
+        f"user-data table {t}: {counts_before[t]} -> {counts_after.get(t)} rows without a snapshot" for t in lost
+    ]
     changed = any(any(d.values()) for d in diff.values())
     if errors:
         return {"status": "fail", "passed": False, "errors": errors, "diff": diff}

@@ -10,7 +10,6 @@ from superlocalmemory.core.config import (
 )
 from superlocalmemory.server import unified_daemon
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 

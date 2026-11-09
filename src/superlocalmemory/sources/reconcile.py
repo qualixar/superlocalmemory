@@ -28,8 +28,14 @@ from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
 from superlocalmemory.sources.store import (
-    SourceStore, carried_entries, current_documents, entries_of, memory_entries, pending_documents,
-    replaced_documents, replaced_pictures,
+    SourceStore,
+    carried_entries,
+    current_documents,
+    entries_of,
+    memory_entries,
+    pending_documents,
+    replaced_documents,
+    replaced_pictures,
 )
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 
@@ -460,7 +466,8 @@ def scan_source(host: SourceHost, store: SourceStore, source: dict[str, Any], *,
         root = check_root(source["root_path"])  # the rules for a new folder hold on every scan
     except RootRefused as exc:
         return _offline(store, source, stats, exc.code)
-    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):  # the path now leads somewhere else than the folder confirmed
+    # the path now leads somewhere else than the folder confirmed
+    if os.path.normcase(str(root)) != os.path.normcase(source["root_path"]):
         return _offline(store, source, stats, "root_moved")
     rules = IgnoreRules(root, tuple(json.loads(source["include_types_json"])))
     try:

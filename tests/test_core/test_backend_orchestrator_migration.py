@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.core.backend_orchestrator import BackendOrchestrator
+from superlocalmemory.storage.database import DatabaseManager
 
 
 class _Cfg:

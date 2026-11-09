@@ -21,16 +21,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from superlocalmemory.server.unified_daemon import create_app
-from tests.helpers.env_capabilities import (
-    NO_VECTOR_SEARCH_REASON,
-    vector_search_available,
-)
 from superlocalmemory.storage.migrations import (
     M018_ingestion_operations,
     M032_write_coordinator_admission,
     M033_projection_transactions,
     M034_obligation_integrity,
     M042_correction_case_ledger,
+)
+from tests.helpers.env_capabilities import (
+    NO_VECTOR_SEARCH_REASON,
+    vector_search_available,
 )
 
 

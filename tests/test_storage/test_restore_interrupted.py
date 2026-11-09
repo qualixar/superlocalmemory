@@ -23,7 +23,12 @@ from superlocalmemory.storage import backup
 from superlocalmemory.storage import upgrade_restore as ur
 
 from ._upgrade_store import (
-    add_memory, current_store, delete_fact, fact_ids, integrity, logical_digest,
+    add_memory,
+    current_store,
+    delete_fact,
+    fact_ids,
+    integrity,
+    logical_digest,
 )
 
 _REPO = Path(__file__).resolve().parents[2]

@@ -3,6 +3,8 @@
 
 """Tests for IncrementalUpdater — hash-based change detection."""
 
+# ruff: noqa: E402 (the imports below deliberately follow the rustworkx availability guard and skip marker)
+
 from __future__ import annotations
 
 import hashlib
@@ -35,7 +37,6 @@ from superlocalmemory.code_graph.models import (
     NodeKind,
     ParseResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock parser
@@ -270,6 +271,7 @@ class TestDependentTracing:
 
         assert result.parsed == 1  # a.py
         assert result.dependents_parsed == 1  # b.py
+        assert parser.parse_count == initial_count + 2  # a.py and its dependent b.py
 
 
 # ---------------------------------------------------------------------------

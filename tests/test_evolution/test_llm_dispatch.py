@@ -25,7 +25,6 @@ from superlocalmemory.evolution.llm_dispatch import (
     _dispatch_llm,
 )
 
-
 # ---------------------------------------------------------------------------
 # Banned-model names built by concatenation to keep the source file
 # clean of literal banned substrings even when the gate scans tests.

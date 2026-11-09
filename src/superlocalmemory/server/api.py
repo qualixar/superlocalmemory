@@ -26,22 +26,22 @@ the production write boundary -- that is ``unified_daemon.py``'s
 """
 
 import logging
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
+import uvicorn
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import uvicorn
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
-from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
-from superlocalmemory.server.routes.helpers import SLM_VERSION
 from superlocalmemory.infra.data_root import DynamicStatePath
+from superlocalmemory.server.routes.helpers import SLM_VERSION
+from superlocalmemory.server.security_middleware import SecurityHeadersMiddleware
 
 logger = logging.getLogger("superlocalmemory.api_server")
 
@@ -131,11 +131,11 @@ def create_app() -> FastAPI:
 
     # Rate limiting (graceful)
     try:
-        from superlocalmemory.infra.rate_limiter import RateLimiter
         from superlocalmemory.core.remote_mode import (
-            rate_limit_config,
             is_rate_limit_exempt,
+            rate_limit_config,
         )
+        from superlocalmemory.infra.rate_limiter import RateLimiter
         # v3.6.12 (issue #40): env-tunable thresholds (defaults unchanged).
         _rl_write, _rl_read, _rl_window = rate_limit_config()
         _write_limiter = RateLimiter(max_requests=_rl_write, window_seconds=_rl_window)
@@ -188,15 +188,16 @@ def create_app() -> FastAPI:
     # ========================================================================
     # Register Route Modules
     # ========================================================================
-    from superlocalmemory.server.routes.memories import router as memories_router
-    from superlocalmemory.server.routes.stats import router as stats_router
-    from superlocalmemory.server.routes.profiles import router as profiles_router
+    from superlocalmemory.server.routes.agents import router as agents_router
     from superlocalmemory.server.routes.backup import router as backup_router
     from superlocalmemory.server.routes.data_io import router as data_io_router
     from superlocalmemory.server.routes.events import router as events_router
-    from superlocalmemory.server.routes.agents import router as agents_router
-    from superlocalmemory.server.routes.ws import router as ws_router, manager as ws_manager
+    from superlocalmemory.server.routes.memories import router as memories_router
+    from superlocalmemory.server.routes.profiles import router as profiles_router
+    from superlocalmemory.server.routes.stats import router as stats_router
     from superlocalmemory.server.routes.v3_api import router as v3_router
+    from superlocalmemory.server.routes.ws import manager as ws_manager
+    from superlocalmemory.server.routes.ws import router as ws_router
 
     application.include_router(memories_router)
     # 4.1.21: the summary routes moved out of memories.py; saved views are new.
@@ -232,8 +233,8 @@ def create_app() -> FastAPI:
             pass
 
     # Wire WebSocket manager
-    import superlocalmemory.server.routes.profiles as _profiles_mod
     import superlocalmemory.server.routes.data_io as _data_io_mod
+    import superlocalmemory.server.routes.profiles as _profiles_mod
     _profiles_mod.ws_manager = ws_manager
     _data_io_mod.ws_manager = ws_manager
 

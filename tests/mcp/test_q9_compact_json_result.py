@@ -102,6 +102,7 @@ async def test_a_tool_returning_a_plain_string_is_untouched():
     """Non-JSON unstructured content (a tool that already returns prose) must
     pass through unchanged — the wrapper only ever touches JSON blocks."""
     from mcp.client import Client
+
     from superlocalmemory.mcp.http_transport import SLMFastMCP
 
     server = SLMFastMCP("slm-q9-compact-json-str-e2e")

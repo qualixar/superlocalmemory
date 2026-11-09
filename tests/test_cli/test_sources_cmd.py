@@ -110,12 +110,25 @@ def test_list_empty(monkeypatch, capsys):
 
 
 def test_rescan_and_report(monkeypatch, capsys):
-    d = FakeDaemon({("POST", "/api/v3/sources/s1/rescan"): {"job_id": "j", "state": "queued", "done": 0, "total": 0},
-                    ("GET", "/api/v3/sources/s1/report"): {
-                        "source_id": "s1", "state": "active", "counts": {"indexed": 2},
-                        "skipped_by_rule": {"hidden": 1}, "quarantined": [{"relpath": "k.txt", "reason": "credential:aws"}],
-                        "cloud_only": ["c.md"], "errors": [], "last_scan_at": None, "paused_reason": None,
-                        "capped": False, "offline_reason": None, "watch": 0}})
+    d = FakeDaemon(
+        {
+            ("POST", "/api/v3/sources/s1/rescan"): {"job_id": "j", "state": "queued", "done": 0, "total": 0},
+            ("GET", "/api/v3/sources/s1/report"): {
+                "source_id": "s1",
+                "state": "active",
+                "counts": {"indexed": 2},
+                "skipped_by_rule": {"hidden": 1},
+                "quarantined": [{"relpath": "k.txt", "reason": "credential:aws"}],
+                "cloud_only": ["c.md"],
+                "errors": [],
+                "last_scan_at": None,
+                "paused_reason": None,
+                "capped": False,
+                "offline_reason": None,
+                "watch": 0,
+            },
+        }
+    )
     assert run(monkeypatch, d, sources_command="rescan", source_id="s1") == 0
     assert "queued" in capsys.readouterr().out.lower()
     assert run(monkeypatch, d, sources_command="report", source_id="s1") == 0
@@ -173,7 +186,9 @@ def test_parser_wires_the_command():
 
 
 def test_forget_empty_needs_a_yes_and_posts_nothing_without_one(monkeypatch, capsys):
-    d = FakeDaemon({("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}})
+    d = FakeDaemon(
+        {("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}}
+    )
     assert run(monkeypatch, d, tty=False, sources_command="forget-empty", source_id="s1") == 2
     assert d.calls == []
     assert run(monkeypatch, d, typed="n", sources_command="forget-empty", source_id="s1") == 1
@@ -184,7 +199,9 @@ def test_forget_empty_needs_a_yes_and_posts_nothing_without_one(monkeypatch, cap
 
 
 def test_forget_empty_yes_and_json(monkeypatch, capsys):
-    d = FakeDaemon({("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}})
+    d = FakeDaemon(
+        {("POST", "/api/v3/sources/s1/forget-empty"): {"source_id": "s1", "forgotten": 2, "state": "active"}}
+    )
     assert run(monkeypatch, d, tty=False, yes=True, json=True, sources_command="forget-empty", source_id="s1") == 0
     assert json.loads(capsys.readouterr().out)["data"] == {"source_id": "s1", "forgotten": 2, "state": "active"}
 
@@ -204,7 +221,12 @@ def test_list_and_report_hint_at_forget_empty(monkeypatch, capsys):
     rep = {"source_id": "src1", "state": "offline", "counts": {}, "skipped_by_rule": {}, "quarantined": [],
            "cloud_only": [], "errors": [], "last_scan_at": None, "paused_reason": None, "capped": False,
            "offline_reason": "empty_folder", "watch": 0}
-    run(monkeypatch, FakeDaemon({("GET", "/api/v3/sources/src1/report"): rep}), sources_command="report", source_id="src1")
+    run(
+        monkeypatch,
+        FakeDaemon({("GET", "/api/v3/sources/src1/report"): rep}),
+        sources_command="report",
+        source_id="src1",
+    )
     assert "slm sources forget-empty src1" in capsys.readouterr().out
 
 

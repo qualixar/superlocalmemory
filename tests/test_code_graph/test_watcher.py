@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.code_graph.watcher import (
     DEBOUNCE_SECONDS,
     IGNORED_DIRS,
@@ -21,7 +20,6 @@ from superlocalmemory.code_graph.watcher import (
     CodeGraphWatcher,
     _DebouncedHandler,
 )
-
 
 # ---------------------------------------------------------------------------
 # DebouncedHandler unit tests
@@ -183,7 +181,7 @@ class TestCodeGraphWatcher:
     def test_watchdog_import_error(self, tmp_path: Path) -> None:
         """If watchdog is not installed, start should raise ImportError."""
         service = MagicMock()
-        watcher = CodeGraphWatcher(str(tmp_path), service)
+        CodeGraphWatcher(str(tmp_path), service)
 
         with patch.dict("sys.modules", {"watchdog": None, "watchdog.observers": None, "watchdog.events": None}):
             # This may or may not raise depending on how watchdog is cached

@@ -14,7 +14,12 @@ from superlocalmemory.media.store_jobs import utc_stamp
 from superlocalmemory.sources.host import SourceHost
 from superlocalmemory.sources.ingest import facts_of, resolve_keys, unfinished_keys
 from superlocalmemory.sources.store import (
-    SourceStore, current_documents, entries_of, memory_entries, pending_documents, replaced_documents,
+    SourceStore,
+    current_documents,
+    entries_of,
+    memory_entries,
+    pending_documents,
+    replaced_documents,
     replaced_pictures,
 )
 

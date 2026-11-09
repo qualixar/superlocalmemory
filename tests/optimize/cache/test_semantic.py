@@ -13,8 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from superlocalmemory.optimize.cache.semantic import VCacheSemantic, _EMBED_DIM
-
+from superlocalmemory.optimize.cache.semantic import _EMBED_DIM, VCacheSemantic
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -224,8 +223,9 @@ def test_vcache_noop_semantic_tier_signature_compat():
 
 def test_vcache_ann_search_skips_wrong_context_fp(config_enabled, tmp_db, req_factory):
     """A-13: context-fp mismatch → HARD exclusion."""
-    from superlocalmemory.optimize.storage.db import CacheDB
     import sqlite3 as _sq
+
+    from superlocalmemory.optimize.storage.db import CacheDB
     tenant = "t1"
     text = "Tell me about Mars"
     embed = _unit_vec(text)
@@ -253,7 +253,7 @@ def test_vcache_ann_search_skips_wrong_context_fp(config_enabled, tmp_db, req_fa
     cfg = config_enabled
     # Single-turn query (no prior context) — context_fp is sentinel.
     tier = VCacheSemantic(db=tmp_db, config=cfg)
-    req = req_factory(
+    req_factory(
         [{"role": "user", "content": text}],
     )
     # Sanity: the in-memory index has one entry with empty ctx_fp.
@@ -276,8 +276,9 @@ def test_vcache_does_not_call_vec_db_when_disabled(config_disabled, tmp_db, req_
 
 def test_vcache_centroid_defense_blocks_outlier(config_enabled, tmp_db, req_factory):
     """Outlier query (very far from centroid) → return None (adversarial)."""
-    from superlocalmemory.optimize.storage.db import CacheDB
     import sqlite3 as _sq
+
+    from superlocalmemory.optimize.storage.db import CacheDB
     tenant = "t1"
     from dataclasses import replace
     cfg = replace(config_enabled, semantic_centroid_defense=True,
@@ -300,7 +301,8 @@ def test_vcache_centroid_defense_blocks_outlier(config_enabled, tmp_db, req_fact
         cur.execute("UPDATE llmcache_entries SET entry_id=? WHERE cache_key=?",
                     (surrogate, f"kc_{i}"))
         cur.execute(
-            "INSERT OR REPLACE INTO llmcache_semantic_vectors (entry_id, tenant_id, vector_blob, vector_dim, model_name) "
+            "INSERT OR REPLACE INTO llmcache_semantic_vectors (entry_id, tenant_id, vector_blob, vector_dim, "
+            "model_name) "
             "VALUES (?, ?, ?, ?, ?)",
             (surrogate, tenant, v.tobytes(), _EMBED_DIM, tier._space_id),
         )
@@ -506,8 +508,9 @@ def test_vcache_set_inner_wrong_dim(config_enabled, tmp_db):
 
 def test_extract_messages_edge_cases():
     """_extract_messages handles None, dict, empty, body.dict."""
-    from superlocalmemory.optimize.cache.semantic import _extract_messages, _extract_system
     from types import SimpleNamespace
+
+    from superlocalmemory.optimize.cache.semantic import _extract_messages, _extract_system
     # None → []
     assert _extract_messages(None) == []
     assert _extract_system(None) == ""

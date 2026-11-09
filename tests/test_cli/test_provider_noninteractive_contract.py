@@ -89,6 +89,7 @@ def test_provider_set_ollama_defaults_to_mode_b(tmp_path) -> None:
 
 def test_provider_set_rejects_an_unknown_mode(tmp_path) -> None:
     import pytest
+
     from superlocalmemory.cli.setup_wizard import configure_provider
 
     config = SLMConfig.for_mode(Mode.B, base_dir=tmp_path)

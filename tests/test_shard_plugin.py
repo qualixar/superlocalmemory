@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from tests._portable import child_env_base
-
 from tests._shard_plugin import parse_shard, shard_of
 
 REPO = Path(__file__).resolve().parents[1]

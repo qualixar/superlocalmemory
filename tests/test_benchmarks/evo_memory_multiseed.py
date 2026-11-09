@@ -41,7 +41,6 @@ from typing import Any
 
 from tests.test_benchmarks import evo_memory as em
 
-
 DEFAULT_SEEDS = 20
 DEFAULT_BASE_SEED = 12345
 

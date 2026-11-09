@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from superlocalmemory.cli.commands import (
     _installed_plugin_versions,
     _slm_version,

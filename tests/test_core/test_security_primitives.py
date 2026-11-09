@@ -22,7 +22,6 @@ import pytest
 
 from superlocalmemory.core import security_primitives as sp
 
-
 # ---------------------------------------------------------------------------
 # safe_resolve
 # ---------------------------------------------------------------------------

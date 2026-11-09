@@ -20,6 +20,8 @@ TDD approach: tests are written FIRST and verify:
 5. mode is preserved across any config PUT
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import json
@@ -31,7 +33,6 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -144,7 +145,7 @@ class TestStorageConfigPut:
 
     def test_base_dir_is_read_only(self, tmp_path, monkeypatch):
         """base_dir in PUT body must be ignored — it is read-only."""
-        client = _make_app(monkeypatch, tmp_path)
+        _make_app(monkeypatch, tmp_path)
         # Write initial config with a base_dir
         _write_config(tmp_path, {"base_dir": "/original/path"})
         client2 = _make_app(monkeypatch, tmp_path)

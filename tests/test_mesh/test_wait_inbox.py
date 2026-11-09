@@ -71,7 +71,6 @@ def test_ninth_concurrent_wait_refused(broker, monkeypatch) -> None:
     monkeypatch.setattr(broker_inbox, "WAIT_MIN_S", 0.5)
     monkeypatch.setattr(broker_inbox, "WAIT_MAX_S", 1.5)
     started = threading.Barrier(9)
-    errors: list[Exception] = []
 
     def waiter() -> None:
         started.wait()

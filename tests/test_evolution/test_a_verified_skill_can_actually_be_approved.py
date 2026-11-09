@@ -19,7 +19,6 @@ import pytest
 
 from superlocalmemory.evolution.skill_activator import (
     SkillActivator,
-    SkillActivationError,
 )
 
 
@@ -120,8 +119,8 @@ def test_only_a_verified_candidate_may_be_approved():
     instructions are gone. The status guard is what prevents that, so the set of
     approvable statuses is asserted directly.
     """
-    from superlocalmemory.server.routes.evolution import _APPROVABLE
     from superlocalmemory.evolution.types import EvolutionStatus
+    from superlocalmemory.server.routes.evolution import _APPROVABLE
 
     assert EvolutionStatus.VERIFIED_QUARANTINED.value in _APPROVABLE
     # The legacy alias for the same state, still present on older rows.

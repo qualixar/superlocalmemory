@@ -18,15 +18,12 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from superlocalmemory.learning.behavioral import BehavioralTracker
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
-from superlocalmemory.storage.models import BehavioralPattern
-from superlocalmemory.learning.behavioral import BehavioralTracker
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

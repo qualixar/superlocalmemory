@@ -123,8 +123,8 @@ def test_mcp_initialize_returns_server_info():
     """POST / with initialize returns 200 + serverInfo (stateless json_response)."""
     from starlette.testclient import TestClient
 
-    from superlocalmemory.mcp.http_transport import SLMFastMCP
     from superlocalmemory import __version__
+    from superlocalmemory.mcp.http_transport import SLMFastMCP
 
     s = SLMFastMCP("slm-test")
     mcp_app = s.streamable_http_app(**_stateless_kwargs())
@@ -193,7 +193,7 @@ def test_mcp_tools_list_returns_core_tools():
 
     assert "recall" in tool_names, f"'recall' not in tool_names: {sorted(tool_names)}"
     assert "remember" in tool_names, f"'remember' not in tool_names: {sorted(tool_names)}"
-    assert "session_init" in tool_names, f"'session_init' not in tool_names"
+    assert "session_init" in tool_names, "'session_init' not in tool_names"
 
 
 # ---------------------------------------------------------------------------
@@ -202,8 +202,9 @@ def test_mcp_tools_list_returns_core_tools():
 
 def test_mcp_tools_call_recall_does_not_deadlock(monkeypatch):
     """tools/call recall must complete without hanging (mock pool path)."""
-    from starlette.testclient import TestClient
     from unittest.mock import MagicMock
+
+    from starlette.testclient import TestClient
 
     mock_pool = MagicMock()
     mock_pool.recall.return_value = {

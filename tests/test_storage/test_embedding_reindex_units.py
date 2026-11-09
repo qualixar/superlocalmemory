@@ -10,6 +10,8 @@ erasure trigger never needs sqlite-vec, a failed job leaves the live space
 byte-for-byte, the swap moves all four parts of a space together.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import hashlib

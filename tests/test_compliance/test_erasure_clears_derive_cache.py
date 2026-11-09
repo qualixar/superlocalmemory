@@ -13,7 +13,6 @@ from superlocalmemory.compliance.gdpr import GDPRCompliance
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import MemoryRecord
-
 from tests.test_cache.conftest import make_key
 
 

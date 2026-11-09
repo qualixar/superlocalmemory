@@ -10,6 +10,8 @@ file, a picture not cleared for remote apps) is answered like an id that does no
 and nothing is written. A caller on this computer is unchanged.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import asyncio
@@ -18,8 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_mcp.test_remote_delete_hides_media import _daemon, _exists
-from tests.test_mcp.test_remote_more_reads_hide_media import (  # noqa: F401  (fixture and helpers)
-    _as, _Server, world)
+from tests.test_mcp.test_remote_more_reads_hide_media import _as, _Server, world  # noqa: F401  (fixture and helpers)
 
 HIDDEN = {"remote": ("zebra picture good", "zebra picture dirty", "zebra folder note"),
           "remote_media": ("zebra picture dirty", "zebra folder note"),

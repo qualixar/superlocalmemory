@@ -35,8 +35,7 @@ def test_the_png_is_a_valid_8x8_image(tmp_path):
 
 
 def test_embedding_service_satisfies_the_text_port():
-    from superlocalmemory.core.embeddings import EmbeddingService
-    from superlocalmemory.core.embeddings import EmbeddingConfig
+    from superlocalmemory.core.embeddings import EmbeddingConfig, EmbeddingService
 
     adapter = ports.EmbeddingServiceText(EmbeddingService(EmbeddingConfig()))
     assert isinstance(adapter, ports.TextEmbedderPort)

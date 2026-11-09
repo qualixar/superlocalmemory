@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared schema — minimal subset needed for shadow_router promotion path
 # ---------------------------------------------------------------------------
@@ -125,8 +124,8 @@ def test_shadow_router_route_query_uses_install_token(
     Closes skeptic H-02 + H-03 — an attacker who controls query_id
     cannot bias the A/B split without also reading the install_token.
     """
-    from superlocalmemory.core import shadow_router as sr_mod
     from superlocalmemory.core import security_primitives as sp
+    from superlocalmemory.core import shadow_router as sr_mod
 
     router_a = sr_mod.ShadowRouter(
         memory_db=str(memory_db),
@@ -134,6 +133,12 @@ def test_shadow_router_route_query_uses_install_token(
         profile_id="p",
     )
     arm_a = router_a.route_query("query-abc")
+    # Before the rotation the arm already follows the original install token.
+    token_a = (tmp_path / ".install_token").read_text(encoding="utf-8").strip()
+    expected_h_a = hashlib.sha256(
+        (token_a + "query-abc").encode("utf-8"),
+    ).hexdigest()[:8]
+    assert arm_a == ("candidate" if int(expected_h_a, 16) % 2 == 1 else "baseline")
 
     # Rotate install token → arm for same query_id may flip.
     new_token_file = tmp_path / ".install_token_rotated"

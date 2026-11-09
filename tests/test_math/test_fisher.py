@@ -22,12 +22,11 @@ import numpy as np
 import pytest
 
 from superlocalmemory.math.fisher import (
-    FisherRaoMetric,
     _VARIANCE_CEIL,
     _VARIANCE_FLOOR,
+    FisherRaoMetric,
     _stable_arccosh_1p_vec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -349,7 +348,7 @@ class TestRoundTrip:
         f_mean, f_var = fm.compute_params(emb)
 
         # Score before confirmation
-        s_before = fm.similarity(q_mean, q_var, f_mean, f_var)
+        fm.similarity(q_mean, q_var, f_mean, f_var)
 
         # Confirm the fact 10 times
         for _ in range(10):

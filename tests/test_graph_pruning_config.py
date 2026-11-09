@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ===========================================================================
 # (a) Config round-trip tests
 # ===========================================================================
@@ -293,7 +292,7 @@ class TestPruneGraphMaxDegree:
 
     def test_default_max_degree_preserves_100_behaviour(self, pruner_db):
         """Calling prune_graph without max_degree must behave exactly as before (default 100)."""
-        from superlocalmemory.core.graph_pruner import prune_graph, _MAX_DEGREE_PER_NODE
+        from superlocalmemory.core.graph_pruner import _MAX_DEGREE_PER_NODE, prune_graph
 
         # Confirm the default bakes in exactly 100
         assert _MAX_DEGREE_PER_NODE == 100

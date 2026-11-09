@@ -11,7 +11,9 @@ import pytest
 
 from superlocalmemory.mcp._daemon_proxy import DaemonPoolProxy
 from superlocalmemory.mcp._pool_adapter import (
-    PoolError, pool_recall, pool_store,
+    PoolError,
+    pool_recall,
+    pool_store,
 )
 
 
@@ -309,8 +311,9 @@ class _RecordingServer:
 
 
 def _switch_profile_tool(engine):
-    from superlocalmemory.mcp.tools_core import register_core_tools
     from unittest.mock import MagicMock
+
+    from superlocalmemory.mcp.tools_core import register_core_tools
 
     server = _RecordingServer()
     register_core_tools(server, MagicMock(return_value=engine))

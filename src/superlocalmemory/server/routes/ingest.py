@@ -73,7 +73,6 @@ async def ingest(req: IngestRequest, request: Request):
             IngestionRequest,
             IngestionState,
         )
-
         from superlocalmemory.server.write_identity import (
             authenticated_request_actor,
         )
@@ -92,8 +91,8 @@ async def ingest(req: IngestRequest, request: Request):
         from superlocalmemory.core.ingestion_command import IdempotencyConflict
         from superlocalmemory.core.metadata_guard import strip_reserved_metadata
         from superlocalmemory.memory_core import (
-            pii_redaction_enabled,
             find_redacted_duplicate,
+            pii_redaction_enabled,
             prepare_key,
             prepare_metadata,
             prepare_user_text,

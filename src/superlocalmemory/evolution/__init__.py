@@ -15,9 +15,9 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from superlocalmemory.evolution.types import (
     EvolutionCandidate,
     EvolutionRecord,
+    EvolutionStatus,
     EvolutionType,
     TriggerType,
-    EvolutionStatus,
 )
 
 __all__ = [

@@ -32,7 +32,7 @@ from pathlib import Path
 
 def cmd_disable(args: Namespace) -> None:
     """Write the ``.disabled`` marker and stop the daemon."""
-    from superlocalmemory.core.slm_disabled import write_marker, is_disabled
+    from superlocalmemory.core.slm_disabled import is_disabled, write_marker
 
     reason = getattr(args, "reason", "") or ""
     marker = write_marker(reason)
@@ -55,7 +55,7 @@ def cmd_disable(args: Namespace) -> None:
 def cmd_enable(args: Namespace) -> None:
     """Remove the ``.disabled`` marker. Daemon is NOT auto-started —
     print the one-liner so the user can start it when ready."""
-    from superlocalmemory.core.slm_disabled import remove_marker, marker_path
+    from superlocalmemory.core.slm_disabled import marker_path, remove_marker
 
     removed = remove_marker()
     if removed:

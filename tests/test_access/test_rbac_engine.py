@@ -11,7 +11,11 @@ import sqlite3
 import pytest
 
 from superlocalmemory.access.rbac import (
-    Permission, RbacEngine, RbacError, Role, permissions_for_role,
+    Permission,
+    RbacEngine,
+    RbacError,
+    Role,
+    permissions_for_role,
 )
 from superlocalmemory.storage.migrations import M024_rbac_users_roles as m024
 

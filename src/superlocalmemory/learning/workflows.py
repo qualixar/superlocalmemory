@@ -25,7 +25,7 @@ import sqlite3
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

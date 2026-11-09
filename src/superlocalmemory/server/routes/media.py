@@ -6,7 +6,8 @@
 
 ``POST /api/v3/media/remember`` saves an image from a file path on this machine,
 base64 data or an https download link, and ``POST /api/v3/documents`` queues a
-PDF (from a file path, base64 data or an https download link); neither is part of any remote tool list. The thumbnail, job-status and
+PDF (from a file path, base64 data or an https download link); neither is part of any remote tool list. The
+thumbnail, job-status and
 document-removal routes answer only for the profile the item belongs to.
 """
 
@@ -25,7 +26,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from superlocalmemory.core.media_fetch import too_large_for_remote
 from superlocalmemory.documents import (
-    document_index, document_lint, job_status, remove_document, retry_document, submit_document,
+    document_index,
+    document_lint,
+    job_status,
+    remove_document,
+    retry_document,
+    submit_document,
 )
 from superlocalmemory.media.gc import gc as run_gc
 from superlocalmemory.media.ingest import MediaInput, remember_media
@@ -167,7 +173,6 @@ async def collect_garbage(req: MediaGcRequest, request: Request):
     """Report (default) or remove image leftovers: rows without a memory, files without a row."""
     from superlocalmemory.access.rbac import Permission
     from superlocalmemory.server.routes.helpers import require_engine
-
     from superlocalmemory.server.write_identity import authenticated_request_actor
 
     _require_local(request)

@@ -31,7 +31,6 @@ import pytest
 from superlocalmemory.core.config import LLMConfig
 from superlocalmemory.server.routes.v3_api import _mode_c_quick_switch_refusal
 
-
 # ---------------------------------------------------------------------------
 # The Mode C quick-switch guard (PUT /api/v3/mode)
 # ---------------------------------------------------------------------------
@@ -233,5 +232,5 @@ class TestDashboardDescribesTheModeNotTheVendor:
 
         js = (Path(__file__).resolve().parents[2] / "src" / "superlocalmemory"
               / "ui" / "js" / "dashboard.js").read_text(encoding="utf-8")
-        line = next(l for l in js.splitlines() if "'dashboard-mode-desc'" in l)
+        line = next(candidate for candidate in js.splitlines() if "'dashboard-mode-desc'" in candidate)
         assert "mode_tagline" in line and "provider" not in line

@@ -12,7 +12,7 @@ import pytest
 def fake_recall():
     # ``project`` (4.1.21, #150): prestage passes the working directory's
     # project as recall's project filter; this fake answers the same either way.
-    def _fn(q, l, p, *, project=None):
+    def _fn(q, limit_arg, p, *, project=None):
         if "topics" in q:
             return [{"name": "Qualixar", "score": 0.9}]
         if "entities" in q:
@@ -99,7 +99,7 @@ def test_context_prestage_tool_mode(tmp_path, monkeypatch, fake_recall, capsys):
     from superlocalmemory.cli.context_commands import cmd_context
     monkeypatch.setattr(
         "superlocalmemory.cli.context_commands._get_recall_fn",
-        lambda: lambda q, l, p: [
+        lambda: lambda q, limit_arg, p: [
             {"id": "m1", "text": "memory content", "score": 0.9}
         ],
     )

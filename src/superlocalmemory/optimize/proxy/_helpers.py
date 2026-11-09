@@ -71,8 +71,9 @@ _MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 # Test helper: in-test httpx mock transport. NOT used in production code.
-from typing import Callable as _Callable
-import httpx as _httpx
+from typing import Callable as _Callable  # noqa: E402 - late import, order kept
+
+import httpx as _httpx  # noqa: E402 - late import, order kept
 
 
 class _MockTransport(_httpx.AsyncBaseTransport):

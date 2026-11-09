@@ -26,7 +26,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 #: The hook daemon serves a Unix socket. CPython on Windows has no AF_UNIX, so
 #: there the daemon never starts and hooks take the socket-free path, which
 #: test_without_unix_sockets_the_hook_falls_back checks on every platform.

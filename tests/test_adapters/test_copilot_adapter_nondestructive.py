@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from superlocalmemory.hooks.copilot_adapter import CopilotAdapter, TARGET_REL
+from superlocalmemory.hooks.copilot_adapter import TARGET_REL, CopilotAdapter
 from superlocalmemory.hooks.memory_protocol import SLM_MARKER_END, SLM_MARKER_START
 
 
@@ -36,7 +36,7 @@ def _adapter(tmp_path: Path, recall=None) -> CopilotAdapter:
     return CopilotAdapter(
         base_dir=tmp_path,
         sync_log_db=tmp_path / "memory.db",
-        recall_fn=recall or (lambda q, l, p: []),
+        recall_fn=recall or (lambda q, limit, p: []),
     )
 
 

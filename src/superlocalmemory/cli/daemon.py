@@ -34,6 +34,7 @@ from superlocalmemory.cli.daemon_errors import (  # noqa: F401 - re-exported
     DaemonServerError,
     server_error_from,
 )
+from superlocalmemory.cli.deployment import configured_port
 from superlocalmemory.infra.daemon_identity import (
     build_descriptor,
     descriptor_matches_health,
@@ -47,7 +48,6 @@ from superlocalmemory.infra.data_root import (
     state_path,
 )
 from superlocalmemory.infra.instance_lock import instance_lock_is_held
-from superlocalmemory.cli.deployment import configured_port
 from superlocalmemory.infra.process_identity import (
     compare_start_tokens,
     process_start_token_for,

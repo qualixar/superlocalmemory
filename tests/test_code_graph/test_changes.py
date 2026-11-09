@@ -25,7 +25,6 @@ from superlocalmemory.code_graph.models import (
     NodeKind,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -147,6 +146,7 @@ class TestRiskScoring:
         # The tested node has security keywords (+0.20) but lower test risk
         # So total difference depends on all factors
         assert untested_risk > 0  # At minimum has test gap component
+        assert untested_risk > tested_risk
 
     def test_risk_score_bounded(self, analyzer: ChangeAnalyzer) -> None:
         """Risk score is between 0 and 1."""

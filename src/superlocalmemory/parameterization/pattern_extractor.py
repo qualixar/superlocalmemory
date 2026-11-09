@@ -24,11 +24,11 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from superlocalmemory.storage.database import DatabaseManager
+    from superlocalmemory.core.config import ParameterizationConfig
     from superlocalmemory.learning.behavioral import BehavioralPatternStore
     from superlocalmemory.learning.cross_project import CrossProjectAggregator
     from superlocalmemory.learning.workflows import WorkflowMiner
-    from superlocalmemory.core.config import ParameterizationConfig
+    from superlocalmemory.storage.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 

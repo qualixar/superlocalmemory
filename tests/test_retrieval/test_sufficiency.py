@@ -374,6 +374,7 @@ class TestOneLayaPerDataFolder:
                         reason="the lock holder uses fcntl; Laya runs only on Apple silicon")
     def test_a_judge_does_not_load_while_another_process_runs_laya(self, worker) -> None:
         import subprocess as sp
+
         from superlocalmemory.infra.data_root import state_path
 
         path = state_path(".laya-judge.lock")

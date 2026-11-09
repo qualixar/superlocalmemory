@@ -46,12 +46,9 @@ system knows and not what it returns.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from superlocalmemory.learning import outcome_queue
-
 from tests.conftest import force_sync_enrichment
 
 

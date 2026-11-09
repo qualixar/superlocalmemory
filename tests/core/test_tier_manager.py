@@ -6,21 +6,22 @@
 
 from __future__ import annotations
 
-import pytest
 import sqlite3
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from superlocalmemory.core.tier_manager import (
+    ARCHIVE_AFTER_DAYS,
+    COLD_AFTER_DAYS,
+    WARM_AFTER_DAYS,
     evaluate_tiers,
+    get_tier_stats,
+    pin_fact,
     promote_on_access,
     promote_on_access_batch,
-    pin_fact,
-    unpin_fact,
-    get_tier_stats,
     record_access_batch,
-    WARM_AFTER_DAYS,
-    COLD_AFTER_DAYS,
-    ARCHIVE_AFTER_DAYS,
+    unpin_fact,
 )
 
 

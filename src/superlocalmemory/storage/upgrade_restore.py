@@ -33,11 +33,21 @@ from pathlib import Path
 from superlocalmemory.storage import _snapshot_manifest as sm
 from superlocalmemory.storage._durable_json import read_json, write_json_atomic
 from superlocalmemory.storage._restore_delta import (
-    export_delta, export_empty_delta, open_compare,
+    export_delta,
+    export_empty_delta,
+    open_compare,
 )
 from superlocalmemory.storage._restore_types import (
-    DELTA_DIR, INTENT_NAME, SNAPSHOTS_DIR, DowngradeReport, ReimportReport,
-    RestoreIntent, RestoreOutcome, RestorePoint, RestorePreview, RestoreRefusedError,
+    DELTA_DIR,
+    INTENT_NAME,
+    SNAPSHOTS_DIR,
+    DowngradeReport,
+    ReimportReport,
+    RestoreIntent,
+    RestoreOutcome,
+    RestorePoint,
+    RestorePreview,
+    RestoreRefusedError,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +84,8 @@ def _stamp_time(point_id: str) -> str:
 def _point_from(root: Path, point_id: str, memory: Path, learning: Path | None,
                 manifest: dict | None) -> RestorePoint:
     from superlocalmemory.storage._restore_preview import (
-        copy_schema_version, not_restorable_reason,
+        copy_schema_version,
+        not_restorable_reason,
     )
 
     files = (manifest or {}).get("files") or []
@@ -277,14 +288,19 @@ def cancel_restore(data_root: Path) -> bool:
     return True
 
 
+from superlocalmemory.storage._downgrade import (  # noqa: E402
+    cancel_downgrade,
+    downgrade_hold_active,
+    downgrade_status,
+    prepare_downgrade,
+)
 from superlocalmemory.storage._restore_boot import (  # noqa: E402
-    perform_pending_restore, settle_projections_after_restore,
+    perform_pending_restore,
+    settle_projections_after_restore,
 )
 from superlocalmemory.storage._restore_reimport import (  # noqa: E402
-    reimport_delta, run_pending_reimport,
-)
-from superlocalmemory.storage._downgrade import (  # noqa: E402
-    cancel_downgrade, downgrade_hold_active, downgrade_status, prepare_downgrade,
+    reimport_delta,
+    run_pending_reimport,
 )
 from superlocalmemory.storage.upgrade_repair import run_store_repair_once  # noqa: E402
 

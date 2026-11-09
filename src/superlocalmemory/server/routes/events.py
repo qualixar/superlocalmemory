@@ -8,11 +8,11 @@ Routes: /events/stream (SSE), /api/events, /api/events/stats
 Uses V3 infra.event_bus.EventBus.
 """
 import json
-import threading
-import queue as _queue
 import logging
-from typing import Optional, Set
+import queue as _queue
+import threading
 from datetime import datetime, timezone
+from typing import Optional, Set
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse

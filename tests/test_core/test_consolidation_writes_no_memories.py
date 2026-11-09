@@ -39,7 +39,6 @@ from superlocalmemory.core.fact_consolidator import (
     consolidate_facts,
 )
 
-
 # ---------------------------------------------------------------------------
 # A store with one entity and enough warm facts to form a cluster.
 # ---------------------------------------------------------------------------
@@ -56,7 +55,8 @@ def _seed(db_path: Path, *, n_facts: int = 4) -> list[str]:
     from superlocalmemory.storage import schema as real_schema
     from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage.schema_v343 import (
-        apply_v343_schema, apply_v346_schema,
+        apply_v343_schema,
+        apply_v346_schema,
     )
     from superlocalmemory.storage.schema_v347 import apply_v347_schema
     from superlocalmemory.storage.schema_v3410 import apply_v3410_schema

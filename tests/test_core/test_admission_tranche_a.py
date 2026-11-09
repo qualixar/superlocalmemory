@@ -17,13 +17,10 @@ Covers:
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
-from typing import FrozenSet
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -161,6 +158,7 @@ class TestDestructiveMcpGated:
     def _trigger_core_tools_registration():
         """Call register_core_tools with a passthrough mock server."""
         from unittest.mock import MagicMock
+
         from superlocalmemory.mcp.tools_core import register_core_tools
 
         mock_server = MagicMock()
@@ -179,6 +177,7 @@ class TestDestructiveMcpGated:
         prove THIS tool carries the decorator at all.
         """
         from unittest.mock import MagicMock
+
         from superlocalmemory.mcp.tools_core import register_core_tools
 
         registered: dict = {}
@@ -409,14 +408,15 @@ class TestNonVacuousCoverageCheck:
         """Policy with empty allowed_transports triggers a warning in personal mode."""
         import logging
 
+        from superlocalmemory.core.actor_context import ActorRole
         from superlocalmemory.core.admission import coverage_self_check
         from superlocalmemory.core.config import DEPLOYMENT_PERSONAL
         from superlocalmemory.core.operation_policy import OperationPolicy
         from superlocalmemory.core.operation_policy_registry import (
-            OperationPolicyRegistry, _DEFAULT_REGISTRY,
+            _DEFAULT_REGISTRY,
+            OperationPolicyRegistry,
         )
         from superlocalmemory.core.operation_request import OperationKind
-        from superlocalmemory.core.actor_context import ActorRole
 
         # Override REMEMBER in the default registry to have empty transports.
         base_policies = dict(_DEFAULT_REGISTRY._policies)
@@ -441,14 +441,15 @@ class TestNonVacuousCoverageCheck:
         Use _DEFAULT_REGISTRY as the base so all kinds are covered; then
         inject a bad policy for REMEMBER via a custom dict that overrides only that.
         """
+        from superlocalmemory.core.actor_context import ActorRole
         from superlocalmemory.core.admission import coverage_self_check
         from superlocalmemory.core.config import DEPLOYMENT_ENTERPRISE
         from superlocalmemory.core.operation_policy import OperationPolicy
         from superlocalmemory.core.operation_policy_registry import (
-            OperationPolicyRegistry, _DEFAULT_REGISTRY,
+            _DEFAULT_REGISTRY,
+            OperationPolicyRegistry,
         )
         from superlocalmemory.core.operation_request import OperationKind
-        from superlocalmemory.core.actor_context import ActorRole
 
         # Build a registry with all default policies except REMEMBER has empty transports.
         base_policies = dict(_DEFAULT_REGISTRY._policies)
@@ -468,7 +469,6 @@ class TestNonVacuousCoverageCheck:
 
         from superlocalmemory.core.admission import _GATED_MCP_TOOLS, coverage_self_check
         from superlocalmemory.core.config import DEPLOYMENT_PERSONAL
-        from superlocalmemory.core.operation_policy_registry import _DEFAULT_REGISTRY
 
         # Temporarily patch _REQUIRED_MCP_GATES to include a fake ungated tool
         with patch(
@@ -527,8 +527,9 @@ class TestAdmitHttpMutation:
     def test_enterprise_anonymous_delete_denied(self, tmp_path, monkeypatch):
         """Enterprise mode, no principal → _admit_http_mutation raises 403."""
         from fastapi import HTTPException
-        from superlocalmemory.server.routes.memories import _admit_http_mutation
+
         from superlocalmemory.core.actor_context import ActorRole
+        from superlocalmemory.server.routes.memories import _admit_http_mutation
 
         req = self._make_request(is_enterprise=True)
         with patch("superlocalmemory.server.rbac_enforce.resolve_principal",
@@ -543,8 +544,9 @@ class TestAdmitHttpMutation:
     def test_enterprise_anonymous_patch_denied(self, tmp_path, monkeypatch):
         """Enterprise mode, no principal → _admit_http_mutation raises 403 for patch."""
         from fastapi import HTTPException
-        from superlocalmemory.server.routes.memories import _admit_http_mutation
+
         from superlocalmemory.core.actor_context import ActorRole
+        from superlocalmemory.server.routes.memories import _admit_http_mutation
 
         req = self._make_request(is_enterprise=True)
         with patch("superlocalmemory.server.rbac_enforce.resolve_principal",

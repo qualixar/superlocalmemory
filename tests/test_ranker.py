@@ -1,5 +1,5 @@
 """Tests for Adaptive Ranker — Task 10 of V3 build."""
-from superlocalmemory.learning.ranker import AdaptiveRanker, PHASE_2_THRESHOLD, PHASE_3_THRESHOLD
+from superlocalmemory.learning.ranker import PHASE_2_THRESHOLD, PHASE_3_THRESHOLD, AdaptiveRanker
 
 
 def _mock_results():
@@ -72,4 +72,4 @@ def test_train_needs_enough_data():
     # Not enough data
     small_data = [{"features": {}, "label": 1.0}] * 10
     result = ranker.train(small_data)
-    assert result == False
+    assert not result

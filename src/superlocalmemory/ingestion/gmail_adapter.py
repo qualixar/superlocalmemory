@@ -21,8 +21,8 @@ import json
 import logging
 from pathlib import Path
 
-from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.ingestion.base_adapter import AdapterConfig, BaseAdapter, IngestItem
 
 logger = logging.getLogger("superlocalmemory.ingestion.gmail")
 
@@ -199,6 +199,7 @@ class GmailAdapter(BaseAdapter):
         """Poll via IMAP. Requires email + password credentials."""
         try:
             import imaplib
+
             from superlocalmemory.ingestion.credentials import load_credential
 
             host = load_credential("gmail", "imap_host") or "imap.gmail.com"

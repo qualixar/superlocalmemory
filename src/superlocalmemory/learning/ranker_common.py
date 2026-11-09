@@ -100,6 +100,7 @@ def _build_training_matrix(rows: list[dict], feature_names):
     when no groups are discoverable (empty input).
     """
     import numpy as np
+
     from superlocalmemory.learning.labeler import label_for_row
 
     grouped: dict[str, list[dict]] = {}
@@ -140,8 +141,8 @@ def _shadow_test_improved(prior_row, booster_new, rows, feature_names) -> bool:
     we promote.
     """
     try:
-        import numpy as np
         import lightgbm as lgb
+        import numpy as np
     except ImportError:  # pragma: no cover
         return True
 
@@ -165,14 +166,14 @@ def _shadow_test_improved(prior_row, booster_new, rows, feature_names) -> bool:
         gains_map = [0, 1, 3, 7, 15]
         dcg = 0.0
         for i, idx in enumerate(order[:k]):
-            l = int(labels[idx])
-            if 0 <= l < len(gains_map):
-                dcg += gains_map[l] / np.log2(i + 2)
+            grade = int(labels[idx])
+            if 0 <= grade < len(gains_map):
+                dcg += gains_map[grade] / np.log2(i + 2)
         ideal = sorted(labels.tolist(), reverse=True)[:k]
         idcg = sum(
-            (gains_map[int(l)] if 0 <= int(l) < len(gains_map) else 0)
+            (gains_map[int(grade)] if 0 <= int(grade) < len(gains_map) else 0)
             / np.log2(i + 2)
-            for i, l in enumerate(ideal)
+            for i, grade in enumerate(ideal)
         )
         return dcg / idcg if idcg > 0 else 0.0
 

@@ -51,8 +51,8 @@ def test_backward_compat_tools():
     """tools.py re-exports from sub-modules correctly."""
     from superlocalmemory.mcp.tools import (
         register_core_tools,
-        register_v28_tools,
         register_v3_tools,
+        register_v28_tools,
     )
     assert callable(register_core_tools)
     assert callable(register_v28_tools)

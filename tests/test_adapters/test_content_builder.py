@@ -66,7 +66,7 @@ def test_payload_deterministic(fake_recall):
 def test_scope_validation():
     with pytest.raises(ValueError):
         build_payload("default", "bogus", Path("/tmp"),
-                      recall_fn=lambda q, l, p: [])
+                      recall_fn=lambda q, limit_arg, p: [])
 
 
 def test_recall_exception_returns_empty_sections():
@@ -81,7 +81,7 @@ def test_recall_exception_returns_empty_sections():
 
 def test_format_helpers_handle_empty(fake_recall):
     empty = build_payload("default", "project", Path("/tmp"),
-                          recall_fn=lambda q, l, p: [])
+                          recall_fn=lambda q, limit_arg, p: [])
     assert "none yet" in format_topics(empty)
     assert "none yet" in format_entities(empty)
     assert "none yet" in format_decisions(empty)

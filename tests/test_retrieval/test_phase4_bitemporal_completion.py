@@ -258,7 +258,8 @@ class TestGetInvalidatedFactIdsWithAsOf:
             "as_of == exact stored supersession must be inclusive (fact demoted)."
         )
         # ±1s around the real (microsecond-bearing) supersession instant
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
         base = _dt.fromisoformat(stored_ts)
         before = normalize_as_of((base - _td(seconds=1)).isoformat())
         after = normalize_as_of((base + _td(seconds=1)).isoformat())
@@ -501,8 +502,9 @@ class TestRecallTraceHttpWithAsOf:
 
     async def test_invalid_as_of_returns_400(self):
         """POST /recall/trace with invalid as_of → JSONResponse(400)."""
-        from superlocalmemory.server.routes.v3_api import recall_trace
         from starlette.responses import JSONResponse
+
+        from superlocalmemory.server.routes.v3_api import recall_trace
         request = self._make_request({"query": "hello", "as_of": "not-a-date"})
         response = await recall_trace(request)
         assert isinstance(response, JSONResponse)
@@ -512,8 +514,9 @@ class TestRecallTraceHttpWithAsOf:
 
     async def test_no_as_of_proceeds_normally(self):
         """POST /recall/trace without as_of continues to engine (no 400)."""
-        from superlocalmemory.server.routes.v3_api import recall_trace
         from starlette.responses import JSONResponse
+
+        from superlocalmemory.server.routes.v3_api import recall_trace
         request = self._make_request({"query": "hello"})
         # get_engine_lazy is imported locally inside the route function from
         # .helpers; patch it there.  A None engine → 503 (not 400), confirming
@@ -530,8 +533,9 @@ class TestRecallTraceHttpWithAsOf:
             assert response.get("error") != "invalid_as_of"
 
     async def test_invalid_strict_json_types_return_400(self):
-        from superlocalmemory.server.routes.v3_api import recall_trace
         from starlette.responses import JSONResponse
+
+        from superlocalmemory.server.routes.v3_api import recall_trace
         request = self._make_request({"query": "hello", "known_as_of": 42})
         response = await recall_trace(request)
         assert isinstance(response, JSONResponse)
@@ -539,8 +543,9 @@ class TestRecallTraceHttpWithAsOf:
         assert json.loads(response.body)["error"] == "invalid_known_as_of"
 
     async def test_include_unknown_requires_json_boolean(self):
-        from superlocalmemory.server.routes.v3_api import recall_trace
         from starlette.responses import JSONResponse
+
+        from superlocalmemory.server.routes.v3_api import recall_trace
         request = self._make_request({"query": "hello", "include_unknown": "false"})
         response = await recall_trace(request)
         assert isinstance(response, JSONResponse)

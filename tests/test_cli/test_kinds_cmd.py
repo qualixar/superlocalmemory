@@ -18,7 +18,7 @@ import pytest
 from superlocalmemory.cli import kinds_cmd
 from superlocalmemory.cli.daemon import DaemonConflict, DaemonNotFound
 from superlocalmemory.core.memory_kind_config import memory_kind_config_from
-from tests.test_server.test_memory_kinds_routes import _Judge, _client, _fact
+from tests.test_server.test_memory_kinds_routes import _client, _fact, _Judge
 
 
 def _bind(monkeypatch, tc) -> None:

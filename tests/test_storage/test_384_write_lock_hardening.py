@@ -31,12 +31,10 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
-from superlocalmemory.storage.memory_write import _busy_timeout_ms, memory_write, memory_read
+from superlocalmemory.storage.memory_write import _busy_timeout_ms, memory_read, memory_write
 from superlocalmemory.storage.write_lock import get_write_lock
-
 
 # ─────────────────────────── helpers ────────────────────────────────────────
 
@@ -140,7 +138,7 @@ class TestNoLongWriteLockHoldAcrossSlowOp:
                 " pagerank_score REAL, computed_at TEXT)"
             )
 
-        lock = get_write_lock(db_path)
+        get_write_lock(db_path)
         memory_write_called: list[bool] = []
 
         from superlocalmemory.storage import memory_write as mw_mod
@@ -255,6 +253,7 @@ class TestM028RepairUsesWriteLock:
         2. Confirming repair completes without error (functional).
         """
         import inspect
+
         from superlocalmemory.storage.migrations.M028_fact_entity_associations import (
             apply,
             repair_fact_entity_associations,
@@ -316,9 +315,8 @@ class TestStep12UsesWriteLock:
         fake_db = FakeDB()
         fake_db.db_path = _db_path_ref
 
-        from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-
         import superlocalmemory.storage.memory_write as mw_mod
+        from superlocalmemory.core.consolidation_engine import ConsolidationEngine
         with patch.object(mw_mod, "memory_read", spy_mr):
             eng = object.__new__(ConsolidationEngine)
             eng._db = fake_db

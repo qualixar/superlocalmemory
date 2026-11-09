@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from superlocalmemory.core.config import EvolutionConfig
 from superlocalmemory.evolution.model_selection import (
+    ALT_OLLAMA,
     CHEAPEST_CLAUDE,
     CHEAPEST_OLLAMA,
-    ALT_OLLAMA,
     QUALITY_CLAUDE,
     resolve_evolution_models,
 )
@@ -142,7 +142,7 @@ def test_evolver_defaults_to_cheapest(
 def test_evolver_honours_configured_mutation_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from superlocalmemory.core.config import SLMConfig, EvolutionConfig
+    from superlocalmemory.core.config import EvolutionConfig, SLMConfig
     from superlocalmemory.evolution import skill_evolver as se
 
     config = SLMConfig.default()

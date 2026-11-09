@@ -28,7 +28,6 @@ from pathlib import Path
 
 from superlocalmemory.core import credential_shapes
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -301,7 +300,8 @@ def detect_secrets(text: str) -> list[SecretHit]:
     """The credential shapes found in ``text``, in order, without overlaps.
 
     Detection only. It uses the named key shapes (the ones ``redact_secrets`` replaces,
-    plus the vendor token shapes of ``credential_shapes``) and never an entropy test, so a sha256 hex string or any other long
+    plus the vendor token shapes of ``credential_shapes``) and never an entropy test, so a sha256 hex string or
+    any other long
     random-looking word is not a hit.
     """
     if not isinstance(text, str) or not text:

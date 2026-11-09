@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 if sys.platform == "win32":  # pragma: no cover
     pytest.skip("SEC-M6 targets POSIX only", allow_module_level=True)
 

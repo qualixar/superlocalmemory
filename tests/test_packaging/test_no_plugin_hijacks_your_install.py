@@ -202,7 +202,7 @@ class TestLaunchersPreferWhatIsAlreadyInstalled:
             capture_output=True, text=True, env=env, timeout=120,
         )
 
-    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[l[0] for l in LAUNCHERS])
+    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[launcher[0] for launcher in LAUNCHERS])
     def test_an_installed_slm_is_used(self, name, rel, tmp_path) -> None:
         """Installed first, plugin second — nothing was ever forked."""
         path_dir = tmp_path / "bin"
@@ -215,7 +215,7 @@ class TestLaunchersPreferWhatIsAlreadyInstalled:
             f"stdout={result.stdout!r}\nstderr={result.stderr[:300]!r}"
         )
 
-    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[l[0] for l in LAUNCHERS])
+    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[launcher[0] for launcher in LAUNCHERS])
     def test_a_leftover_venv_loses_to_an_installed_slm(
         self, name, rel, tmp_path,
     ) -> None:
@@ -242,7 +242,7 @@ class TestLaunchersPreferWhatIsAlreadyInstalled:
         )
         assert "4.0.8" in result.stderr, f"{name}: the stale version was not named"
 
-    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[l[0] for l in LAUNCHERS])
+    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[launcher[0] for launcher in LAUNCHERS])
     def test_a_venv_is_used_when_nothing_is_installed(
         self, name, rel, tmp_path,
     ) -> None:
@@ -263,7 +263,7 @@ class TestLaunchersPreferWhatIsAlreadyInstalled:
             f"stdout={result.stdout!r}\nstderr={result.stderr[:300]!r}"
         )
 
-    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[l[0] for l in LAUNCHERS])
+    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[launcher[0] for launcher in LAUNCHERS])
     def test_it_says_something_useful_when_nothing_is_installed(
         self, name, rel, tmp_path,
     ) -> None:
@@ -285,7 +285,7 @@ class TestLaunchersPreferWhatIsAlreadyInstalled:
             f"stderr={result.stderr[:300]!r}"
         )
 
-    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[l[0] for l in LAUNCHERS])
+    @pytest.mark.parametrize("name, rel", LAUNCHERS, ids=[launcher[0] for launcher in LAUNCHERS])
     def test_a_duplicate_install_is_reported(self, name, rel) -> None:
         """One store served by two versions is the failure worth seeing."""
         text = (REPO / rel).read_text(encoding="utf-8")

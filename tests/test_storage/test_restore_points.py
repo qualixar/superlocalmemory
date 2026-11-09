@@ -13,7 +13,12 @@ from superlocalmemory.storage import backup
 from superlocalmemory.storage import upgrade_restore as ur
 
 from ._upgrade_store import (
-    add_memory, confirm_kind, current_store, delete_fact, delete_memory, file_digest,
+    add_memory,
+    confirm_kind,
+    current_store,
+    delete_fact,
+    delete_memory,
+    file_digest,
 )
 
 

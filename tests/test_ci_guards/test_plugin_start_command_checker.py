@@ -15,7 +15,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 import scripts.integration_compatibility as compat
 from scripts.integration_compatibility import _plugin_package
 

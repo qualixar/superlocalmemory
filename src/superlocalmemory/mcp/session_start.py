@@ -103,6 +103,13 @@ def _priority_facts(engine, pid, project_path, response=None):
     return pins, standing, upcoming
 
 
+def _jev_ordered(engine, query, relevant):
+    from superlocalmemory.core.session_jev import jev_order
+
+    retrieval = getattr(getattr(engine, "config", None), "retrieval", None)
+    return jev_order(query, relevant, lambda result: result.fact.content, retrieval)
+
+
 def _injectable(pins, standing, relevant, max_results):
     memories, seen = [], set()
     for fact in pins[:20]:
@@ -266,6 +273,10 @@ async def session_init(
         )
         threshold = rules.get_recall_config().get("relevance_threshold", 0.3)
         relevant = _relevant(response, threshold, max_age_days)
+        # 4.2.17: Jev orders them when the person chose Jev reordering
+        # (core/session_jev: order only, 1.5 s budget, never hides anything).
+        relevant = await asyncio.to_thread(
+            _jev_ordered, engine, query or session_context_query(project_path), relevant)
         pins, standing, upcoming = _priority_facts(engine, pid, project_path, response)
         context, rows = _render_session(
             engine, named, response, pins, standing, relevant, max_results

@@ -18,9 +18,7 @@ import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.hooks import before_web_hook as bwh
-
 
 # --------------------------------------------------------------------------
 # _extract_query

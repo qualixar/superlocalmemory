@@ -44,7 +44,6 @@ from contextlib import contextmanager
 
 import pytest
 
-
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 #: Liveness bound for waits only a broken build ever sits out (every held
@@ -289,10 +288,11 @@ def test_http_switch_returns_503_when_drain_times_out(engine_with_mock_deps) -> 
     After the fix: the server returns HTTP 503 within the drain timeout window.
     """
     from fastapi.testclient import TestClient
-    from superlocalmemory.server.unified_daemon import create_app
+
     from superlocalmemory.server.profile_runtime import (
         bind_profile_runtime,
     )
+    from superlocalmemory.server.unified_daemon import create_app
 
     engine = engine_with_mock_deps
     _add_profile(engine, "default")
@@ -358,8 +358,9 @@ def test_daemon_responsive_during_switch_with_timeout(engine_with_mock_deps) -> 
     acquire a lease immediately after the timed-out switch.
     """
     from fastapi.testclient import TestClient
-    from superlocalmemory.server.unified_daemon import create_app
+
     from superlocalmemory.server.profile_runtime import bind_profile_runtime
+    from superlocalmemory.server.unified_daemon import create_app
 
     engine = engine_with_mock_deps
     _add_profile(engine, "default")

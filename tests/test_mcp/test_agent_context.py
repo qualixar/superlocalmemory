@@ -25,7 +25,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-
 # ---------------------------------------------------------------------------
 # sanitize_agent_id — audit fix (log-injection / oversize / path chars)
 # ---------------------------------------------------------------------------

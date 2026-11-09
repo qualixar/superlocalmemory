@@ -6,9 +6,7 @@ import json
 import logging
 
 from fastapi.requests import Request
-from fastapi.responses import Response
-
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from superlocalmemory.optimize.proxy._helpers import (
     _ANTHROPIC_FORWARD_HEADERS,

@@ -28,7 +28,6 @@ import pytest
 
 from superlocalmemory.core import security_primitives as sp
 
-
 # ---------------------------------------------------------------------------
 # H-SEC-02 — GENERIC_KEY ReDoS elimination
 # ---------------------------------------------------------------------------

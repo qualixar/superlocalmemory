@@ -22,9 +22,9 @@ All bridge data lives in code_graph.db via the `code_memory_links` table.
 """
 
 from superlocalmemory.code_graph.bridge.entity_resolver import EntityResolver
+from superlocalmemory.code_graph.bridge.event_listeners import BridgeEventListeners
 from superlocalmemory.code_graph.bridge.fact_enricher import FactEnricher
 from superlocalmemory.code_graph.bridge.hebbian_linker import HebbianLinker
-from superlocalmemory.code_graph.bridge.event_listeners import BridgeEventListeners
 from superlocalmemory.code_graph.bridge.temporal_checker import TemporalChecker
 
 __all__ = [

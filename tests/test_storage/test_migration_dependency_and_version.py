@@ -10,8 +10,8 @@ than run against a base schema it assumes is present.
 """
 from __future__ import annotations
 
-import sqlite3
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest

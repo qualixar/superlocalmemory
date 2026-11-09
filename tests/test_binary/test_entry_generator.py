@@ -22,10 +22,8 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-
 import build_entry  # noqa: E402 — injected via tests/test_binary/conftest.py
-
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOPIC_SRC = REPO_ROOT / "src" / "superlocalmemory" / "core" / "topic_signature.py"

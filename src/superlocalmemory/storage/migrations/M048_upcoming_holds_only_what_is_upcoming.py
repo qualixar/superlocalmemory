@@ -32,8 +32,8 @@ so a second pass moves nothing.
 
 from __future__ import annotations
 
-import logging
 import contextlib
+import logging
 import sqlite3
 from typing import Any
 

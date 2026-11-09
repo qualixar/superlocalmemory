@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from scripts.release import release_tools as rt
 
 ROOT = Path(__file__).resolve().parents[2]

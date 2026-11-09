@@ -9,10 +9,10 @@ import re
 import pytest
 from mcp.types import TextContent
 
-from superlocalmemory.media.upload_links import UploadLinks
 from superlocalmemory.mcp import tools_media_upload as tool_mod
 from superlocalmemory.mcp.http_transport import SLMFastMCP
 from superlocalmemory.mcp.remote_caller import remote_caller, remote_grant, remote_media_allowed
+from superlocalmemory.media.upload_links import UploadLinks
 from superlocalmemory.remote_connections.grant import RemoteGrant
 from superlocalmemory.server.remote_keys import RemoteKeyStore
 

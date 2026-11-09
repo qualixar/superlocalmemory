@@ -34,7 +34,6 @@ from superlocalmemory.storage.models import (
     FactType,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -166,7 +165,9 @@ class TestStoreHooks:
         """store() calls _hooks.run_pre('store', ...) before processing."""
         spy = MagicMock()
         engine_with_mock_deps._hooks.register_pre("store", spy)
-        engine_with_mock_deps.store("Hook test content for verifying pre-store hooks are invoked correctly", session_id="s1")
+        engine_with_mock_deps.store(
+            "Hook test content for verifying pre-store hooks are invoked correctly", session_id="s1"
+        )
         spy.assert_called_once()
         ctx = spy.call_args[0][0]
         assert ctx["operation"] == "store"

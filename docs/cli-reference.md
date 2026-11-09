@@ -376,6 +376,24 @@ idempotency key. `--note` (up to 1,000 characters) and `--agent` are kept with t
 report. A refused report exits 1 with the reason; `--json` returns the envelope
 with `outcome_id`, `reward`, `attributed` and `duplicate`.
 
+### `slm hide <fact_id>... [--undo] [--json]`
+
+Keeps memories out of recall answers and session starts, without deleting or
+editing them. SLM already does this on its own for machine bookkeeping (a bare
+"session ended <time>" line); `slm hide` is the same thing for a row you decide
+about yourself, such as a vague note. `--undo` shows the memories in answers
+again, and SLM will not hide them automatically after that. Either way the
+decision is yours and no automatic rule or repair changes it.
+
+```bash
+slm recall "what did we decide about caching" --json   # note the result ids
+slm hide <fact_id> <fact_id>
+slm hide --undo <fact_id>
+```
+
+The memories stay stored, listed and counted. Ids from another profile are
+reported as not found; the command exits 1 only when none of the ids matched.
+
 ### `slm health`
 
 Diagnostics for the mathematical layers (similarity, consistency and lifecycle

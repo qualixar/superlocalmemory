@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sqlite3
 import inspect
+import sqlite3
 from pathlib import Path
 
 from superlocalmemory.server.routes import stats
@@ -145,8 +145,8 @@ def test_timeline_buckets_by_the_callers_local_day(monkeypatch, tmp_path: Path) 
 
 
 def test_timeline_offset_is_bounded() -> None:
-    from fastapi.testclient import TestClient
     from fastapi import FastAPI
+    from fastapi.testclient import TestClient
 
     app = FastAPI()
     app.include_router(stats.router)

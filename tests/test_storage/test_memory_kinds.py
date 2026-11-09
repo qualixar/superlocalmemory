@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pytest
 
-from superlocalmemory.storage.models import FactType
 from superlocalmemory.storage.memory_kinds import (
     ALIASES,
     AUTHORITY,
@@ -26,6 +25,7 @@ from superlocalmemory.storage.memory_kinds import (
     kind_fields,
     parse_kind,
 )
+from superlocalmemory.storage.models import FactType
 
 
 class TestParseKind:

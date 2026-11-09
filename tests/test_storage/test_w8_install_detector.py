@@ -13,7 +13,6 @@ from unittest import mock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Task 8.6 — install_detector module
 # ---------------------------------------------------------------------------
@@ -167,14 +166,15 @@ class TestSchemaVersionErrorNamesAllInstalls:
 
     def test_error_message_contains_all_install_types(self, tmp_path):
         """SchemaVersionError lists pipx, venv, npm when all three are present."""
+        import sqlite3
+
         from superlocalmemory.storage._schema_version import (
-            SchemaVersionError,
             SUPPORTED_SCHEMA_VERSION,
+            SchemaVersionError,
             check_version_or_raise,
             ensure_schema_version_table,
             write_schema_version,
         )
-        import sqlite3
 
         # Build a DB with schema version > supported
         db = tmp_path / "learning.db"
@@ -206,14 +206,15 @@ class TestSchemaVersionErrorNamesAllInstalls:
 
     def test_error_message_includes_upgrade_commands(self, tmp_path):
         """SchemaVersionError includes upgrade commands for each install type."""
+        import sqlite3
+
         from superlocalmemory.storage._schema_version import (
-            SchemaVersionError,
             SUPPORTED_SCHEMA_VERSION,
+            SchemaVersionError,
             check_version_or_raise,
             ensure_schema_version_table,
             write_schema_version,
         )
-        import sqlite3
 
         db = tmp_path / "learning.db"
         conn = sqlite3.connect(str(db))
@@ -239,14 +240,15 @@ class TestSchemaVersionErrorNamesAllInstalls:
 
     def test_error_message_when_no_installs_detected(self, tmp_path):
         """SchemaVersionError still raises cleanly when no installs detected."""
+        import sqlite3
+
         from superlocalmemory.storage._schema_version import (
-            SchemaVersionError,
             SUPPORTED_SCHEMA_VERSION,
+            SchemaVersionError,
             check_version_or_raise,
             ensure_schema_version_table,
             write_schema_version,
         )
-        import sqlite3
 
         db = tmp_path / "learning.db"
         conn = sqlite3.connect(str(db))
@@ -267,13 +269,14 @@ class TestSchemaVersionErrorNamesAllInstalls:
 
     def test_no_error_when_version_is_current(self, tmp_path):
         """check_version_or_raise does NOT raise when version <= supported."""
+        import sqlite3
+
         from superlocalmemory.storage._schema_version import (
             SUPPORTED_SCHEMA_VERSION,
             check_version_or_raise,
             ensure_schema_version_table,
             write_schema_version,
         )
-        import sqlite3
 
         db = tmp_path / "learning.db"
         conn = sqlite3.connect(str(db))

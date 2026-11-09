@@ -10,6 +10,8 @@ brain router and the strict security-headers middleware — avoiding the
 full unified daemon to keep tests fast and deterministic.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import sqlite3
@@ -29,7 +31,6 @@ from superlocalmemory.server.middleware.security_headers import (
     SecurityHeadersMiddleware,
 )
 from superlocalmemory.server.routes import brain as brain_mod
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -537,8 +538,9 @@ def test_preferences_loader_missing_db(
 def test_cache_stats_with_memory_db(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    from superlocalmemory.server.routes import brain as brain_mod
     import sqlite3
+
+    from superlocalmemory.server.routes import brain as brain_mod
     db = tmp_path / "memory.db"
     conn = sqlite3.connect(str(db))
     try:
@@ -581,8 +583,9 @@ def test_cache_stats_db_missing(
 
 def test_bandit_unsettled_empty_table(tmp_learning_db: Path) -> None:
     """Table exists, no rows, no oldest — count=0, age=None."""
-    from superlocalmemory.server.routes.brain import _bandit_unsettled
     import sqlite3
+
+    from superlocalmemory.server.routes.brain import _bandit_unsettled
     conn = sqlite3.connect(str(tmp_learning_db))
     try:
         conn.execute(
@@ -601,8 +604,9 @@ def test_bandit_unsettled_empty_table(tmp_learning_db: Path) -> None:
 def test_cache_stats_missing_table(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    from superlocalmemory.server.routes import brain as brain_mod
     import sqlite3
+
+    from superlocalmemory.server.routes import brain as brain_mod
     db = tmp_path / "memory.db"
     conn = sqlite3.connect(str(db))
     try:
@@ -619,8 +623,9 @@ def test_cache_stats_missing_table(
 def test_bandit_unsettled_with_rows(
     tmp_learning_db: Path, install_token: str,
 ) -> None:
-    from superlocalmemory.server.routes.brain import _bandit_unsettled
     import sqlite3
+
+    from superlocalmemory.server.routes.brain import _bandit_unsettled
     conn = sqlite3.connect(str(tmp_learning_db))
     try:
         conn.execute(
@@ -652,8 +657,9 @@ def test_bandit_unsettled_missing_table(tmp_path: Path) -> None:
 
 
 def test_bandit_unsettled_naive_datetime(tmp_learning_db: Path) -> None:
-    from superlocalmemory.server.routes.brain import _bandit_unsettled
     import sqlite3
+
+    from superlocalmemory.server.routes.brain import _bandit_unsettled
     conn = sqlite3.connect(str(tmp_learning_db))
     try:
         conn.execute(
@@ -685,8 +691,8 @@ def test_bandit_unsettled_naive_datetime(tmp_learning_db: Path) -> None:
 def test_bandit_snapshot_returns_zero_when_no_bandit_tables(
     tmp_learning_db: Path,
 ) -> None:
-    from superlocalmemory.server.routes.brain import _compute_bandit_snapshot
     from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes.brain import _compute_bandit_snapshot
     db = LearningDatabase(tmp_learning_db)
     result = _compute_bandit_snapshot("default", db)
     assert result["strata_total"] == 48
@@ -698,10 +704,11 @@ def test_bandit_snapshot_with_seeded_arms(
     tmp_learning_db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stub ContextualBandit.snapshot to cover top-arm accumulation loop."""
-    from superlocalmemory.server.routes import brain as brain_mod
-    from superlocalmemory.learning.database import LearningDatabase
     import sys
     import types
+
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes import brain as brain_mod
 
     class _FakeBandit:
         def __init__(self, *a, **k):
@@ -739,16 +746,17 @@ def test_bandit_snapshot_with_seeded_arms(
 def test_action_outcomes_count_missing_table(
     tmp_learning_db: Path,
 ) -> None:
-    from superlocalmemory.server.routes.brain import _action_outcomes_count
     from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes.brain import _action_outcomes_count
     db = LearningDatabase(tmp_learning_db)
     assert _action_outcomes_count(db, "default") == 0
 
 
 def test_action_outcomes_count_with_rows(tmp_learning_db: Path) -> None:
     import sqlite3
-    from superlocalmemory.server.routes.brain import _action_outcomes_count
+
     from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes.brain import _action_outcomes_count
     conn = sqlite3.connect(str(tmp_learning_db))
     try:
         conn.execute(
@@ -790,9 +798,10 @@ def test_redact_tuple_container() -> None:
 def test_count_signals_since_no_filter(
     tmp_learning_db: Path,
 ) -> None:
-    from superlocalmemory.server.routes.brain import _count_signals_since
+    from datetime import datetime, timedelta, timezone
+
     from superlocalmemory.learning.database import LearningDatabase
-    from datetime import datetime, timezone, timedelta
+    from superlocalmemory.server.routes.brain import _count_signals_since
     db = LearningDatabase(tmp_learning_db)
     db.store_signal("default", "q1", "f1", "recall_hit", 1.0)
     db.store_signal("default", "q2", "f2", "other_type", 1.0)
@@ -802,9 +811,10 @@ def test_count_signals_since_no_filter(
 
 
 def test_count_signals_since_missing_db(tmp_path: Path) -> None:
-    from superlocalmemory.server.routes.brain import _count_signals_since
-    from superlocalmemory.learning.database import LearningDatabase
     from datetime import datetime, timezone
+
+    from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes.brain import _count_signals_since
     # Point at a fresh (empty) DB — query runs OK, returns 0.
     db = LearningDatabase(tmp_path / "empty.db")
     since = datetime.now(timezone.utc)
@@ -813,16 +823,16 @@ def test_count_signals_since_missing_db(tmp_path: Path) -> None:
 
 def test_safe_count_missing_table(tmp_path: Path) -> None:
     """_safe_count returns 0 when the queried table is absent."""
-    from superlocalmemory.server.routes.brain import _safe_count
     from superlocalmemory.learning.database import LearningDatabase
+    from superlocalmemory.server.routes.brain import _safe_count
     db = LearningDatabase(tmp_path / "empty.db")
     # learning_feedback is not in the default schema.
     assert _safe_count(db, "learning_feedback", "default") == 0
 
 
 def test_meta_now_shape() -> None:
-    from superlocalmemory.server.routes.brain import _meta_now
     from superlocalmemory import __version__
+    from superlocalmemory.server.routes.brain import _meta_now
     meta = _meta_now()
     assert meta["honest_labels"] is True
     assert meta["version"] == __version__
@@ -856,8 +866,8 @@ def test_cross_platform_errors_dont_crash(monkeypatch) -> None:
     adapters with zero kwargs. The error path therefore tests a broken
     factory (which is how the real startup failure would look).
     """
-    from superlocalmemory.server.routes import brain as brain_mod
     import superlocalmemory.cli.context_commands as ctx_mod
+    from superlocalmemory.server.routes import brain as brain_mod
 
     def _broken_factory(*a, **k):
         raise RuntimeError("boom")

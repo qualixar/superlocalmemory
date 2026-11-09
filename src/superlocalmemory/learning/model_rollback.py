@@ -47,9 +47,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Final
-from contextlib import closing
 
 from superlocalmemory.learning.model_cache import invalidate as invalidate_model_cache
 

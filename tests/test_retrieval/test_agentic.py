@@ -28,7 +28,6 @@ from superlocalmemory.retrieval.agentic import (
 )
 from superlocalmemory.storage.models import AtomicFact
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -171,7 +170,7 @@ class TestAgenticRetrieverRetrieve:
         ]
 
         retriever = AgenticRetriever()
-        results = retriever.retrieve(
+        retriever.retrieve(
             "query", "default", engine, llm=llm, top_k=20,
         )
         assert len(retriever.rounds) >= 2

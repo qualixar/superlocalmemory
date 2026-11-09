@@ -145,6 +145,7 @@ async def test_mcp2_client_mode_auto_lists_and_calls_tool():
     Not an import check — a real round-trip through negotiation + tools/call.
     """
     import importlib.metadata as md
+
     from mcp.client import Client
 
     assert md.version("mcp").startswith("2."), (
@@ -183,8 +184,8 @@ async def test_mcp2_http_client_mode_auto_over_streamable_http():
     """HTTP path: Client(url, mode=auto) against a real Streamable-HTTP app."""
     import asyncio
     import contextlib
-    import socket
     import importlib.metadata as md
+    import socket
 
     import uvicorn
     from fastapi import FastAPI

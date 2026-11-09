@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 
 from superlocalmemory.optimize.config import (
-    get_optimize_config,
     _reset_config_store,
     _set_config_store,
+    get_optimize_config,
 )
 from superlocalmemory.optimize.config.defaults import DEFAULT_OPTIMIZE_CONFIG
 

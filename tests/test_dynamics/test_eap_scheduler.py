@@ -32,7 +32,6 @@ from superlocalmemory.math.polar_quant import PolarQuantEncoder
 from superlocalmemory.math.qjl import QJLEncoder
 from superlocalmemory.storage.quantized_store import QuantizedEmbeddingStore
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

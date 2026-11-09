@@ -160,14 +160,12 @@ def _admit_http_mutation(
     from fastapi import HTTPException as _HTTPException
 
     from superlocalmemory.core.actor_context import Transport
-    from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
+    from superlocalmemory.core.admission import AdmissionDenied, _company_mode_active, admit, resolve_actor
     from superlocalmemory.core.operation_request import OperationKind
     from superlocalmemory.server.rbac_enforce import (
         resolve_actor_roles,
         resolve_principal,
     )
-
-    from superlocalmemory.core.admission import _company_mode_active
 
     # Both switches, the same rule the other entry points use. Reading
     # config.toml alone left this path treating a workspace as personal after
@@ -986,6 +984,7 @@ async def search_memories(request: Request, body: SearchRequest):
     (422, INVALID_KIND) before any retrieval if it does not parse.
     """
     from superlocalmemory.core.kind_query import InvalidKind, resolve_kind
+
     # READ on the caller's own workspace, and the search below runs there only.
     # This POST is not gated by the GET-only RBAC middleware; without it a
     # person signed in to one workspace searched the owner's active one.
@@ -1087,15 +1086,16 @@ async def search_memories(request: Request, body: SearchRequest):
             if response is not None:
                 elapsed_ms = round((_time.monotonic() - t0) * 1000, 1)
                 from superlocalmemory.core.kind_query import engine_display_min_confidence
-                from superlocalmemory.server.recall_serializer import (
-                    recall_response_metadata,
-                    serialize_recall_response,
-                )
+
                 # Results that came from a picture or a document page get a
                 # ``media`` block (the same one GET /recall adds), so the
                 # dashboard's "Find a picture" box can show the picture. One
                 # batched read; empty, with no query, when images are off.
                 from superlocalmemory.retrieval.media_channel import memory_sources
+                from superlocalmemory.server.recall_serializer import (
+                    recall_response_metadata,
+                    serialize_recall_response,
+                )
                 _memory_ids = list({
                     r.fact.memory_id for r in response.results[:_search_limit]
                     if r.fact.memory_id
@@ -1154,8 +1154,7 @@ async def search_memories(request: Request, body: SearchRequest):
         kind_select = ", memory_kind, memory_kind_source, memory_kind_confidence, fact_type" if has_kind_columns else ""
         # Same word-based match as the daemon's /recall fallback, so the
         # dashboard, CLI and MCP find the same rows (server/recall_fallback.py).
-        from superlocalmemory.server.recall_fallback import (
-            abandoned_channel_metadata, keyword_match_sql)
+        from superlocalmemory.server.recall_fallback import abandoned_channel_metadata, keyword_match_sql
         sql = keyword_match_sql(body.query, column="content")
         rows = [] if sql is None else cursor.execute(f"""
             SELECT fact_id, memory_id, profile_id, content, confidence as memory_confidence,

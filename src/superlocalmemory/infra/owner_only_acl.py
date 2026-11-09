@@ -42,7 +42,8 @@ def restrict_to_owner(path: Path) -> None:
     except ImportError as exc:  # pywin32 is a declared Windows dependency
         raise OSError("Windows permission support (pywin32) is unavailable") from exc
     from superlocalmemory.optimize.proxy.capture import (
-        _windows_dacl_is_owner_only, _windows_owner_dacl,
+        _windows_dacl_is_owner_only,
+        _windows_owner_dacl,
     )
 
     owner_sid, dacl = _windows_owner_dacl(win32api, win32con, win32security)
@@ -81,7 +82,8 @@ def is_owner_only(path: Path) -> bool:
     except ImportError as exc:  # pywin32 is a declared Windows dependency
         raise OSError("Windows permission support (pywin32) is unavailable") from exc
     from superlocalmemory.optimize.proxy.capture import (
-        _windows_dacl_is_owner_only, _windows_owner_dacl,
+        _windows_dacl_is_owner_only,
+        _windows_owner_dacl,
     )
 
     owner_sid, _dacl = _windows_owner_dacl(win32api, win32con, win32security)

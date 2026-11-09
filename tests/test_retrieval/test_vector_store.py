@@ -660,8 +660,9 @@ class TestSerializationRoutesThroughCodec:
         the assertion fails — confirming two diverged implementations.
         """
         from unittest.mock import patch as _patch
-        from superlocalmemory.retrieval.vector_store import VectorStore
+
         import superlocalmemory.retrieval.vector_store as vs_mod
+        from superlocalmemory.retrieval.vector_store import VectorStore
 
         sentinel = b"sentinel-bytes-from-codec"
         vec = [0.1] * DIM
@@ -686,9 +687,10 @@ class TestSerializationRoutesThroughCodec:
         change: if the two implementations already diverge, the change is
         not safe to make and that divergence is itself the finding.
         """
-        from superlocalmemory.storage.embedding_codec import encode_embedding
-        from superlocalmemory.retrieval.vector_store import VectorStore
         import numpy as np
+
+        from superlocalmemory.retrieval.vector_store import VectorStore
+        from superlocalmemory.storage.embedding_codec import encode_embedding
 
         rng = np.random.default_rng(42)
         vec = rng.standard_normal(DIM).astype(np.float32).tolist()
@@ -733,8 +735,8 @@ class TestIsSearchableByMeaning:
 
     def test_returns_false_when_store_unavailable(self) -> None:
         """Fail-closed: unavailable store → False, never True."""
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "m.db"

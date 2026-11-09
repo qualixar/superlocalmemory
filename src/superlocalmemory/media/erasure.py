@@ -21,7 +21,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from superlocalmemory.core.transactions.owners import (
-    OperationContext, OwnerErasureProof, OwnerHealth, OwnerResult,
+    OperationContext,
+    OwnerErasureProof,
+    OwnerHealth,
+    OwnerResult,
 )
 from superlocalmemory.media import files, media_db_exists, open_media_store
 

@@ -15,8 +15,8 @@ from scripts.integration_compatibility import (
     load_manifest,
     validate_local_contracts,
 )
-from superlocalmemory.hooks.portable_kit import IDE_MATRIX
 
+from superlocalmemory.hooks.portable_kit import IDE_MATRIX
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "ide" / "integration-contracts.json"

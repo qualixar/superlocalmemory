@@ -29,7 +29,6 @@ import pytest
 
 from superlocalmemory.core.recall_queue import RecallQueue
 
-
 _DEFAULT_ITERS = int(os.environ.get("SLM_PROP_ITERS", "300"))
 _DEFAULT_OPS_PER_ITER = int(os.environ.get("SLM_PROP_OPS", "40"))
 

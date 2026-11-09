@@ -14,7 +14,6 @@ import sqlite3
 import uuid
 
 import pytest
-
 from tests.helpers.env_capabilities import (
     NO_SECURE_DELETE_REASON,
     keyword_index_forgets_at_once,

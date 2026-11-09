@@ -482,7 +482,9 @@ def test_an_upload_link_save_waits_out_a_cold_start(env, monkeypatch):
     seen = []
     monkeypatch.setattr(ingest, "_cold_wait_s", lambda remote=False: seen.append(remote) or 0.01)
     env.client.warm = False
-    remote_inp = lambda: MediaInput(base64=base64.b64encode(png()).decode(), remote=True)
+    def remote_inp():
+        return MediaInput(base64=base64.b64encode(png()).decode(), remote=True)
+
     save(env, inp=remote_inp())
     save(env, inp=remote_inp(), can_wait=True)
     assert seen == [True, False]

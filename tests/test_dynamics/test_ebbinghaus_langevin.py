@@ -208,10 +208,8 @@ class TestStoreScaledClock:
 
     def test_three_months_unaccessed_is_warm_not_forgotten(self):
         import numpy as np
+
         from superlocalmemory.core.config import ForgettingConfig
-        from superlocalmemory.dynamics.ebbinghaus_langevin_coupling import (
-            EbbinghausLangevinCoupling,
-        )
 
         cfg = ForgettingConfig()
         coupling = _make_elc(cfg)
@@ -230,10 +228,8 @@ class TestStoreScaledClock:
     def test_matches_batch_path_zone(self):
         """ELC and batch_compute_retention (the corrected clock) give the same zone for the same input."""
         import numpy as np
+
         from superlocalmemory.core.config import ForgettingConfig
-        from superlocalmemory.dynamics.ebbinghaus_langevin_coupling import (
-            EbbinghausLangevinCoupling,
-        )
         from superlocalmemory.math.ebbinghaus import EbbinghausCurve
 
         cfg = ForgettingConfig()
@@ -265,10 +261,10 @@ def _make_elc(cfg):
     from superlocalmemory.dynamics.ebbinghaus_langevin_coupling import (
         EbbinghausLangevinCoupling,
     )
-    from superlocalmemory.math.langevin import LangevinDynamics
     from superlocalmemory.dynamics.fisher_langevin_coupling import (
         FisherLangevinCoupling,
     )
+    from superlocalmemory.math.langevin import LangevinDynamics
     return EbbinghausLangevinCoupling(
         _make_curve(cfg), LangevinDynamics(), FisherLangevinCoupling(), cfg,
     )

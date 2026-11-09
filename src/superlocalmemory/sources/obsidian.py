@@ -17,8 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from superlocalmemory.memory_core import (
-    ContentOrigin, effective_pii_redaction, prepare_for_save, prepare_metadata)
+from superlocalmemory.memory_core import ContentOrigin, effective_pii_redaction, prepare_for_save, prepare_metadata
 from superlocalmemory.sources import ingest, links
 from superlocalmemory.sources.host import SourceHost
 

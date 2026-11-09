@@ -101,8 +101,8 @@ def _handle_recall(
 
     # v3.6.6: same shared chokepoint as the daemon HTTP route + CLI fallback,
     # so the MCP WorkerPool subprocess path returns identical budgeted output.
-    from superlocalmemory.retrieval.media_channel import memory_sources
     from superlocalmemory.core.kind_query import engine_display_min_confidence
+    from superlocalmemory.retrieval.media_channel import memory_sources
     from superlocalmemory.server.recall_serializer import (
         recall_response_metadata,
         serialize_recall_response,

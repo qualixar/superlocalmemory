@@ -37,14 +37,13 @@ import inspect
 import logging
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.loops import (
     engine_backed_ledger,
 )
 from superlocalmemory.loops.stop_reasons import last_gate_reason
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.retrieval.answer_check_status import REQUEST_NO_REORDER
 
 logger = logging.getLogger("slm.mcp.tools_loops")

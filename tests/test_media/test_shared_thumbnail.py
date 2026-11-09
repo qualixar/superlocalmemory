@@ -26,9 +26,13 @@ def world(tmp_path, monkeypatch):
 def _picture(world, owner, scope, shared_with=()):
     roles, store = world
     memory = f"mem-{owner}-{scope}-{len(shared_with)}"
-    roles.db.execute("INSERT INTO memories (memory_id, profile_id, scope, shared_with, content) VALUES (?, ?, ?, ?, 'p')",
-                     (memory, owner, scope, json.dumps(list(shared_with))))
-    return store.insert_item(profile_id=owner, source_sha256=memory.ljust(64, "0")[:64], anchor_memory_id=memory, **BASE)
+    roles.db.execute(
+        "INSERT INTO memories (memory_id, profile_id, scope, shared_with, content) VALUES (?, ?, ?, ?, 'p')",
+        (memory, owner, scope, json.dumps(list(shared_with))),
+    )
+    return store.insert_item(
+        profile_id=owner, source_sha256=memory.ljust(64, "0")[:64], anchor_memory_id=memory, **BASE
+    )
 
 
 def _get(world, media_id, profile, suffix=""):

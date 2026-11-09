@@ -453,9 +453,8 @@ def _construct_laya(plan: _LayaPlan) -> Any:
 
 def _construct_jev(provider: str, store: Any, timeout_s: float, rerank_k: int) -> Any:
     try:
-        from superlocalmemory.retrieval import jev_judge
-
         from superlocalmemory.infra.data_root import canonical_data_root
+        from superlocalmemory.retrieval import jev_judge
 
         # The stored choice is re-read before every request, so consent
         # withdrawn in any process stops this one too.
@@ -471,6 +470,25 @@ def _construct_jev(provider: str, store: Any, timeout_s: float, rerank_k: int) -
 
 
 # -- public ------------------------------------------------------------------
+
+def session_rank_judge(retrieval_config: Any, timeout_s: float) -> Any | None:
+    """A short-lived Jev judge for ordering a session start's memories, or None.
+
+    Same gates as recall's reordering: Jev chosen, both consents the boolean
+    True, a key stored (``jev_rerank_k``, ``_jev_target``). Not the shared live
+    judge: a session start runs in the hook's own process, often with no
+    engine, and the caller shuts this one down when it is done
+    (``core.session_jev``).
+    """
+    k = jev_rerank_k(retrieval_config)
+    if k <= 0:
+        return None
+    target = _jev_target(retrieval_config)
+    if target is None:
+        return None
+    provider, store = target
+    return _construct_jev(provider, store, timeout_s, k)
+
 
 def resolve_judge_mode(retrieval_config: Any) -> str:
     """What would run: "laya", "jev" or "off". Detects; starts nothing."""
@@ -607,6 +625,7 @@ def release_sufficiency_judge(retrieval_engine: Any, *, final: bool = False) -> 
 
 
 __all__ = [
+    "session_rank_judge",
     "MODE_AUTO",
     "MODE_JEV",
     "MODE_LAYA",

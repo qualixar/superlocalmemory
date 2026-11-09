@@ -201,6 +201,7 @@ class DaemonPoolProxy:
             answer_check_skipped,
             in_context_load,
         )
+
         # ``answer_check`` is True (ask as usual), False (skip), or one of the
         # daemon's request words — the bounded-loop gate sends "no_reorder":
         # it needs the verdict, never the reorder, and pays for one per lap.

@@ -9,8 +9,6 @@ Covers hard rule B3 (size == 40) and the canonical weight-grid invariant.
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_catalog_size_is_40():
     """B3: catalog size is locked at exactly 40 arms."""
@@ -36,7 +34,7 @@ def test_catalog_keys_unique():
 
 def test_catalog_weights_in_grid():
     """B3: every weight in every arm belongs to the canonical grid."""
-    from superlocalmemory.learning.arm_catalog import ARM_CATALOG, _WEIGHT_GRID
+    from superlocalmemory.learning.arm_catalog import _WEIGHT_GRID, ARM_CATALOG
 
     grid = set(_WEIGHT_GRID)
     for name, weights in ARM_CATALOG.items():

@@ -125,7 +125,11 @@ def test_job_status_is_profile_checked(monkeypatch, tmp_path):
     ok = c.get(f"/api/v3/jobs/{mine.job_id}")
     assert ok.status_code == 200
     body = ok.json()
-    assert body["state"] == "queued" and body["document_id"] == mine.document_id and body["document"]["state"] == "processing"
+    assert (
+        body["state"] == "queued"
+        and body["document_id"] == mine.document_id
+        and body["document"]["state"] == "processing"
+    )
     assert c.get(f"/api/v3/jobs/{theirs.job_id}").status_code == 404
     assert c.get(f"/api/v3/jobs/{theirs.job_id}?profile_id=p2").status_code == 200
     assert c.get("/api/v3/jobs/" + "d" * 32).status_code == 404

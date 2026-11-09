@@ -20,7 +20,6 @@ from fastapi import HTTPException, Request
 
 from superlocalmemory.server.loopback import is_loopback as _is_loopback_host
 
-
 # H-04 (3.7.9): the test-client auth bypass must be impossible in a real daemon
 # even if SLM_TEST_ISOLATION=1 leaks into a production environment. Anchor it to
 # pytest being present in the running interpreter — a production daemon process

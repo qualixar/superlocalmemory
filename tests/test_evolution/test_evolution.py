@@ -30,18 +30,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from superlocalmemory.evolution.types import (
-    EvolutionCandidate,
-    EvolutionRecord,
-    EvolutionStatus,
-    EvolutionType,
-    SkillLineage,
-    TriggerType,
+from superlocalmemory.evolution.blind_verifier import (
+    VerificationResult,
+    build_verification_prompt,
+    parse_verification_response,
 )
 from superlocalmemory.evolution.evolution_store import (
     MAX_ATTEMPTS_PER_SKILL,
     MAX_EVOLUTIONS_PER_CYCLE,
     EvolutionStore,
+)
+from superlocalmemory.evolution.mutation_generator import (
+    MAX_CONTENT_CHARS,
+    build_mutation_prompt,
+    build_retry_prompt,
+    parse_mutation_output,
+    validate_skill_content,
+)
+from superlocalmemory.evolution.skill_evolver import (
+    SkillEvolver,
+    detect_backend,
 )
 from superlocalmemory.evolution.triggers import (
     DEGRADATION_THRESHOLD,
@@ -54,23 +62,14 @@ from superlocalmemory.evolution.triggers import (
     PostSessionTrigger,
     _check_memory_pressure,
 )
-from superlocalmemory.evolution.mutation_generator import (
-    MAX_CONTENT_CHARS,
-    build_mutation_prompt,
-    build_retry_prompt,
-    parse_mutation_output,
-    validate_skill_content,
+from superlocalmemory.evolution.types import (
+    EvolutionCandidate,
+    EvolutionRecord,
+    EvolutionStatus,
+    EvolutionType,
+    SkillLineage,
+    TriggerType,
 )
-from superlocalmemory.evolution.blind_verifier import (
-    VerificationResult,
-    build_verification_prompt,
-    parse_verification_response,
-)
-from superlocalmemory.evolution.skill_evolver import (
-    SkillEvolver,
-    detect_backend,
-)
-
 
 # ===================================================================
 # SECTION 1: types.py
@@ -622,20 +621,18 @@ class TestPostSessionTrigger:
         # Insert 5 Skill events, 2 of which are followed by Bash errors.
         for invoc in range(5):
             conn.execute(
-                "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, created_at) "
+                "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, "
+                "created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                ("sess-1", "default", "Skill",
-                 json.dumps({"skill": "bad-skill"}), "",
-                 f"2026-04-15T00:0{invoc}:00Z"),
+                ("sess-1", "default", "Skill", json.dumps({"skill": "bad-skill"}), "", f"2026-04-15T00:0{invoc}:00Z"),
             )
             # First 2 invocations get Bash error followers (negative signals)
             if invoc < NEGATIVE_SIGNALS_THRESHOLD:
                 conn.execute(
-                    "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, created_at) "
+                    "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, "
+                    "created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    ("sess-1", "default", "Bash", "",
-                     "error: command failed",
-                     f"2026-04-15T00:0{invoc}:01Z"),
+                    ("sess-1", "default", "Bash", "", "error: command failed", f"2026-04-15T00:0{invoc}:01Z"),
                 )
         conn.commit()
         conn.close()

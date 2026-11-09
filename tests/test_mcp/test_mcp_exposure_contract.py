@@ -90,22 +90,22 @@ def _fresh_server(monkeypatch: pytest.MonkeyPatch, profile: str = "core"):
 
 def _register_every_tool(target) -> None:
     from superlocalmemory.mcp.tools_active import register_active_tools
+    from superlocalmemory.mcp.tools_brain import register_brain_tools
     from superlocalmemory.mcp.tools_code_graph import register_code_graph_tools
     from superlocalmemory.mcp.tools_core import register_core_tools
     from superlocalmemory.mcp.tools_evolution import register_evolution_tools
+    from superlocalmemory.mcp.tools_kinds import register_kind_tools
     from superlocalmemory.mcp.tools_learning import register_learning_tools
-    from superlocalmemory.mcp.tools_mesh import register_mesh_tools
-    from superlocalmemory.mcp.tools_optimize import register_optimize_tools
     from superlocalmemory.mcp.tools_loops import register_loop_tools
     from superlocalmemory.mcp.tools_media import register_document_tools, register_media_tools
+    from superlocalmemory.mcp.tools_mesh import register_mesh_tools
     from superlocalmemory.mcp.tools_ops import register_ops_tools
-    from superlocalmemory.mcp.tools_brain import register_brain_tools
-    from superlocalmemory.mcp.tools_kinds import register_kind_tools
+    from superlocalmemory.mcp.tools_optimize import register_optimize_tools
     from superlocalmemory.mcp.tools_summaries import register_summary_tools
-    from superlocalmemory.mcp.tools_views import register_view_tools
-    from superlocalmemory.mcp.tools_v28 import register_v28_tools
     from superlocalmemory.mcp.tools_v3 import register_v3_tools
+    from superlocalmemory.mcp.tools_v28 import register_v28_tools
     from superlocalmemory.mcp.tools_v33 import register_v33_tools
+    from superlocalmemory.mcp.tools_views import register_view_tools
 
     get_engine = lambda: None  # noqa: E731 - registration never executes it
     register_core_tools(target, get_engine)

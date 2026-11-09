@@ -5,7 +5,8 @@
 
 Before 4.1.25 nothing served a candidate ranker: a retrained model was
 persisted with ``is_candidate = 1`` and every recall was still ranked by the
-active model, so the "A/B test" compared the active model with itself. This module is the serve-time half of the fix. For each recall it
+active model, so the "A/B test" compared the active model with itself. This module is the serve-time half of
+the fix. For each recall it
 
 1. asks the shadow router whether a candidate is under test,
 2. routes the recall's ``query_id`` to an arm,

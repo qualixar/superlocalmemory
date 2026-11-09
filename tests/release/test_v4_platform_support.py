@@ -1,9 +1,7 @@
 """Release contract for the intentionally narrowed V4 platform matrix."""
 
-from pathlib import Path
-
 import tomllib
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 

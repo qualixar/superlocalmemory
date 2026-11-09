@@ -25,7 +25,6 @@ Contract refs:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sqlite3
@@ -119,7 +118,7 @@ class ConsolidationWorker:
                         ("INSERT", "UPDATE", "DELETE", "ALTER", "CREATE"),
                     ):
                         with _ga_write_lock:
-                            cursor = self._conn.execute(sql, params)
+                            self._conn.execute(sql, params)
                             self._conn.commit()
                         return []
                     return self._conn.execute(sql, params).fetchall()
@@ -160,8 +159,7 @@ class ConsolidationWorker:
                 # Late import — the shim hosts ``_run_shadow_cycle`` so
                 # that monkey-patches on ``consolidation_worker`` reach
                 # into the orchestrator's helper lookups.
-                from superlocalmemory.learning import consolidation_worker \
-                    as _shim
+                from superlocalmemory.learning import consolidation_worker as _shim
                 if self._should_retrain(profile_id):
                     stats["online_retrain"] = _shim._run_shadow_cycle(
                         memory_db_path=self._memory_db,
@@ -176,10 +174,10 @@ class ConsolidationWorker:
         # 6. Entity compilation (v3.4.3).
         if not dry_run:
             try:
+                from superlocalmemory.core.config import SLMConfig
                 from superlocalmemory.learning.entity_compiler import (
                     EntityCompiler,
                 )
-                from superlocalmemory.core.config import SLMConfig
                 config = SLMConfig.load()
                 compiler = EntityCompiler(self._memory_db, config)
                 ec_result = compiler.compile_all(profile_id)
@@ -309,8 +307,7 @@ class ConsolidationWorker:
         ``DeprecationWarning`` fires on first invocation per process.
         """
         try:
-            from superlocalmemory.learning import consolidation_worker \
-                as _shim
+            from superlocalmemory.learning import consolidation_worker as _shim
             return _shim._retrain_ranker_impl(self._learning_db, profile_id)
         except Exception as exc:
             logger.debug("Retrain failed: %s", exc)

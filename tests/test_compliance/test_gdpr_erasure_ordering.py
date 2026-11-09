@@ -33,7 +33,6 @@ from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -339,8 +338,8 @@ class TestLearningDatabaseUsesActiveDataRoot:
         self,
         tmp_path: Path,
     ) -> None:
-        from superlocalmemory.learning.database import LearningDatabase
         import superlocalmemory.core.config as config_module
+        from superlocalmemory.learning.database import LearningDatabase
 
         active_root = tmp_path / "active-root"
         default_root = tmp_path / "default-root"

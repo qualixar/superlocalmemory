@@ -20,9 +20,9 @@ import re
 import shutil
 import tempfile
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from contextlib import ExitStack
 from typing import Any, Callable, ContextManager
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
@@ -32,7 +32,10 @@ from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, Parse
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import DOCUMENT
 from superlocalmemory.memory_core import (
-    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+    ContentOrigin,
+    effective_pii_redaction,
+    prepare_for_save,
+    scan_sensitive,
 )
 from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.worker_client import MediaWorkerError
@@ -383,4 +386,6 @@ class JobRunner:
         else:
             segments.insert(0, (DOCUMENT + "\n\n", ContentOrigin.DERIVED_TEXT))
         saved = self._save(tuple(segments), f"doc:{self.doc_id}:doc", {"type": "document", "document_id": self.doc_id})
-        self.store.update_document(self.doc_id, memory_id=saved.memory_id, fact_ids_json=json.dumps(list(saved.fact_ids)))
+        self.store.update_document(
+            self.doc_id, memory_id=saved.memory_id, fact_ids_json=json.dumps(list(saved.fact_ids)),
+        )

@@ -3,13 +3,20 @@
 """Pinned facts, standing rules and scheduled facts follow the same view as recall: a remote app
 sees no picture, page or folder file it may not see; a caller on this computer sees all."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import asyncio
 
-
 from tests.test_mcp.test_remote_more_reads_hide_media import (  # noqa: F401  (fixture and helpers)
-    CASES, _as, _daemon, _relay, _Server, world)
+    CASES,
+    _as,
+    _daemon,
+    _relay,
+    _Server,
+    world,
+)
 
 
 def _pin_all(engine, ids) -> None:
@@ -47,7 +54,6 @@ def test_session_init_pins_standing_rules_and_schedule(world, monkeypatch, who, 
     real = remote_visibility.hidden_fact_ids
     monkeypatch.setattr(remote_visibility, "hidden_fact_ids",
                         lambda db, pid, found: calls.append(list(found)) or real(db, pid, found))
-    by_id = {v: k for k, v in ids.items()}
     monkeypatch.setattr(standing_rules, "standing_facts", lambda db, pid, exclude=frozenset(): [
         standing_rules.StandingFact(fact_id=i, content=c, kind="rule", importance=0.5, access_count=0)
         for c, i in ids.items() if i not in exclude])

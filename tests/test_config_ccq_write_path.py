@@ -38,7 +38,6 @@ from superlocalmemory.core.config import (
 )
 from superlocalmemory.storage.models import Mode
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

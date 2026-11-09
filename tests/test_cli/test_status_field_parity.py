@@ -30,11 +30,9 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Canonical definition — one copy, in the source, shared with the HTTP surface
 # ---------------------------------------------------------------------------
-
 from superlocalmemory.core.status_contract import (  # noqa: E402
     CANONICAL_STATUS_FIELDS as _CANONICAL,
 )

@@ -195,15 +195,15 @@ class ConsolidationEngine:
                 # Step 9 (v3.4.7): Generate soft prompts from patterns + assertions.
                 # Previously the AutoParameterizeHook was never wired.
                 try:
-                    from superlocalmemory.parameterization.pattern_extractor import PatternExtractor
-                    from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
-                    from superlocalmemory.parameterization.prompt_injector import PromptInjector
-                    from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
+                    from superlocalmemory.core.config import ParameterizationConfig
+                    from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
                     from superlocalmemory.learning.behavioral import BehavioralPatternStore
                     from superlocalmemory.parameterization.cross_project import CrossProjectAggregator
+                    from superlocalmemory.parameterization.pattern_extractor import PatternExtractor
+                    from superlocalmemory.parameterization.prompt_injector import PromptInjector
+                    from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
+                    from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
                     from superlocalmemory.parameterization.workflow_miner import WorkflowMiner
-                    from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
-                    from superlocalmemory.core.config import ParameterizationConfig
                     p_config = getattr(self._config, "parameterization", ParameterizationConfig())
                     from superlocalmemory.infra.data_root import state_path
                     learning_db = str(state_path("learning.db"))
@@ -432,7 +432,7 @@ class ConsolidationEngine:
 
         # 4. active_decisions: signal_type='decision' with min access
         # CRITICAL: uses signal_type NOT fact_type (HIGH-2 fix)
-        not_prompt, not_prompt_params = source_filter()
+        not_prompt, not_prompt_params = source_filter(self._db)
         decision_facts = self._db.execute(
             "SELECT f.fact_id, f.content FROM atomic_facts f "
             "LEFT JOIN fact_access_log a ON f.fact_id = a.fact_id "
@@ -903,7 +903,7 @@ class ConsolidationEngine:
         """Get top facts by type and sort criteria."""
         type_placeholders = ",".join("?" * len(fact_types))
         # 4.2.14: never a captured prompt or bookkeeping (core/block_sources).
-        not_prompt, not_prompt_params = source_filter()
+        not_prompt, not_prompt_params = source_filter(self._db)
 
         if sort_by == "recency":
             query = (

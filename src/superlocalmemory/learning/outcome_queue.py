@@ -26,15 +26,15 @@ by ``unified_daemon.py``'s lifespan hook.
 
 from __future__ import annotations
 
-
-from superlocalmemory.core.session_identity import is_conversation
 import logging
 import queue
 import sqlite3
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from superlocalmemory.core.session_identity import is_conversation
 
 logger = logging.getLogger(__name__)
 

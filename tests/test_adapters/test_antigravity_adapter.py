@@ -8,9 +8,9 @@ import pytest
 
 from superlocalmemory.hooks.adapter_base import HARD_BYTES_CAP
 from superlocalmemory.hooks.antigravity_adapter import (
-    AntigravityAdapter,
     GLOBAL_REL,
     WORKSPACE_REL,
+    AntigravityAdapter,
     render_antigravity,
 )
 
@@ -19,7 +19,7 @@ def _make_adapter(tmp_path: Path, *, scope: str = "workspace",
                   recall=None, monkeypatch=None) -> AntigravityAdapter:
     if monkeypatch is not None:
         monkeypatch.setenv("SLM_ANTIGRAVITY_FORCE", "1")
-    fn = recall or (lambda q, l, p: [])
+    fn = recall or (lambda q, limit_arg, p: [])
     return AntigravityAdapter(
         scope=scope, base_dir=tmp_path,
         sync_log_db=tmp_path / "memory.db",
@@ -135,6 +135,7 @@ def test_code_never_contains_banned_plural_path():
     from code / string literals. Tokens in the top-level docstring are
     permitted because they document the rule — they never execute."""
     import ast
+
     from superlocalmemory.hooks import antigravity_adapter as mod
     src = Path(mod.__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)

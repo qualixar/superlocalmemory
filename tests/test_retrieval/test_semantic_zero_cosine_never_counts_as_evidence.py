@@ -14,11 +14,11 @@ memory cannot pass the floor on semantic score alone.
 
 from __future__ import annotations
 
+import numpy as np
+
 from superlocalmemory.retrieval.engine import RetrievalEngine
 from superlocalmemory.retrieval.fusion import FusionResult
 from superlocalmemory.retrieval.semantic_channel import _cosine_similarity
-
-import numpy as np
 
 
 def _fr(fid: str, **scores: float) -> FusionResult:

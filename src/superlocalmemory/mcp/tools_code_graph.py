@@ -19,14 +19,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.security_primitives import (
     PathTraversalError,
     safe_resolve,
 )
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS, READ_ONLY, SETS
 
 logger = logging.getLogger(__name__)
 
@@ -167,13 +166,13 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                     f"Repository path does not exist: {repo_path}"
                 )
 
-            from superlocalmemory.code_graph.config import CodeGraphConfig
-            from superlocalmemory.code_graph.service import CodeGraphService
-            from superlocalmemory.code_graph.parser import CodeParser
-            from superlocalmemory.code_graph.graph_store import GraphStore
-            from superlocalmemory.code_graph.graph_engine import GraphEngine
-            from superlocalmemory.code_graph.flows import FlowDetector
             from superlocalmemory.code_graph.communities import CommunityDetector
+            from superlocalmemory.code_graph.config import CodeGraphConfig
+            from superlocalmemory.code_graph.flows import FlowDetector
+            from superlocalmemory.code_graph.graph_engine import GraphEngine
+            from superlocalmemory.code_graph.graph_store import GraphStore
+            from superlocalmemory.code_graph.parser import CodeParser
+            from superlocalmemory.code_graph.service import CodeGraphService
 
             t0 = time.time()
 
@@ -184,7 +183,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
             }
             if languages:
                 config_kwargs["languages"] = frozenset(
-                    l.strip() for l in languages.split(",") if l.strip()
+                    lang.strip() for lang in languages.split(",") if lang.strip()
                 )
             if exclude_patterns:
                 config_kwargs["exclude_patterns"] = tuple(
@@ -363,8 +362,8 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 }
 
             # Re-parse changed files
-            from superlocalmemory.code_graph.parser import CodeParser
             from superlocalmemory.code_graph.graph_store import GraphStore
+            from superlocalmemory.code_graph.parser import CodeParser
 
             config = svc.config
             parser = CodeParser(config)
@@ -395,6 +394,7 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                         Path(fp), source, lang
                     )
                     import hashlib
+
                     from superlocalmemory.code_graph.models import FileRecord
                     from superlocalmemory.code_graph.parser import (
                         _clean_and_resolve_edges,
@@ -481,9 +481,9 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 return _error_response("No changed files provided.")
 
             db = _get_db()
-            from superlocalmemory.code_graph.graph_store import GraphStore
-            from superlocalmemory.code_graph.graph_engine import GraphEngine
             from superlocalmemory.code_graph.blast_radius import BlastRadius
+            from superlocalmemory.code_graph.graph_engine import GraphEngine
+            from superlocalmemory.code_graph.graph_store import GraphStore
 
             store = GraphStore(db)
             engine = GraphEngine(store)
@@ -598,8 +598,8 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 return err
 
             db = _get_db()
-            from superlocalmemory.code_graph.graph_store import GraphStore
             from superlocalmemory.code_graph.graph_engine import GraphEngine
+            from superlocalmemory.code_graph.graph_store import GraphStore
             from superlocalmemory.code_graph.models import EdgeKind
 
             store = GraphStore(db)
@@ -1221,8 +1221,8 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                     return _error_response(f"Target '{target}' not found.")
 
                 # Find all references
-                from superlocalmemory.code_graph.graph_store import GraphStore
                 from superlocalmemory.code_graph.graph_engine import GraphEngine
+                from superlocalmemory.code_graph.graph_store import GraphStore
 
                 store = GraphStore(db)
                 engine = GraphEngine(store)
@@ -1243,8 +1243,8 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 }
 
             elif action == "find_dead_code":
-                from superlocalmemory.code_graph.graph_store import GraphStore
                 from superlocalmemory.code_graph.graph_engine import GraphEngine
+                from superlocalmemory.code_graph.graph_store import GraphStore
 
                 store = GraphStore(db)
                 engine = GraphEngine(store)
@@ -1484,9 +1484,9 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                 return _error_response("No changed files provided.")
 
             db = _get_db()
-            from superlocalmemory.code_graph.graph_store import GraphStore
-            from superlocalmemory.code_graph.graph_engine import GraphEngine
             from superlocalmemory.code_graph.blast_radius import BlastRadius
+            from superlocalmemory.code_graph.graph_engine import GraphEngine
+            from superlocalmemory.code_graph.graph_store import GraphStore
 
             store = GraphStore(db)
             engine = GraphEngine(store)
@@ -1648,9 +1648,10 @@ def register_code_graph_tools(server, get_engine: Callable) -> None:
                     f"Code entity '{code_entity}' not found in graph."
                 )
 
+            from datetime import datetime, timezone
+
             from superlocalmemory.code_graph.models import CodeMemoryLink, LinkType
             from superlocalmemory.storage.models import _new_id
-            from datetime import datetime, timezone
 
             now_str = datetime.now(timezone.utc).isoformat()
             link = CodeMemoryLink(

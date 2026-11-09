@@ -3,6 +3,8 @@
 
 """Upgrading the memory engine never deletes a memory, and one click goes back."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import time

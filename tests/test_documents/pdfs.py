@@ -22,13 +22,17 @@ def make_pdf(pages: list[str], *, title: str = "", created: str = "", encrypted:
     objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(pages)} >>".encode()
     trailer_extra = b""
     if title or created:
-        info = "<< " + (f"/Title ({title}) " if title else "") + (f"/CreationDate ({created}) " if created else "") + ">>"
+        info = (
+            "<< " + (f"/Title ({title}) " if title else "") + (f"/CreationDate ({created}) " if created else "") + ">>"
+        )
         objs.append(info.encode("latin-1"))
         trailer_extra += b" /Info %d 0 R" % len(objs)
     if encrypted:
         pad = b"<" + b"ab" * 32 + b">"
         objs.append(b"<< /Filter /Standard /V 1 /R 2 /O " + pad + b" /U " + pad + b" /P -4 >>")
-        trailer_extra += b" /Encrypt %d 0 R /ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>]" % len(objs)
+        trailer_extra += (
+            b" /Encrypt %d 0 R /ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>]" % len(objs)
+        )
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objs, 1):

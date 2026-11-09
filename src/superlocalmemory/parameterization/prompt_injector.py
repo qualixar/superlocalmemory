@@ -18,8 +18,8 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.core.config import ParameterizationConfig
+    from superlocalmemory.storage.database import DatabaseManager
 
 from superlocalmemory.parameterization.soft_prompt_generator import (
     SESSION_EXCLUDED_CATEGORIES,
@@ -133,11 +133,14 @@ class PromptInjector:
         Returns:
             Combined context string with soft prompts first.
         """
-        budget = total_budget or (
-            self._config.max_prompt_tokens + self._config.max_memory_tokens
-        )
         prompt_budget = self._config.max_prompt_tokens
         memory_budget = self._config.max_memory_tokens
+        # 4.2.17: the override was documented and ignored. It is split between
+        # the two parts in the configured ratio.
+        if total_budget is not None and total_budget > 0:
+            configured = max(1, prompt_budget + memory_budget)
+            prompt_budget = total_budget * prompt_budget // configured
+            memory_budget = total_budget - prompt_budget
 
         # Trim soft prompt to its budget
         if soft_prompt_text:
@@ -193,7 +196,9 @@ class PromptInjector:
             max_version = 0
             if version_rows:
                 row = version_rows[0]
-                max_version = (dict(row) if hasattr(row, "keys") else {"max_version": row[0]}).get("max_version", 0) or 0
+                max_version = (
+                    dict(row) if hasattr(row, "keys") else {"max_version": row[0]}
+                ).get("max_version", 0) or 0
             new_version = max_version + 1
 
             # Insert new prompt

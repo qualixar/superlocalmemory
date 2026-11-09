@@ -230,8 +230,8 @@ class GraphAnalyzer:
             return {}
 
         try:
-            import leidenalg
             import igraph
+            import leidenalg
         except ImportError:
             logger.info(
                 "leidenalg not installed, using Louvain fallback",

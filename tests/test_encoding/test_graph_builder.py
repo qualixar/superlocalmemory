@@ -31,7 +31,6 @@ from superlocalmemory.storage.models import (
     MemoryRecord,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -97,7 +96,7 @@ class TestParseDate:
 
 class TestEntityEdges:
     def test_shared_entity_creates_edge(self, db: DatabaseManager) -> None:
-        f1 = _setup_fact(db, "f1", "Alice works at Google",
+        _setup_fact(db, "f1", "Alice works at Google",
                          canonical_entities=["ent_alice"])
         f2 = _setup_fact(db, "f2", "Alice likes hiking",
                          canonical_entities=["ent_alice"])
@@ -174,7 +173,7 @@ class TestTemporalEdges:
 
 class TestSemanticEdges:
     def test_ann_creates_edge(self, db: DatabaseManager) -> None:
-        f1 = _setup_fact(db, "f1", "Alice loves hiking",
+        _setup_fact(db, "f1", "Alice loves hiking",
                          embedding=[1.0, 0.0, 0.0])
         f2 = _setup_fact(db, "f2", "Alice enjoys trails",
                          embedding=[0.9, 0.1, 0.0])
@@ -189,7 +188,7 @@ class TestSemanticEdges:
         assert semantic[0].weight == pytest.approx(0.95, abs=0.01)
 
     def test_below_threshold_no_edge(self, db: DatabaseManager) -> None:
-        f1 = _setup_fact(db, "f1", "Fact A", embedding=[1.0, 0.0])
+        _setup_fact(db, "f1", "Fact A", embedding=[1.0, 0.0])
         f2 = _setup_fact(db, "f2", "Fact B", embedding=[0.0, 1.0])
 
         ann = MagicMock()
@@ -315,8 +314,8 @@ class TestEdgePersistence:
                          canonical_entities=["ent_alice"])
 
         builder = GraphBuilder(db=db)
-        edges1 = builder.build_edges(f2, "default")
-        edges2 = builder.build_edges(f2, "default")  # Build again
+        builder.build_edges(f2, "default")
+        builder.build_edges(f2, "default")  # Build again
         # Second call should not create duplicates
         all_edges = db.get_edges_for_node("f2", "default")
         entity_edges = [e for e in all_edges if e.edge_type == EdgeType.ENTITY]

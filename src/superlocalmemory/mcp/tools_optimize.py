@@ -22,12 +22,11 @@ import logging
 import threading
 import time
 
-
-from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.agent_context import get_current_agent_id
 from superlocalmemory.mcp.remote_caller import current_remote_key_id
+from superlocalmemory.mcp.tool_hints import ADDS, READ_ONLY, SETS
 from superlocalmemory.optimize.compress.ccr import _UUID4_RE, CCRStore
 from superlocalmemory.optimize.compress.router import CompressRouter as CompressRouter
 from superlocalmemory.optimize.compress.router import CompressTextResult as CompressTextResult

@@ -11,6 +11,8 @@ file), moving text to a managed model not approved for text is refused, unless
 the explicit override is passed. A rollback is never refused: it goes back.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from types import SimpleNamespace

@@ -67,15 +67,16 @@ def test_entity_default_paging_uses_fact_count_index(engine_with_mock_deps):
 
 def test_mesh_read_model_separates_remote_peers_from_local_sessions_and_expires_stale():
     """The dashboard must not report loopback sessions or dead peers as mesh peers."""
-    from fastapi import FastAPI
-    from superlocalmemory.mesh.broker import MeshBroker
-    from superlocalmemory.server.routes import mesh as mesh_routes
-    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL
-
     import sqlite3
     import tempfile
     from pathlib import Path
     from types import SimpleNamespace
+
+    from fastapi import FastAPI
+
+    from superlocalmemory.mesh.broker import MeshBroker
+    from superlocalmemory.server.routes import mesh as mesh_routes
+    from superlocalmemory.storage.schema_v343 import _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL
 
     temp_dir = tempfile.mkdtemp()
     db_path = Path(temp_dir) / "mesh.db"

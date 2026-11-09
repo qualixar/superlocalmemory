@@ -429,7 +429,6 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi import FastAPI  # noqa: E402  (after importorskip)
 from fastapi.testclient import TestClient  # noqa: E402
 
-
 DAEMON_HEADERS = {
     "X-SLM-Daemon-Capability": "mesh-capability",
     "X-SLM-Target-Instance": "mesh-instance",
@@ -1244,6 +1243,7 @@ class TestFencingFailClosed:
     def test_missing_table_returns_zero_not_raises(self, tmp_path):
         """First-run: mesh_locks absent → return 0, no exception (normal startup)."""
         import sqlite3 as _sqlite3
+
         from superlocalmemory.mesh.broker_security import seed_fencing_counter
 
         # Empty DB with no tables

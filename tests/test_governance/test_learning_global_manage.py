@@ -7,15 +7,17 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
 from tests.test_governance.test_role_surface_matrix_rest import (
-    _company, _global_admin, matrix,
+    _company,
+    _global_admin,
+    matrix,  # noqa: F401 - pytest fixture, used by name
 )
-from tests.test_server.test_rbac_company_mode_credential import app_and_engine
+from tests.test_server.test_rbac_company_mode_credential import app_and_engine  # noqa: F401 - fixture matrix needs
 
 
 @pytest.mark.parametrize("operation", ["backup", "migrate-legacy"])
 def test_learning_store_operations_require_global_manage(matrix, monkeypatch, tmp_path, operation):
-    from superlocalmemory.server.routes import learning
     from superlocalmemory.learning import legacy_migration
+    from superlocalmemory.server.routes import learning
 
     db = tmp_path / "learning.db"
     with sqlite3.connect(db) as conn:

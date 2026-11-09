@@ -2,7 +2,9 @@
 # Run live against the real llmlingua install — no mocking
 
 from __future__ import annotations
+
 import os
+
 import pytest
 
 # Skip if HF download is blocked in CI to avoid multi-GB downloads.
@@ -62,8 +64,9 @@ def test_empty_input_returns_original() -> None:
 
 def test_default_model_is_xlm_roberta() -> None:
     """Default model must be xlm-roberta-large (compulsory per LOCKED DECISION)."""
-    from superlocalmemory.optimize.compress.prose_llmlingua import _MODEL_XLM, LLMLinguaCompressor
     import inspect
+
+    from superlocalmemory.optimize.compress.prose_llmlingua import _MODEL_XLM, LLMLinguaCompressor
     sig = inspect.signature(LLMLinguaCompressor.__init__)
     default = sig.parameters["model_name"].default
     assert default == _MODEL_XLM, (
@@ -125,8 +128,8 @@ def test_compress_passthrough_when_compressed_prompt_non_string() -> None:
 
 def test_constructor_with_mocked_llmlingua_import(monkeypatch) -> None:
     """Mock llmlingua.PromptCompressor to cover constructor lines 45-59."""
-    from unittest.mock import MagicMock, patch
     import sys
+    from unittest.mock import MagicMock, patch
 
     fake_compressor_class = MagicMock()
     fake_compressor_instance = MagicMock()
@@ -149,8 +152,8 @@ def test_constructor_with_mocked_llmlingua_import(monkeypatch) -> None:
 
 def test_compress_successful_path_returns_compressed(monkeypatch) -> None:
     """Successful compress path (line 74) returns the compressed string."""
-    from unittest.mock import MagicMock, patch
     import sys
+    from unittest.mock import MagicMock, patch
 
     fake_compressor = MagicMock()
     fake_compressor.compress_prompt.return_value = {

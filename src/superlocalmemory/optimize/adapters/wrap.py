@@ -77,17 +77,17 @@ def wrap_agent(
     if needs_liveness:
         if not ensure_proxy_running():
             print(
-                f"[slm wrap] proxy is not enabled or not running — run "
-                f"`slm proxy` to start it, or `slm optimize on` first.",
+                "[slm wrap] proxy is not enabled or not running — run "
+                "`slm proxy` to start it, or `slm optimize on` first.",
                 file=sys.stderr,
             )
             return 1
     else:
         if not _proxy_configured():
             print(
-                f"[slm wrap] proxy is not enabled in optimize.json — set "
-                f"`proxy_enabled: true` (port 8765) and re-run, or run "
-                f"`slm optimize on` first.",
+                "[slm wrap] proxy is not enabled in optimize.json — set "
+                "`proxy_enabled: true` (port 8765) and re-run, or run "
+                "`slm optimize on` first.",
                 file=sys.stderr,
             )
             return 1

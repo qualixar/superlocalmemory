@@ -3,6 +3,8 @@
 
 """Switching the embedding model drops the old model's cached derivations."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 import pytest
 
 from tests.helpers.env_capabilities import NO_VECTOR_SEARCH_REASON, vector_search_available
@@ -11,7 +13,9 @@ if not vector_search_available():
     pytest.skip(NO_VECTOR_SEARCH_REASON, allow_module_level=True)
 
 from tests.test_storage.test_embedding_reindex_units import (  # noqa: E402,F401
-    FakeEmbedder, _run, store,
+    FakeEmbedder,
+    _run,
+    store,
 )
 
 

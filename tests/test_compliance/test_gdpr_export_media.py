@@ -8,8 +8,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from superlocalmemory.compliance.gdpr import GDPRCompliance
 from superlocalmemory.media.store import MediaStore
 from superlocalmemory.sources.store import SourceStore

@@ -7,6 +7,8 @@ All HTTP is mocked: GitHub through ``httpx`` and Google Drive through a fake
 service object. The bytes handed to each mock are captured and checked.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import io
@@ -20,12 +22,12 @@ from typing import Any
 
 import httpx
 import pytest
+from _backup_key_env import key_env  # noqa: F401
 
 from superlocalmemory.infra import backup_crypto as bc
 from superlocalmemory.infra import backup_keys as bk
 from superlocalmemory.infra import cloud_backup as cb
 from superlocalmemory.infra import cloud_backup_crypto as cbc
-from _backup_key_env import key_env  # noqa: F401
 
 PLANTED = "ghp_PLANTEDcredentialDoNotUpload0123456789"
 TS = "20261003-101500-cloud-sync"

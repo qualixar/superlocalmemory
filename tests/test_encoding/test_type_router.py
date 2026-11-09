@@ -20,7 +20,6 @@ import pytest
 from superlocalmemory.encoding.type_router import TypeRouter, _cosine
 from superlocalmemory.storage.models import AtomicFact, FactType, Mode
 
-
 # ---------------------------------------------------------------------------
 # _cosine
 # ---------------------------------------------------------------------------

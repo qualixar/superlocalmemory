@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING
 from superlocalmemory.code_graph.models import EdgeKind
 
 if TYPE_CHECKING:
-    from superlocalmemory.code_graph.database import CodeGraphDatabase
     from superlocalmemory.code_graph.bridge.entity_resolver import MatchedNode
+    from superlocalmemory.code_graph.database import CodeGraphDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,10 @@ class FactEnricher:
             # Get callees count
             callees_count = self._count_edges_from(node.node_id, EdgeKind.CALLS)
 
-            suffix = f"[{node.kind}: {node.file_path}::{node.qualified_name.split('::')[-1] if '::' in node.qualified_name else node.qualified_name}"
+            suffix = (
+                f"[{node.kind}: {node.file_path}::"
+                f"{node.qualified_name.split('::')[-1] if '::' in node.qualified_name else node.qualified_name}"
+            )
             if callers_count > 0:
                 suffix += f"; {callers_count} callers"
             if callees_count > 0:

@@ -437,7 +437,7 @@ def test_render_category_pii_only():
             "user@example.com",
         ),
     ]
-    result = gen._render_category("identity", patterns, "profile_1")
+    gen._render_category("identity", patterns, "profile_1")
     # After PII filter, content may be mostly redacted but still non-empty
     # since the template has static text too
     # Just verify it doesn't crash
@@ -471,7 +471,7 @@ def test_generate_render_returns_none():
     ]
     # This may or may not produce a prompt depending on template static text
     # The key is no crash
-    prompts = gen.generate(patterns, "profile_1")
+    gen.generate(patterns, "profile_1")
 
 
 def test_trim_to_tokens_multi_sentence():
@@ -553,21 +553,19 @@ def test_trim_to_tokens_appends_period_when_missing():
     But total must EXCEED budget (line 360-361 early return) for trimming to engage.
     So make total ~12 tokens with budget ~10.
     """
-    gen = SoftPromptGenerator(config=_make_config())
+    SoftPromptGenerator(config=_make_config())
     # ~12 tokens total. Budget 10. regex split → 2 chunks.
     # Chunk 1: "Hi." (~1 token), Chunk 2: "no period semicolons dashes extra words here" (~7 tokens)
     # Both fit in budget=10 → result_sentences = both → joined doesn't end with "."
     # Total must EXCEED budget to pass the early return.
     # Then after split, chunks 1+2 fit budget but chunk 3 doesn't.
     # Chunk 2 has no period → joined result won't end with "."
-    text = "First. no period part. " + "overflow " * 20
     # Split: ["First.", "no period part.", "overflow overflow ..."]
     # Chunk 1 ~1 token, chunk 2 ~3 tokens → both fit in budget=6
     # Chunk 3 ~15 tokens → exceeds, break
     # result = "First. no period part." → ends with "." → STILL hits
     # Need chunk WITHOUT period that fits.
     # "A. this has no ending period; plus extra. " + overflow
-    text2 = "A. trailing semicolons here; stuff. " + "overflow " * 30
     # Split: ["A.", "trailing semicolons here; stuff.", "overflow overflow..."]
     # All end with "." Still no good.
     # KEY INSIGHT: I need the LAST included chunk to NOT end with "."
@@ -577,13 +575,11 @@ def test_trim_to_tokens_appends_period_when_missing():
     # If budget fits chunks 0+1+2, result="A. B. last-chunk-no-dot" ends without "."
     # But total must exceed budget to not early-return.
     # Add overflow: "A. B. last-chunk-no-dot OVERFLOW_PADDING" * many
-    text3 = "A. B. no final dot here" + " padding" * 20
     # Split: ["A.", "B.", "no final dot here padding padding..."]
     # Total ~23 tokens, budget=15
     # Chunk 0 ~1, Chunk 1 ~1, Chunk 2 ~21 → 1+1=2, +21=23 > 15 → break at chunk 2
     # result_sentences = ["A.", "B."] → ends with "." → NOT line 384
     # Need chunk 2 to FIT. Budget 25, total ~23 → early return. Budget 22:
-    text4 = "A. no dot tail" + " word" * 15
     # Split: ["A.", "no dot tail word word ..."]
     # Total ~13 tokens. Budget = 12.
     # Chunk 0 (1 tok) + Chunk 1 (12 tok) = 13 > 12 → break at chunk 1

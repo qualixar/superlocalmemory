@@ -7,8 +7,9 @@ serving session_init / observe / session_context correctly.
 """
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
+
+import pytest
 
 
 class _FakePool:
@@ -151,7 +152,9 @@ class TestPoolAdapter:
     def test_pool_recall_returns_typed_dataclass(self, monkeypatch):
         from superlocalmemory.mcp import _pool_adapter
         from superlocalmemory.mcp._pool_adapter import (
-            PoolRecallResponse, PoolRecallItem, PoolFact,
+            PoolFact,
+            PoolRecallItem,
+            PoolRecallResponse,
         )
         fake = _FakePool()
         monkeypatch.setattr(_pool_adapter, "_pool", lambda: fake)
@@ -162,8 +165,8 @@ class TestPoolAdapter:
 
     def test_pool_recall_integrates_with_auto_recall(self, monkeypatch):
         """End-to-end: AutoRecall with recall_fn=pool_recall returns context."""
-        from superlocalmemory.mcp import _pool_adapter
         from superlocalmemory.hooks.auto_recall import AutoRecall
+        from superlocalmemory.mcp import _pool_adapter
 
         monkeypatch.setattr(_pool_adapter, "_pool", lambda: _FakePool())
         auto = AutoRecall(recall_fn=_pool_adapter.pool_recall)
@@ -178,7 +181,8 @@ class TestToolsActiveUsesPool:
     """
     def test_session_init_uses_pool_adapter_not_engine_recall(self, monkeypatch):
         import asyncio
-        from superlocalmemory.mcp import tools_active, _pool_adapter
+
+        from superlocalmemory.mcp import _pool_adapter, tools_active
 
         fake_pool = _FakePool()
         monkeypatch.setattr(_pool_adapter, "_pool", lambda: fake_pool)
@@ -227,7 +231,8 @@ class TestToolsActiveUsesPool:
 
     def test_observe_uses_pool_adapter_not_engine_store(self, monkeypatch):
         import asyncio
-        from superlocalmemory.mcp import tools_active, _pool_adapter
+
+        from superlocalmemory.mcp import _pool_adapter, tools_active
 
         fake_pool = _FakePool()
         monkeypatch.setattr(_pool_adapter, "_pool", lambda: fake_pool)

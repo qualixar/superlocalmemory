@@ -29,8 +29,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _slm_env as env  # noqa: E402
 import corpus  # noqa: E402
 from _verdicts import (  # noqa: E402,F401
-    DOWNGRADE_SCHEMA, core_counts_unchanged, TARGET_SCHEMA, check_ok, downgrade_ok, expected_hits, failing, overlap,
-    mapping_diff, recall_check, recall_verdict, restore_problems, snapshot_passed, snapshot_reasons, snapshotless_verdict, upgrade_ok)
+    DOWNGRADE_SCHEMA,
+    TARGET_SCHEMA,
+    check_ok,
+    core_counts_unchanged,
+    downgrade_ok,
+    expected_hits,
+    failing,
+    mapping_diff,
+    overlap,
+    recall_check,
+    recall_verdict,
+    restore_problems,
+    snapshot_passed,
+    snapshot_reasons,
+    snapshotless_verdict,
+    upgrade_ok,
+)
 
 SNAP_DIR = "pre-migration-snapshots"
 EXPECTED_OLD = "4.1.24"
@@ -193,17 +208,26 @@ def restore_one(new_py: Path, root: Path, snap: Path, fixture: Path, work: Path)
     contents_ok = kind != "memory.db" or env.contents_by_ref(got_db) == env.contents_by_ref(want_db)
     problems = restore_problems(want_cols, got_cols, env.table_counts(want_db), env.table_counts(got_db),
                                 env.schema_version(want_db), env.schema_version(got_db), contents_ok)
-    return {**out, "ok": not problems, "reasons": problems, "contents_identical": contents_ok,
-            "bytes_identical": env.sha256_file(got_db) == env.sha256_file(want_db),
-            "extra_tables": sorted(set(got_cols) - set(want_cols)), "missing_tables": sorted(set(want_cols) - set(got_cols)),
-            "schema_versions": {"fixture": env.schema_version(want_db), "restored": env.schema_version(got_db)}}
+    return {
+        **out,
+        "ok": not problems,
+        "reasons": problems,
+        "contents_identical": contents_ok,
+        "bytes_identical": env.sha256_file(got_db) == env.sha256_file(want_db),
+        "extra_tables": sorted(set(got_cols) - set(want_cols)),
+        "missing_tables": sorted(set(want_cols) - set(got_cols)),
+        "schema_versions": {"fixture": env.schema_version(want_db), "restored": env.schema_version(got_db)},
+    }
 
 
 def _no_snapshot_detail(detail: dict, fixture: Path, data: Path, names: tuple = ("memory.db", "learning.db")) -> dict:
     """Judge a start that left no pre-migration copy (see ``snapshotless_verdict``)."""
-    verdict = snapshotless_verdict({n: env.schema_signature(fixture / "data" / n) for n in names},
-                                   {n: env.schema_signature(data / n) for n in names},
-                                   env.table_counts(fixture / "data" / "memory.db"), env.table_counts(data / "memory.db"))
+    verdict = snapshotless_verdict(
+        {n: env.schema_signature(fixture / "data" / n) for n in names},
+        {n: env.schema_signature(data / n) for n in names},
+        env.table_counts(fixture / "data" / "memory.db"),
+        env.table_counts(data / "memory.db"),
+    )
     detail.update(status=verdict["status"], passed=verdict["passed"], schema_changes=verdict["diff"])
     detail["errors"] += verdict["errors"]
     if verdict["status"] == "n/a":
@@ -227,7 +251,9 @@ def check_snapshot(new_py: Path, root: Path, known: set[str], fixture: Path, wor
     detail["restores"] = [restore_one(new_py, root, s, fixture, work) for s in snaps]
     detail["errors"] += snapshot_reasons(detail["restores"], rc)
     detail["passed"] = snapshot_passed(detail["restores"], rc)
-    bare = tuple(n for n in ("memory.db", "learning.db") if not any(s.name.startswith(n.split(".")[0] + "-") for s in snaps))
+    bare = tuple(
+        n for n in ("memory.db", "learning.db") if not any(s.name.startswith(n.split(".")[0] + "-") for s in snaps)
+    )
     if bare:  # a database without its own copy must not have changed in a way that needed one
         extra = _no_snapshot_detail({"errors": []}, fixture, data, bare)
         detail["schema_changes"] = extra["schema_changes"]
@@ -290,7 +316,9 @@ def run_checks(fixture: Path, old_py: Path, new_py: Path, work: Path, down_py: P
     if down_py:
         alt_root = work / "upgraded-alt"
         shutil.copytree(new_root, alt_root)
-        checks[f"downgrade_to_{EXPECTED_DOWN}"] = downgrade_to(new_py, down_py, alt_root, base["runs"], EXPECTED_DOWN, 53)
+        checks[f"downgrade_to_{EXPECTED_DOWN}"] = downgrade_to(
+            new_py, down_py, alt_root, base["runs"], EXPECTED_DOWN, 53
+        )
     checks["downgrade"] = downgrade_to(new_py, old_py, new_root, base["runs"], EXPECTED_OLD, 54)
     return {"fixture_version": manifest["version"], "fixture_embedding_mode": manifest["embedding_mode"],
             "checks": checks, "failing": failing(checks), "total_seconds": round(time.monotonic() - started, 1)}

@@ -46,7 +46,6 @@ from typing import Optional
 from superlocalmemory.core.ram_lock import ram_reservation
 from superlocalmemory.infra.data_root import DynamicStatePath, state_path
 
-
 # --------------------------------------------------------------------------
 # Module constants
 # --------------------------------------------------------------------------

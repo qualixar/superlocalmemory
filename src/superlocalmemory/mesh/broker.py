@@ -18,22 +18,28 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections.abc import Sequence
 from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger("superlocalmemory.mesh")
-import os as _os
+import os as _os  # noqa: E402 - late import, order kept
 
-from .broker_security import (  # noqa: E501
-    apply_security_schema, check_cross_profile_sender, ensure_db_healthy, get_or_create_peer_key, reject_secret_state, seed_fencing_counter, _set_nonce_db_path, validate_lock_fence_query,  # noqa: E501
+from . import broker_cleanup, broker_inbox, broker_profiles  # noqa: E402 - late import, order kept
+from .broker_owner import OwnerControlsMixin  # noqa: E402 - late import, order kept
+from .broker_security import (  # noqa: E501, E402
+    _set_nonce_db_path,
+    apply_security_schema,  # noqa: E501
+    check_cross_profile_sender,
+    ensure_db_healthy,
+    get_or_create_peer_key,
+    reject_secret_state,
+    seed_fencing_counter,
+    validate_lock_fence_query,
 )
-
-from . import broker_cleanup, broker_inbox, broker_profiles
-from .broker_owner import OwnerControlsMixin
-from .broker_web import WebPeersMixin
-from .envelope import Origin
+from .broker_web import WebPeersMixin  # noqa: E402 - late import, order kept
+from .envelope import Origin  # noqa: E402 - late import, order kept
 
 # Remote sync support (optional, try/except to avoid import issues)
 try:
@@ -406,7 +412,8 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
 
     @staticmethod
     def _too_large(content: str) -> dict:
-        return {"ok": False, "error": f"message too large ({len(content.encode('utf-8'))} bytes, max {MAX_MESSAGE_SIZE}). "
+        return {"ok": False, "error":
+                f"message too large ({len(content.encode('utf-8'))} bytes, max {MAX_MESSAGE_SIZE}). "
                 "Mesh messages are notifications — reference a file path instead."}
 
     def _forward_if_remote(self, from_peer: str, to_peer: str, content: str,
@@ -510,7 +517,10 @@ class MeshBroker(OwnerControlsMixin, WebPeersMixin):
         if fields is not None:
             broker_profiles.insert_envelope(conn, msg_id, kind=kind, app=app, fields=fields)
         if operation_id:
-            conn.execute("INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)", (operation_id, msg_id, now))
+            conn.execute(
+                "INSERT OR IGNORE INTO mesh_sent_ops (operation_id, message_id, created_at) VALUES (?, ?, ?)",
+                (operation_id, msg_id, now),
+            )
         self._log_event(conn, "message_sent", from_peer or "system", {
             "to": _to_peer, "target_type": target_type, "project": _project_path,
         }, profile_id=profile_id)

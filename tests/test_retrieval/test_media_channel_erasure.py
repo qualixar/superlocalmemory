@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from benchmark.recall_channels import migrate
+
 from superlocalmemory.retrieval.media_channel import MediaChannel
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager

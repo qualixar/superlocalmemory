@@ -20,10 +20,8 @@ import pytest
 
 from superlocalmemory.learning.arm_catalog import ARM_CATALOG
 from superlocalmemory.learning.bandit import (
-    BanditChoice,
     ContextualBandit,
     _conn_for,
-    compute_stratum,
 )
 from superlocalmemory.learning.bandit_cache import (
     _BanditCache,
@@ -35,7 +33,6 @@ from superlocalmemory.learning.ensemble import (
     _apply_weights_score,
     _candidate_to_result,
     _parse_blend,
-    _softmax_unit,
     ensemble_rerank,
 )
 from superlocalmemory.learning.reward_proxy import (
@@ -45,7 +42,6 @@ from superlocalmemory.learning.reward_proxy import (
     settle_stale_plays,
 )
 from superlocalmemory.storage.migration_runner import apply_all
-
 
 # ---------------------------------------------------------------------------
 # bandit_cache

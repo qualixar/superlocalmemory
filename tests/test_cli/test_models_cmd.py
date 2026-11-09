@@ -43,10 +43,10 @@ class TestTextOutput:
         models_cmd.cmd_models(Namespace(json=False))
 
         out = capsys.readouterr().out
-        lines = [l for l in out.splitlines() if l.strip()]
+        lines = [line for line in out.splitlines() if line.strip()]
         installed_block = out.split("Installed Ollama models", 1)[1]
         first_model_line = next(
-            l for l in installed_block.splitlines() if l.strip().startswith(("gemma", "llama", "qwen"))
+            line for line in installed_block.splitlines() if line.strip().startswith(("gemma", "llama", "qwen"))
         )
         assert "gemma3:4b" in first_model_line
         assert "This computer: 24.0 GB" in out

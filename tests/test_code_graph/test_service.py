@@ -63,8 +63,9 @@ class TestGetStats:
         assert stats["built"] is False
 
     def test_stats_with_data(self, service: CodeGraphService):
-        from superlocalmemory.code_graph.models import GraphNode, NodeKind
         import time
+
+        from superlocalmemory.code_graph.models import GraphNode, NodeKind
 
         node = GraphNode(
             node_id="n1", kind=NodeKind.FUNCTION, name="test",

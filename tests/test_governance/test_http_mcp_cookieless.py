@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.test_governance.test_role_surface_matrix_mcp import store
+from tests.test_governance.test_role_surface_matrix_mcp import store  # noqa: F401 - pytest fixture, used by name
 
 
 @pytest.mark.parametrize("connection", ["transport-session", "explicit-binding", "unidentified"])

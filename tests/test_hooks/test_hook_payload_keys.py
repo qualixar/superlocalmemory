@@ -61,8 +61,9 @@ def test_stdin_is_rewritten_once_and_non_json_passes_through(monkeypatch):
 
 
 def test_the_dispatcher_normalises_before_the_handler_reads(monkeypatch):
-    from superlocalmemory.hooks import hook_handlers
     import sys
+
+    from superlocalmemory.hooks import hook_handlers
 
     seen = {}
 

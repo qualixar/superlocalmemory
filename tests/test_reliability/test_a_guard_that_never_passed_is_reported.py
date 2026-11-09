@@ -43,7 +43,7 @@ def _store(path, *, with_column: bool, elsewhere: int | None = None, facts: int 
     conn.execute(f"CREATE TABLE facts ({cols})")
     if facts:
         conn.executemany(
-            f"INSERT INTO facts (fact_id, content) VALUES (?, ?)",
+            "INSERT INTO facts (fact_id, content) VALUES (?, ?)",
             [(f"f{i}", "x") for i in range(facts)],
         )
     if elsewhere is not None:

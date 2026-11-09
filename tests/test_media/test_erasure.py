@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-
 from superlocalmemory.core.transactions.concrete_owners import build_erasure_service_for_db
 from superlocalmemory.core.transactions.erasure import ErasureService
 from superlocalmemory.core.transactions.owners import OperationContext
 from superlocalmemory.media import files, media_db_path
 from superlocalmemory.media.erasure import MediaErasureOwner
-
 from tests.test_media._erase_support import MemDb, add_image, cached, make_root
 
 

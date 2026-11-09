@@ -87,10 +87,9 @@ import logging
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-
-from contextlib import contextmanager
 
 from superlocalmemory.storage.logical_edges import iter_logical_edges
 

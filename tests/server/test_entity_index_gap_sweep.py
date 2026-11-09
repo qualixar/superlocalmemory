@@ -21,6 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.test_retrieval.test_bridge_determinism import build_store
 
 from superlocalmemory.server.entity_index_repair import (
     MAX_TICK_SECONDS,
@@ -30,7 +31,6 @@ from superlocalmemory.server.entity_index_repair import (
 )
 from superlocalmemory.storage import entity_index
 from superlocalmemory.storage.models import AtomicFact
-from tests.test_retrieval.test_bridge_determinism import build_store
 
 
 def _has_pair(store, fact_id: str, entity_id: str) -> bool:

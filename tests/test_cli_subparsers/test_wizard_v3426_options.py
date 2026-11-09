@@ -108,7 +108,8 @@ class TestPersistence:
 
 class TestSecurityHardening:
     def test_options_written_at_0600(self, slm_home):
-        import os, sys
+        import os
+        import sys
         if sys.platform == "win32":
             pytest.skip("POSIX perm check")
         persist_v3426_options(V3426Options(True, 30, 10, 100), slm_home)
@@ -117,7 +118,8 @@ class TestSecurityHardening:
         assert mode == 0o600
 
     def test_parent_dir_tightened_to_0700(self, tmp_path):
-        import os, sys
+        import os
+        import sys
         if sys.platform == "win32":
             pytest.skip("POSIX perm check")
         loose = tmp_path / "loose"

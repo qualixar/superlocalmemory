@@ -23,7 +23,6 @@ from superlocalmemory.learning.bandit_cache import _BanditCache
 from superlocalmemory.learning.reward_proxy import settle_stale_plays
 from superlocalmemory.storage.migration_runner import apply_all
 
-
 PROFILE = "rp"
 
 
@@ -329,7 +328,6 @@ def test_missing_tool_events_db_defaults_safely(tmp_path: Path, env):
 
 def test_settle_stale_plays_on_missing_learning_db(tmp_path: Path):
     """Bad learning path → returns 0 without raising."""
-    ghost = tmp_path / "nope.db"
     memory = _bootstrap_memory_db(tmp_path)
     # Opening a missing file creates an empty DB — so we use a directory
     # path that sqlite cannot open.

@@ -6,6 +6,8 @@ also covers the v3.6.12 fixes: shared-secret enforcement for non-loopback
 callers (mesh-1) and lock-release rowcount honesty (mesh-2).
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import sqlite3
@@ -22,7 +24,6 @@ from fastapi.testclient import TestClient
 from superlocalmemory.mesh.broker import MeshBroker
 from superlocalmemory.server.routes import mesh as mesh_routes
 
-
 DAEMON_HEADERS = {
     "X-SLM-Daemon-Capability": "mesh-capability",
     "X-SLM-Target-Instance": "mesh-instance",
@@ -31,7 +32,9 @@ DAEMON_HEADERS = {
 
 def _init_mesh_schema(db_path: str) -> None:
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_DDL, _MESH_V346_ALTERS,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn = sqlite3.connect(db_path)
     conn.executescript(_MESH_DDL)

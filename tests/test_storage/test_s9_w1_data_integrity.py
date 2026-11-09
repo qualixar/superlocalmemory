@@ -25,7 +25,6 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
-
 from superlocalmemory.storage import migration_runner
 from superlocalmemory.storage.migrations import (
     M002_model_state_history as M002,
@@ -33,7 +32,6 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M020_model_state_integrity as M020,
 )
-
 
 # ---------------------------------------------------------------------------
 # H-DATA-01 — M020 forward migration backfills bytes_sha256

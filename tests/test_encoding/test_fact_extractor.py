@@ -369,6 +369,7 @@ class TestFactExtractorModeLLM:
             session_id="s1",
         )
         # Should fall back to local extraction
+        assert len(facts) > 0
 
     def test_llm_importance_normalization(self) -> None:
         response = json.dumps(

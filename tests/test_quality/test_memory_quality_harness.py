@@ -13,9 +13,9 @@ import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from superlocalmemory.integrations.bounded_loops_mcp import bridge_payload
 from superlocalmemory.storage import schema as real_schema

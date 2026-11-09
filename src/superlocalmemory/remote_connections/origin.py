@@ -11,8 +11,8 @@ import asyncio
 import base64
 import logging
 import time
-from contextlib import nullcontext
 from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from typing import Any
 
 import httpx

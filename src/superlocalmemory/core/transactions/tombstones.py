@@ -28,7 +28,8 @@ def _invalidate_display_summaries(conn: object, profile_id: str, fact_id: str) -
     """Drop derived text that quotes the fact the moment its erasure starts.
 
     ``consolidated_summaries`` rows and the soft prompts built from a core block
-    that quotes the fact are derived text that their owners regenerate, so removing them here costs nothing on heal and means no
+    that quotes the fact are derived text that their owners regenerate, so removing them here costs nothing on
+    heal and means no
     reader can ever see the fact's words through a summary. The read path also
     withholds them by tombstone (storage/erasure_visibility.py) for tombstones
     written by other paths.

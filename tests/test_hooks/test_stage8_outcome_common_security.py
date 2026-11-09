@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 # POSIX-only — chmod semantics are different on Windows.
 if sys.platform == "win32":  # pragma: no cover — not targeted on Windows
     pytest.skip("stage8 dir-perm tests are POSIX-only",

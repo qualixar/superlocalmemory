@@ -171,8 +171,8 @@ from __future__ import annotations
 
 import json
 import os
-import statistics
 import platform
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -197,6 +197,11 @@ if str(_SRC) not in sys.path:
 # ---------------------------------------------------------------------------
 # SLM imports (same import block as the 4.0.5 gate for consistency)
 # ---------------------------------------------------------------------------
+import superlocalmemory.storage.migrations.M018_ingestion_operations as m018  # noqa: E402
+import superlocalmemory.storage.migrations.M032_write_coordinator_admission as m032  # noqa: E402
+import superlocalmemory.storage.migrations.M033_projection_transactions as m033  # noqa: E402
+import superlocalmemory.storage.migrations.M034_obligation_integrity as m034  # noqa: E402
+import superlocalmemory.storage.migrations.M042_correction_case_ledger as m042  # noqa: E402
 from superlocalmemory.core.config import RetrievalConfig  # noqa: E402
 from superlocalmemory.core.engine_ingestion import build_immediate_admission_handler  # noqa: E402
 from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime  # noqa: E402
@@ -205,11 +210,6 @@ from superlocalmemory.retrieval.engine import RetrievalEngine  # noqa: E402
 from superlocalmemory.storage import schema  # noqa: E402
 from superlocalmemory.storage.admission_journal import Actor, RememberRequest  # noqa: E402
 from superlocalmemory.storage.database import DatabaseManager  # noqa: E402
-import superlocalmemory.storage.migrations.M018_ingestion_operations as m018  # noqa: E402
-import superlocalmemory.storage.migrations.M032_write_coordinator_admission as m032  # noqa: E402
-import superlocalmemory.storage.migrations.M033_projection_transactions as m033  # noqa: E402
-import superlocalmemory.storage.migrations.M034_obligation_integrity as m034  # noqa: E402
-import superlocalmemory.storage.migrations.M042_correction_case_ledger as m042  # noqa: E402
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord  # noqa: E402
 
 # ---------------------------------------------------------------------------

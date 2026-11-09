@@ -26,7 +26,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from superlocalmemory.core.lifecycle_state import (
@@ -340,8 +340,8 @@ def _demote_tier(
 # In-memory counter for batch-flush access recording.
 # Thread-safe. Flushed to SQLite every _ACCESS_FLUSH_THRESHOLD records
 # or _ACCESS_FLUSH_SECONDS, whichever comes first.
-import threading as _threading
-from datetime import datetime as _datetime
+import threading as _threading  # noqa: E402 - late import, order kept
+from datetime import datetime as _datetime  # noqa: E402 - late import, order kept
 
 _pending_accesses: dict[str, int] = {}
 _access_lock = _threading.Lock()

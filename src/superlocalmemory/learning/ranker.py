@@ -24,10 +24,8 @@ import math
 from typing import Any
 
 from superlocalmemory.learning.features import (
-    FEATURE_DIM,
     FEATURE_NAMES,
     FeatureExtractor,
-    FeatureVector,
 )
 
 logger = logging.getLogger(__name__)

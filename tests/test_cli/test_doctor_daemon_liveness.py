@@ -244,7 +244,6 @@ def test_features_get_a_sane_budget_and_slowness_never_says_restart(
         monkeypatch, free_port, capsys, probes):
     import time
 
-    from superlocalmemory.cli.doctor_daemon import ProbeTimeout
 
     assert doctor_daemon.FEATURES_TIMEOUT >= 2.0 > doctor_daemon.HEALTH_TIMEOUT
     assert doctor_daemon.CHECK_TIMEOUT >= doctor_daemon.FEATURES_TIMEOUT + doctor_daemon.HEALTH_TIMEOUT

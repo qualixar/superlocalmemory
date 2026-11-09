@@ -4,9 +4,11 @@
 
 """Tests for LLM provider layer — Task 1 of V3 build."""
 import json
+
 import pytest
-from superlocalmemory.llm.backbone import LLMBackbone, _SUPPORTED_PROVIDERS
-from superlocalmemory.core.config import SLMConfig, LLMConfig
+
+from superlocalmemory.core.config import LLMConfig, SLMConfig
+from superlocalmemory.llm.backbone import _SUPPORTED_PROVIDERS, LLMBackbone
 from superlocalmemory.storage.models import Mode
 
 

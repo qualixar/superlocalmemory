@@ -228,8 +228,9 @@ def test_redaction_growing_text_is_rechecked(broker, monkeypatch) -> None:
 
 
 def test_limiter_is_atomic_and_forgets_idle_senders() -> None:
-    from superlocalmemory.mesh.broker_profiles import SendRateLimiter
     import threading
+
+    from superlocalmemory.mesh.broker_profiles import SendRateLimiter
     lim = SendRateLimiter(limit=5, window_s=60)
     results = []
     threads = [threading.Thread(target=lambda: results.append(lim.try_acquire("p", "s")))

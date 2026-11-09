@@ -59,8 +59,8 @@ class CCRStore:
         RB-05: Only original bytes accepted; compressed bytes stored via update_compressed().
         """
         try:
-            import uuid as _uuid_mod
             import time as _time_mod
+            import uuid as _uuid_mod
             ccr_id = str(_uuid_mod.uuid4())
             db = self._get_db()
             ttl_expires = (

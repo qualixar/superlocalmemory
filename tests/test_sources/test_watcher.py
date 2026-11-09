@@ -8,9 +8,9 @@ import time
 from types import SimpleNamespace
 
 from superlocalmemory.sources import folder_watch as watcher_mod
+from superlocalmemory.sources.folder_watch import SourceWatcher
 from superlocalmemory.sources.report import build_report
 from superlocalmemory.sources.store import SourceStore
-from superlocalmemory.sources.folder_watch import SourceWatcher
 
 
 class FakeObserver:
@@ -222,7 +222,7 @@ def test_service_has_no_observer_for_a_paused_source(env):
     from superlocalmemory.sources.scanner import SourceScanService
 
     env.write("a.md", "one")
-    sid = env.add_and_confirm()
+    env.add_and_confirm()
     env.host.sleep = lambda s: None
     env.remote = True  # the scan pauses the source
     FakeObserver.made = []

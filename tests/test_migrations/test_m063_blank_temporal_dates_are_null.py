@@ -5,7 +5,6 @@ uncacheable (M057's non-ISO rule), and every recall re-read 5,000 events.
 """
 
 import sqlite3
-from types import SimpleNamespace
 
 from superlocalmemory.storage.migrations import M057_temporal_retrieval_version as m057
 from superlocalmemory.storage.migrations import M063_blank_temporal_dates_are_null as m063

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 from benchmarks.resource_lifecycle.harness import (
     latency_summary,
     render_markdown,

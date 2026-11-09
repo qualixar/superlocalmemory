@@ -21,7 +21,6 @@ import pytest
 from superlocalmemory.core import context_cache as cc
 from superlocalmemory.core import security_primitives as sp
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

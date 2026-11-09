@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-
 from superlocalmemory.core.config import ParameterizationConfig
 from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
 from superlocalmemory.parameterization.pattern_extractor import (
