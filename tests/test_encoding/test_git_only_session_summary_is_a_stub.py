@@ -117,6 +117,28 @@ def test_git_only_shapes_are_stubs(text):
 
 
 @pytest.mark.parametrize("text", [
+    # Copies the extractor paraphrases from the Stop/agent lines; every count is
+    # unflagged rows on the same store after the first M068 pass.
+    "session ended on 2026-10-11 16:02",                                  # 194
+    "The session ended at 2026-11-07 13:49 in config",                    # 149
+    "The session ended on 2026-10-11 16:00",                              # 89
+    "The session ended at 2026-11-07 13:49 in superlocalmemory.",         # 63
+    "A session ended on 2026-10-11 16:19",                                # 30
+    "Varun's session ended on 2026-10-11 16:19",                          # 12
+    "Varunpratapbhardwaj's session ended on 2026-10-11",                  # 5
+    "The Agentic_official's session ended on 2026-10-11 16:19",           # 4
+    "Claude\u2019s session ended on 2026-10-11 16:19",
+    "the audit-pack session ended 2026-10-11 16:19",
+    "session ended at 23:53",
+    "2026-10-11 is the date when Varun's session ended",                  # 7
+    "2026-10-11 is the date when the session ended",
+    "2026-10-11 is the date the session ended.",
+])
+def test_paraphrased_session_end_stamps_are_stubs(text):
+    assert is_stub(text)
+
+
+@pytest.mark.parametrize("text", [
     "[Agentic_official] session ended 2026-10-13 11:01 | branch: fix/4.2.2"
     " | recent: 0545bc9a fix: calibration reads the workspace",
     "[Agentic_official] session ended 2026-10-13 11:01 | branch: main"
@@ -129,6 +151,12 @@ def test_git_only_shapes_are_stubs(text):
     "uncommitted: the migration plan still needs a rollback step",
     "branch: main is protected, so every change goes through a pull request",
     "There were 2 files changed in the main branch",
+    "The session ended at 2026-11-01 10:00 in a deadlock we never reproduced",
+    "The session ended at 2026-11-01 10:00 in the evening",
+    "Varun's session ended on a Thursday",
+    "The session ended yesterday",
+    "2026-10-11 is the date when the billing migration went live",
+    "The session ended on 2026-10-11 16:00 because the laptop died",
 ])
 def test_lines_with_real_content_stay_answers(text):
     assert not is_stub(text)

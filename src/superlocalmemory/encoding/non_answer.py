@@ -32,8 +32,19 @@ import re
 
 _EMPTY = re.compile(r'^[\s\[\]{}(),;:]*$')
 _DATE = r'\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?'
-_SESSION = re.compile(r'^(?:\[\]\s*)?(?:the\s+)?(?:user[\'\u2019]s\s+)?session\s+(?:ended|closed)'
-                      r'(?:\s+at)?\s+' + _DATE + r'[.!]?$', re.I)
+# "session ended <stamp>" and the copies the extractor paraphrases from it:
+# "The session ended on <stamp>", "A session ended at <stamp> in config",
+# "Varun's session ended on <stamp>", "<date> is the date when the session
+# ended". Nothing but the stamp, an optional one-word owner and an optional
+# one-token project ("in config"), so "ended at 10:00 in a deadlock we never
+# reproduced" or "ended on <date> because the laptop died" stays an answer.
+_WHO = r'(?:(?:the|a|an)\s+)?(?:[\w.-]{1,60}[\'\u2019]s\s+|[\w-]{1,40}\s+)?'
+_STAMP = r'(?:' + _DATE + r'|\d{1,2}:\d{2}(?::\d{2})?)'
+_SESSION = re.compile(r'^(?:\[\]\s*)?' + _WHO + r'session\s+(?:ended|closed)'
+                      r'(?:\s+(?:at|on))?\s+' + _STAMP
+                      + r'(?:\s+in\s+[\w.@-]{1,100}?)?[.!]?$', re.I)
+_SESSION_DATE_FIRST = re.compile(r'^' + _DATE + r'\s+is\s+the\s+date\s+(?:when\s+|that\s+)?'
+                                 + _WHO + r'session\s+(?:ended|closed)[.!]?$', re.I)
 # The last line of ``git diff --stat``: "2 files changed, 0 insertions(+), 0 deletions(-)".
 _DIFF_STAT = (r'\d+\s+files?\s+changed(?:,\s*\d+\s+insertions?\(\+\))?'
               r'(?:,\s*\d+\s+deletions?\(-\))?')
@@ -77,6 +88,7 @@ def is_empty_structure(text: str) -> bool:
 def is_stub(text: str) -> bool:
     value = (text or '').strip()
     return bool(value and (_EMPTY.fullmatch(value) or _SESSION.fullmatch(value)
+                           or _SESSION_DATE_FIRST.fullmatch(value)
                            or _RECEIPT.fullmatch(value) or _hook_line(value)))
 
 

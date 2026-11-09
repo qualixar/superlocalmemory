@@ -10,13 +10,14 @@ M062 (4.2.2) flagged the stored stubs the rule knew then, and new saves are
 flagged as they are written. The rule has since learned more shapes: the
 Codex/agent checkpoint without its "[agent]" prefix (4.2.14), "the session
 ended <date> <time>" (4.2.15), and the Stop hook summary that adds only the
-branch and the ``git diff --stat`` total, plus the copies ingestion derives
-from it ("the user's session ended ...", "2 files changed, 0 insertions(+)",
-"uncommitted: ..."). Rows of those shapes stored before each change were never
-re-checked, and recall leaves a row out of its answers by the flag, not the
-text. Measured on one real store: 1,764 unflagged rows of the 4.2.14/4.2.15
-shapes, and 100 git-only summaries, three of which were shown at one session
-start as "relevant memories".
+branch and the ``git diff --stat`` total, plus the copies the extractor
+paraphrases from these lines ("The session ended on <stamp>", "Varun's session
+ended at <stamp>", "<date> is the date when the session ended", "2 files
+changed, 0 insertions(+)"). Rows of those shapes stored before each change were
+never re-checked, and recall leaves a row out of its answers by the flag, not
+the text. Measured on one real store: 2,030 such rows, every one a bare
+timestamp or git total; some were shown at a session start as "relevant
+memories".
 
 WHAT IT DOES
 
