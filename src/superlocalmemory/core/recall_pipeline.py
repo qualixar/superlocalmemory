@@ -104,14 +104,15 @@ def _apply_markers_to_response(response: RecallResponse) -> None:
 
 
 def _log_recall_exposure(access_log: Any, results: list, profile_id: str) -> None:
-    """Record which memories this recall returned (``fact_access_log``).
+    """Queue a record of which memories this recall returned (``fact_access_log``).
 
-    The write was lost in 3.8.6 and nothing noticed: on the author's store the
-    last recall row is dated 26 Jul 2026. Retention's access clock and the
-    "active decisions" Core Memory block (decisions read at least N times) both
-    read this table, so every recall since then counted as unread. One batched
-    write of the final results, never raises, and skipped for SLM's own
-    warm-up recalls (``answer_check_scope.not_a_read``).
+    Recall itself stays write-free (the 3.8.6 contract): the batched insert is
+    handed to the shared background writer (``storage.deferred_writes``), the
+    same route spreading activation uses for its cache, so recall never waits
+    on the write lock. Retention's access clock and the "active decisions" Core
+    Memory block read this table; without the record, on the author's store the
+    last recall row was dated 26 Jul 2026. Never raises, and skipped for SLM's
+    own warm-up recalls (``answer_check_scope.not_a_read``).
     """
     if access_log is None or not results:
         return
@@ -119,13 +120,24 @@ def _log_recall_exposure(access_log: Any, results: list, profile_id: str) -> Non
 
     if not is_a_read():
         return
+    fact_ids = [r.fact.fact_id for r in results if getattr(r, "fact", None)]
+    if not fact_ids:
+        return
+
+    def _write() -> None:
+        try:
+            access_log.store_access_batch(
+                fact_ids=fact_ids, profile_id=profile_id, access_type="recall",
+            )
+        except Exception as exc:  # noqa: BLE001 - bookkeeping never fails anything
+            logger.debug("recall exposure log failed: %s", exc)
+
     try:
-        access_log.store_access_batch(
-            fact_ids=[r.fact.fact_id for r in results if getattr(r, "fact", None)],
-            profile_id=profile_id, access_type="recall",
-        )
+        from superlocalmemory.storage import deferred_writes
+
+        deferred_writes.submit_background(_write)
     except Exception as exc:  # noqa: BLE001 - logging a read never fails a recall
-        logger.debug("recall exposure log failed: %s", exc)
+        logger.debug("recall exposure log not queued: %s", exc)
 
 
 def _preserve_exact_lexical_evidence(

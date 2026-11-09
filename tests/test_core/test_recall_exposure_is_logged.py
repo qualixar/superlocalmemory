@@ -2,6 +2,9 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 """Every recall records which memories it returned; SLM's warm-up does not.
 
+The record is queued on the shared background writer, so recall itself stays
+write-free (the 3.8.6 contract); these tests run the queued job inline.
+
 3.8.6 dropped the write and only a slow, never-run test noticed: on the
 author's store the last recall row in ``fact_access_log`` is dated 26 Jul
 2026. Retention's access clock and the "active decisions" Core Memory block
@@ -12,6 +15,8 @@ from __future__ import annotations
 
 import inspect
 from types import SimpleNamespace
+
+import pytest
 
 from superlocalmemory.core import recall_pipeline
 from superlocalmemory.core.answer_check_scope import is_a_read, not_a_read
@@ -26,6 +31,13 @@ class _Log:
             raise RuntimeError("disk full")
         self.calls.append(kwargs)
         return len(kwargs["fact_ids"])
+
+
+@pytest.fixture(autouse=True)
+def _inline_background(monkeypatch):
+    monkeypatch.setattr(
+        "superlocalmemory.storage.deferred_writes.submit_background", lambda fn: fn(),
+    )
 
 
 def _results(*ids):
@@ -52,6 +64,17 @@ def test_a_failed_log_never_fails_the_recall_and_empty_answers_log_nothing():
     recall_pipeline._log_recall_exposure(log, [], "default")
     recall_pipeline._log_recall_exposure(None, _results("a"), "default")
     assert log.calls == []
+
+
+def test_the_write_is_queued_not_run_on_the_recall_thread(monkeypatch):
+    queued, log = [], _Log()
+    monkeypatch.setattr(
+        "superlocalmemory.storage.deferred_writes.submit_background", queued.append,
+    )
+    recall_pipeline._log_recall_exposure(log, _results("a"), "default")
+    assert log.calls == [] and len(queued) == 1
+    queued[0]()
+    assert log.calls[0]["fact_ids"] == ["a"]
 
 
 def test_the_pipeline_logs_and_the_warm_up_is_marked():

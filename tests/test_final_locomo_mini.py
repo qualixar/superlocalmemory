@@ -563,6 +563,10 @@ class TestMathLayers:
         for _ in range(6):
             response = loaded_engine.recall("What is Alice's job?")
             expected_exposures.update(result.fact.fact_id for result in response.results)
+        # The record is written by the background writer, off recall's thread.
+        from superlocalmemory.storage.deferred_writes import shutdown_deferred_writes
+
+        shutdown_deferred_writes()
 
         logged = {
             str(row["fact_id"]): int(row["count"])

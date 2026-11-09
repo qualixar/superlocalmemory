@@ -92,6 +92,13 @@ def test_386_engine_recall_attempts_no_canonical_dml(engine_with_mock_deps, monk
     monkeypatch.setattr(
         "superlocalmemory.infra.local_diagnostics.record_recall", lambda *args, **kwargs: None,
     )
+    # Bookkeeping handed to the shared background writer (4.2.17: the record of
+    # what recall returned) runs off this thread by design; hold it so it cannot
+    # land inside the purity window.
+    queued: list = []
+    monkeypatch.setattr(
+        "superlocalmemory.storage.deferred_writes.submit_background", queued.append,
+    )
 
     try:
         result = engine.recall("read-only contract", fast=True)
@@ -103,6 +110,7 @@ def test_386_engine_recall_attempts_no_canonical_dml(engine_with_mock_deps, monk
     assert result.source_fidelity_status == "checked"
     assert attempted == [], "\n".join(attempted)
     assert after_version == before_version
+    assert queued, "recall should queue the record of what it returned"
 
 
 def test_386_engine_recall_skips_write_capable_bandit(engine_with_mock_deps, monkeypatch):
