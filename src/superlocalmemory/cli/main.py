@@ -408,7 +408,8 @@ def main() -> None:
     db_scale_p.add_argument(
         "scale_action",
         choices=("status", "adopt", "prepare", "verify", "promote", "rollback"),
-        help="Lifecycle action. Adopt confirms a detected legacy projection; prepare and verify never mutate active paths.",
+        help=("Lifecycle action. Adopt confirms a detected legacy projection; "
+              "prepare and verify never mutate active paths."),
     )
     db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
     db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")
@@ -641,8 +642,10 @@ def main() -> None:
     )
 
     forget_p = sub.add_parser("forget", help="Delete memories matching a query (fuzzy)")
-    forget_p.add_argument("query", nargs="?", default=None, help="Query to match for deletion. Optional with --dry-run (previews all memories).")
-    forget_p.add_argument("--dry-run", action="store_true", default=False, help="Preview matches without deleting. With no query, previews every memory.")
+    forget_p.add_argument("query", nargs="?", default=None,
+                          help="Query to match for deletion. Optional with --dry-run (previews all memories).")
+    forget_p.add_argument("--dry-run", action="store_true", default=False,
+                          help="Preview matches without deleting. With no query, previews every memory.")
     forget_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
     forget_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 

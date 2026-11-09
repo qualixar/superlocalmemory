@@ -471,6 +471,25 @@ def _construct_jev(provider: str, store: Any, timeout_s: float, rerank_k: int) -
 
 # -- public ------------------------------------------------------------------
 
+def session_rank_judge(retrieval_config: Any, timeout_s: float) -> Any | None:
+    """A short-lived Jev judge for ordering a session start's memories, or None.
+
+    Same gates as recall's reordering: Jev chosen, both consents the boolean
+    True, a key stored (``jev_rerank_k``, ``_jev_target``). Not the shared live
+    judge: a session start runs in the hook's own process, often with no
+    engine, and the caller shuts this one down when it is done
+    (``core.session_jev``).
+    """
+    k = jev_rerank_k(retrieval_config)
+    if k <= 0:
+        return None
+    target = _jev_target(retrieval_config)
+    if target is None:
+        return None
+    provider, store = target
+    return _construct_jev(provider, store, timeout_s, k)
+
+
 def resolve_judge_mode(retrieval_config: Any) -> str:
     """What would run: "laya", "jev" or "off". Detects; starts nothing."""
     mode = _mode(retrieval_config)
@@ -606,6 +625,7 @@ def release_sufficiency_judge(retrieval_engine: Any, *, final: bool = False) -> 
 
 
 __all__ = [
+    "session_rank_judge",
     "MODE_AUTO",
     "MODE_JEV",
     "MODE_LAYA",

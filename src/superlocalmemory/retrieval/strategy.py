@@ -16,12 +16,30 @@ import re
 from dataclasses import dataclass, field
 
 STRATEGY_PRESETS: dict[str, dict[str, float]] = {
-    "temporal": {"semantic": 0.8, "bm25": 1.5, "entity_graph": 0.8, "temporal": 2.0, "spreading_activation": 0.5, "hopfield": 0.5},
-    "multi_hop": {"semantic": 1.0, "bm25": 0.8, "entity_graph": 2.5, "temporal": 0.5, "spreading_activation": 2.0, "hopfield": 0.7},
-    "aggregation": {"semantic": 1.2, "bm25": 1.5, "entity_graph": 1.0, "temporal": 0.5, "spreading_activation": 0.8, "hopfield": 0.6},
-    "opinion": {"semantic": 1.8, "bm25": 0.6, "entity_graph": 0.8, "temporal": 0.3, "spreading_activation": 0.5, "hopfield": 0.5},
-    "factual": {"semantic": 1.2, "bm25": 1.4, "entity_graph": 1.0, "temporal": 0.6, "spreading_activation": 0.8, "hopfield": 0.8},
-    "entity": {"semantic": 1.0, "bm25": 1.2, "entity_graph": 3.0, "temporal": 0.5, "spreading_activation": 1.5, "hopfield": 0.9},
+    "temporal": {
+        "semantic": 0.8, "bm25": 1.5, "entity_graph": 0.8,
+        "temporal": 2.0, "spreading_activation": 0.5, "hopfield": 0.5,
+    },
+    "multi_hop": {
+        "semantic": 1.0, "bm25": 0.8, "entity_graph": 2.5,
+        "temporal": 0.5, "spreading_activation": 2.0, "hopfield": 0.7,
+    },
+    "aggregation": {
+        "semantic": 1.2, "bm25": 1.5, "entity_graph": 1.0,
+        "temporal": 0.5, "spreading_activation": 0.8, "hopfield": 0.6,
+    },
+    "opinion": {
+        "semantic": 1.8, "bm25": 0.6, "entity_graph": 0.8,
+        "temporal": 0.3, "spreading_activation": 0.5, "hopfield": 0.5,
+    },
+    "factual": {
+        "semantic": 1.2, "bm25": 1.4, "entity_graph": 1.0,
+        "temporal": 0.6, "spreading_activation": 0.8, "hopfield": 0.8,
+    },
+    "entity": {
+        "semantic": 1.0, "bm25": 1.2, "entity_graph": 3.0,
+        "temporal": 0.5, "spreading_activation": 1.5, "hopfield": 0.9,
+    },
     # A question about the present carries almost no topical information in its
     # words: "what am I working on" matches anything containing "working",
     # including a note from a month ago about a working tree. Word-matching was
@@ -34,7 +52,10 @@ STRATEGY_PRESETS: dict[str, dict[str, float]] = {
         "entity_graph": 1.0, "spreading_activation": 0.8, "hopfield": 0.5,
     },
     "general": {},
-    "vague": {"semantic": 0.8, "bm25": 0.5, "entity_graph": 0.6, "temporal": 0.3, "spreading_activation": 1.5, "hopfield": 1.1},
+    "vague": {
+        "semantic": 0.8, "bm25": 0.5, "entity_graph": 0.6,
+        "temporal": 0.3, "spreading_activation": 1.5, "hopfield": 1.1,
+    },
 }
 
 _TEMPORAL_WORDS: frozenset[str] = frozenset({

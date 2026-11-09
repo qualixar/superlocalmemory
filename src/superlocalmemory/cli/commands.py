@@ -664,7 +664,9 @@ def dispatch(args: Namespace) -> None:
         "list": cmd_list,
         "remember": cmd_remember,
         "recall": cmd_recall,
-        "search": cmd_recall,  # v3.6.12 (parity-3): MCP exposes a `search` verb; give the CLI parity (recall is multi-channel incl. BM25/keyword).
+        # v3.6.12 (parity-3): MCP exposes a `search` verb; give the CLI parity
+        # (recall is multi-channel incl. BM25/keyword).
+        "search": cmd_recall,
         "forget": cmd_forget,
         "delete": cmd_delete,
         "update": cmd_update,
@@ -5033,7 +5035,8 @@ def cmd_codex(args: Namespace) -> None:
     if action == "install":
         assets, hooks = install_assets(dry_run=dry_run), install_hooks(dry_run=dry_run)
         if assets.get("success") and hooks.get("success"):
-            print(f"SLM Codex add-ons {'would be installed' if dry_run else 'installed'}: {len(SKILLS)} skills, {len(AGENTS)} subagents, 4 lifecycle hooks.")
+            print(f"SLM Codex add-ons {'would be installed' if dry_run else 'installed'}: "
+                  f"{len(SKILLS)} skills, {len(AGENTS)} subagents, 4 lifecycle hooks.")
             print("MCP wiring remains explicit: run `slm connect codex` if it is not already configured.")
             print("Review and trust newly installed hooks in Codex with /hooks.")
         else:
@@ -5169,6 +5172,9 @@ def cmd_session_context(args: Namespace) -> None:
                     (pid, *not_prompt_params, 10 * OVERSAMPLE),
                 ).fetchall()
             fact_rows = keep_sources(fact_rows, 10)
+            # 4.2.17: Jev orders them when the person chose Jev reordering
+            # (core/session_jev: order only, 1.5 s budget, else unchanged).
+            fact_rows = _jev_session_order(args, config, fact_rows)
             for r in fact_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -5745,6 +5751,18 @@ def cmd_reap(args: Namespace) -> None:
 #: 4.2.14: compiled for the dashboard and soft prompts, never put in a session:
 #: "time_of_day: hour_21", "query_type: general" are telemetry, not memory.
 _BLOCKS_NOT_FOR_SESSIONS = frozenset({"behavioral_patterns"})
+
+
+def _jev_session_order(args: Namespace, config: object, rows: list) -> list:
+    """The session start's memories in Jev's order for this project, or unchanged."""
+    import os
+
+    from superlocalmemory.core.project_identity import session_context_query
+    from superlocalmemory.core.session_jev import jev_order
+
+    query = (getattr(args, "query", "") or "").strip() or session_context_query(
+        os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    return jev_order(query, rows, lambda row: row["content"], getattr(config, "retrieval", None))
 
 
 def _core_block_rows(db_path: object, profile_id: str) -> list:
