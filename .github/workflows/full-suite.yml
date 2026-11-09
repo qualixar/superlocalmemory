@@ -1,0 +1,71 @@
+name: Full suite
+
+# The whole default test suite, run once per release candidate (4.2.17).
+# Manual only: Tests (test.yml) stays the fast gate on every push. Running the
+# full suite here keeps the release check off developer laptops, where eight
+# local workers once starved a 24 GB Mac into a kernel watchdog panic.
+# Test files are split into shards by a stable hash of their path, so each
+# shard is small, shards run in parallel, and a rerun picks the same files.
+# A branch push to rc/** also runs it: GitHub only offers the manual button
+# once a workflow file is on the default branch.
+on:
+  push:
+    branches: ["rc/**"]
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Number of shards"
+        default: "6"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shard:
+    name: Shard ${{ matrix.shard }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.2.0
+        with:
+          node-version: "22"
+      - name: Install libomp (required by lightgbm)
+        run: brew install libomp
+      - name: Install the locked environment
+        run: |
+          uv sync --frozen --python 3.12
+          npm ci --ignore-scripts
+      - name: Pick this shard's test files
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ inputs.shards || '6' }}
+        run: |
+          uv run python - <<'EOF' > shard-files.txt
+          import os, pathlib, zlib
+          shard, shards = int(os.environ["SHARD"]), int(os.environ["SHARDS"])
+          files = sorted(str(p) for p in pathlib.Path("tests").rglob("test_*.py")
+                         if "fixtures" not in p.parts)
+          for f in files:
+              if zlib.crc32(f.encode()) % shards == shard:
+                  print(f)
+          EOF
+          wc -l shard-files.txt
+      - name: Run the shard
+        run: |
+          uv run python -m pytest -q -n 2 --dist loadfile -p no:randomly \
+            --junitxml=junit-${{ matrix.shard }}.xml $(cat shard-files.txt)
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-${{ matrix.shard }}
+          path: junit-${{ matrix.shard }}.xml
