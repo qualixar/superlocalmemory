@@ -25,7 +25,7 @@ jobs:
   # tests measured the shared runner and kept failing releases. The full suite
   # runs once, locally, before tagging.
   gate:
-    runs-on: macos-14
+    runs-on: macos-15
     # uv-managed Python only: the runner's python.org build cannot load
     # SQLite extensions, and uv prefers a system Python when it finds one.
     env:
