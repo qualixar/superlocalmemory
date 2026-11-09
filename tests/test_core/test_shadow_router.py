@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared schema — minimal subset needed for shadow_router promotion path
 # ---------------------------------------------------------------------------
@@ -125,8 +124,8 @@ def test_shadow_router_route_query_uses_install_token(
     Closes skeptic H-02 + H-03 — an attacker who controls query_id
     cannot bias the A/B split without also reading the install_token.
     """
-    from superlocalmemory.core import shadow_router as sr_mod
     from superlocalmemory.core import security_primitives as sp
+    from superlocalmemory.core import shadow_router as sr_mod
 
     router_a = sr_mod.ShadowRouter(
         memory_db=str(memory_db),

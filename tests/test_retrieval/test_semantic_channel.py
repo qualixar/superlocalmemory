@@ -19,7 +19,6 @@ Covers:
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -31,7 +30,6 @@ from superlocalmemory.retrieval.semantic_channel import (
     _fisher_rao_similarity,
 )
 from superlocalmemory.storage.models import AtomicFact
-
 
 # ---------------------------------------------------------------------------
 # Helpers

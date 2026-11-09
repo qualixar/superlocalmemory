@@ -7,8 +7,8 @@ import asyncio
 import pytest
 
 from superlocalmemory.mcp import tools_mesh
-from superlocalmemory.mesh.broker import MeshBroker  # noqa: F401
 from superlocalmemory.mcp.remote_caller import RemotePeer, current_remote_peer, remote_peer
+from superlocalmemory.mesh.broker import MeshBroker  # noqa: F401
 
 
 class _Collector:
@@ -91,7 +91,6 @@ def test_a_web_caller_without_an_in_process_broker_is_refused_and_never_uses_the
 
 def test_web_caller_never_stores_a_message(monkeypatch) -> None:
     """Even with the daemon wired to a real broker, a web caller stores nothing."""
-    from superlocalmemory.mesh.broker import MeshBroker
     stored = []
     real = MeshBroker.send_message
 

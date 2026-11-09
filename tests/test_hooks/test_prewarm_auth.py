@@ -24,7 +24,6 @@ import pytest
 from superlocalmemory.core import security_primitives as sp
 from superlocalmemory.hooks import prewarm_auth as pa
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

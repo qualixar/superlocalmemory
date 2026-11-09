@@ -298,6 +298,7 @@ def seed_fencing_counter(db_path: str) -> int:
 
 # Pattern matches key names that imply secret material.
 import re as _re
+
 STATE_SECRET_KEY = _re.compile(
     r"(?:^|[_\-.])(api[_\-.]?key|secret|token|password|credential)(?:$|[_\-.]|$)",
     _re.IGNORECASE,

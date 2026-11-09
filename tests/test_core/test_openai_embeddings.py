@@ -14,16 +14,12 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
 from superlocalmemory.core.embeddings import EmbeddingService
 from superlocalmemory.storage.models import Mode
-
 
 # ---------------------------------------------------------------------------
 # EmbeddingConfig.is_openai_compatible
@@ -188,7 +184,6 @@ class TestEmbeddingServiceRouting:
         assert svc.is_available is True
 
     def test_embed_calls_openai_compatible_path(self) -> None:
-        import httpx as _httpx
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "data": [{"index": 0, "embedding": [0.1] * 768}],

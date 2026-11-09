@@ -38,12 +38,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from superlocalmemory.access.rbac import Permission
 from superlocalmemory.core import memory_kind_wiring as wiring
+from superlocalmemory.core.kind_query import InvalidKind
 from superlocalmemory.core.memory_kind_backfill import BackfillRefused, BackfillRunner
 from superlocalmemory.core.memory_kind_config import (
     save_memory_kind_settings,
     settings_dict,
 )
-from superlocalmemory.core.kind_query import InvalidKind
 from superlocalmemory.retrieval import remote_view
 from superlocalmemory.server import write_identity
 from superlocalmemory.server.kind_error import invalid_kind_http

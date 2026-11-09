@@ -18,10 +18,10 @@ License: AGPL-3.0-or-later
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 import os
 import threading
 from collections.abc import Callable
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:

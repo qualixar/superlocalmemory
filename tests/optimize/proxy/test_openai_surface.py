@@ -9,16 +9,16 @@ import pytest
 from fastapi import FastAPI
 
 from superlocalmemory.optimize.config.schema import OptimizeConfig
+from superlocalmemory.optimize.proxy._helpers import _MockTransport
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,
     HookChain,
 )
-from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
-from superlocalmemory.optimize.proxy._helpers import _MockTransport
 from superlocalmemory.optimize.proxy.openai_surface import (
-    _parse_openai_sse_to_json,
     _openai_sse_from_cached_json,
+    _parse_openai_sse_to_json,
 )
+from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
 
 
 def _openai_headers() -> dict:

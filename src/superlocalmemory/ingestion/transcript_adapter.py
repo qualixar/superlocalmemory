@@ -21,8 +21,8 @@ import logging
 import sys
 from pathlib import Path
 
-from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.ingestion.base_adapter import AdapterConfig, BaseAdapter, IngestItem
 
 logger = logging.getLogger("superlocalmemory.ingestion.transcript")
 
@@ -52,8 +52,8 @@ class TranscriptAdapter(BaseAdapter):
 
         # Start watchdog observer
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
 
             class _Handler(FileSystemEventHandler):
                 def __init__(self, adapter: TranscriptAdapter):
@@ -110,7 +110,8 @@ class TranscriptAdapter(BaseAdapter):
         for filepath in batch:
             try:
                 from superlocalmemory.ingestion.parsers import (
-                    parse_transcript_file, content_hash,
+                    content_hash,
+                    parse_transcript_file,
                 )
                 combined_text, speakers = parse_transcript_file(filepath)
                 dedup = content_hash(filepath)

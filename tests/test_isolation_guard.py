@@ -16,9 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from tests._portable import child_env_base
-
 from tests import conftest
+from tests._portable import child_env_base
 from tests.isolation_guard import LiveRootGuard, live_data_roots
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

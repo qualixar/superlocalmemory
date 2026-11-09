@@ -19,8 +19,8 @@ from superlocalmemory.math.hopfield import HopfieldConfig
 from superlocalmemory.retrieval.bridge_discovery import BridgeDiscovery
 from superlocalmemory.retrieval.entity_channel import EntityGraphChannel
 from superlocalmemory.retrieval.hopfield_channel import HopfieldChannel
-from superlocalmemory.retrieval.semantic_channel import SemanticChannel
 from superlocalmemory.retrieval.scope_policy import authorized_fact_ids
+from superlocalmemory.retrieval.semantic_channel import SemanticChannel
 from superlocalmemory.retrieval.spreading_activation import (
     SpreadingActivation,
     SpreadingActivationConfig,

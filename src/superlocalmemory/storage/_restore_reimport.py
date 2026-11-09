@@ -147,7 +147,8 @@ def _settle(data_root: Path, delta_dir: Path, report: ReimportReport, passes: in
         return
     try:
         from superlocalmemory.storage._restore_retention import (
-            discard_delta, prune_restore_artifacts,
+            discard_delta,
+            prune_restore_artifacts,
         )
 
         discard_delta(Path(data_root), Path(delta_dir))

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from superlocalmemory.storage.agent_experience import ProfileAdmissionError
 from superlocalmemory.storage.execution_learning import (
     ExecutionLearningStore,
     ExecutionLearningValidationError,
 )
-from superlocalmemory.storage.agent_experience import ProfileAdmissionError
 from superlocalmemory.storage.migrations import M040_agent_experience_receipts as m040
 from superlocalmemory.storage.migrations import M041_external_evidence_receipts as m041
 from superlocalmemory.storage.migrations import M050_execution_learning_v2 as m050

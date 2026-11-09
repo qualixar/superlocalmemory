@@ -24,16 +24,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import statistics
 import threading
 import time
 from pathlib import Path
-from typing import Iterator
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

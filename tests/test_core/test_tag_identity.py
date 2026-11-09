@@ -17,7 +17,6 @@ from superlocalmemory.core.tag_identity import (
     tag_keys,
 )
 
-
 # -- tag_key -----------------------------------------------------------------
 
 @pytest.mark.parametrize("value", [

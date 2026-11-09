@@ -305,7 +305,7 @@ async def test_tc6_anthropic_surface_extracts_raw_key(tmp_cache_db, monkeypatch)
     from fastapi import FastAPI
 
     from superlocalmemory.optimize.config.schema import OptimizeConfig
-    from superlocalmemory.optimize.proxy.lifecycle import HookChain, CachedResponse
+    from superlocalmemory.optimize.proxy.lifecycle import CachedResponse, HookChain
     from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
 
     check_tenant_ids: list[str | None] = []

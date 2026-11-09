@@ -31,7 +31,6 @@ from tests.test_integration.test_erasure_integrity_e2e import (  # noqa: F401 - 
     stub_embedder,
 )
 
-
 # One topic per memory: near-duplicates (even with a different tag) are merged
 # into the existing fact on save, so every memory here is about something else.
 _TOPICS = iter((

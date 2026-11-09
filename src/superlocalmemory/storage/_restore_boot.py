@@ -39,7 +39,11 @@ from typing import Any
 
 from superlocalmemory.storage._durable_json import read_json, write_json_atomic
 from superlocalmemory.storage._restore_types import (
-    DELTA_DIR, INTENT_NAME, OUTCOME_NAME, SAFETY_DIR, RestoreOutcome,
+    DELTA_DIR,
+    INTENT_NAME,
+    OUTCOME_NAME,
+    SAFETY_DIR,
+    RestoreOutcome,
 )
 
 logger = logging.getLogger(__name__)
@@ -278,7 +282,9 @@ def _final_delta(data_root: Path, memory_db: Path, learning_db: Path,
     from superlocalmemory.storage import upgrade_restore as ur
     from superlocalmemory.storage._restore_damaged import is_unreadable_error
     from superlocalmemory.storage._restore_delta import (
-        export_delta, export_empty_delta, open_compare,
+        export_delta,
+        export_empty_delta,
+        open_compare,
     )
 
     recorded = Path(intent["final_delta_dir"]) if intent.get("final_delta_dir") else None
@@ -340,7 +346,8 @@ def _stage_and_write(data_root: Path, memory_db: Path, learning_db: Path,
     finish. (Over a damaged store the write is a file replacement, flagged in
     ``progress`` so a failure there never claims the store is unchanged.)"""
     from superlocalmemory.storage._restore_delta import (
-        apply_delta_to_staging, erased_profile_ids,
+        apply_delta_to_staging,
+        erased_profile_ids,
     )
     from superlocalmemory.storage._restore_learning import profiles_in, replay_erasures
 
@@ -453,7 +460,8 @@ def _settle_retention(data_root: Path, settled_delta: Path | None) -> None:
     """Bounded retention of deltas and safety copies (L1-12). Never fails a restore."""
     try:
         from superlocalmemory.storage._restore_retention import (
-            discard_delta, prune_restore_artifacts,
+            discard_delta,
+            prune_restore_artifacts,
         )
 
         if settled_delta is not None:

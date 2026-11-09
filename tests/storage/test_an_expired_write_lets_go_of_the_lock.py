@@ -20,7 +20,6 @@ import threading
 import time
 
 import pytest
-
 from tests.storage.test_write_coordinator import _admission_payload, _install_write_commits
 
 # Tens of seconds of VM work on any machine this suite runs on.

@@ -21,7 +21,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from superlocalmemory.core import laya_process, laya_runtime as lr
+from superlocalmemory.core import laya_process
+from superlocalmemory.core import laya_runtime as lr
 from superlocalmemory.retrieval import sufficiency
 from superlocalmemory.server.routes import answer_check, answer_check_actions
 from tests.helpers.owned_python import owned_environment

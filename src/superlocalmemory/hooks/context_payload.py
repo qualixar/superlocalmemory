@@ -20,7 +20,6 @@ from typing import Callable, Iterable
 from superlocalmemory import __version__
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge
 
-
 VERSION = __version__
 DEFAULT_TOP_K = 10
 DEFAULT_DECISIONS_K = 5

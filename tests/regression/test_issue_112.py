@@ -31,7 +31,6 @@ import pytest
 from superlocalmemory.core.config import LLMConfig
 from superlocalmemory.server.routes.v3_api import _mode_c_quick_switch_refusal
 
-
 # ---------------------------------------------------------------------------
 # The Mode C quick-switch guard (PUT /api/v3/mode)
 # ---------------------------------------------------------------------------

@@ -18,8 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_mcp.test_remote_delete_hides_media import _daemon, _exists
-from tests.test_mcp.test_remote_more_reads_hide_media import (  # noqa: F401  (fixture and helpers)
-    _as, _Server, world)
+from tests.test_mcp.test_remote_more_reads_hide_media import _as, _Server, world  # noqa: F401  (fixture and helpers)
 
 HIDDEN = {"remote": ("zebra picture good", "zebra picture dirty", "zebra folder note"),
           "remote_media": ("zebra picture dirty", "zebra folder note"),

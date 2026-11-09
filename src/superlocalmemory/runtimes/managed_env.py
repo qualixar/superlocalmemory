@@ -33,7 +33,10 @@ from typing import Any
 from superlocalmemory.core import laya_paths, laya_process
 from superlocalmemory.infra.instance_lock import InstanceLock
 from superlocalmemory.runtimes.model_sources import (
-    HuggingFaceSource, LocalDirSource, ModelSource, classify_error,
+    HuggingFaceSource,
+    LocalDirSource,
+    ModelSource,
+    classify_error,
 )
 
 logger = logging.getLogger(__name__)

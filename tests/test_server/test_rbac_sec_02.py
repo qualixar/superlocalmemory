@@ -233,7 +233,8 @@ def test_membership_purged_on_profile_delete(client):
     rbac = tc.app.state.rbac
     alice = _mk_user(tc, h, "alice")
     from superlocalmemory.server.routes.helpers import (
-        delete_profile_from_db, ensure_profile_in_db,
+        delete_profile_from_db,
+        ensure_profile_in_db,
     )
     ensure_profile_in_db("corp", "corp")
     rbac.set_membership("corp", alice, "admin")
@@ -248,7 +249,9 @@ def test_membership_purged_on_profile_delete(client):
 
 def test_install_token_rejected_from_non_loopback():
     from unittest.mock import MagicMock, patch
+
     from fastapi import HTTPException
+
     from superlocalmemory.server.write_identity import require_write_actor
 
     req = MagicMock()

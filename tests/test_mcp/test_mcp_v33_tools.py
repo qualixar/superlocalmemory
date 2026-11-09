@@ -24,8 +24,6 @@ import asyncio
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
-
-
 # ---------------------------------------------------------------------------
 # Helper: mock server that captures @server.tool() decorated functions
 # ---------------------------------------------------------------------------
@@ -116,8 +114,8 @@ class TestV33ToolRegistration:
 
     def test_no_overlap_with_core_tools(self):
         """V3.3 tool names don't collide with core tools."""
-        from superlocalmemory.mcp.tools_v33 import register_v33_tools
         from superlocalmemory.mcp.tools_core import register_core_tools
+        from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
         srv_core = _MockServer()
         register_core_tools(srv_core, MagicMock())
@@ -130,8 +128,8 @@ class TestV33ToolRegistration:
 
     def test_no_overlap_with_active_tools(self):
         """V3.3 tool names don't collide with active tools."""
-        from superlocalmemory.mcp.tools_v33 import register_v33_tools
         from superlocalmemory.mcp.tools_active import register_active_tools
+        from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
         srv_active = _MockServer()
         register_active_tools(srv_active, MagicMock())
@@ -144,8 +142,8 @@ class TestV33ToolRegistration:
 
     def test_no_overlap_with_v28_tools(self):
         """V3.3 tool names don't collide with v28 tools."""
-        from superlocalmemory.mcp.tools_v33 import register_v33_tools
         from superlocalmemory.mcp.tools_v28 import register_v28_tools
+        from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
         srv_v28 = _MockServer()
         register_v28_tools(srv_v28, MagicMock())

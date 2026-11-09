@@ -18,10 +18,9 @@ from unittest.mock import patch
 
 import pytest
 
-from tests._portable import child_env_base
-
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.storage.models import Mode
+from tests._portable import child_env_base
 from tests.fixtures.stub_llm_server import StubLLMServer
 
 

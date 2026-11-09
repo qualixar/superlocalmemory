@@ -65,6 +65,8 @@ def workspace(tmp_path, monkeypatch):
     # below would fail on a missing table rather than on a policy decision.
     from superlocalmemory.storage.migrations import (
         M024_rbac_users_roles as _rbac_tables,
+    )
+    from superlocalmemory.storage.migrations import (
         M026_rbac_memberships_fk as _rbac_fk,
     )
     for statement in _rbac_tables.DDL.split(";"):

@@ -10,13 +10,15 @@ Routes: /api/learning/status, /api/feedback, /api/feedback/dwell,
 Uses V3 learning modules: FeedbackCollector, EngagementTracker, AdaptiveLearner.
 """
 import logging
-import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
+
+from superlocalmemory.learning.engagement import derive_engagement_from_dbs
+from superlocalmemory.storage.memory_write import memory_read
 
 from .helpers import MEMORY_DIR, get_active_profile
 from .learning_telemetry import ReadOnlyRankerStore
@@ -29,8 +31,6 @@ from .learning_telemetry import (
 from .learning_telemetry import (
     sqlite_status as _sqlite_status,
 )
-from superlocalmemory.storage.memory_write import memory_read
-from superlocalmemory.learning.engagement import derive_engagement_from_dbs
 
 logger = logging.getLogger("superlocalmemory.routes.learning")
 router = APIRouter()

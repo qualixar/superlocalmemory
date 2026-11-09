@@ -13,8 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from superlocalmemory.optimize.cache.semantic import VCacheSemantic, _EMBED_DIM
-
+from superlocalmemory.optimize.cache.semantic import _EMBED_DIM, VCacheSemantic
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -224,8 +223,9 @@ def test_vcache_noop_semantic_tier_signature_compat():
 
 def test_vcache_ann_search_skips_wrong_context_fp(config_enabled, tmp_db, req_factory):
     """A-13: context-fp mismatch → HARD exclusion."""
-    from superlocalmemory.optimize.storage.db import CacheDB
     import sqlite3 as _sq
+
+    from superlocalmemory.optimize.storage.db import CacheDB
     tenant = "t1"
     text = "Tell me about Mars"
     embed = _unit_vec(text)
@@ -276,8 +276,9 @@ def test_vcache_does_not_call_vec_db_when_disabled(config_disabled, tmp_db, req_
 
 def test_vcache_centroid_defense_blocks_outlier(config_enabled, tmp_db, req_factory):
     """Outlier query (very far from centroid) → return None (adversarial)."""
-    from superlocalmemory.optimize.storage.db import CacheDB
     import sqlite3 as _sq
+
+    from superlocalmemory.optimize.storage.db import CacheDB
     tenant = "t1"
     from dataclasses import replace
     cfg = replace(config_enabled, semantic_centroid_defense=True,
@@ -506,8 +507,9 @@ def test_vcache_set_inner_wrong_dim(config_enabled, tmp_db):
 
 def test_extract_messages_edge_cases():
     """_extract_messages handles None, dict, empty, body.dict."""
-    from superlocalmemory.optimize.cache.semantic import _extract_messages, _extract_system
     from types import SimpleNamespace
+
+    from superlocalmemory.optimize.cache.semantic import _extract_messages, _extract_system
     # None → []
     assert _extract_messages(None) == []
     assert _extract_system(None) == ""

@@ -20,8 +20,8 @@ from fastapi import APIRouter, Request
 
 from superlocalmemory.mesh.lock_protocol import LockCoordinator
 from superlocalmemory.mesh.node_identity import get_node_id
-from superlocalmemory.server.routes.mesh import _get_broker
 from superlocalmemory.server.routes.helpers import get_active_profile
+from superlocalmemory.server.routes.mesh import _get_broker
 
 router = APIRouter(prefix="/mesh/lock", tags=["mesh-lock"])
 

@@ -145,6 +145,8 @@ class TestAssertTrustedExecutable:
         """A directory is not a regular file; the check must reject it."""
         from superlocalmemory.integrations.bounded_loops_mcp import (
             BridgeUnavailable as _BU,
+        )
+        from superlocalmemory.integrations.bounded_loops_mcp import (
             _assert_trusted_executable,
         )
         with pytest.raises(_BU, match="trusted regular file"):
@@ -154,6 +156,8 @@ class TestAssertTrustedExecutable:
         """On POSIX, group-writable executable must be rejected."""
         from superlocalmemory.integrations.bounded_loops_mcp import (
             BridgeUnavailable as _BU,
+        )
+        from superlocalmemory.integrations.bounded_loops_mcp import (
             _assert_trusted_executable,
         )
         exe = tmp_path / "exe"

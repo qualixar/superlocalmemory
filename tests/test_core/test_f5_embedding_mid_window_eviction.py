@@ -14,10 +14,7 @@ if pressure is detected the worker is killed immediately.
 
 from __future__ import annotations
 
-import threading
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from superlocalmemory.core.config import EmbeddingConfig
 from superlocalmemory.core.embeddings import EmbeddingService

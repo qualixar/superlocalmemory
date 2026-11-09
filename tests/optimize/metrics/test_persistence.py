@@ -6,10 +6,10 @@ import time
 
 import pytest
 
+import superlocalmemory.optimize.metrics.persistence as _persistence_mod
 from superlocalmemory.optimize.metrics.counters import MetricsCollector
 from superlocalmemory.optimize.metrics.persistence import MetricsPersistence
 from superlocalmemory.optimize.storage.db import CacheDB
-import superlocalmemory.optimize.metrics.persistence as _persistence_mod
 
 
 @pytest.fixture(autouse=True)

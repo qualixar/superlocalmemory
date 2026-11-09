@@ -11,7 +11,9 @@ from superlocalmemory.core import embedding_reindex as er
 from superlocalmemory.core import embedding_reindex_steps as steps
 from superlocalmemory.core import ram_lock
 from tests.test_storage.test_embedding_reindex_units import (  # noqa: F401 - fixture + helpers
-    FakeEmbedder, _target, store,
+    FakeEmbedder,
+    _target,
+    store,
 )
 
 

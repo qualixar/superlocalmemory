@@ -12,14 +12,18 @@ Locks the invariants fixed in this release:
 
 from __future__ import annotations
 
-import pytest
-
 import sqlite3
+
+import pytest
 
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import (
-    GraphEdge, EdgeType, AtomicFact, FactType, MemoryRecord,
+    AtomicFact,
+    EdgeType,
+    FactType,
+    GraphEdge,
+    MemoryRecord,
 )
 
 

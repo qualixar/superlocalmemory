@@ -25,7 +25,6 @@ from superlocalmemory.learning.fact_outcome_joins import (
 )
 from superlocalmemory.storage.write_lock import get_write_lock
 
-
 # H-12/H-P-01: single-pass JSON1 aggregation across ALL facts for a profile.
 # Returns ``{fact_id: (count, mean_reward)}`` for outcomes with reward NOT
 # NULL. Replaces the per-fact O(F) loop of ``aggregate_reward_for_fact``

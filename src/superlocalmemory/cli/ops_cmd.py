@@ -37,7 +37,6 @@ from typing import Any
 from superlocalmemory.cli.daemon_paths import InvalidDaemonId, describe, validate_daemon_id
 from superlocalmemory.core import outbound_http as _outbound
 
-
 _VALID_ACTIONS = ("retry", "force_reconcile", "cancel")
 
 # Issue #148: building or sending a request can itself raise -- a non-ASCII

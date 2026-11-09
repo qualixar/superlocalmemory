@@ -22,13 +22,12 @@ from pathlib import Path
 import pytest
 
 from superlocalmemory.evolution.budget import (
-    BudgetExhausted,
-    EvolutionBudget,
     MAX_CYCLES_PER_DAY,
     MAX_LLM_CALLS_PER_CYCLE,
     MAX_WALL_TIME_SEC,
+    BudgetExhausted,
+    EvolutionBudget,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

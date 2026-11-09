@@ -27,8 +27,8 @@ Tests verify:
 from __future__ import annotations
 
 import json
-import re
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -522,6 +522,7 @@ class TestBackwardCompat:
     def test_build_plugin_mjs_still_passes_check(self) -> None:
         """node scripts/build-plugin.mjs --check must still pass (plugin/ in-sync)."""
         import subprocess
+
         from tests.test_plugin._plugin_sandbox import plugin_tree_lock
 
         with plugin_tree_lock():

@@ -21,12 +21,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.core.engine import MemoryEngine
 from superlocalmemory.core.modes import get_capabilities
 from superlocalmemory.storage.models import AtomicFact, Mode
-
 
 # ---------------------------------------------------------------------------
 # Helpers

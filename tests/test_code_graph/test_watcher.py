@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.code_graph.watcher import (
     DEBOUNCE_SECONDS,
     IGNORED_DIRS,
@@ -21,7 +20,6 @@ from superlocalmemory.code_graph.watcher import (
     CodeGraphWatcher,
     _DebouncedHandler,
 )
-
 
 # ---------------------------------------------------------------------------
 # DebouncedHandler unit tests

@@ -14,8 +14,7 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_mcp.test_remote_more_reads_hide_media import (  # noqa: F401  (fixture and helpers)
-    _as, _Server, world)
+from tests.test_mcp.test_remote_more_reads_hide_media import _as, _Server, world  # noqa: F401  (fixture and helpers)
 
 LOOPBACK = ("127.0.0.1", 50000)
 CALLERS = [("local", False, False), ("remote", True, False), ("remote_media", True, True)]

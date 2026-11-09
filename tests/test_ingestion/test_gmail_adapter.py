@@ -32,7 +32,6 @@ from superlocalmemory.ingestion import gmail_adapter
 from superlocalmemory.ingestion.base_adapter import AdapterConfig, IngestItem
 from superlocalmemory.ingestion.gmail_adapter import GmailAdapter
 
-
 # ---------------------------------------------------------------------------
 # Fixture builders
 # ---------------------------------------------------------------------------

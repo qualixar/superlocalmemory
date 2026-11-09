@@ -13,10 +13,8 @@ Covers:
 
 from __future__ import annotations
 
-
 from superlocalmemory.encoding.temporal_parser import TemporalParser
 from superlocalmemory.storage.models import AtomicFact
-
 
 # ---------------------------------------------------------------------------
 # parse_session_date

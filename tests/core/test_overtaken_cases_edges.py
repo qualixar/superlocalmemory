@@ -13,7 +13,6 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
 from tests.core.test_overtaken_cases import _delete, _fact, _propose, _replace, _rows
 
 

@@ -26,9 +26,7 @@ import types
 from pathlib import Path
 
 import pytest
-
 from tests._portable import assert_owner_only
-
 
 # ---------------------------------------------------------------------------
 # Helpers — redirect MEMORY_DIR to a tmp path per test
@@ -241,7 +239,9 @@ class TestParentDirMode:
     """The parent directory of .credentials.json should be 0700."""
 
     def test_parent_dir_created_with_0700(self, tmp_path, monkeypatch):
-        import sys, types
+        import sys
+        import types
+
         import superlocalmemory.infra.cloud_backup as cb
 
         # Point to a sub-dir that does NOT yet exist

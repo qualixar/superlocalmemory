@@ -14,11 +14,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
+from superlocalmemory.mcp.tool_hints import READ_ONLY, SETS
 
 logger = logging.getLogger(__name__)
 

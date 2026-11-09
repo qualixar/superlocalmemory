@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 from tests._portable import committed_executable
 
 # ---------------------------------------------------------------------------

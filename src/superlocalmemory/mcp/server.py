@@ -274,14 +274,13 @@ _user_allowlist_str = _os_reg.environ.get("SLM_MCP_TOOLS", "").strip()
 # and any code that imports them from this module.
 # ---------------------------------------------------------------------------
 
-from superlocalmemory.mcp.profiles import (  # noqa: E402 (after env setups above)
-    _PROFILE_ALIASES,
-    _PROFILE_DEFINITIONS,
-    _MEDIA_TOOLS,
-)
-
 # SLM_MCP_PROFILE from the host's config, else the set saved by `slm tools set`.
 from superlocalmemory.mcp.profile_names import effective_profile as _effective_profile  # noqa: E402
+from superlocalmemory.mcp.profiles import (  # noqa: E402 (after env setups above)
+    _MEDIA_TOOLS,
+    _PROFILE_ALIASES,
+    _PROFILE_DEFINITIONS,
+)
 
 _profile = _effective_profile()
 

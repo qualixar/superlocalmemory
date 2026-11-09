@@ -25,6 +25,7 @@ from types import ModuleType
 from typing import Any, Generator, NoReturn
 
 from superlocalmemory.storage import erasure_derived, projection_outbox, store_signature
+from superlocalmemory.storage import write_generation as _write_generation
 from superlocalmemory.storage.correction_cases import SAVED_SUCCESSOR_PARAMS, SAVED_SUCCESSOR_SQL
 from superlocalmemory.storage.embedding_codec import (
     decode_embedding,
@@ -32,13 +33,13 @@ from superlocalmemory.storage.embedding_codec import (
     encode_embedding,
     encode_float_vector,
 )
-from superlocalmemory.storage.event_time import valid_from as _event_start
 from superlocalmemory.storage.erasure_visibility import (
     aggregate_erasure_clause_for_db,
     erasure_clause,
     has_tombstones,
     memory_erasure_clause_for_db,
 )
+from superlocalmemory.storage.event_time import valid_from as _event_start
 from superlocalmemory.storage.memory_kinds import KIND_COLUMNS
 from superlocalmemory.storage.models import (
     AtomicFact,
@@ -58,8 +59,6 @@ from superlocalmemory.storage.models import (
 )
 from superlocalmemory.storage.read_connection import read_only_snapshot
 from superlocalmemory.storage.write_lock import get_write_lock
-
-from superlocalmemory.storage import write_generation as _write_generation
 
 logger = logging.getLogger(__name__)
 

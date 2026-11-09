@@ -25,7 +25,6 @@ from superlocalmemory.core.modes import (
 )
 from superlocalmemory.storage.models import Mode
 
-
 # ---------------------------------------------------------------------------
 # get_capabilities
 # ---------------------------------------------------------------------------

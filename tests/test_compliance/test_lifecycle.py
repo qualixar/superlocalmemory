@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from superlocalmemory.compliance.lifecycle import LifecycleManager
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import (
@@ -31,8 +32,6 @@ from superlocalmemory.storage.models import (
     MemoryLifecycle,
     MemoryRecord,
 )
-from superlocalmemory.compliance.lifecycle import LifecycleManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

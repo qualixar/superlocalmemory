@@ -6,9 +6,9 @@ import asyncio
 
 from superlocalmemory.optimize.proxy._helpers import (
     _HOOK_TENANT_SUPPORT,
+    _accepts_tenant_id,
     _safe_cache_check,
     _safe_cache_store,
-    _accepts_tenant_id,
 )
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,

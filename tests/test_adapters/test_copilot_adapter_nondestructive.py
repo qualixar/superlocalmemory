@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from superlocalmemory.hooks.copilot_adapter import CopilotAdapter, TARGET_REL
+from superlocalmemory.hooks.copilot_adapter import TARGET_REL, CopilotAdapter
 from superlocalmemory.hooks.memory_protocol import SLM_MARKER_END, SLM_MARKER_START
 
 

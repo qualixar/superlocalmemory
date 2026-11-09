@@ -14,12 +14,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from dataclasses import replace
-
-from superlocalmemory.core.session_identity import is_conversation
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from superlocalmemory.core.session_identity import is_conversation
 
 if TYPE_CHECKING:
     import os
@@ -252,6 +252,7 @@ _RANKING_MODES: frozenset[str] = frozenset({"off", "v1", "v2", "v2-ensemble"})
 
 
 from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL
+
 
 class _ReadOnlyLearningView:
     """Minimal learning-model reader that cannot initialise or mutate a DB."""

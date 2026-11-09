@@ -31,12 +31,12 @@ from urllib.parse import quote
 from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import WithJsonSchema
 
-from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
-from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.core.media_fetch import MAX_REMOTE_BASE64_BYTES, too_large_for_remote
+from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.mcp.remote_caller import current_remote_key_id, current_remote_media_allowed
 from superlocalmemory.mcp.remote_visibility import with_view
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 
 logger = logging.getLogger("slm.mcp.tools_media")
 

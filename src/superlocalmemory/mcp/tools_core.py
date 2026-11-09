@@ -17,7 +17,6 @@ import hashlib
 import logging
 from typing import Callable
 
-from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.config import CANONICAL_LIST_LIMIT, CANONICAL_RECALL_LIMIT
 from superlocalmemory.core.operation_request import OperationKind
@@ -25,6 +24,7 @@ from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
 from superlocalmemory.mcp.remote_visibility import visible_facts
 from superlocalmemory.mcp.shared import authorize_mcp_mutation, parse_id_list
+from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 
 logger = logging.getLogger(__name__)
 
@@ -1109,8 +1109,6 @@ def register_core_tools(server, get_engine: Callable) -> None:
         try:
             # Same source the HTTP surface reads, imported here rather than at
             # module scope: that module costs ~260ms and MCP starts over stdio.
-            from superlocalmemory.server.routes.helpers import SLM_VERSION
-
             import asyncio
             import os
 
@@ -1119,6 +1117,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 is_daemon_running,
             )
             from superlocalmemory.mcp.request_profile import tool_profile
+            from superlocalmemory.server.routes.helpers import SLM_VERSION
 
             # The daemon's /status describes its active profile, so a named
             # profile is counted from the store below instead.
@@ -1507,7 +1506,6 @@ def register_core_tools(server, get_engine: Callable) -> None:
             import urllib.parse
 
             from superlocalmemory.cli.daemon import (
-                daemon_request,
                 is_daemon_running,
             )
             from superlocalmemory.mcp.request_profile import (

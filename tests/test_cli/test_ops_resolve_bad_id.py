@@ -28,9 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from tests._portable import child_env_base
-
 import superlocalmemory
+from tests._portable import child_env_base
 
 REPO_SRC = str(Path(superlocalmemory.__file__).resolve().parents[1])
 

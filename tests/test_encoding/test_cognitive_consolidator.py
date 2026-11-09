@@ -26,7 +26,6 @@ from superlocalmemory.encoding.cognitive_consolidator import (
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import _new_id
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -1232,13 +1231,13 @@ def test_compress_without_polar_quant(db, profile_id):
 
 def test_extract_gist_llm_none():
     """_extract_gist_llm returns None when llm is None."""
-    from superlocalmemory.encoding.cognitive_consolidator import (
-        CognitiveConsolidator,
-    )
+    from unittest.mock import MagicMock
 
     # Access the private method via an instance with no LLM
     from superlocalmemory.core.config import CCQConfig as _CCQConfig
-    from unittest.mock import MagicMock
+    from superlocalmemory.encoding.cognitive_consolidator import (
+        CognitiveConsolidator,
+    )
 
     db_mock = MagicMock()
     cons = CognitiveConsolidator(db=db_mock, llm=None, config=_CCQConfig())

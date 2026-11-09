@@ -35,8 +35,8 @@ from superlocalmemory.optimize.proxy._helpers import _MockTransport
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,
     HookChain,
-    ProxyRequest,
     ProviderResponse,
+    ProxyRequest,
 )
 from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
 from superlocalmemory.optimize.proxy.vertex_surface import (
@@ -44,7 +44,6 @@ from superlocalmemory.optimize.proxy.vertex_surface import (
     _parse_vertex_path,
     _validate_vertex_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,8 +93,8 @@ def _make_app(proxy: ProxyApp) -> FastAPI:
 
 def _make_manager(tmp_path: Path):
     """Create an in-memory CacheManager backed by a temp DB."""
-    from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.cache.key_builder import CacheConfig
+    from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
     db = CacheDB(tmp_path / "llmcache.db")
     return CacheManager(db=db, config=CacheConfig()), db

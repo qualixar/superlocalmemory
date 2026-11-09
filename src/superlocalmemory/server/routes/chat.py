@@ -381,8 +381,8 @@ def _recall_via_resident_engine(app_state, query: str, limit: int, profile: str 
                 include_global=True, include_shared=True,
             ) if memory_ids else {}
         )
-        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.server.recall_serializer import (
             serialize_recall_response,
         )

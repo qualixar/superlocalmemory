@@ -19,7 +19,6 @@ import pytest
 
 from superlocalmemory.encoding.entropy_gate import EntropyGate, _cosine
 
-
 # ---------------------------------------------------------------------------
 # _cosine
 # ---------------------------------------------------------------------------

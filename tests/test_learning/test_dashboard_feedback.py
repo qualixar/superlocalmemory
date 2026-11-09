@@ -23,12 +23,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._portable import assert_owner_only
-
 from superlocalmemory.learning.feedback import (
     _DASHBOARD_SIGNAL_MAP,
     FeedbackCollector,
 )
+from tests._portable import assert_owner_only
 
 
 @pytest.fixture()

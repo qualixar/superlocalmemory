@@ -13,7 +13,7 @@ import logging
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -111,6 +111,7 @@ async def evaluate_tiers_route(request: Request, profile_id: str | None = None):
             profile_id=profile_id,
         )
         from superlocalmemory.core.tier_manager import evaluate_tiers
+
         from .helpers import get_engine_lazy
 
         engine = get_engine_lazy(request.app.state)

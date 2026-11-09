@@ -21,9 +21,7 @@ import pytest
 
 from superlocalmemory.core.actor_context import ActorContext, ActorRole, Transport, make_internal_owner_context
 from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
-from superlocalmemory.core.operation_policy_registry import _DEFAULT_REGISTRY
 from superlocalmemory.core.operation_request import OperationKind
-
 
 # ---------------------------------------------------------------------------
 # resolve_actor

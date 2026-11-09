@@ -13,10 +13,7 @@ Tests that the @admits decorator:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helper: mock server that captures registered tools
@@ -57,9 +54,9 @@ def test_admits_decorator_enterprise_anonymous_denies(tmp_path, monkeypatch):
     """Enterprise mode + no principal → ANONYMOUS → @admits denies → error dict."""
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
 
-    from superlocalmemory.core.admission import admits, _resolve_deployment
-    from superlocalmemory.core.operation_request import OperationKind
+    from superlocalmemory.core.admission import admits
     from superlocalmemory.core.config import DEPLOYMENT_ENTERPRISE
+    from superlocalmemory.core.operation_request import OperationKind
 
     @admits(OperationKind.REMEMBER)
     async def my_tool(content: str) -> dict:
@@ -99,9 +96,10 @@ def test_admits_decorator_is_async_compatible(tmp_path, monkeypatch):
     """@admits wrapper is itself async and preserves coroutine semantics."""
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
 
+    import inspect
+
     from superlocalmemory.core.admission import admits
     from superlocalmemory.core.operation_request import OperationKind
-    import inspect
 
     @admits(OperationKind.REMEMBER)
     async def my_tool() -> dict:

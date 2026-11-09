@@ -1,7 +1,9 @@
 import pytest
+
 from superlocalmemory.remote_connections.gateway_provider import CloudGatewayProvider
 from superlocalmemory.remote_connections.native_enrollment import NativeEnrollmentStore
 from tests.test_remote_native_enrollment_store import Backend
+
 
 @pytest.mark.asyncio
 async def test_opt_in_enrollment_registers_native_pkce_and_returns_sign_in(tmp_path):
@@ -71,7 +73,8 @@ async def test_interrupted_connection_save_recovers_existing_desktop_client(tmp_
 
 @pytest.mark.asyncio
 async def test_slow_secure_store_does_not_block_unrelated_coroutine(tmp_path):
-    import asyncio,threading
+    import asyncio
+    import threading
     entered=threading.Event();release=threading.Event()
     class Slow(Backend):
         def get_password(self,service,name):
@@ -92,6 +95,7 @@ async def test_slow_secure_store_does_not_block_unrelated_coroutine(tmp_path):
 @pytest.mark.asyncio
 async def test_expired_completed_record_refresh_persists_rotated_tokens(tmp_path):
     from dataclasses import replace
+
     from tests.test_remote_native_enrollment_store import record
     backend=Backend();store=NativeEnrollmentStore(tmp_path,backend=backend,clock=lambda:100)
     row=replace(record(),expires_at_ms=101000,completed=True,client_id='client',access_token='old-access',refresh_token='old-refresh',access_expires_ms=1)
@@ -108,13 +112,15 @@ async def test_expired_completed_record_refresh_persists_rotated_tokens(tmp_path
 
 
 def _proof_target(proof):
-    import base64,json
+    import base64
+    import json
     payload=proof.split('.')[1];payload+='='*(-len(payload)%4)
     return json.loads(base64.urlsafe_b64decode(payload))['htu']
 
 @pytest.mark.asyncio
 async def test_connected_apps_calls_use_owner_token_and_endpoint_bound_proof(tmp_path):
     from dataclasses import replace
+
     from tests.test_remote_native_enrollment_store import record
     requests=[]
     async def http(path,**kwargs):

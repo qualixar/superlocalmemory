@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---- isolation ----
 
 def test_assert_no_memory_db_tables_passes(tmp_cache_db) -> None:
@@ -21,6 +20,7 @@ def test_assert_no_memory_db_tables_passes(tmp_cache_db) -> None:
 def test_isolation_wrong_db_raises(tmp_path: Path) -> None:
     """Opening CacheDB on memory.db must raise RuntimeError."""
     import sqlite3
+
     from superlocalmemory.optimize.storage.db import CacheDB
     # Create a memory.db by importing the memory schema; simpler: create a
     # forbidden table directly.
@@ -213,6 +213,7 @@ def test_machine_id_falls_back_on_windows_without_os_uname(
 ) -> None:
     """Windows has no os.uname(); CacheDB must use the persisted uuid fallback."""
     import os as _os
+
     from superlocalmemory.optimize.storage.db import CacheDB
 
     monkeypatch.setattr(
@@ -357,8 +358,8 @@ def test_c10_vec_add_default_context_fp_is_empty(tmp_cache_db) -> None:
 
 def test_c06_second_open_uses_persisted_key(tmp_path: Path) -> None:
     """C-06: Second CacheDB open must use the persisted key (decrypt still works)."""
-    from superlocalmemory.optimize.storage.db import CacheDB
     import superlocalmemory.optimize.storage.db as db_mod
+    from superlocalmemory.optimize.storage.db import CacheDB
 
     key_file = tmp_path / "opt-key.bin"
     db_path = tmp_path / "llmcache.db"

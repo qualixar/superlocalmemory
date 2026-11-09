@@ -23,8 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from superlocalmemory.core import judge_keys, laya_runtime
-from superlocalmemory.core import engine_wiring
+from superlocalmemory.core import engine_wiring, judge_keys, laya_runtime
 from superlocalmemory.retrieval import jev_judge, sufficiency
 from superlocalmemory.server.routes import answer_check
 

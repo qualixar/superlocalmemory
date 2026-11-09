@@ -4,11 +4,11 @@ from __future__ import annotations
 
 def test_all_exports_present() -> None:
     from superlocalmemory.optimize.compress import (
+        AlignResult,
+        CacheAligner,
+        CCRStore,
         CompressRouter,
         CompressTextResult,
-        CCRStore,
-        CacheAligner,
-        AlignResult,
     )
     assert CompressRouter is not None
     assert CompressTextResult is not None

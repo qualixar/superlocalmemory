@@ -26,11 +26,10 @@ from pathlib import Path
 
 import pytest
 
-from tests._portable import child_env_base
-
 from superlocalmemory.core import embeddings as emb_mod
 from superlocalmemory.core.config import EmbeddingConfig
 from superlocalmemory.core.embeddings import EmbeddingService
+from tests._portable import child_env_base
 from tests.helpers import fake_embedding_worker as fake
 
 REPO_SRC = str(Path(__file__).resolve().parents[2] / "src")

@@ -18,15 +18,14 @@ from superlocalmemory.hooks.adapter_base import (
     truncate_to_cap,
 )
 from superlocalmemory.hooks.antigravity_adapter import AntigravityAdapter
+from superlocalmemory.hooks.context_payload import build_payload, truncate_payload_for_cap
 from superlocalmemory.hooks.copilot_adapter import CopilotAdapter
 from superlocalmemory.hooks.cursor_adapter import CursorAdapter
-from superlocalmemory.hooks.context_payload import build_payload, truncate_payload_for_cap
 from superlocalmemory.hooks.sync_loop import (
     DEFAULT_INTERVAL_SECONDS,
     _interval_from_env,
     schedule,
 )
-
 
 # ---------------------------------------------------------------------------
 # adapter_base
@@ -349,8 +348,8 @@ def test_copilot_sync_path_traversal_marks_inactive(tmp_path, monkeypatch,
         recall_fn=fake_recall,
     )
     # Force safe_resolve to raise.
-    from superlocalmemory.hooks import copilot_adapter as mod
     from superlocalmemory.core.security_primitives import PathTraversalError
+    from superlocalmemory.hooks import copilot_adapter as mod
     monkeypatch.setattr(
         mod, "safe_resolve",
         lambda base, rel: (_ for _ in ()).throw(PathTraversalError("no")),
@@ -366,8 +365,8 @@ def test_copilot_disable_path_traversal_silent(tmp_path, monkeypatch,
         base_dir=tmp_path, sync_log_db=tmp_path / "m.db",
         recall_fn=fake_recall,
     )
-    from superlocalmemory.hooks import copilot_adapter as mod
     from superlocalmemory.core.security_primitives import PathTraversalError
+    from superlocalmemory.hooks import copilot_adapter as mod
     monkeypatch.setattr(
         mod, "safe_resolve",
         lambda base, rel: (_ for _ in ()).throw(PathTraversalError("no")),
@@ -383,8 +382,8 @@ def test_antigravity_sync_path_traversal_marks_inactive(tmp_path, monkeypatch,
         scope="workspace", base_dir=tmp_path,
         sync_log_db=tmp_path / "m.db", recall_fn=fake_recall,
     )
-    from superlocalmemory.hooks import antigravity_adapter as mod
     from superlocalmemory.core.security_primitives import PathTraversalError
+    from superlocalmemory.hooks import antigravity_adapter as mod
     monkeypatch.setattr(
         mod, "safe_resolve",
         lambda base, rel: (_ for _ in ()).throw(PathTraversalError("no")),
@@ -400,8 +399,8 @@ def test_antigravity_disable_path_traversal_silent(tmp_path, monkeypatch,
         scope="workspace", base_dir=tmp_path,
         sync_log_db=tmp_path / "m.db", recall_fn=fake_recall,
     )
-    from superlocalmemory.hooks import antigravity_adapter as mod
     from superlocalmemory.core.security_primitives import PathTraversalError
+    from superlocalmemory.hooks import antigravity_adapter as mod
     monkeypatch.setattr(
         mod, "safe_resolve",
         lambda base, rel: (_ for _ in ()).throw(PathTraversalError("no")),
@@ -416,8 +415,8 @@ def test_cursor_disable_path_traversal_silent(tmp_path, monkeypatch,
         scope="project", base_dir=tmp_path,
         sync_log_db=tmp_path / "m.db", recall_fn=fake_recall,
     )
-    from superlocalmemory.hooks import cursor_adapter as mod
     from superlocalmemory.core.security_primitives import PathTraversalError
+    from superlocalmemory.hooks import cursor_adapter as mod
     monkeypatch.setattr(
         mod, "safe_resolve",
         lambda base, rel: (_ for _ in ()).throw(PathTraversalError("no")),
@@ -501,9 +500,10 @@ def test_the_filesystem_root_is_never_treated_as_a_project(monkeypatch, fake_rec
 def test_both_daemon_call_sites_ask_for_global_adapters_only() -> None:
     """Pinned at the source because booting the daemon is not a unit test, and
     the cwd default is exactly the mistake a future call site would repeat."""
+    import inspect
+
     import superlocalmemory.server.routes.brain as brain
     import superlocalmemory.server.unified_daemon as daemon
-    import inspect
 
     for module in (daemon, brain):
         src = inspect.getsource(module)

@@ -13,13 +13,11 @@ Covers:
 
 from __future__ import annotations
 
-
 from superlocalmemory.encoding.signal_inference import (
     infer_signal,
     infer_signal_scores,
 )
 from superlocalmemory.storage.models import SignalType
-
 
 # ---------------------------------------------------------------------------
 # infer_signal — single type

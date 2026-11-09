@@ -12,7 +12,6 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 from superlocalmemory.server.routes.brain import redact_secrets_in_preferences
 
-
 # ---------------------------------------------------------------------------
 # Known-pattern redaction
 # ---------------------------------------------------------------------------

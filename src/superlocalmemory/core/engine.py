@@ -24,12 +24,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from superlocalmemory.core.session_identity import synthetic_session_id
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT, SLMConfig
 from superlocalmemory.core.engine_capabilities import Capabilities, CapabilityError
 from superlocalmemory.core.modes import get_capabilities
+from superlocalmemory.core.session_identity import synthetic_session_id
 from superlocalmemory.storage.models import (
-    AtomicFact, MemoryRecord, Mode, RecallResponse,
+    AtomicFact,
+    MemoryRecord,
+    Mode,
+    RecallResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,7 +294,8 @@ class MemoryEngine:
         # make every advertised write path fail after startup.
         try:
             from superlocalmemory.storage.migration_runner import (
-                apply_all, apply_deferred,
+                apply_all,
+                apply_deferred,
             )
             _base = self._config.base_dir
             _learning_db = _base / "learning.db"
@@ -365,16 +369,19 @@ class MemoryEngine:
             logger.debug("McpEmbedderProxy init skipped: %s", exc)
 
     def _init_heavy_layer(self) -> None:
-        from superlocalmemory.llm.backbone import LLMBackbone
-        from superlocalmemory.core.engine_wiring import (
-            init_embedder, init_encoding, init_retrieval, wire_hooks,
-            _init_auto_invoker, _init_consolidation,
-        )
-
         # Built on the space the store holds, never on a model config.json merely
         # names: a different model is re-indexed in the background by the daemon
         # (core/embedding_live.py, core/embedding_reindex.py), not here.
         from superlocalmemory.core.embedding_live import bind_live_space, take_preset_embedder
+        from superlocalmemory.core.engine_wiring import (
+            _init_auto_invoker,
+            _init_consolidation,
+            init_embedder,
+            init_encoding,
+            init_retrieval,
+            wire_hooks,
+        )
+        from superlocalmemory.llm.backbone import LLMBackbone
         bind_live_space(self._config, self._db)
         self._embedder = take_preset_embedder(self._config) or init_embedder(self._config)
 
@@ -401,9 +408,9 @@ class MemoryEngine:
         ):
             logger.warning("Mode config: %s", _warning)
 
-        from superlocalmemory.trust.scorer import TrustScorer
-        from superlocalmemory.trust.provenance import ProvenanceTracker
         from superlocalmemory.compliance.eu_ai_act import EUAIActChecker
+        from superlocalmemory.trust.provenance import ProvenanceTracker
+        from superlocalmemory.trust.scorer import TrustScorer
 
         self._trust_scorer = TrustScorer(self._db)
 
@@ -497,7 +504,9 @@ class MemoryEngine:
         """
         try:
             from superlocalmemory.cli.pending_store import (
-                get_pending, mark_done, mark_failed,
+                get_pending,
+                mark_done,
+                mark_failed,
             )
         except ImportError:
             return
@@ -1050,6 +1059,7 @@ class MemoryEngine:
         from superlocalmemory.core.engine_ingestion import _require_known_profile
         _require_known_profile(self, pid)
         from datetime import datetime, timezone
+
         from superlocalmemory.core.engine_ingestion import content_passes_admission
         if not content_passes_admission(content):
             return []

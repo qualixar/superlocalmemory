@@ -71,8 +71,9 @@ def test_drop_all_tables(tmp_path: Path) -> None:
 
 def test_assert_no_memory_db_tables_passes_on_clean_db(tmp_path: Path) -> None:
     """No forbidden tables present -> no exception."""
-    from superlocalmemory.optimize.storage import schema
     import sqlite3
+
+    from superlocalmemory.optimize.storage import schema
     conn = sqlite3.connect(str(tmp_path / "clean.db"))
     conn.execute("CREATE TABLE foo (id INTEGER)")
     conn.commit()
@@ -83,9 +84,11 @@ def test_assert_no_memory_db_tables_passes_on_clean_db(tmp_path: Path) -> None:
 
 def test_assert_no_memory_db_tables_raises_on_forbidden_table(tmp_path: Path) -> None:
     """Forbidden table present -> RuntimeError with table name."""
-    from superlocalmemory.optimize.storage import schema
     import sqlite3
+
     import pytest
+
+    from superlocalmemory.optimize.storage import schema
     conn = sqlite3.connect(str(tmp_path / "dirty.db"))
     conn.execute("CREATE TABLE atomic_facts (id TEXT)")
     conn.execute("CREATE TABLE profiles (id TEXT)")

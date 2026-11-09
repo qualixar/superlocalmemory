@@ -22,7 +22,6 @@ import pytest
 from superlocalmemory.hooks import event_delivery as ed
 from superlocalmemory.hooks import event_spool
 
-
 # Production values, captured before any test patches them.
 _PROD_TIMEOUT_MS = ed.DEFAULT_DELIVERY_TIMEOUT_MS
 _PROD_BUDGET_MS = ed.HOOK_BUDGET_MS

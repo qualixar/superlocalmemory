@@ -13,12 +13,11 @@ from argparse import Namespace
 
 import pytest
 
-from tests._portable import child_env_base
-
 from superlocalmemory.cli import commands
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
+from tests._portable import child_env_base
 
 
 class _FakeEngine:
@@ -56,6 +55,7 @@ def fake_engine_with_strict_threshold(tmp_path, monkeypatch):
     stricter than the module default (0.20) — so a test can tell whether a
     surface reads the CONFIGURED value or silently keeps its own default."""
     from dataclasses import dataclass
+
     from superlocalmemory.core import engine as engine_mod
 
     @dataclass

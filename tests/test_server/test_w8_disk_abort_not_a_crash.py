@@ -1,10 +1,13 @@
 """The daemon must report a deliberate disk abort distinctly from a crash."""
 from unittest import mock
+
 from superlocalmemory.storage.backup import InsufficientDiskSpaceError
 
 
 def test_disk_abort_is_not_reported_as_a_crash(caplog):
-    import logging, superlocalmemory.storage.migration_runner as mr
+    import logging
+
+    import superlocalmemory.storage.migration_runner as mr
     caplog.set_level(logging.WARNING)
     with mock.patch.object(mr, "apply_all",
                            side_effect=InsufficientDiskSpaceError(900, 100)):
@@ -20,7 +23,9 @@ def test_disk_abort_is_not_reported_as_a_crash(caplog):
 
 
 def test_daemon_source_handles_it_before_the_generic_handler():
-    import inspect, superlocalmemory.server.unified_daemon as ud
+    import inspect
+
+    import superlocalmemory.server.unified_daemon as ud
     src = inspect.getsource(ud)
     i_specific = src.index("except InsufficientDiskSpaceError")
     i_generic = src.index('logger.warning("migration runner crashed (non-fatal)')

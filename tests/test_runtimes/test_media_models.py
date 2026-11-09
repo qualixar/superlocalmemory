@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 
 import pytest
-
-import importlib
 
 from superlocalmemory.runtimes import media_models, space_plan, worker_client
 

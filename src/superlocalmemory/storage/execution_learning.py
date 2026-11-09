@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from superlocalmemory.storage.agent_experience import (
-    _ProfileAdmissionGate,
     _PROCESS_LOCKS_GUARD,
     _PROFILE_GATES,
     ProfileAdmissionError,
+    _ProfileAdmissionGate,
 )
 
 _CONTRACT = "bounded-loops.dev/slm-bridge/v2"

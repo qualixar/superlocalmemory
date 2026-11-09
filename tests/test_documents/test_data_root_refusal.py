@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from superlocalmemory.documents.submit import _Stop, _stage_path
+from superlocalmemory.documents.submit import _stage_path, _Stop
 from superlocalmemory.media.ingest import MediaInput
 from tests.test_documents.pdfs import make_pdf
 

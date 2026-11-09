@@ -15,13 +15,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.core.block_hygiene import (
+    compile_block_content,
     dedupe_block_content,
     filter_low_quality_block_facts,
-    compile_block_content,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -191,8 +189,8 @@ class TestMaintenanceSchedulerRecompile:
 
     def test_run_calls_compile_core_blocks(self, tmp_path) -> None:
         """MaintenanceScheduler._run() calls consolidation_engine.compile_core_blocks_mode_a."""
-        from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
         from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
         from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage.models import Mode
 

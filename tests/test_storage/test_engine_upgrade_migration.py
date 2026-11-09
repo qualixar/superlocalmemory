@@ -19,9 +19,9 @@ from unittest.mock import patch
 
 import pytest
 
-from superlocalmemory.storage import schema
 from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.core.engine_capabilities import Capabilities
+from superlocalmemory.storage import schema
 from superlocalmemory.storage.models import Mode
 
 

@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from superlocalmemory.server.routes import v3_api
 
 
-
 def _call(result):
     """A route may be a plain function (read routes run on the thread pool) or a coroutine."""
     import inspect

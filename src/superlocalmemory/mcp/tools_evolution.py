@@ -18,11 +18,10 @@ import json
 import logging
 from typing import Callable
 
-
-from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.mcp.tool_hints import READ_ONLY, hints
 from superlocalmemory.storage.read_connection import ReadConnectionFactory
 
 logger = logging.getLogger(__name__)

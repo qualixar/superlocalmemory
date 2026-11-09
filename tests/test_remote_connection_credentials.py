@@ -1,10 +1,11 @@
 """Credential delivery probes use an injected fake; never the live OS keychain."""
-from dataclasses import replace
 import json
+from dataclasses import replace
+
 import pytest
 
 try:
-    from superlocalmemory.remote_connections.credentials import CredentialVault, ConnectorCredential, CredentialError
+    from superlocalmemory.remote_connections.credentials import ConnectorCredential, CredentialError, CredentialVault
 except ImportError:
     CredentialVault = ConnectorCredential = None
     CredentialError = RuntimeError
@@ -79,7 +80,7 @@ def test_corrupt_or_foreign_keychain_record_is_refused(vault):
     key = next(iter(backend.values)); raw = json.loads(backend.values[key]); raw["profile"] = "other"
     backend.values[key] = json.dumps(raw)
     with pytest.raises(CredentialError): store.load("install-a","owner-a","default","a"*32)
-    backend.values[key] = "{" 
+    backend.values[key] = "{"
     with pytest.raises(CredentialError): store.load("install-a","owner-a","default","a"*32)
 
 def test_unavailable_secure_backend_affects_remote_only(tmp_path, monkeypatch):

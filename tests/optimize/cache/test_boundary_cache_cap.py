@@ -13,13 +13,11 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-
 from superlocalmemory.optimize.cache.boundary_store import (
+    _BOUNDARY_CACHE_MAX,
     BoundaryStore,
     PerItemBoundaryRecord,
-    _BOUNDARY_CACHE_MAX,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

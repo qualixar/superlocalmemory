@@ -8,9 +8,9 @@ import time
 from types import SimpleNamespace
 
 from superlocalmemory.sources import folder_watch as watcher_mod
+from superlocalmemory.sources.folder_watch import SourceWatcher
 from superlocalmemory.sources.report import build_report
 from superlocalmemory.sources.store import SourceStore
-from superlocalmemory.sources.folder_watch import SourceWatcher
 
 
 class FakeObserver:

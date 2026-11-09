@@ -20,14 +20,16 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
-from superlocalmemory.learning import signals as _signals_mod
 from superlocalmemory.learning.signals import (
     SignalBatch,
-    bump_counter as _bump_counter,
-    get_queue as _signals_get_queue,
     record_signal_batch,
+)
+from superlocalmemory.learning.signals import (
+    bump_counter as _bump_counter,
+)
+from superlocalmemory.learning.signals import (
+    get_queue as _signals_get_queue,
 )
 
 

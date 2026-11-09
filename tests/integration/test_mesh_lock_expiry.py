@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from superlocalmemory.mesh.broker import MeshBroker, _NEVER_EXPIRES
+from superlocalmemory.mesh.broker import _NEVER_EXPIRES, MeshBroker
 
 
 @pytest.fixture
@@ -13,7 +13,9 @@ def broker(tmp_path):
     db_path = tmp_path / "mesh_lock.db"
     conn = sqlite3.connect(str(db_path))
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_ALTERS, _MESH_V346_DDL,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn.executescript(_MESH_DDL)
     for alter_sql in _MESH_V346_ALTERS:

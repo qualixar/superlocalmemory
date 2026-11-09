@@ -142,9 +142,8 @@ def _live_text_space(data_root: Path) -> tuple[str, int]:
 
 def current_space_plan(data_root: str | Path | None = None, *, requested: str | None = None) -> SpacePlan:
     """The plan for this data folder's live text space and the shipped picture model."""
-    from superlocalmemory.runtimes.media_env import MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION
-
     from superlocalmemory.infra.data_root import canonical_data_root
+    from superlocalmemory.runtimes.media_env import MEDIA_MODEL_REPO, MEDIA_MODEL_REVISION
 
     root = Path(data_root) if data_root is not None else canonical_data_root()
     text_model, text_dim = _live_text_space(root)

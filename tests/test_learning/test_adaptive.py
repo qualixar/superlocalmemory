@@ -27,11 +27,10 @@ from pathlib import Path
 
 import pytest
 
+from superlocalmemory.learning.adaptive import _MIN_FEEDBACK_FOR_TRAINING, AdaptiveLearner
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FeedbackRecord, MemoryRecord
-from superlocalmemory.learning.adaptive import AdaptiveLearner, _MIN_FEEDBACK_FOR_TRAINING
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

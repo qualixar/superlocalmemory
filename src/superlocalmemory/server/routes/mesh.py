@@ -420,8 +420,8 @@ def _strict_peer_key(broker, from_peer: str) -> str:
 def _admit_remote_send(client_host: str) -> None:
     """Admission gate parity (closes the P1 bypass for inbound remote send)."""
     try:
-        from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
         from superlocalmemory.core.actor_context import Transport
+        from superlocalmemory.core.admission import AdmissionDenied, admit, resolve_actor
         from superlocalmemory.core.operation_request import OperationKind
     except ImportError:
         return

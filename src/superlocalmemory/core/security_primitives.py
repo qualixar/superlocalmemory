@@ -28,7 +28,6 @@ from pathlib import Path
 
 from superlocalmemory.core import credential_shapes
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------

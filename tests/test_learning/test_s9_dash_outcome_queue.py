@@ -21,14 +21,16 @@ import sqlite3
 import time
 from pathlib import Path
 
-import pytest
-
 from superlocalmemory.learning import outcome_queue
 from superlocalmemory.learning.outcome_queue import (
-    RecallEvent, enqueue_recall, get_counters, queue_size,
-    start_worker, stop_worker, _reset_for_testing,
+    RecallEvent,
+    _reset_for_testing,
+    enqueue_recall,
+    get_counters,
+    queue_size,
+    start_worker,
+    stop_worker,
 )
-
 
 # ---------------------------------------------------------------------------
 # Enqueue is microseconds — perf regression guard

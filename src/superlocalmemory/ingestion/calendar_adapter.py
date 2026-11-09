@@ -20,8 +20,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig, IngestItem
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.ingestion.base_adapter import AdapterConfig, BaseAdapter, IngestItem
 
 logger = logging.getLogger("superlocalmemory.ingestion.calendar")
 
@@ -237,9 +237,10 @@ class CalendarAdapter(BaseAdapter):
     def _fetch_oauth(self) -> list[IngestItem]:
         """Poll Google Calendar API with OAuth."""
         try:
-            from superlocalmemory.ingestion.credentials import load_credential
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
+
+            from superlocalmemory.ingestion.credentials import load_credential
 
             refresh_token = load_credential("gmail", "refresh_token")
             client_id = load_credential("gmail", "client_id")

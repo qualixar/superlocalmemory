@@ -31,7 +31,6 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Callable
 
-
 from superlocalmemory.mcp.tool_hints import READ_ONLY
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge
 

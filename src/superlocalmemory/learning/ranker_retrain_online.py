@@ -29,10 +29,9 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Final
 from contextlib import closing
+from datetime import datetime, timezone
+from typing import Final
 
 from superlocalmemory.learning.model_cache import invalidate as invalidate_model_cache
 from superlocalmemory.learning.ranker_common import (
@@ -160,8 +159,8 @@ def _train_booster(
     production invocation uses the real path.
     """
     try:
-        import numpy as np
         import lightgbm as lgb
+        import numpy as np
     except ImportError as exc:  # pragma: no cover — platform guard
         raise RuntimeError(f"lightgbm unavailable: {exc}") from exc
 

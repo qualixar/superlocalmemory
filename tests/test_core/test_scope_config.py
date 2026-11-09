@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from superlocalmemory.core.config import SLMConfig, ScopeConfig, Mode
+from superlocalmemory.core.config import Mode, ScopeConfig, SLMConfig
 
 
 def test_defaults_match_3614_behaviour():

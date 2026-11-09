@@ -28,8 +28,14 @@ from superlocalmemory.sources.ignore import IgnoreRules, kind_of
 from superlocalmemory.sources.roots import RootRefused, check_root
 from superlocalmemory.sources.safe_read import open_regular
 from superlocalmemory.sources.store import (
-    SourceStore, carried_entries, current_documents, entries_of, memory_entries, pending_documents,
-    replaced_documents, replaced_pictures,
+    SourceStore,
+    carried_entries,
+    current_documents,
+    entries_of,
+    memory_entries,
+    pending_documents,
+    replaced_documents,
+    replaced_pictures,
 )
 from superlocalmemory.sources.walk import Entry, WalkResult, stat_entry, walk_tree
 

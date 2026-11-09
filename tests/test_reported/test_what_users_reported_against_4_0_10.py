@@ -26,7 +26,6 @@ import pytest
 
 import superlocalmemory
 
-
 REPO = pathlib.Path(superlocalmemory.__file__).resolve().parents[2]
 
 

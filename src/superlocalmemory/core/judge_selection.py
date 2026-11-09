@@ -453,9 +453,8 @@ def _construct_laya(plan: _LayaPlan) -> Any:
 
 def _construct_jev(provider: str, store: Any, timeout_s: float, rerank_k: int) -> Any:
     try:
-        from superlocalmemory.retrieval import jev_judge
-
         from superlocalmemory.infra.data_root import canonical_data_root
+        from superlocalmemory.retrieval import jev_judge
 
         # The stored choice is re-read before every request, so consent
         # withdrawn in any process stops this one too.

@@ -1,10 +1,9 @@
 """Auxiliary graph, learning, math, MCP, and route state stays root-local."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
-
 
 _RUNTIME_FILES = (
     "code_graph/config.py",

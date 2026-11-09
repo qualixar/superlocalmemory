@@ -25,8 +25,19 @@ from superlocalmemory.storage import migration_runner as mr
 from superlocalmemory.storage import upgrade_restore as ur
 
 from ._upgrade_store import (
-    add_memory, add_profile, as_4118, columns, confirm_kind, current_store, delete_fact,
-    delete_memory, fact_ids, file_digest, integrity, memory_ids, record_erasure,
+    add_memory,
+    add_profile,
+    as_4118,
+    columns,
+    confirm_kind,
+    current_store,
+    delete_fact,
+    delete_memory,
+    fact_ids,
+    file_digest,
+    integrity,
+    memory_ids,
+    record_erasure,
 )
 
 

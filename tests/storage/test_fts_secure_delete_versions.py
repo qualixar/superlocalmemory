@@ -7,9 +7,9 @@ import sqlite3
 from contextlib import closing
 
 import pytest
+from tests.test_storage import _upgrade_store as store
 
 from superlocalmemory.storage import fts_residue
-from tests.test_storage import _upgrade_store as store
 
 _IN_BROKEN_RANGE = (3, 44, 0) <= sqlite3.sqlite_version_info < (3, 46, 1)
 

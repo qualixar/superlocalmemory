@@ -24,9 +24,9 @@ import os as _os
 import sqlite3
 import tempfile
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from contextlib import closing
 
 import numpy as np
 

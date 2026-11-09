@@ -28,12 +28,11 @@ from superlocalmemory.core.config import (
     SLMConfig,
 )
 from superlocalmemory.retrieval.strategy import (
+    _VAGUE_PHRASES,
     STRATEGY_PRESETS,
     QueryStrategyClassifier,
-    _VAGUE_PHRASES,
 )
 from superlocalmemory.storage.models import Mode
-
 
 # ---------------------------------------------------------------------------
 # Deterministic embedder for test reproducibility

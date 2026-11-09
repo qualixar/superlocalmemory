@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 _MARKER_NAME = ".disabled"
 _ENV_NAME = "SLM_DISABLE"
 

@@ -25,7 +25,6 @@ from superlocalmemory.server.middleware.security_headers import (
 )
 from superlocalmemory.server.routes import brain as brain_mod
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — minimal app with headers middleware and two routes.
 # ---------------------------------------------------------------------------

@@ -17,10 +17,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from superlocalmemory.core.config import RetrievalConfig, SLMConfig
-from tests._portable import assert_owner_only
 from superlocalmemory.core.engine_wiring import init_reranker
 from superlocalmemory.retrieval.remote_reranker import RemoteReranker
 from superlocalmemory.storage.models import Mode
+from tests._portable import assert_owner_only
 
 ENDPOINT = "https://reranker.example.test/v1/rerank"
 MODEL = "/root/model/reranker.gguf"

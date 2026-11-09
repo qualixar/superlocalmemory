@@ -23,8 +23,9 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 def _make_app_with_db(db_path):
     """Create a FastAPI app with routes patched to use given db_path."""
-    from superlocalmemory.server.routes.v3_api import router
     from fastapi import FastAPI
+
+    from superlocalmemory.server.routes.v3_api import router
 
     app = FastAPI()
     app.include_router(router)

@@ -12,10 +12,10 @@ import logging
 import threading
 
 import pytest
+from _backup_key_env import files_containing, key_env  # noqa: F401
 
 from superlocalmemory.infra import backup_crypto as bc
 from superlocalmemory.infra import backup_keys as bk
-from _backup_key_env import files_containing, key_env  # noqa: F401
 
 _KEY = bytes(range(32))
 

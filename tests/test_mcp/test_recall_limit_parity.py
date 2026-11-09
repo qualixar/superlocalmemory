@@ -20,8 +20,6 @@ from __future__ import annotations
 import inspect
 from unittest.mock import MagicMock
 
-
-
 # ---------------------------------------------------------------------------
 # Sentinel value from LLD §5
 # ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from tests._portable import child_env_base
 
 from superlocalmemory.cli import remote_commands

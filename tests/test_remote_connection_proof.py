@@ -1,8 +1,10 @@
 """Native device signing uses maintained cryptography/PyJWT primitives."""
 import json
 import time
+
 import jwt
 import pytest
+
 try:
     from superlocalmemory.remote_connections.proof import DeviceSigner
 except ImportError:

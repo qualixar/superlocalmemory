@@ -13,7 +13,6 @@ import pytest
 
 from superlocalmemory.core import remote_mode as rm
 
-
 # -- is_remote_mode / mcp_stateless ------------------------------------------
 
 def test_remote_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

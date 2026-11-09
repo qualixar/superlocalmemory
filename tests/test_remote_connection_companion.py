@@ -1,11 +1,14 @@
 """Opt-in lifecycle uses fake sockets; canonical origin tests are separate."""
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from dataclasses import replace
-import time
+
 import pytest
+
 from superlocalmemory.remote_connections.codec import compact
 from superlocalmemory.remote_connections.credentials import ConnectorCredential
+
 try:
     from superlocalmemory.remote_connections.companion import Companion
 except ImportError:
@@ -84,9 +87,9 @@ async def test_network_loss_reconnects_and_never_replays_a_request(harness):
 
 @pytest.mark.asyncio
 async def test_handshake_auth_denial_does_not_retry_forever(harness):
+    from websockets.datastructures import Headers
     from websockets.exceptions import InvalidStatus
     from websockets.http11 import Response
-    from websockets.datastructures import Headers
     states,calls,socket,load,exchange,dial=harness
     @asynccontextmanager
     async def denied(endpoint,token):
@@ -163,6 +166,7 @@ async def test_a_broken_credential_is_still_a_configuration_error(harness):
 
 def test_the_dial_says_it_reads_grants(monkeypatch):
     import websockets.asyncio.client as client
+
     from superlocalmemory.remote_connections import companion as module
     from superlocalmemory.remote_connections.proof import DeviceSigner
     seen={}

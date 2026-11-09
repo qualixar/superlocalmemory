@@ -249,6 +249,7 @@ def test_peer_ref_is_stable_and_shaped():
 
 def test_a_trailing_newline_is_not_a_valid_grant_or_id():
     import pytest
+
     from superlocalmemory.remote_connections import grant as g
 
     key = bytes(range(1, 33))

@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 import release_manifest as rm  # noqa — path injected by conftest
 
 

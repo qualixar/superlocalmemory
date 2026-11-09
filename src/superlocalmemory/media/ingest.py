@@ -31,7 +31,10 @@ from typing import Any, Literal
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import (
-    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+    ContentOrigin,
+    effective_pii_redaction,
+    prepare_for_save,
+    scan_sensitive,
 )
 from superlocalmemory.memory_core.submit import SavePending, SaveReceipt, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.space_plan import compatible, current_space_plan

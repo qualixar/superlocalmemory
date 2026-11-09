@@ -19,7 +19,6 @@ follows from the diff.
 from __future__ import annotations
 
 import json
-
 from unittest.mock import MagicMock
 
 from superlocalmemory.core.config import RetrievalConfig

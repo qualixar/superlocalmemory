@@ -24,8 +24,6 @@ import re
 import subprocess
 from pathlib import Path
 
-
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "postinstall-interactive.js"
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from superlocalmemory.core.ingestion_command import IngestionOperationRepository
-from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 from superlocalmemory.memory_core import ContentOrigin
+from superlocalmemory.memory_core.submit import SaveRequest, submit_memory
 
 from .test_write_paths_redact import (
-    M018_ingestion_operations, M032_write_coordinator_admission, M033_projection_transactions,
-    M034_obligation_integrity, M042_correction_case_ledger,
+    M018_ingestion_operations,
+    M032_write_coordinator_admission,
+    M033_projection_transactions,
+    M034_obligation_integrity,
+    M042_correction_case_ledger,
 )
 
 SOURCE = {"type": "media", "media_id": "m1", "origin": "tool"}

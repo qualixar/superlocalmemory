@@ -40,6 +40,7 @@ import httpx
 from superlocalmemory import __version__ as _SLM_VERSION
 from superlocalmemory.core import recall_gate
 from superlocalmemory.core.judge_keys import JudgeKeyStore
+from superlocalmemory.core.outbound_http import GatedClient
 from superlocalmemory.encoding.memory_kind_recipe import KindAnswer, KindRecipe
 from superlocalmemory.retrieval import answer_question_forms as question_forms
 from superlocalmemory.retrieval import jev_kinds
@@ -52,7 +53,6 @@ from superlocalmemory.retrieval.answer_check_status import (
     effective_deadline,
 )
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge, redact_or_none
-from superlocalmemory.core.outbound_http import GatedClient
 from superlocalmemory.retrieval.jev_transport import HostedTransport
 from superlocalmemory.retrieval.judge_recipe import (
     ACTIVE_RECIPE,

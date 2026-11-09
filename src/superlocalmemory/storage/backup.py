@@ -60,9 +60,9 @@ override) will not list or touch these files.  That is intentional.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
-import os
 import sqlite3
 import time
 from datetime import UTC, datetime

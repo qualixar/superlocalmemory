@@ -36,8 +36,9 @@ fastapi = pytest.importorskip("fastapi", reason="fastapi not installed")
 
 def _make_app():
     """Create a FastAPI app with V3 router included."""
-    from superlocalmemory.server.routes.v3_api import router
     from fastapi import FastAPI
+
+    from superlocalmemory.server.routes.v3_api import router
 
     app = FastAPI()
     app.state.engine = MagicMock(profile_id="default")
@@ -570,6 +571,7 @@ class TestProcessHealth:
     def test_process_health_reports_pid(self):
         """MCP server PID is a positive integer."""
         import os
+
         from fastapi.testclient import TestClient
 
         client = TestClient(_make_app())
@@ -649,8 +651,8 @@ class TestAutoInvokerSoftPromptInjection:
 
     def _make_invoker(self, prompt_injector=None, config=None):
         """Create an AutoInvoker with mocked DB."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = []
@@ -730,8 +732,8 @@ class TestForgettingAwareAutoInvoke:
 
     def test_enrich_result_skips_archived(self):
         """_enrich_result returns None for archived facts."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = [
@@ -743,8 +745,8 @@ class TestForgettingAwareAutoInvoke:
 
     def test_enrich_result_skips_forgotten(self):
         """_enrich_result returns None for forgotten facts."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = [
@@ -756,8 +758,8 @@ class TestForgettingAwareAutoInvoke:
 
     def test_enrich_result_allows_active(self):
         """_enrich_result returns data for active facts."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = [
@@ -772,8 +774,8 @@ class TestForgettingAwareAutoInvoke:
 
     def test_enrich_result_allows_warm(self):
         """_enrich_result returns data for warm (non-excluded) facts."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = [
@@ -786,8 +788,8 @@ class TestForgettingAwareAutoInvoke:
 
     def test_candidates_sql_excludes_forgotten(self):
         """_get_candidates SQL fallback includes lifecycle filter."""
-        from superlocalmemory.hooks.auto_invoker import AutoInvoker
         from superlocalmemory.core.config import AutoInvokeConfig
+        from superlocalmemory.hooks.auto_invoker import AutoInvoker
 
         db = MagicMock()
         db.execute.return_value = [{"fact_id": "f1"}]

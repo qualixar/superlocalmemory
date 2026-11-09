@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-
 # POSIX-only — fcntl is Linux/macOS. Windows gets its own path later.
 if sys.platform == "win32":
     pytest.skip("ram_reservation is POSIX-only", allow_module_level=True)

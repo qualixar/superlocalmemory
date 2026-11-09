@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-
 from superlocalmemory.cli.daemon import DaemonConflict, DaemonNotFound
 from tests.test_server.test_memory_kinds_routes import _client, _fact
 

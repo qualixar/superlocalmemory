@@ -17,9 +17,7 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
-import json
 import logging
-from collections import defaultdict
 from datetime import UTC, datetime
 
 from superlocalmemory.storage.models import FeedbackRecord

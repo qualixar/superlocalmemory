@@ -10,6 +10,7 @@ All tests use scratch directories under tmp_path. They never touch
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import time
 from pathlib import Path
@@ -18,17 +19,14 @@ from unittest import mock
 import pytest
 
 from superlocalmemory.storage.backup import (
+    InsufficientDiskSpaceError,
     LiveStoreWriteError,
     SnapshotUnusableError,
-    restore_pre_migration_snapshot,
-    InsufficientDiskSpaceError,
     _backup_via_sqlite_api,
     _gc_old_backups,
     _pre_migration_backup,
+    restore_pre_migration_snapshot,
 )
-
-import shutil
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,6 +192,7 @@ class TestBackupViaSqliteApi:
         # A docstring mention is acceptable; an actual call is not.
         import ast
         import inspect
+
         import superlocalmemory.storage.backup as backup_module
         source = inspect.getsource(backup_module)
         tree = ast.parse(source)

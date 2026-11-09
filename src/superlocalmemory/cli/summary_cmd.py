@@ -37,6 +37,7 @@ from typing import Any
 
 from superlocalmemory.infra.data_root import state_path
 
+
 def _coverage_is_complete(coverage: str) -> bool:
     """Whether *coverage* means "this really is the whole picture".
 

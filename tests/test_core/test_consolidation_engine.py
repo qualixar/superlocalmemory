@@ -17,9 +17,8 @@ import pytest
 
 from superlocalmemory.core.config import ConsolidationConfig, SLMConfig
 from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage import schema
-
+from superlocalmemory.storage.database import DatabaseManager
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -72,7 +71,10 @@ def _seed_facts(
 ) -> list[str]:
     """Insert sample facts and return their fact_ids."""
     from superlocalmemory.storage.models import (
-        AtomicFact, FactType, MemoryRecord, SignalType,
+        AtomicFact,
+        FactType,
+        MemoryRecord,
+        SignalType,
     )
     record = MemoryRecord(
         profile_id=profile_id, content="test memory",
@@ -253,7 +255,11 @@ class TestConsolidationModeA:
     ) -> None:
         """active_decisions block queries signal_type='decision', not fact_type."""
         from superlocalmemory.storage.models import (
-            AtomicFact, FactType, MemoryRecord, SignalType, _new_id,
+            AtomicFact,
+            FactType,
+            MemoryRecord,
+            SignalType,
+            _new_id,
         )
         # Create a fact and set signal_type='decision' via SQL
         # (signal_type column is free-text; 'decision' is not in SignalType enum)

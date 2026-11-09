@@ -19,8 +19,15 @@ from superlocalmemory.storage import upgrade_restore as ur
 from superlocalmemory.storage._restore_delta import export_delta, open_compare
 
 from ._upgrade_store import (
-    add_memory, add_profile, current_store, delete_fact, delete_memory, fact_ids,
-    lose_rows, memory_ids, record_erasure,
+    add_memory,
+    add_profile,
+    current_store,
+    delete_fact,
+    delete_memory,
+    fact_ids,
+    lose_rows,
+    memory_ids,
+    record_erasure,
 )
 
 

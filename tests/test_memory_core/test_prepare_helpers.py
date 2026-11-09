@@ -36,7 +36,7 @@ def test_metadata_is_redacted_recursively_without_mutating_input() -> None:
     assert EMAIL not in repr(out)
     assert count == 3
     assert out["n"] == 3 and out["flag"] is True and out["none"] is None
-    assert isinstance(out[f"key [PII:EMAIL]"][1]["deep"], tuple)
+    assert isinstance(out["key [PII:EMAIL]"][1]["deep"], tuple)
 
 
 def test_metadata_is_untouched_when_redaction_is_off() -> None:

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "installer-matrix.yml"
 # 4.2.9: CI runs macOS only, so it stays fast and green; the Windows steps

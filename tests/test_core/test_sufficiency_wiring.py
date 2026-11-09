@@ -15,19 +15,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from superlocalmemory.core import engine_wiring, judge_selection
+
 # Imported at collection time: tests/conftest.py replaces this attribute for the
 # whole session so no engine a test builds can start a real Laya worker.
 from superlocalmemory.core.engine_wiring import (
     init_sufficiency_judge as _real_init_sufficiency_judge,
 )
-from superlocalmemory.core import engine_wiring, judge_selection
 from superlocalmemory.core.recall_pipeline import _judge_sufficiency
 from superlocalmemory.core.score_contract import finalize_score_contract
 from superlocalmemory.retrieval import sufficiency
 from superlocalmemory.retrieval.judge_recipe import JudgeDocument
 from superlocalmemory.retrieval.sufficiency import SufficiencyVerdict
 from superlocalmemory.storage.models import (
-    AtomicFact, FactType, RecallResponse, RetrievalResult,
+    AtomicFact,
+    FactType,
+    RecallResponse,
+    RetrievalResult,
 )
 
 

@@ -19,14 +19,13 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-
 logger = logging.getLogger(__name__)
 
-from superlocalmemory.mcp.tool_hints import DESTROYS, DESTROYS_ONCE, READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.shared import authorize_mcp_mutation
+from superlocalmemory.mcp.tool_hints import DESTROYS, DESTROYS_ONCE, READ_ONLY
 
 
 class DaemonDidNotComplete(RuntimeError):
@@ -113,10 +112,10 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             engine = get_engine()
             pid = engine.profile_id
 
-            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
             from superlocalmemory.learning.forgetting_scheduler import (
                 ForgettingScheduler,
             )
+            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
 
             ebbinghaus = EbbinghausCurve(engine._config.forgetting)
             scheduler = ForgettingScheduler(
@@ -186,10 +185,10 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             engine = get_engine()
             pid = engine.profile_id
 
+            from superlocalmemory.dynamics.eap_scheduler import EAPScheduler
             from superlocalmemory.math.ebbinghaus import EbbinghausCurve
             from superlocalmemory.math.polar_quant import PolarQuantEncoder
             from superlocalmemory.math.qjl import QJLEncoder
-            from superlocalmemory.dynamics.eap_scheduler import EAPScheduler
             from superlocalmemory.storage.quantized_store import (
                 QuantizedEmbeddingStore,
             )
@@ -391,8 +390,8 @@ def register_v33_tools(server, get_engine: Callable) -> None:
                     mutation_source="mcp-process-reaper",
                 )
             from superlocalmemory.infra.process_reaper import (
-                cleanup_all_orphans,
                 ReaperConfig,
+                cleanup_all_orphans,
             )
 
             config = ReaperConfig()
@@ -517,8 +516,8 @@ def register_v33_tools(server, get_engine: Callable) -> None:
 
             # 2. Ebbinghaus forgetting decay
             try:
-                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
                 from superlocalmemory.learning.forgetting_scheduler import ForgettingScheduler
+                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
                 ebbinghaus = EbbinghausCurve(engine._config.forgetting)
                 scheduler = ForgettingScheduler(engine._db, ebbinghaus, engine._config.forgetting)
                 decay_result = scheduler.run_decay_cycle(pid, force=False)

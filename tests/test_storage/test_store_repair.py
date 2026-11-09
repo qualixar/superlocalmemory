@@ -241,7 +241,9 @@ def test_apply_never_restores_a_secret_holding_original(secret_conn) -> None:
 def test_the_shared_restore_refuses_a_secret_as_a_last_guard(secret_conn) -> None:
     # A hand-built plan, as a caller that skipped the planner would make.
     from superlocalmemory.storage.store_repair import (
-        RepairPlan, RestoreItem, restore_blanked_text,
+        RepairPlan,
+        RestoreItem,
+        restore_blanked_text,
     )
 
     run = lambda sql, params=(): secret_conn.execute(sql, params).fetchall()  # noqa: E731

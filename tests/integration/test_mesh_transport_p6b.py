@@ -352,7 +352,7 @@ class TestOutboxTTLAndCap:
 
     def test_per_peer_cap_enforced(self, mesh_db):
         """When a peer_url has _CAP_PER_PEER rows, adding one more drops the oldest."""
-        from superlocalmemory.mesh.outbox_remote import RemoteOutbox, _CAP_PER_PEER
+        from superlocalmemory.mesh.outbox_remote import _CAP_PER_PEER, RemoteOutbox
         ob = RemoteOutbox(str(mesh_db))
         peer = "http://peer-a:9000"
         now = time.time()
@@ -384,7 +384,7 @@ class TestDeadLetter:
 
     def test_dead_letter_after_max_retries(self, mesh_db):
         """mark_retry deletes a row once retry_count exceeds _MAX_RETRIES."""
-        from superlocalmemory.mesh.outbox_remote import RemoteOutbox, _MAX_RETRIES
+        from superlocalmemory.mesh.outbox_remote import _MAX_RETRIES, RemoteOutbox
         ob = RemoteOutbox(str(mesh_db))
         now = time.time()
         ob.enqueue("http://peer:1", "p1", {"msg": "doom"}, None, now=now)

@@ -19,14 +19,12 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
 from superlocalmemory.core.embeddings import EmbeddingService
 from superlocalmemory.core.engine_wiring import init_embedder
 from superlocalmemory.storage.models import Mode
-
 
 # ---------------------------------------------------------------------------
 # EmbeddingConfig provider field
@@ -130,7 +128,6 @@ class TestEngineEmbedderAutoDetect:
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
     def test_falls_back_to_st_when_ollama_unavailable(self, _mock, tmp_path: Path) -> None:
         """When Ollama is down → fall back to sentence-transformers."""
-        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
         engine = self._make_engine(tmp_path=tmp_path)
         # Also mock EmbeddingService to avoid real model load
         with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
@@ -323,6 +320,7 @@ class TestEmbeddingServiceTimeout:
     ) -> None:
         """A broken local ML stack must emit a protocol error, not exit silently."""
         import builtins
+
         from superlocalmemory.core import embedding_worker
 
         real_import = builtins.__import__

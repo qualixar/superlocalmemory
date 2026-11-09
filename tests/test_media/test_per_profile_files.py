@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tests.test_media.test_ingest import env, png, root, save, store  # noqa: F401  (fixtures)
 from superlocalmemory.media import erasure, files
+from tests.test_media.test_ingest import env, png, root, save, store  # noqa: F401  (fixtures)
 
 
 def _paths(env, profile):

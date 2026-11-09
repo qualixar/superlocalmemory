@@ -19,15 +19,17 @@ from superlocalmemory.learning.signal_worker import (
     _write_with_retry,
 )
 from superlocalmemory.learning.signals import (
+    _Q as _SIGNAL_QUEUE,
+)
+from superlocalmemory.learning.signals import (
+    _drain_queue_for_tests,
     enqueue,
     get_counters,
     reset_counters,
-    _drain_queue_for_tests,
-    _Q as _SIGNAL_QUEUE,
 )
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
 )
 
 

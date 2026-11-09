@@ -1,7 +1,7 @@
 """Remote enrollment metadata only; fixtures never open the live memory root."""
+import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-import os
 
 import pytest
 

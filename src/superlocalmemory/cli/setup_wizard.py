@@ -9,6 +9,7 @@ For pip: triggered on first `slm` command when .setup-complete is missing.
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 """
 from __future__ import annotations
+
 import os
 import platform
 import shutil
@@ -17,6 +18,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -108,7 +111,7 @@ def _download_model(model_name: str, label: str) -> bool:
     Returns True on success.
     """
     print(f"\n  Downloading {label}: {model_name}")
-    print(f"  (this may take a few minutes on first run)\n")
+    print("  (this may take a few minutes on first run)\n")
     # H-03: pass the model name as argv, never interpolated into executed
     # source, so a crafted model_name cannot become arbitrary Python.
     script = (
@@ -148,7 +151,7 @@ def _download_model(model_name: str, label: str) -> bool:
 def _download_reranker(model_name: str) -> bool:
     """Download cross-encoder reranker model."""
     print(f"\n  Downloading reranker: {model_name}")
-    print(f"  (cross-encoder for result re-ranking)\n")
+    print("  (cross-encoder for result re-ranking)\n")
     # H-03: model name via argv, never interpolated into executed source.
     script = (
         _EXIT_WITH_PARENT
@@ -170,9 +173,9 @@ def _download_reranker(model_name: str) -> bool:
             },
         )
         if result.returncode == 0:
-            print(f"  ✓ Reranker ready")
+            print("  ✓ Reranker ready")
             return True
-        print(f"  ✗ Reranker download failed")
+        print("  ✗ Reranker download failed")
         return False
     except Exception as exc:
         print(f"  ✗ Reranker error: {exc}")
@@ -184,7 +187,7 @@ def _download_compressor(model_name: str) -> bool:
     lazy-downloads on first use in prose_llmlingua.py.
     """
     print(f"\n  Downloading compression model: {model_name}")
-    print(f"  (LLMLingua-2 prose compressor, ~560MB — aggressive mode only)\n")
+    print("  (LLMLingua-2 prose compressor, ~560MB — aggressive mode only)\n")
     # H-03: model name via argv, never interpolated into executed source.
     script = (
         "import sys; from llmlingua import PromptCompressor; "
@@ -206,12 +209,12 @@ def _download_compressor(model_name: str) -> bool:
             },
         )
         if result.returncode == 0:
-            print(f"  ✓ Compression model ready")
+            print("  ✓ Compression model ready")
             return True
-        print(f"  ✗ Compression model download failed (will lazy-download on first use)")
+        print("  ✗ Compression model download failed (will lazy-download on first use)")
         return False
     except ImportError:
-        print(f"  ⚠ llmlingua not installed — compression model will download on first use")
+        print("  ⚠ llmlingua not installed — compression model will download on first use")
         return False
     except Exception as exc:
         print(f"  ✗ Compression model error: {exc}")
@@ -691,7 +694,6 @@ def configure_provider(
     ``model``/``target_mode`` are only consulted for that case.
     """
     from superlocalmemory.core.config import SLMConfig
-    from superlocalmemory.storage.models import Mode
     presets = SLMConfig.provider_presets()
     providers = list(presets.keys())
     interactive_selection = provider_name is None

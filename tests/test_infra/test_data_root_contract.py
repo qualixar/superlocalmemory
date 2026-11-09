@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 _ALIASES = ("SLM_DATA_DIR", "SL_MEMORY_PATH", "SLM_HOME")
 
 
@@ -285,8 +284,7 @@ def test_critical_runtime_components_resolve_the_same_state_namespace(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     from superlocalmemory.cli import daemon, service_installer
-    from superlocalmemory.core import embeddings
-    from superlocalmemory.core import health_monitor
+    from superlocalmemory.core import embeddings, health_monitor
     from superlocalmemory.core.security_primitives import _install_token_path
     from superlocalmemory.hooks import hook_daemon, session_registry
     from superlocalmemory.retrieval import reranker

@@ -16,9 +16,10 @@ from __future__ import annotations
 import numpy as np
 
 from superlocalmemory.storage.models import (
-    AtomicFact, FactType, MemoryRecord,
+    AtomicFact,
+    FactType,
+    MemoryRecord,
 )
-
 
 _FACT_TYPES = [FactType.SEMANTIC, FactType.EPISODIC, FactType.OPINION, FactType.PROSPECTIVE]
 

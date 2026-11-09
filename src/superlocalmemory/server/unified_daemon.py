@@ -29,7 +29,6 @@ import asyncio
 import concurrent.futures
 import functools
 import hashlib
-import json
 import logging
 import os
 import signal
@@ -41,7 +40,10 @@ import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:  # annotation only: the guardian is imported lazily at start
+    from superlocalmemory.daemon.record_guardian import RecordGuardian
 
 # v3.6.7: Tell mcp/server.py it is being imported inside the daemon process.
 # This suppresses the three side-effect threads (mcp-warmup, parent-watchdog,
@@ -58,10 +60,17 @@ from superlocalmemory.core.process_role import clear_daemon_process, mark_daemon
 from superlocalmemory.daemon.materializer import (
     PassHooks,
     PendingMaterializer,
-    PendingProfileMismatchError as _PendingProfileMismatchError,
+)
+from superlocalmemory.daemon.materializer import (
     ingestion_pass as _ingestion_pass,
+)
+from superlocalmemory.daemon.materializer import (
     legacy_item as _legacy_item,
+)
+from superlocalmemory.daemon.materializer import (
     run_operation as _run_operation,
+)
+from superlocalmemory.daemon.materializer import (
     should_idle as _materializer_idle_rule,
 )
 from superlocalmemory.daemon.services import ServiceRegistry
@@ -71,14 +80,14 @@ from superlocalmemory.infra.daemon_identity import (
     clear_descriptor_if_owner,
     publish_if_owner,
 )
-from superlocalmemory.infra.instance_lock import (
-    acquire_with_backoff,
-    get_instance_lock,
-)
 from superlocalmemory.infra.data_root import (
     assert_no_durable_root_conflict,
     canonical_data_root,
     state_path,
+)
+from superlocalmemory.infra.instance_lock import (
+    acquire_with_backoff,
+    get_instance_lock,
 )
 
 
@@ -477,16 +486,14 @@ def _shutdown_enrichment_pool_if_created() -> None:
     if pool is not None:
         pool.shutdown(wait=False, cancel_futures=True)
 # Moved to server/read_gates.py in 4.1.20; the old private names stay importable.
-from superlocalmemory.server.read_gates import (  # noqa: E402
+from superlocalmemory.server.read_gates import (  # noqa: E402  # noqa: E402
     _SENSITIVE_READ_EXACT_PATHS,  # noqa: F401
     _SENSITIVE_READ_PREFIXES,  # noqa: F401
+    _capability_ok,
+    is_cli_status_read,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
     is_sensitive_dashboard_read as _is_sensitive_dashboard_read,
-)
-from superlocalmemory.server.read_gates import (  # noqa: E402
-    _capability_ok,
-    is_cli_status_read,
 )
 from superlocalmemory.server.read_gates import (  # noqa: E402
     mesh_read_gate as _mesh_read_gate,
@@ -494,7 +501,6 @@ from superlocalmemory.server.read_gates import (  # noqa: E402
 from superlocalmemory.server.read_gates import (  # noqa: E402
     rbac_read_gate as _rbac_read_gate,
 )
-
 
 # Adapter process-control routes that change running state (start/stop) or
 # persistence state (enable/disable). These require WRITE permission.
@@ -896,8 +902,8 @@ class EngineRecallAdapter:
             if memory_ids else {}
         )
         # v3.6.6: same shared chokepoint as the HTTP route — identical output.
-        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.core.kind_query import engine_display_min_confidence
+        from superlocalmemory.retrieval.media_channel import memory_sources
         from superlocalmemory.server.recall_serializer import (
             recall_response_metadata,
             serialize_recall_response,
@@ -1058,6 +1064,8 @@ def _hot_reconfigure_engine(application, new_config, *, mode_change: bool) -> No
 
 from superlocalmemory.core.recall_gate import (
     in_flight as _recalls_in_flight,
+)
+from superlocalmemory.core.recall_gate import (
     recalls_needing_embedder as _recalls_needing_embedder,
 )
 
@@ -1160,7 +1168,6 @@ def _facet_kwargs(project: str, saved_by: str, about: str, kind: str | None = No
 from superlocalmemory.server.recall_fallback import (  # noqa: E402
     recall_keyword_fallback as _recall_keyword_fallback,  # noqa: F401 — kept importable
 )
-
 
 # v3.4.52: Embedding model warm state. Set to True by the async pre-warm
 # thread once Ollama has loaded the embedding model. /health reports this
@@ -1478,9 +1485,10 @@ async def _consolidation_timer_loop(application: FastAPI) -> None:
 
 from superlocalmemory.server.legacy_port import (  # noqa: E402 - re-exported
     maybe_start_legacy_redirect as _maybe_start_legacy_redirect,
-    start_legacy_redirect as _start_legacy_redirect,
 )
-
+from superlocalmemory.server.legacy_port import (
+    start_legacy_redirect as _start_legacy_redirect,  # noqa: F401 - re-exported
+)
 
 # ---------------------------------------------------------------------------
 # Lifespan
@@ -2470,9 +2478,9 @@ async def lifespan(application: FastAPI):
     # dead. Wires the existing infra/process_reaper.py at daemon start.
     # Fail-soft — never blocks the startup path.
     try:
-        from superlocalmemory.infra.process_reaper import ReaperConfig, reap_stale_on_startup
-        from superlocalmemory.infra.pid_manager import PidManager
         from superlocalmemory.infra.data_root import canonical_data_root as _cdr
+        from superlocalmemory.infra.pid_manager import PidManager
+        from superlocalmemory.infra.process_reaper import ReaperConfig, reap_stale_on_startup
 
         _rpr_cfg = ReaperConfig(orphan_age_threshold_hours=0.0)
         _rpr_mgr = PidManager(_cdr() / "slm.pids")
@@ -2820,6 +2828,7 @@ async def lifespan(application: FastAPI):
             transition preempts remaining queries; they complete on next boot.
             """
             import time as _t
+
             from superlocalmemory.server.recall_warmup import begin, run_warmup_recalls
             begin(engine)
             for _ in range(60):
@@ -3263,6 +3272,7 @@ async def lifespan(application: FastAPI):
     elif _advertise_requested and application.state.mesh_broker is not None:
         try:
             import socket as _adv_sock
+
             from superlocalmemory.mesh.discovery import MeshAdvertiser as _MeshAdvertiser
             _adv_node_id = _adv_sock.gethostname()
             _advertiser = _MeshAdvertiser(
@@ -3327,6 +3337,8 @@ async def lifespan(application: FastAPI):
     try:
         from superlocalmemory.core.admission import (
             _resolve_deployment as _adm_resolve,
+        )
+        from superlocalmemory.core.admission import (
             coverage_self_check,
         )
         from superlocalmemory.mcp import server as _mcp_server_mod
@@ -3938,7 +3950,6 @@ def _configure_mcp_transport_settings() -> dict:
     exist. Callers pass the returned dict through as
     ``server.streamable_http_app(**kwargs)``.
     """
-    from typing import Any
 
     from superlocalmemory.core.remote_mode import mcp_stateless
 
@@ -4224,8 +4235,8 @@ def create_app() -> FastAPI:
     # user-facing endpoint is exactly http://127.0.0.1:8765/mcp.
     # (FastAPI strips the mount prefix before the sub-app sees the request.)
     try:
-        from superlocalmemory.mcp.server import server as _mcp_server
         from superlocalmemory.core.remote_mode import is_remote_mode
+        from superlocalmemory.mcp.server import server as _mcp_server
 
         # mcp 2.0.0: transport knobs are kwargs to streamable_http_app(), not
         # mutable settings.stateless_http / .json_response / .transport_security.
@@ -4256,11 +4267,9 @@ def create_app() -> FastAPI:
         # tools (remember, recall, etc.) automatically use the correct namespace.
         # AgentIDExtractorASGI lives in mcp/agent_context so it is unit-testable
         # (tests/test_mcp/test_agent_context.py) rather than buried inline here.
-        from superlocalmemory.mcp.agent_context import AgentIDExtractorASGI
-
-        from superlocalmemory.server.remote_tool_policy import RemoteToolScopeASGI
-
         from superlocalmemory.core.caller_session import CallerSessionASGI
+        from superlocalmemory.mcp.agent_context import AgentIDExtractorASGI
+        from superlocalmemory.server.remote_tool_policy import RemoteToolScopeASGI
 
         # Remote callers: only the tools their key allows (default deny).
         # CallerSessionASGI hands the caller's sign-in to the tools, so a
@@ -5079,8 +5088,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
             runtime_state = "not_ready"
         lifecycle_state = "ready" if base_ready else "starting"
         identity = getattr(application.state, "daemon_descriptor", None)
-        from superlocalmemory.server.profile_runtime import get_profile_runtime
         from superlocalmemory.core.embedding_reindex_daemon import health_payload as _reindex_health
+        from superlocalmemory.server.profile_runtime import get_profile_runtime
         profile_snapshot = get_profile_runtime(application.state).snapshot
         # H-05 (3.7.9): operational metadata (pid, daemon identity including
         # capability_fingerprint/instance_id, active profile, readiness detail)
@@ -5886,14 +5895,6 @@ def _register_daemon_routes(application: FastAPI) -> None:
         except HTTPException:
             raise
         except Exception as exc:
-            from superlocalmemory.core.remember_admission import AdmissionRejected
-            from superlocalmemory.core.remember_runtime import CanonicalRememberUnavailable
-            from superlocalmemory.storage.admission_journal import (
-                AdmissionAuthorizationError,
-                AdmissionPayloadError,
-                IdempotencyConflict,
-            )
-
             # 4.1.14 audit: an unknown profile surfacing late (deleted
             # between the existence gate and admission) must stay a 404,
             # not a 503 retryable — a deleted profile never heals by
@@ -5901,6 +5902,13 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # chain for the distinctive type instead of matching strings.
             from superlocalmemory.core.ingestion_command import (
                 UnknownProfileError,
+            )
+            from superlocalmemory.core.remember_admission import AdmissionRejected
+            from superlocalmemory.core.remember_runtime import CanonicalRememberUnavailable
+            from superlocalmemory.storage.admission_journal import (
+                AdmissionAuthorizationError,
+                AdmissionPayloadError,
+                IdempotencyConflict,
             )
             _cause: BaseException | None = exc
             _unknown = False
@@ -7286,7 +7294,7 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
         return
     import socket
 
-    import uvicorn
+    import uvicorn  # noqa: F401 - fail before any database is opened if it is missing
 
     # Bind before any migration or engine work.  A process which cannot own
     # the listener must not open the user's databases or publish lifecycle

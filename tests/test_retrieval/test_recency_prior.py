@@ -27,7 +27,6 @@ from superlocalmemory.retrieval.fusion import FusionResult
 from superlocalmemory.retrieval.strategy import QueryStrategy
 from superlocalmemory.storage.models import AtomicFact
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

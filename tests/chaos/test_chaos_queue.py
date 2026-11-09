@@ -29,7 +29,6 @@ import pytest
 
 from superlocalmemory.core.recall_queue import RecallQueue
 
-
 _CHAOS_ENABLED = os.environ.get("SLM_RUN_CHAOS") == "1"
 pytestmark = pytest.mark.skipif(
     not _CHAOS_ENABLED,

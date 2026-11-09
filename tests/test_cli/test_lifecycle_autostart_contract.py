@@ -46,8 +46,8 @@ def test_main_dispatch_does_not_prestart_lifecycle_commands(
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str],
 ) -> None:
-    from superlocalmemory.cli import daemon, main as main_module
-    from superlocalmemory.cli import commands, setup_wizard, version_banner
+    from superlocalmemory.cli import commands, daemon, setup_wizard, version_banner
+    from superlocalmemory.cli import main as main_module
 
     ensure = Mock(return_value=True)
     monkeypatch.setattr(daemon, "ensure_daemon", ensure)
@@ -65,8 +65,8 @@ def test_plain_serve_starts_once_inside_handler(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from superlocalmemory.cli import daemon, main as main_module
-    from superlocalmemory.cli import setup_wizard, version_banner
+    from superlocalmemory.cli import daemon, setup_wizard, version_banner
+    from superlocalmemory.cli import main as main_module
 
     ensure = Mock(return_value=True)
     monkeypatch.setattr(daemon, "ensure_daemon", ensure)

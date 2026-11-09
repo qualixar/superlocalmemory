@@ -10,8 +10,8 @@ Public surface:
     CacheAligner    — volatile-token detection for system prompt prefix stability
 """
 
-from superlocalmemory.optimize.compress.router import CompressRouter, CompressTextResult
+from superlocalmemory.optimize.compress.align import AlignResult, CacheAligner
 from superlocalmemory.optimize.compress.ccr import CCRStore
-from superlocalmemory.optimize.compress.align import CacheAligner, AlignResult
+from superlocalmemory.optimize.compress.router import CompressRouter, CompressTextResult
 
 __all__ = ["CompressRouter", "CompressTextResult", "CCRStore", "CacheAligner", "AlignResult"]

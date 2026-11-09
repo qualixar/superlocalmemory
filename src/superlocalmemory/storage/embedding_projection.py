@@ -42,8 +42,8 @@ import numpy as np
 
 from superlocalmemory.storage.database import _scope_where
 from superlocalmemory.storage.embedding_codec import (
-    expected_bytes,
     decode_embedding,
+    expected_bytes,
 )
 
 logger = logging.getLogger(__name__)

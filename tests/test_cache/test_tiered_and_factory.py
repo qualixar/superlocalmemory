@@ -11,7 +11,11 @@ import pytest
 
 import superlocalmemory.cache as cache_pkg
 from superlocalmemory.cache import (
-    SqliteDeriveCache, TieredCache, default_cache, derive_cache_path, get_or_compute,
+    SqliteDeriveCache,
+    TieredCache,
+    default_cache,
+    derive_cache_path,
+    get_or_compute,
     invalidate_for_model,
 )
 

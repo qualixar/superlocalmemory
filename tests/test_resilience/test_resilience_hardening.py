@@ -24,7 +24,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -321,6 +320,7 @@ class TestMeshExpiryBootWiring:
         Verify the implementation directly — this is the correctness signal for G-07.
         """
         import inspect
+
         from superlocalmemory.infra.self_heal import expire_stale_mesh_locks
 
         source = inspect.getsource(expire_stale_mesh_locks)
@@ -662,8 +662,8 @@ class TestDLQDeleteGuard:
 
     def test_dlq_row_preserved_when_retry_still_fails(self, tmp_path):
         """When cmd.retry() returns an operation still in FAILED state → DLQ row kept."""
-        from superlocalmemory.core.ops_remediation import _action_retry
         from superlocalmemory.core.ingestion_command import IngestionState
+        from superlocalmemory.core.ops_remediation import _action_retry
 
         db_path = tmp_path / "memory.db"
         self._create_ops_db(db_path)
@@ -699,8 +699,8 @@ class TestDLQDeleteGuard:
 
     def test_dlq_row_removed_when_retry_succeeds(self, tmp_path):
         """When cmd.retry() returns operation in QUERYABLE state → DLQ row removed."""
-        from superlocalmemory.core.ops_remediation import _action_retry
         from superlocalmemory.core.ingestion_command import IngestionState
+        from superlocalmemory.core.ops_remediation import _action_retry
 
         db_path = tmp_path / "memory.db"
         self._create_ops_db(db_path)

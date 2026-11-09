@@ -21,11 +21,13 @@ def test_dashboard_fallback_finds_a_natural_question(
     engine_with_mock_deps, monkeypatch,
 ) -> None:
     from superlocalmemory.core.engine_ingestion import (
-        canonical_store, local_trusted_actor_id,
+        canonical_store,
+        local_trusted_actor_id,
     )
     from superlocalmemory.server.routes.helpers import ensure_profile_in_json
     from superlocalmemory.server.unified_daemon import (
-        _recall_keyword_fallback, create_app,
+        _recall_keyword_fallback,
+        create_app,
     )
 
     engine = engine_with_mock_deps

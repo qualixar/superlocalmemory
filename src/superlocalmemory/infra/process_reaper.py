@@ -462,7 +462,7 @@ else:
                 started = record.started_at
                 # Estimate age from started_at
                 try:
-                    from datetime import datetime, UTC
+                    from datetime import UTC, datetime
                     start_dt = datetime.fromisoformat(started)
                     age_hours = (
                         datetime.now(UTC) - start_dt

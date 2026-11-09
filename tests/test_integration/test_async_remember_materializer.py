@@ -38,8 +38,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-
-
 # ---------------------------------------------------------------------------
 # Helpers — replicate the materializer's drain loop in-process so we don't
 # spin up a daemon thread. The real loop lives in
@@ -105,7 +103,9 @@ class TestPendingStoreRoundtrip:
 
     def test_mark_done_removes_from_pending(self, tmp_path: Path) -> None:
         from superlocalmemory.cli.pending_store import (
-            get_pending, mark_done, store_pending,
+            get_pending,
+            mark_done,
+            store_pending,
         )
 
         pid = store_pending(content="drain me", base_dir=tmp_path)
@@ -127,7 +127,8 @@ class TestMaterializerDrainsToEngine:
         self, tmp_path: Path,
     ) -> None:
         from superlocalmemory.cli.pending_store import (
-            get_pending, store_pending,
+            get_pending,
+            store_pending,
         )
 
         for i in range(3):
@@ -167,7 +168,8 @@ class TestMaterializerFailureRetryContract:
 
     def test_first_failure_keeps_row_in_pending(self, tmp_path: Path) -> None:
         from superlocalmemory.cli.pending_store import (
-            get_pending, store_pending,
+            get_pending,
+            store_pending,
         )
 
         store_pending(content="will fail once", base_dir=tmp_path)
@@ -190,7 +192,9 @@ class TestMaterializerFailureRetryContract:
     def test_retries_never_delete_unprocessed_evidence(self, tmp_path: Path) -> None:
         """Repeated failure retains the row for bounded-backoff retry."""
         from superlocalmemory.cli.pending_store import (
-            _MAX_RETRIES, mark_failed, store_pending,
+            _MAX_RETRIES,
+            mark_failed,
+            store_pending,
         )
 
         row_id = store_pending(content="permanent failure", base_dir=tmp_path)
@@ -214,7 +218,8 @@ class TestMaterializerFailureRetryContract:
     def test_transient_failure_then_success(self, tmp_path: Path) -> None:
         """The realistic case: first attempt fails, second succeeds, no loss."""
         from superlocalmemory.cli.pending_store import (
-            get_pending, store_pending,
+            get_pending,
+            store_pending,
         )
 
         store_pending(content="recovers on retry", base_dir=tmp_path)

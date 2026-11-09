@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from superlocalmemory.code_graph.bridge.event_listeners import BridgeEventListeners
 from superlocalmemory.code_graph.bridge.entity_resolver import EntityResolver
+from superlocalmemory.code_graph.bridge.event_listeners import BridgeEventListeners
 from superlocalmemory.code_graph.bridge.fact_enricher import FactEnricher
 from superlocalmemory.code_graph.bridge.hebbian_linker import HebbianLinker
 from superlocalmemory.code_graph.bridge.temporal_checker import TemporalChecker
@@ -19,7 +19,6 @@ from superlocalmemory.code_graph.database import CodeGraphDatabase
 from superlocalmemory.code_graph.graph_engine import GraphEngine
 from superlocalmemory.code_graph.graph_store import GraphStore
 from superlocalmemory.code_graph.models import CodeMemoryLink, LinkType
-
 
 # ---------------------------------------------------------------------------
 # Fake event bus for testing

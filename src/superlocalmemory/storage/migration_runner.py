@@ -36,9 +36,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from superlocalmemory.storage import _boot_snapshot as _boot_copy
 from superlocalmemory.storage._migration_catalogue import (  # noqa: F401 -- re-exported
-    DEFERRED_MIGRATIONS,
-    MIGRATIONS,
     _M001,
     _M002,
     _M003,
@@ -90,18 +89,12 @@ from superlocalmemory.storage._migration_catalogue import (  # noqa: F401 -- re-
     _M050,
     _M051,
     _M052,
-)
-from superlocalmemory.storage._schema_version import (
-    SUPPORTED_SCHEMA_VERSION,
-    SchemaVersionError,
-    check_version_or_raise as _check_version_or_raise,
-    ensure_schema_version_table as _ensure_schema_version_table,
-    read_schema_version as _read_schema_version,
-    write_schema_version as _write_schema_version,
+    DEFERRED_MIGRATIONS,
+    MIGRATIONS,
 )
 from superlocalmemory.storage._migration_internals import (
-    Migration,
     _MODULES,  # noqa: F401 — re-exported for test/introspection compatibility
+    Migration,
     _apply_single,
     _connect,
     _db_for,
@@ -109,11 +102,26 @@ from superlocalmemory.storage._migration_internals import (
     _migration_log_exists,
     _read_log,
 )
+from superlocalmemory.storage._schema_version import (
+    SUPPORTED_SCHEMA_VERSION,
+    SchemaVersionError,
+)
+from superlocalmemory.storage._schema_version import (
+    check_version_or_raise as _check_version_or_raise,
+)
+from superlocalmemory.storage._schema_version import (
+    ensure_schema_version_table as _ensure_schema_version_table,
+)
+from superlocalmemory.storage._schema_version import (
+    read_schema_version as _read_schema_version,
+)
+from superlocalmemory.storage._schema_version import (
+    write_schema_version as _write_schema_version,
+)
 from superlocalmemory.storage.backup import (
     _gc_old_backups,
     _pre_migration_backup,
 )
-from superlocalmemory.storage import _boot_snapshot as _boot_copy
 
 logger = logging.getLogger(__name__)
 
@@ -456,7 +464,6 @@ def _breaking_floor(learning_db: Path, memory_db: Path) -> int:
     not be opened by an older build. Only completed ones count: a migration that
     failed has not changed anything an older build would trip over.
     """
-    from superlocalmemory.storage._migration_internals import _MODULES
 
     logs = {"learning": _read_log(learning_db), "memory": _read_log(memory_db)}
     floor = 0

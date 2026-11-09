@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 _REPO = Path(__file__).resolve().parents[2]
 _DOC = _REPO / "docs" / "distributed-deployment.md"
 _SRC = _REPO / "src" / "superlocalmemory"

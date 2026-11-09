@@ -15,10 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage import schema
+from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import _new_id
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

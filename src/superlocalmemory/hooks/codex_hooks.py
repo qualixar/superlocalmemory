@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 SLM_MARKER = "SLM_CODEX_HOOK"
 DEFAULT_HOOKS_PATH = Path.home() / ".codex" / "hooks.json"
 EVENTS = ("SessionStart", "PostToolUse", "UserPromptSubmit", "Stop")

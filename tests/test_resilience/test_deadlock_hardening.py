@@ -34,7 +34,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -124,7 +123,7 @@ class TestKill9Recovery:
 
     def test_live_owner_lock_not_touched(self, tmp_path):
         """A writer.lock whose PID is a live SLM-looking process is left alone."""
-        from superlocalmemory.infra.self_heal import reap_stale_artifacts, _pid_create_time
+        from superlocalmemory.infra.self_heal import _pid_create_time, reap_stale_artifacts
 
         lock_file = tmp_path / "memory.db.writer.lock"
         live_pid = os.getpid()
@@ -324,6 +323,7 @@ class TestStalePlainPidFiles:
         """
         import shutil
         import tempfile
+
         from superlocalmemory.infra.self_heal import reap_stale_artifacts
 
         # Use a short parent to keep the full socket path under the OS limit

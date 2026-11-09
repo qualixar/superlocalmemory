@@ -175,8 +175,8 @@ class TestRealStoreIsInWalMode:
     commits — so assert the mode the code depends on."""
 
     def test_new_databases_are_created_in_wal(self, tmp_path):
-        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.storage import schema as _schema
+        from superlocalmemory.storage.database import DatabaseManager
 
         db = DatabaseManager(tmp_path / "memory.db")
         db.initialize(_schema)

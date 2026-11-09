@@ -16,7 +16,7 @@ import random
 import numpy as np
 import pytest
 
-from superlocalmemory.optimize.cache.semantic import VCacheSemantic, _EMBED_DIM
+from superlocalmemory.optimize.cache.semantic import _EMBED_DIM, VCacheSemantic
 
 # ---------------------------------------------------------------------------
 # Helpers

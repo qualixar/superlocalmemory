@@ -23,10 +23,9 @@ from pathlib import Path
 import pytest
 
 from superlocalmemory.storage import schema as real_schema
-from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.access_log import AccessLog
+from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

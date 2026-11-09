@@ -21,10 +21,10 @@ import logging
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, UTC, timezone
+from contextlib import closing
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
-from contextlib import closing
 
 from superlocalmemory.infra.cloud_backup_github import (  # noqa: F401 - re-exported
     MAX_GITHUB_RELEASES,
@@ -421,7 +421,9 @@ def _get_drive_service() -> Any | None:
 def sync_to_google_drive(backup_path: Path, dest_config: dict) -> bool:
     """Upload a backup file to Google Drive, encrypted on this machine first."""
     from superlocalmemory.infra.cloud_backup_crypto import (
-        UPLOAD_MIMETYPE, encrypted_upload_copy, prepare_upload_key,
+        UPLOAD_MIMETYPE,
+        encrypted_upload_copy,
+        prepare_upload_key,
     )
 
     service = _get_drive_service()
@@ -598,7 +600,9 @@ def sync_to_github(backup_files: list[Path] | Path, dest_config: dict) -> bool:
     import httpx
 
     from superlocalmemory.infra.cloud_backup_crypto import (
-        UPLOAD_MIMETYPE, encrypted_upload_copy, prepare_upload_key,
+        UPLOAD_MIMETYPE,
+        encrypted_upload_copy,
+        prepare_upload_key,
     )
 
     # Accept both single path and list

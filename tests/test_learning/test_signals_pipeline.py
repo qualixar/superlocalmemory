@@ -8,28 +8,28 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import time
 
 import pytest
 
 from superlocalmemory.learning import signals as signals_mod
 from superlocalmemory.learning.signals import (
+    _Q as _SIGNAL_QUEUE,
+)
+from superlocalmemory.learning.signals import (
     SignalBatch,
-    SignalCandidate,
+    _drain_queue_for_tests,
+    _hash_query,
     enqueue,
     enqueue_shown_flip,
-    record_signal_batch,
-    _Q as _SIGNAL_QUEUE,
-    _hash_query,
     get_counters,
     queue_size,
+    record_signal_batch,
     reset_counters,
-    _drain_queue_for_tests,
 )
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
     open_conn,
 )
 

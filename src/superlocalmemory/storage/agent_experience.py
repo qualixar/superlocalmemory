@@ -13,10 +13,10 @@ import random
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
-from contextlib import closing
 
 from superlocalmemory.contracts.v402 import validate_agent_experience, validate_cognitive_turn
 

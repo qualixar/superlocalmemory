@@ -17,12 +17,9 @@ import pytest
 from superlocalmemory.compliance.gdpr import GDPRCompliance
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
-from superlocalmemory.storage.memory_kinds import KindAssignment, KindSource, MemoryKind
 from superlocalmemory.storage.memory_kind_store import KindChange, MemoryKindStore
+from superlocalmemory.storage.memory_kinds import KindAssignment, KindSource, MemoryKind
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
-
-
-
 
 
 def _apply_memory_kind_schema(db: DatabaseManager) -> None:

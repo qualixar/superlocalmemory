@@ -159,6 +159,7 @@ class TestObserveBuffer:
     def test_buffer_deduplicates(self):
         from types import SimpleNamespace
         from unittest.mock import patch
+
         from superlocalmemory.server.unified_daemon import ObserveBuffer
         buf = ObserveBuffer(debounce_sec=60)  # Long debounce so flush doesn't auto-fire
         buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))
@@ -175,6 +176,7 @@ class TestObserveBuffer:
     def test_buffer_accepts_different_content(self):
         from types import SimpleNamespace
         from unittest.mock import patch
+
         from superlocalmemory.server.unified_daemon import ObserveBuffer
         buf = ObserveBuffer(debounce_sec=60)
         buf.set_engine(SimpleNamespace(_config=SimpleNamespace(scope=None), _profile_id="default"))

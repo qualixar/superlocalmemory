@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from superlocalmemory import __version__
 
+from superlocalmemory import __version__
 
 _ROOT_COMMANDS = (
     "init", "setup", "mode", "provider", "connect", "migrate", "db",

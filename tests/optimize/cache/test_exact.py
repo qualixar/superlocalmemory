@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 
-
 from superlocalmemory.optimize.cache.exact import ExactCache
 
 
@@ -93,6 +92,7 @@ def test_is_cacheable_response_helper() -> None:
 def test_c05_debug_log_on_tool_use_skip(caplog) -> None:
     """C-05: _is_cacheable_response must emit a debug log when skipping tool_use response."""
     import logging
+
     from superlocalmemory.optimize.cache.exact import _is_cacheable_response
 
     with caplog.at_level(logging.DEBUG, logger="superlocalmemory.optimize.cache.exact"):

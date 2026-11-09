@@ -30,18 +30,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from superlocalmemory.evolution.types import (
-    EvolutionCandidate,
-    EvolutionRecord,
-    EvolutionStatus,
-    EvolutionType,
-    SkillLineage,
-    TriggerType,
+from superlocalmemory.evolution.blind_verifier import (
+    VerificationResult,
+    build_verification_prompt,
+    parse_verification_response,
 )
 from superlocalmemory.evolution.evolution_store import (
     MAX_ATTEMPTS_PER_SKILL,
     MAX_EVOLUTIONS_PER_CYCLE,
     EvolutionStore,
+)
+from superlocalmemory.evolution.mutation_generator import (
+    MAX_CONTENT_CHARS,
+    build_mutation_prompt,
+    build_retry_prompt,
+    parse_mutation_output,
+    validate_skill_content,
+)
+from superlocalmemory.evolution.skill_evolver import (
+    SkillEvolver,
+    detect_backend,
 )
 from superlocalmemory.evolution.triggers import (
     DEGRADATION_THRESHOLD,
@@ -54,23 +62,14 @@ from superlocalmemory.evolution.triggers import (
     PostSessionTrigger,
     _check_memory_pressure,
 )
-from superlocalmemory.evolution.mutation_generator import (
-    MAX_CONTENT_CHARS,
-    build_mutation_prompt,
-    build_retry_prompt,
-    parse_mutation_output,
-    validate_skill_content,
+from superlocalmemory.evolution.types import (
+    EvolutionCandidate,
+    EvolutionRecord,
+    EvolutionStatus,
+    EvolutionType,
+    SkillLineage,
+    TriggerType,
 )
-from superlocalmemory.evolution.blind_verifier import (
-    VerificationResult,
-    build_verification_prompt,
-    parse_verification_response,
-)
-from superlocalmemory.evolution.skill_evolver import (
-    SkillEvolver,
-    detect_backend,
-)
-
 
 # ===================================================================
 # SECTION 1: types.py

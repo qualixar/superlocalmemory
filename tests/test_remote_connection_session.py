@@ -2,11 +2,14 @@
 import asyncio
 import base64
 import time
+
 import pytest
+
 from superlocalmemory.remote_connections.codec import compact, decode_frame
 from superlocalmemory.remote_connections.credentials import ConnectorCredential
+
 try:
-    from superlocalmemory.remote_connections.session import RelaySession, OriginResponse
+    from superlocalmemory.remote_connections.session import OriginResponse, RelaySession
 except ImportError:
     RelaySession=OriginResponse=None
 

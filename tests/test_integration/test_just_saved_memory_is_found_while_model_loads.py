@@ -18,7 +18,6 @@ import time
 from superlocalmemory.retrieval import channel_status as chstat
 from superlocalmemory.retrieval import engine as retrieval_engine_mod
 
-
 #: How long the fake model stays "loading" unless released. A liveness bound,
 #: NOT a performance claim: every test releases it the moment its recall
 #: returns, so only a recall that really waits on the model ever sits it out.

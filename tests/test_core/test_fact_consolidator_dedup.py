@@ -25,10 +25,10 @@ from __future__ import annotations
 
 import pytest
 
+from superlocalmemory.core.fact_consolidator import consolidate_facts
 from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import MemoryRecord
-from superlocalmemory.core.fact_consolidator import consolidate_facts
 
 _NOW = "2026-01-01T00:00:00+00:00"
 

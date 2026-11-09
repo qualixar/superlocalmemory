@@ -15,12 +15,11 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import json
-
-from superlocalmemory.storage.embedding_codec import decode_embedding
-from superlocalmemory.storage.erasure_derived import THEME_CHARS
 import logging
 from datetime import UTC, datetime
 
+from superlocalmemory.storage.embedding_codec import decode_embedding
+from superlocalmemory.storage.erasure_derived import THEME_CHARS
 from superlocalmemory.storage.models import AtomicFact, MemoryScene
 
 logger = logging.getLogger(__name__)

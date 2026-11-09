@@ -41,7 +41,11 @@ from pathlib import Path
 # this file under the 800-line hard cap (coding-style.md).
 from superlocalmemory.cli.gdpr_io import (
     ART_COVERAGE as _ART_COVERAGE,
+)
+from superlocalmemory.cli.gdpr_io import (
     KNOWN_GAPS as _KNOWN_GAPS,
+)
+from superlocalmemory.cli.gdpr_io import (
     _audit_chain_path,
     _data_root,
     _die,
@@ -51,7 +55,6 @@ from superlocalmemory.cli.gdpr_io import (
     stream_export_to_file,
     stream_export_to_stdout,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # status
@@ -179,7 +182,7 @@ def _sanitise_audit(events: list) -> list[dict]:
 def _print_human_status(data: dict) -> None:
     root = data["data_root"]
     db = "EXISTS" if data["db_exists"] else "NOT FOUND"
-    print(f"\nGDPR Compliance Status")
+    print("\nGDPR Compliance Status")
     print(f"  Data root : {root}")
     print(f"  Database  : {db}")
     print(f"  Profiles  : {', '.join(data['profiles']) or '(none)'}")
@@ -245,8 +248,8 @@ def _cmd_gdpr_export(args: Namespace) -> None:
 
     include_embeddings = bool(getattr(args, "include_embeddings", False))
     try:
-        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.compliance.gdpr import GDPRCompliance
+        from superlocalmemory.storage.database import DatabaseManager
 
         # Do NOT call db.initialize() — GDPRCompliance drives all DDL via
         # _profile_scoped_tables() / sqlite_master and works with the existing
@@ -405,8 +408,8 @@ def _cmd_gdpr_erase(args: Namespace) -> None:
 
     # ── LIVE ERASURE ─────────────────────────────────────────────────────────
     try:
-        from superlocalmemory.storage.database import DatabaseManager
         from superlocalmemory.compliance.gdpr import GDPRCompliance
+        from superlocalmemory.storage.database import DatabaseManager
 
         db = DatabaseManager(db_path)
         gdpr = GDPRCompliance(db, data_root=root)
@@ -651,8 +654,8 @@ def _cmd_gdpr_verify(args: Namespace) -> None:
     hmac_ok = False
     verify_error: str | None = None
     try:
-        from superlocalmemory.storage.memory_write import memory_read
         from superlocalmemory.core.transactions.erasure import verify_receipt
+        from superlocalmemory.storage.memory_write import memory_read
 
         with memory_read(db_path) as conn:
             hmac_ok = verify_receipt(

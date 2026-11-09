@@ -29,11 +29,11 @@ that is the shape that actually reached the store.
 
 from __future__ import annotations
 
-import pytest
-
 import asyncio
 import sqlite3
 from pathlib import Path
+
+import pytest
 
 from superlocalmemory.mcp.shared import parse_id_list
 from superlocalmemory.storage.database import DatabaseManager

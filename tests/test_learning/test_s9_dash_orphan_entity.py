@@ -22,11 +22,7 @@ This test covers both layers.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Consumer-side filter — BehavioralPatternStore

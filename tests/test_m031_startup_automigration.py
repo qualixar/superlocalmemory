@@ -39,8 +39,6 @@ import sqlite3
 import time
 from pathlib import Path
 
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -390,6 +388,7 @@ def test_version_gate_prevents_double_apply(tmp_path):
 
     # Verify the recorded hash matches the module's actual DDL.
     import hashlib
+
     from superlocalmemory.storage.migrations import (
         M031_dead_letter_operations as _M031,
     )
@@ -484,7 +483,7 @@ def test_graph_pruning_config_needs_no_schema_migration():
     defaults at SLMConfig.load() time (config.py line 1203). No ALTER TABLE,
     no new column, no new table required.
     """
-    from superlocalmemory.storage.migration_runner import MIGRATIONS, DEFERRED_MIGRATIONS
+    from superlocalmemory.storage.migration_runner import DEFERRED_MIGRATIONS, MIGRATIONS
 
     all_migration_names = [m.name for m in (*MIGRATIONS, *DEFERRED_MIGRATIONS)]
     graph_pruning_migrations = [

@@ -7,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from superlocalmemory.optimize.config.schema import OptimizeConfig
+from superlocalmemory.optimize.proxy._helpers import _MockTransport
 from superlocalmemory.optimize.proxy.lifecycle import HookChain
 from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
-from superlocalmemory.optimize.proxy._helpers import _MockTransport
 
 
 def _anthropic_headers() -> dict:

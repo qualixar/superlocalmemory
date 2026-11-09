@@ -4,7 +4,6 @@
 """Tests for V3 Infrastructure modules -- Task 3 of V3 build."""
 from pathlib import Path
 
-
 # -----------------------------------------------------------------------
 # Rate Limiter
 # -----------------------------------------------------------------------
@@ -139,8 +138,9 @@ def test_backup_configure(tmp_path):
 
 
 def test_backup_create_and_list(tmp_path):
-    from superlocalmemory.infra.backup import BackupManager
     import sqlite3
+
+    from superlocalmemory.infra.backup import BackupManager
 
     # Create a minimal DB to back up
     db_path = tmp_path / "memory.db"

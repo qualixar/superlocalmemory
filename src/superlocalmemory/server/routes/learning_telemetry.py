@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
+
 from superlocalmemory.learning.signal_kinds import FEEDBACK_ONLY_SQL
 
 logger = logging.getLogger("superlocalmemory.routes.learning")

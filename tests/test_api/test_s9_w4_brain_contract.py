@@ -21,7 +21,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 _EXPECTED_TOP_LEVEL_KEYS = frozenset({
     "preferences",
     "learning",

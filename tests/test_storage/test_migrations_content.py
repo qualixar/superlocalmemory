@@ -17,9 +17,17 @@ import pytest
 
 from superlocalmemory.storage.migrations import (
     M001_add_signal_features_columns as M001,
+)
+from superlocalmemory.storage.migrations import (
     M002_model_state_history as M002,
+)
+from superlocalmemory.storage.migrations import (
     M003_migration_log as M003,
+)
+from superlocalmemory.storage.migrations import (
     M004_cross_platform_sync_log as M004,
+)
+from superlocalmemory.storage.migrations import (
     M005_bandit_tables as M005,
 )
 

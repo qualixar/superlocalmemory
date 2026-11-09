@@ -12,8 +12,6 @@ from __future__ import annotations
 import inspect
 import re
 
-import pytest
-
 from superlocalmemory.mcp import tools_v3
 
 _COMPLIANCE_CLAIM = re.compile(

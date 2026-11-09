@@ -38,12 +38,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from superlocalmemory.core import recall_gate
 from superlocalmemory.core import memory_kind_backfill_plan as plan
 from superlocalmemory.core import memory_kind_runs as runs
-from superlocalmemory.core.memory_kind_runs import ACTIVE, REVERTIBLE
 from superlocalmemory.core import memory_kind_wiring as wiring
+from superlocalmemory.core import recall_gate
 from superlocalmemory.core.memory_kind_config import MemoryKindConfig
+from superlocalmemory.core.memory_kind_runs import ACTIVE, REVERTIBLE
 from superlocalmemory.encoding.memory_kind_rules import cue_kind, suggest_by_rules
 from superlocalmemory.storage.memory_kind_store import MemoryKindStore
 

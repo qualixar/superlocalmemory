@@ -13,8 +13,8 @@ consent answered 200 and the online check kept running.
 
 from __future__ import annotations
 
-import os
 import json
+import os
 from types import SimpleNamespace
 
 import pytest

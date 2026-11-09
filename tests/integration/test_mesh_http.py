@@ -22,7 +22,6 @@ from fastapi.testclient import TestClient
 from superlocalmemory.mesh.broker import MeshBroker
 from superlocalmemory.server.routes import mesh as mesh_routes
 
-
 DAEMON_HEADERS = {
     "X-SLM-Daemon-Capability": "mesh-capability",
     "X-SLM-Target-Instance": "mesh-instance",
@@ -31,7 +30,9 @@ DAEMON_HEADERS = {
 
 def _init_mesh_schema(db_path: str) -> None:
     from superlocalmemory.storage.schema_v343 import (
-        _MESH_DDL, _MESH_V346_DDL, _MESH_V346_ALTERS,
+        _MESH_DDL,
+        _MESH_V346_ALTERS,
+        _MESH_V346_DDL,
     )
     conn = sqlite3.connect(db_path)
     conn.executescript(_MESH_DDL)

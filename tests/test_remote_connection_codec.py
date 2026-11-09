@@ -1,9 +1,11 @@
 """Python companion wire compatibility with the existing TypeScript relay."""
 import base64
 import json
+
 import pytest
+
 try:
-    from superlocalmemory.remote_connections.codec import decode_frame, encode_frame, FrameError
+    from superlocalmemory.remote_connections.codec import FrameError, decode_frame, encode_frame
 except ImportError:
     decode_frame=encode_frame=None
     FrameError=RuntimeError

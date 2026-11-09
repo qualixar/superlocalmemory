@@ -53,6 +53,7 @@ def hook_outputs(monkeypatch, tmp_path):
     """What the real Write/Edit and Stop hooks emit for one short session."""
     import os
     import tempfile
+
     from superlocalmemory.hooks import hook_handlers as hh
 
     for name in os.listdir(tempfile.gettempdir()):

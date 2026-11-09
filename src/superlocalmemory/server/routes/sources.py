@@ -20,9 +20,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from superlocalmemory import sources
+from superlocalmemory.server.routes.media import _profile, _require_local
 from superlocalmemory.sources import api as sources_api
 from superlocalmemory.sources import picker
-from superlocalmemory.server.routes.media import _profile, _require_local
 from superlocalmemory.sources.roots import RootRefused
 
 router = APIRouter(prefix="/api/v3/sources", tags=["sources"])

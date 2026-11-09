@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest, CompressHook
 from superlocalmemory.optimize.compress.router import CompressRouter
+from superlocalmemory.optimize.proxy.lifecycle import CompressHook, ProxyRequest
 
 
 def _make_req(
@@ -421,7 +421,7 @@ def test_compress_tool_role_skip() -> None:
 def test_on_compress_metrics_counter_wired() -> None:
     """set_metrics injects counters that on_compress calls."""
     router = CompressRouter()
-    
+
     # Mock mirrors the real counter signature:
     # MetricsCounters.on_compress(bytes_original, bytes_after, lossy) — the lossy
     # flag distinguishes Layer-2 lossy runs from lossless ones.

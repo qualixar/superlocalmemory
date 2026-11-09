@@ -20,13 +20,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from superlocalmemory.core import engine_wiring, judge_keys, judge_selection, laya_runtime
+from superlocalmemory.core.config import RetrievalConfig
+
 # Imported at collection time: tests/conftest.py replaces this attribute for the
 # whole session so no engine a test builds can start a real Laya worker.
 from superlocalmemory.core.engine_wiring import (
     init_sufficiency_judge as _real_init_sufficiency_judge,
 )
-from superlocalmemory.core import engine_wiring, judge_keys, judge_selection, laya_runtime
-from superlocalmemory.core.config import RetrievalConfig
 from superlocalmemory.core.recall_pipeline import _judge_sufficiency
 from superlocalmemory.retrieval import jev_judge, sufficiency
 from superlocalmemory.retrieval.sufficiency import SufficiencyVerdict

@@ -64,6 +64,7 @@ def test_get_engine_concurrent_callers_single_instance():
     racing on a cold ``get_engine()`` must see the same instance and
     must only construct the engine once."""
     import threading
+
     from superlocalmemory.mcp import server
     server.reset_engine()
 

@@ -8,7 +8,6 @@ main module stays under the 400-LOC cap.
 
 from __future__ import annotations
 
-
 TECH_KEYWORDS: dict[str, str] = {
     "python": "Python", "javascript": "JavaScript",
     "typescript": "TypeScript", "react": "React",

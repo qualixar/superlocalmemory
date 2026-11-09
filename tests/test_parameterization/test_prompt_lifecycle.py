@@ -9,17 +9,17 @@ TDD RED phase: tests written before implementation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 from superlocalmemory.core.config import ParameterizationConfig
-from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
 from superlocalmemory.parameterization.pattern_extractor import (
     PatternAssertion,
     PatternCategory,
 )
+from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
 
 
 def _make_config(**overrides) -> ParameterizationConfig:

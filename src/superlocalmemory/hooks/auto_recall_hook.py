@@ -212,7 +212,9 @@ def _format_envelope(results: list[dict], response: dict | None = None) -> dict:
     try:
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.core.injection import (
-            InjectableMemory, render_context, response_injectable,
+            InjectableMemory,
+            render_context,
+            response_injectable,
         )
         # Closest memories, an abstained recall, or a warming-up one inject
         # nothing, not even a verdict line: only supported results go in.

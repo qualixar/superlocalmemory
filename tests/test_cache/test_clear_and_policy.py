@@ -9,7 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from superlocalmemory.cache import (
-    clear_derived_cache, default_cache, derive_cache_path, reconcile_redaction_policy,
+    clear_derived_cache,
+    default_cache,
+    derive_cache_path,
+    reconcile_redaction_policy,
 )
 from superlocalmemory.core import derived_cache_policy as policy
 

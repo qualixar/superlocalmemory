@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING
 from superlocalmemory.code_graph.models import EdgeKind
 
 if TYPE_CHECKING:
-    from superlocalmemory.code_graph.database import CodeGraphDatabase
     from superlocalmemory.code_graph.bridge.entity_resolver import MatchedNode
+    from superlocalmemory.code_graph.database import CodeGraphDatabase
 
 logger = logging.getLogger(__name__)
 

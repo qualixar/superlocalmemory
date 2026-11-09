@@ -9,7 +9,8 @@ import pytest
 from superlocalmemory.media import open_media_store
 from superlocalmemory.server.routes import helpers
 from superlocalmemory.storage import migration_runner as mr
-from superlocalmemory.storage import profile_fold, schema as real_schema
+from superlocalmemory.storage import profile_fold
+from superlocalmemory.storage import schema as real_schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import MemoryRecord
 

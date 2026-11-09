@@ -3,7 +3,6 @@ from pathlib import Path
 
 from superlocalmemory.hooks import codex_assets
 
-
 EXPECTED_SKILLS = {
     "slm-cache",
     "slm-compress",

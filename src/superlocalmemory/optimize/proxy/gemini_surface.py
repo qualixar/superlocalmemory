@@ -50,8 +50,8 @@ from superlocalmemory.optimize.proxy._helpers import (
     capture_passthrough_forward,
 )
 from superlocalmemory.optimize.proxy.capture import capture_enabled
-from superlocalmemory.optimize.proxy.openai_surface import _parse_openai_sse_to_json
 from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse, ProxyRequest
+from superlocalmemory.optimize.proxy.openai_surface import _parse_openai_sse_to_json
 
 logger = logging.getLogger("slm.optimize.proxy.gemini")
 

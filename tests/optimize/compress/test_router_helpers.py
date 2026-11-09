@@ -1,14 +1,13 @@
 """Tests for module-level helper functions in router.py."""
 from __future__ import annotations
 
-
 from superlocalmemory.optimize.compress.router import (
+    CompressTextResult,
     _detect_language,
     _msg_has_tool_result,
     _set_tool_result_text,
     _token_estimate,
     _tool_result_text,
-    CompressTextResult,
 )
 
 

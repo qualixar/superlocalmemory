@@ -12,7 +12,6 @@ import pytest
 
 from superlocalmemory.learning.labeler import label_for_row, label_gain
 
-
 # ---------------------------------------------------------------------------
 # §6.6 test_outcome_reward_mapping_buckets
 # ---------------------------------------------------------------------------

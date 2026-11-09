@@ -8,8 +8,7 @@ import sqlite3
 
 import pytest
 
-from superlocalmemory.views import ViewError, ViewStore, recall_arguments, shape_run
-from superlocalmemory.views import model
+from superlocalmemory.views import ViewError, ViewStore, model, recall_arguments, shape_run
 
 from ._store import learning_db
 

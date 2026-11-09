@@ -1,7 +1,9 @@
 """Tests for V2 to V3 Migration -- Task 18 of V3 build."""
 import sqlite3
-import pytest
 from pathlib import Path
+
+import pytest
+
 from superlocalmemory.storage.v2_migrator import V2Migrator
 
 

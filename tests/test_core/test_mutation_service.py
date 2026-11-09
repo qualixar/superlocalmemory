@@ -76,8 +76,8 @@ def test_authorized_delete_runs_trust_before_persistence(engine_with_mock_deps) 
 
 
 def test_authorized_update_creates_review_required_successor(tmp_path: Path) -> None:
-    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
     from superlocalmemory.core.mutations import update_fact_authorized
+    from superlocalmemory.core.remember_runtime import CanonicalRememberRuntime
     from superlocalmemory.storage import schema
     from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage.migrations import M018_ingestion_operations as m018

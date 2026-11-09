@@ -62,8 +62,9 @@ def test_optimize_on_writes_config(_isolate_config):
 
 
 def test_optimize_off_writes_config(_isolate_config):
-    from superlocalmemory.cli.optimize_cmd import cmd_optimize_off
     import dataclasses
+
+    from superlocalmemory.cli.optimize_cmd import cmd_optimize_off
 
     # Pre-enable
     cfg = dataclasses.replace(

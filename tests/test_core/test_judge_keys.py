@@ -17,13 +17,12 @@ import stat
 
 import pytest
 
-from tests._portable import assert_owner_only
-
 from superlocalmemory.core.judge_keys import (
     PROVIDERS,
     JudgeKeyStore,
     JudgeKeyStoreError,
 )
+from tests._portable import assert_owner_only
 
 VALID_KEY = "sk-live-" + "a1B2c3D4" * 4  # 40 printable ASCII chars, no spaces
 

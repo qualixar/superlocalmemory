@@ -32,7 +32,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from superlocalmemory.core.config import SLMConfig, RetrievalConfig
+from superlocalmemory.core.config import RetrievalConfig, SLMConfig
 from superlocalmemory.core.engine import MemoryEngine
 from superlocalmemory.storage.models import (
     Mode,
@@ -298,7 +298,7 @@ class TestStorageArtifacts:
             "SELECT COUNT(*) AS c FROM graph_edges WHERE profile_id = 'default'"
         )
         count = int(dict(rows[0])["c"])
-        assert count > 0, f"DO NOT SHIP: graph_edges has 0 edges"
+        assert count > 0, "DO NOT SHIP: graph_edges has 0 edges"
 
     def test_bm25_tokens_exist(self, loaded_engine: MemoryEngine) -> None:
         """bm25_tokens table should have rows (BM25 indexing worked)."""
@@ -306,7 +306,7 @@ class TestStorageArtifacts:
             "SELECT COUNT(*) AS c FROM bm25_tokens WHERE profile_id = 'default'"
         )
         count = int(dict(rows[0])["c"])
-        assert count > 0, f"DO NOT SHIP: bm25_tokens has 0 rows"
+        assert count > 0, "DO NOT SHIP: bm25_tokens has 0 rows"
 
     def test_temporal_events_exist(self, loaded_engine: MemoryEngine) -> None:
         """temporal_events should have entries (date parsing worked)."""
@@ -314,7 +314,7 @@ class TestStorageArtifacts:
             "SELECT COUNT(*) AS c FROM temporal_events WHERE profile_id = 'default'"
         )
         count = int(dict(rows[0])["c"])
-        assert count > 0, f"DO NOT SHIP: temporal_events has 0 entries"
+        assert count > 0, "DO NOT SHIP: temporal_events has 0 entries"
 
     def test_memory_scenes_exist(self, loaded_engine: MemoryEngine) -> None:
         """memory_scenes should have entries (scene building worked)."""
@@ -322,7 +322,7 @@ class TestStorageArtifacts:
             "SELECT COUNT(*) AS c FROM memory_scenes WHERE profile_id = 'default'"
         )
         count = int(dict(rows[0])["c"])
-        assert count > 0, f"DO NOT SHIP: memory_scenes has 0 entries"
+        assert count > 0, "DO NOT SHIP: memory_scenes has 0 entries"
 
     def test_facts_have_embeddings(self, loaded_engine: MemoryEngine) -> None:
         """At least some facts should have non-null embeddings."""
@@ -331,7 +331,7 @@ class TestStorageArtifacts:
             "WHERE profile_id = 'default' AND embedding IS NOT NULL"
         )
         count = int(dict(rows[0])["c"])
-        assert count > 0, f"DO NOT SHIP: No facts have embeddings"
+        assert count > 0, "DO NOT SHIP: No facts have embeddings"
 
     def test_facts_have_fisher_params(self, loaded_engine: MemoryEngine) -> None:
         """At least some facts should have non-null fisher_mean and fisher_variance."""
@@ -342,7 +342,7 @@ class TestStorageArtifacts:
         )
         count = int(dict(rows[0])["c"])
         assert count > 0, (
-            f"DO NOT SHIP: No facts have Fisher params (fisher_mean/variance)"
+            "DO NOT SHIP: No facts have Fisher params (fisher_mean/variance)"
         )
 
 

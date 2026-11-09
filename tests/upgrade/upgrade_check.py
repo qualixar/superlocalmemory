@@ -29,8 +29,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _slm_env as env  # noqa: E402
 import corpus  # noqa: E402
 from _verdicts import (  # noqa: E402,F401
-    DOWNGRADE_SCHEMA, core_counts_unchanged, TARGET_SCHEMA, check_ok, downgrade_ok, expected_hits, failing, overlap,
-    mapping_diff, recall_check, recall_verdict, restore_problems, snapshot_passed, snapshot_reasons, snapshotless_verdict, upgrade_ok)
+    DOWNGRADE_SCHEMA,
+    TARGET_SCHEMA,
+    check_ok,
+    core_counts_unchanged,
+    downgrade_ok,
+    expected_hits,
+    failing,
+    mapping_diff,
+    overlap,
+    recall_check,
+    recall_verdict,
+    restore_problems,
+    snapshot_passed,
+    snapshot_reasons,
+    snapshotless_verdict,
+    upgrade_ok,
+)
 
 SNAP_DIR = "pre-migration-snapshots"
 EXPECTED_OLD = "4.1.24"

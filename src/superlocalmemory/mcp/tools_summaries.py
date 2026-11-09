@@ -33,11 +33,10 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Callable
 
-
-from superlocalmemory.mcp.tool_hints import READ_ONLY
 from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.mcp.tool_hints import READ_ONLY
 
 logger = logging.getLogger("superlocalmemory.mcp.summaries")
 

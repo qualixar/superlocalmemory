@@ -34,15 +34,15 @@ pytestmark = pytest.mark.benchmark
 
 # Deferred imports: harness symbols live inside the test_benchmarks package
 # so the default ``pytest`` run (no -m benchmark) does not load them.
+from tests.test_benchmarks.chart_export import line_chart_svg  # noqa: E402
 from tests.test_benchmarks.evo_memory import (  # noqa: E402
-    EvoMemoryBenchmark,
     ComparisonResult,
+    EvoMemoryBenchmark,
     compute_mrr_at_k,
     compute_recall_at_k,
-    verify_fixture_sha256,
     publish_gate_status,
+    verify_fixture_sha256,
 )
-from tests.test_benchmarks.chart_export import line_chart_svg  # noqa: E402
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 FIXTURE_PATH = FIXTURE_DIR / "evo_memory_synthetic_v1.jsonl"

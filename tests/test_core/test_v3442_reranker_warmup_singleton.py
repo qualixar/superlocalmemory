@@ -22,7 +22,7 @@ The fix:
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from superlocalmemory.core.engine_wiring import _log_reranker_warmup_status
 

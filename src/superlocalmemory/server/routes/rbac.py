@@ -28,10 +28,17 @@ from pydantic import BaseModel
 
 from superlocalmemory.access.rbac import LastAdminError, RbacError
 from superlocalmemory.access.rbac_admin import (
-    AuditUnavailable, AuthorityError, audited, check_identity_authority, record,
+    AuditUnavailable,
+    AuthorityError,
+    audited,
+    check_identity_authority,
+    record,
 )
 from superlocalmemory.server.rbac_enforce import (
-    get_rbac_engine, principal_info, require_global_manage, require_manage,
+    get_rbac_engine,
+    principal_info,
+    require_global_manage,
+    require_manage,
     resolve_principal,
 )
 

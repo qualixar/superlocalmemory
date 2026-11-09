@@ -32,15 +32,14 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
+from superlocalmemory.core.topic_signature import compute_topic_signature
+from superlocalmemory.learning.bandit import ContextualBandit
 from superlocalmemory.learning.engagement_features import (
     EngagementFeatures,
     extract_features,
 )
 from superlocalmemory.learning.reward_model import score
-from superlocalmemory.core.topic_signature import compute_topic_signature
-from superlocalmemory.learning.bandit import ContextualBandit
 
 logger = logging.getLogger(__name__)
 

@@ -5,10 +5,9 @@
 """Tests for Auto-Capture & Auto-Recall — Task 16 of V3 build."""
 
 
-from superlocalmemory.hooks.auto_recall import AutoRecall
 from superlocalmemory.hooks.auto_capture import AutoCapture
+from superlocalmemory.hooks.auto_recall import AutoRecall
 from superlocalmemory.hooks.rules_engine import RulesEngine
-
 
 # -- Auto Recall --
 

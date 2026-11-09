@@ -12,7 +12,10 @@ import pytest
 
 from superlocalmemory.runtimes import managed_env as me
 from superlocalmemory.runtimes.managed_env import (
-    EnvSpec, HuggingFaceSource, LocalDirSource, ManagedEnv,
+    EnvSpec,
+    HuggingFaceSource,
+    LocalDirSource,
+    ManagedEnv,
 )
 
 LOCK_TEXT = "# --index-url https://example.invalid/cpu\nfoo==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"

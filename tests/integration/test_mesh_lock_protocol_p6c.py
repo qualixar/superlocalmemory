@@ -29,15 +29,14 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Generator
 from types import SimpleNamespace
+from typing import Generator
 
 import pytest
 
-from superlocalmemory.mesh.broker import MeshBroker, _NEVER_EXPIRES
+from superlocalmemory.mesh.broker import _NEVER_EXPIRES, MeshBroker
 from superlocalmemory.mesh.lock_protocol import LockCoordinator
 from superlocalmemory.mesh.node_identity import get_node_id
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -477,6 +476,7 @@ class TestLockDeltaRoute:
         fastapi_mod = pytest.importorskip("fastapi", reason="fastapi not installed")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from superlocalmemory.server.routes import mesh_lock as mesh_lock_routes
 
         broker, db_path, node_id = db

@@ -19,16 +19,13 @@ Covers:
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import sqlite3
-import sys
 import warnings
 from pathlib import Path
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Architecture assertions — import paths unchanged
@@ -37,11 +34,11 @@ import pytest
 
 def test_consolidation_worker_re_exports_ConsolidationWorker() -> None:
     """Back-compat: ConsolidationWorker imports unchanged after split."""
-    from superlocalmemory.learning.consolidation_worker import (
-        ConsolidationWorker,
-    )
     from superlocalmemory.learning.consolidation_cycle import (
         ConsolidationWorker as CanonCW,
+    )
+    from superlocalmemory.learning.consolidation_worker import (
+        ConsolidationWorker,
     )
     # They are the same class — shim re-export, not a copy.
     assert ConsolidationWorker is CanonCW
@@ -49,10 +46,10 @@ def test_consolidation_worker_re_exports_ConsolidationWorker() -> None:
 
 def test_hnsw_dedup_re_exports_HnswDeduplicator() -> None:
     """Back-compat: HnswDeduplicator imports unchanged after split."""
-    from superlocalmemory.learning.hnsw_dedup import HnswDeduplicator
     from superlocalmemory.learning.dedup_hnsw import (
         HnswDeduplicator as CanonHD,
     )
+    from superlocalmemory.learning.hnsw_dedup import HnswDeduplicator
     assert HnswDeduplicator is CanonHD
 
 
@@ -139,10 +136,10 @@ def test_ranker_retrain_legacy_gated_when_outcomes_present(
     the legacy cold-start path MUST be skipped. The online retrain path
     owns the profile after that point.
     """
+    from superlocalmemory.learning import consolidation_worker as cw_mod
     from superlocalmemory.learning.consolidation_worker import (
         ConsolidationWorker,
     )
-    from superlocalmemory.learning import consolidation_worker as cw_mod
 
     # Build minimal schemas so _should_retrain can read the active row.
     memory_db = tmp_path / "memory.db"

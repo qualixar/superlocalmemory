@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -20,12 +19,10 @@ except (ImportError, OSError):
     pytest.skip("lightgbm not available", allow_module_level=True)
 pytest.importorskip("numpy")
 
-import lightgbm as lgb
 import numpy as np
 
 from superlocalmemory.learning import model_cache
 from superlocalmemory.learning.consolidation_worker import (
-    _build_training_matrix,
     _retrain_ranker_impl,
 )
 from superlocalmemory.learning.database import LearningDatabase
@@ -38,13 +35,12 @@ from superlocalmemory.learning.model_cache import (
 )
 from superlocalmemory.learning.ranker import AdaptiveRanker
 from superlocalmemory.learning.signals import record_signal_batch
+from tests.fixtures.lgb_mock import MockDataset, mock_lgb_train
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
     open_conn,
 )
-from tests.fixtures.lgb_mock import MockDataset, mock_lgb_train
-
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic training data generator

@@ -22,15 +22,15 @@ from superlocalmemory.parameterization.pattern_extractor import (
     PatternCategory,
     PatternExtractor,
 )
+from superlocalmemory.parameterization.pii_filter import PII_PATTERNS, PIIFilter
+from superlocalmemory.parameterization.prompt_injector import PromptInjector
+from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
 from superlocalmemory.parameterization.soft_prompt_generator import (
     CATEGORY_PRIORITY_ORDER,
     CATEGORY_TEMPLATES,
     SoftPromptGenerator,
     SoftPromptTemplate,
 )
-from superlocalmemory.parameterization.prompt_injector import PromptInjector
-from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
-from superlocalmemory.parameterization.pii_filter import PIIFilter, PII_PATTERNS
 
 __all__ = [
     "PatternAssertion",

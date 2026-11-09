@@ -14,7 +14,6 @@ from pathlib import Path
 
 from superlocalmemory.infra.data_root import state_path
 
-
 # Languages supported out of the box (tree-sitter grammar names)
 DEFAULT_LANGUAGES: frozenset[str] = frozenset({
     "python", "typescript", "tsx", "javascript", "jsx",

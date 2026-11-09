@@ -27,7 +27,6 @@ from pathlib import Path
 
 from superlocalmemory import __version__ as _RUNTIME_VERSION
 
-
 # ---------------------------------------------------------------------------
 # Public: home resolution
 # ---------------------------------------------------------------------------

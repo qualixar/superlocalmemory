@@ -30,7 +30,6 @@ from superlocalmemory.dynamics.activation_guided_quantization import (
     SAGQPrecision,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

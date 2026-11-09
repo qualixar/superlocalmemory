@@ -12,24 +12,31 @@ is kept in sync as a cache for backward compatibility.
 """
 import asyncio
 import logging
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from superlocalmemory.server.profile_runtime import (
+    TransitionDrainTimeout,
+    commit_daemon_profile_switch,
+    get_profile_runtime,
+)
 from superlocalmemory.server.route_mutations import authorize_route_mutation
 
 from .helpers import (
-    get_db_connection, validate_profile_name,
-    ProfileSwitch, DB_PATH,
-    sync_profiles, ensure_profile_in_db, ensure_profile_in_json,
-    delete_profile_from_db, PICTURES_PENDING,
-    _load_profiles_json, _save_profiles_json, get_active_profile,
-)
-from superlocalmemory.server.profile_runtime import (
-    commit_daemon_profile_switch,
-    get_profile_runtime,
-    TransitionDrainTimeout,
+    DB_PATH,
+    PICTURES_PENDING,
+    ProfileSwitch,
+    _load_profiles_json,
+    _save_profiles_json,
+    delete_profile_from_db,
+    ensure_profile_in_db,
+    ensure_profile_in_json,
+    get_active_profile,
+    get_db_connection,
+    sync_profiles,
+    validate_profile_name,
 )
 
 logger = logging.getLogger("superlocalmemory.routes.profiles")

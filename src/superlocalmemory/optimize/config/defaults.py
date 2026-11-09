@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from superlocalmemory.optimize.config.schema import (
-    OptimizeConfig, ProviderConfig, TTLConfig,
+    OptimizeConfig,
+    ProviderConfig,
+    TTLConfig,
 )
 
 DEFAULT_OPTIMIZE_CONFIG = OptimizeConfig(

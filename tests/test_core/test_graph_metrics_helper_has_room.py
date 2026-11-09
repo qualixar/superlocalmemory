@@ -13,7 +13,8 @@ from __future__ import annotations
 import threading
 import time
 
-from superlocalmemory.core import background_process, graph_metrics_process as gmp
+from superlocalmemory.core import background_process
+from superlocalmemory.core import graph_metrics_process as gmp
 
 
 def _sleep_then_pid(seconds: float) -> int:

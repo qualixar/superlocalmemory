@@ -30,7 +30,6 @@ from superlocalmemory.storage.models import (
     GraphEdge,
     MemoryRecord,
 )
-
 from tests.conftest import force_sync_enrichment
 
 _PARENT_MEMORY = "m-outbox"

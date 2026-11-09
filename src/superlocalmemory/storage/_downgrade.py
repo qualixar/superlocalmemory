@@ -44,7 +44,10 @@ from typing import Any
 
 from superlocalmemory.storage._durable_json import read_json, write_json_atomic
 from superlocalmemory.storage._restore_types import (
-    DOWNGRADE_MARKER, SNAPSHOTS_DIR, DowngradeRefusedError, DowngradeReport,
+    DOWNGRADE_MARKER,
+    SNAPSHOTS_DIR,
+    DowngradeRefusedError,
+    DowngradeReport,
 )
 
 logger = logging.getLogger(__name__)
@@ -138,7 +141,8 @@ def _stamp(db: Path, version: int) -> None:
     from contextlib import closing
 
     from superlocalmemory.storage._schema_version import (
-        ensure_schema_version_table, write_schema_version,
+        ensure_schema_version_table,
+        write_schema_version,
     )
 
     with closing(sqlite3.connect(str(db), timeout=30)) as conn:
@@ -153,7 +157,9 @@ def prepare_downgrade(*, target_schema: int = 51, requested_by: str, data_root: 
     ``DowngradeRefusedError`` (nothing changed) when that would not be safe."""
     from superlocalmemory.storage import _snapshot_manifest as sm
     from superlocalmemory.storage.backup import (
-        InsufficientDiskSpaceError, SnapshotUnusableError, _pre_migration_backup,
+        InsufficientDiskSpaceError,
+        SnapshotUnusableError,
+        _pre_migration_backup,
     )
 
     data_root, memory_db, learning_db = Path(data_root), Path(memory_db), Path(learning_db)

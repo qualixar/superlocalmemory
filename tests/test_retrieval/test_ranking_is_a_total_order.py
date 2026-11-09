@@ -186,7 +186,7 @@ class TestTiedScoresComeBackInAStableOrder:
 
     def _build_tied(self, fact_ids: list[str]) -> list[str]:
         """Run engine._build_results on facts with equal fused scores and ages."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
         from unittest.mock import MagicMock
 
         from superlocalmemory.core.config import RetrievalConfig
@@ -245,7 +245,7 @@ class TestTiedScoresComeBackInAStableOrder:
         Without this, a key that sorted by fact_id first would satisfy the test
         above while destroying ranking entirely.
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
         from unittest.mock import MagicMock
 
         from superlocalmemory.core.config import RetrievalConfig

@@ -22,7 +22,7 @@ def host(tmp_path, monkeypatch, mock_embedder):
 
 
 def test_an_mcp_capture_is_emitted_as_memory_captured(host, monkeypatch) -> None:
-    from superlocalmemory.infra.event_bus import EventBus, VALID_EVENT_TYPES
+    from superlocalmemory.infra.event_bus import VALID_EVENT_TYPES, EventBus
 
     emitted: list[str] = []
     refused: list[str] = []

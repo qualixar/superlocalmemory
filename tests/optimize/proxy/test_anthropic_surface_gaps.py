@@ -15,11 +15,10 @@ from superlocalmemory.optimize.proxy.anthropic_surface import _sse_from_cached_j
 from superlocalmemory.optimize.proxy.lifecycle import (
     CachedResponse,
     HookChain,
-    ProxyRequest,
     ProviderResponse,
+    ProxyRequest,
 )
 from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
-
 
 # ---------------------------------------------------------------------------
 # Helpers

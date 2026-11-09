@@ -456,7 +456,7 @@ async def test_integration_filtered_server_five_tools_all_slm_branded():
     every registered tool is SLM-branded (no foreign-branded name leaks into the
     MCP surface) — fulfills AUDIT L-03.
     """
-    from superlocalmemory.mcp.tools_optimize import register_optimize_tools, _OPTIMIZE_TOOL_NAMES
+    from superlocalmemory.mcp.tools_optimize import _OPTIMIZE_TOOL_NAMES, register_optimize_tools
 
     inner = _MockServer()
 

@@ -333,8 +333,9 @@ def test_set_with_dict_response(tmp_cache_db) -> None:
 
 def test_set_with_provider_response(tmp_cache_db) -> None:
     """set() with ProviderResponse uses body_bytes."""
-    from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse
     import json as _json
+
+    from superlocalmemory.optimize.proxy.lifecycle import ProviderResponse
     cm = CacheManager(tmp_cache_db)
     resp_bytes = _json.dumps({"text": "from_provider"}).encode("utf-8")
     prov_resp = ProviderResponse(
@@ -867,6 +868,7 @@ def test_c02_set_semantic_index_fail_open(tmp_cache_db) -> None:
 def test_c08_default_tenant_hash_constant() -> None:
     """C-08: _DEFAULT_TENANT_HASH must equal sha256('default')."""
     import hashlib
+
     from superlocalmemory.optimize.cache.manager import _DEFAULT_TENANT_HASH
     expected = hashlib.sha256(b"default").hexdigest()
     assert _DEFAULT_TENANT_HASH == expected, (
@@ -876,8 +878,8 @@ def test_c08_default_tenant_hash_constant() -> None:
 
 def test_c08_check_uses_precomputed_hash(tmp_cache_db) -> None:
     """C-08: check() must build the same key as direct get() with 'default' tenant."""
-    from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest
     from superlocalmemory.optimize.cache.manager import _DEFAULT_TENANT_HASH
+    from superlocalmemory.optimize.proxy.lifecycle import ProxyRequest
 
     cm = CacheManager(tmp_cache_db)
     req = ProxyRequest(

@@ -9,9 +9,9 @@ the first recalls waited, and ~1.2 GB of extra memory on a 22k-fact store.
 
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
-import inspect
 from pathlib import Path
 
 import pytest

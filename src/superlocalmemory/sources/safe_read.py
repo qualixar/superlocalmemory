@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import BinaryIO
 
 
-
 def _flags() -> int:
     """Read-only, no link following, never blocking, and byte-exact on Windows (``O_BINARY``)."""
     return (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)

@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 
 class _Engine:
     """Just enough of an engine to exercise the naming rule."""

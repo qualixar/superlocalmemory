@@ -25,7 +25,7 @@ def host(tmp_path, monkeypatch, mock_embedder):
 
 @pytest.fixture
 def events(monkeypatch) -> list[tuple[str, dict]]:
-    from superlocalmemory.infra.event_bus import EventBus, VALID_EVENT_TYPES
+    from superlocalmemory.infra.event_bus import VALID_EVENT_TYPES, EventBus
 
     seen: list[tuple[str, dict]] = []
 

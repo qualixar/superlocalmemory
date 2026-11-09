@@ -18,8 +18,8 @@ import json
 import pytest
 
 from superlocalmemory.optimize.compress.router import (
-    CompressRouter,
     _MIN_CHARS_FOR_COMPRESSION,
+    CompressRouter,
     _json_minify,
 )
 from superlocalmemory.optimize.config.schema import OptimizeConfig

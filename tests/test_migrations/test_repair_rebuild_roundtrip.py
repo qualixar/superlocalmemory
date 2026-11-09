@@ -438,11 +438,13 @@ def test_m022_backfill_uses_parent_profile_orphans_default() -> None:
 def _justified_drift_db() -> "sqlite3.Connection":
     import sqlite3
 
+    from superlocalmemory.storage import _migration_internals as mi
     from superlocalmemory.storage.migrations import (
         M003_migration_log,
+    )
+    from superlocalmemory.storage.migrations import (
         M048_upcoming_holds_only_what_is_upcoming as M048,
     )
-    from superlocalmemory.storage import _migration_internals as mi
 
     conn = sqlite3.connect(":memory:")
     conn.executescript(M003_migration_log.DDL)

@@ -17,7 +17,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # H-01 — cross-profile preference contamination (learning/cross_project.py)
 # ---------------------------------------------------------------------------

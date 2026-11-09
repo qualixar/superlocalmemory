@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-
 class TestMigrationNotificationHelpers:
     """_notify_migration_applied and _write_migration_error_log helpers."""
 

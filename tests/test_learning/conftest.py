@@ -28,7 +28,6 @@ from unittest.mock import patch
 import pytest
 
 from tests.fixtures.lgb_mock import (
-    MockBooster,
     MockDataset,
     mock_lgb_train,
 )

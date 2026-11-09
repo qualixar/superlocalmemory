@@ -2,9 +2,12 @@
 import base64
 import json
 import time
+
 import pytest
-from superlocalmemory.remote_connections.credentials import ConnectorCredential
+
 from superlocalmemory.remote_connections.codec import MAX_RESPONSE_BYTES
+from superlocalmemory.remote_connections.credentials import ConnectorCredential
+
 try:
     from superlocalmemory.remote_connections.origin import CanonicalMcpOrigin
 except ImportError:

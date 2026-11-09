@@ -28,7 +28,9 @@ import uuid
 import pytest
 
 from tests.helpers.env_capabilities import purge_keyword_index_on_old_sqlite
-
+from tests.test_integration.test_mcp_declared_kind_transport import (  # noqa: E402,F401
+    stub_embedder,  # the fixture, used by ``daemon``
+)
 from tests.test_integration.test_per_request_profile_e2e import (
     PRODUCTION_PORTS,
     REPO_ROOT,
@@ -36,11 +38,6 @@ from tests.test_integration.test_per_request_profile_e2e import (
     _child_env,
     _foreign_daemon_pids,
     _reserve_private_port,
-)
-
-
-from tests.test_integration.test_mcp_declared_kind_transport import (  # noqa: E402,F401
-    stub_embedder,  # the fixture, used by ``daemon``
 )
 
 ERASE_PROFILE = "g07erase"

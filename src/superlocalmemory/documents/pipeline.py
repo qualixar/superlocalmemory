@@ -20,9 +20,9 @@ import re
 import shutil
 import tempfile
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from contextlib import ExitStack
 from typing import Any, Callable, ContextManager
 
 from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
@@ -32,7 +32,10 @@ from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, Parse
 from superlocalmemory.media import files
 from superlocalmemory.media.labels import DOCUMENT
 from superlocalmemory.memory_core import (
-    ContentOrigin, effective_pii_redaction, prepare_for_save, scan_sensitive,
+    ContentOrigin,
+    effective_pii_redaction,
+    prepare_for_save,
+    scan_sensitive,
 )
 from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
 from superlocalmemory.runtimes.worker_client import MediaWorkerError

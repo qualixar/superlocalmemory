@@ -10,7 +10,10 @@ import logging
 from typing import Any, Callable
 
 from superlocalmemory.core.injection import (
-    InjectableMemory, render_context, response_injectable, supported_only,
+    InjectableMemory,
+    render_context,
+    response_injectable,
+    supported_only,
 )
 from superlocalmemory.retrieval.temporal_frame import relative_age, temporal_frame
 
@@ -176,7 +179,8 @@ class AutoRecall:
             response = self._recall(query, self._max_memories)
             if response is None or not response_injectable(response):
                 return []
-            from datetime import datetime as _dt, timezone as _tz
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
             _now = _dt.now(_tz.utc)
             results = []
             for r in response.results:

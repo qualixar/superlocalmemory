@@ -7,9 +7,14 @@ from __future__ import annotations
 
 import asyncio
 
-
 from tests.test_mcp.test_remote_more_reads_hide_media import (  # noqa: F401  (fixture and helpers)
-    CASES, _as, _daemon, _relay, _Server, world)
+    CASES,
+    _as,
+    _daemon,
+    _relay,
+    _Server,
+    world,
+)
 
 
 def _pin_all(engine, ids) -> None:

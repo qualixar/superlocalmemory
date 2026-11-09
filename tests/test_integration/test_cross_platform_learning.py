@@ -64,7 +64,6 @@ import pytest
 from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.reward import EngagementRewardModel
 
-
 # ---------------------------------------------------------------------------
 # Platform simulation constants
 # ---------------------------------------------------------------------------

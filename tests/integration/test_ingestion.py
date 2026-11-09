@@ -93,7 +93,7 @@ class TestParsers:
 class TestBaseAdapter:
 
     def test_rate_limiting(self):
-        from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig
+        from superlocalmemory.ingestion.base_adapter import AdapterConfig, BaseAdapter
         config = AdapterConfig(rate_limit_per_hour=3)
         adapter = BaseAdapter(config)
         adapter._items_this_hour = 3
@@ -101,7 +101,8 @@ class TestBaseAdapter:
 
     def test_rate_limit_resets_after_hour(self):
         import time
-        from superlocalmemory.ingestion.base_adapter import BaseAdapter, AdapterConfig
+
+        from superlocalmemory.ingestion.base_adapter import AdapterConfig, BaseAdapter
         config = AdapterConfig(rate_limit_per_hour=3)
         adapter = BaseAdapter(config)
         adapter._items_this_hour = 3

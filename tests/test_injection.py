@@ -9,7 +9,6 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 from superlocalmemory.core.injection import (
     InjectableMemory,
     clamp_content,
@@ -22,7 +21,6 @@ from superlocalmemory.core.injection import (
     resolve_budget,
     select_core_block,
 )
-
 
 # ── estimate_tokens ──────────────────────────────────────────────────────
 

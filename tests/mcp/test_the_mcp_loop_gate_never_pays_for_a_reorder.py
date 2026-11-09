@@ -15,8 +15,7 @@ import urllib.parse
 import pytest
 
 from superlocalmemory.core.answer_check_scope import skip_answer_check
-from superlocalmemory.mcp import _daemon_proxy
-from superlocalmemory.mcp import tools_loops
+from superlocalmemory.mcp import _daemon_proxy, tools_loops
 from superlocalmemory.retrieval.answer_check_status import REQUEST_NO_REORDER
 
 

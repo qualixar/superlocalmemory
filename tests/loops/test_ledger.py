@@ -1,6 +1,5 @@
 """Tests for the loop ledger: entry serialization, in-memory + SLM-backed."""
 
-import pytest
 
 from superlocalmemory.loops.engine import run_bounded_loop
 from superlocalmemory.loops.ledger import (
@@ -9,7 +8,6 @@ from superlocalmemory.loops.ledger import (
     SLMMemoryLedger,
 )
 from superlocalmemory.loops.models import Bounds, LapResult, Verdict
-
 
 # ---------------------------------------------------------------------------
 # LedgerEntry serialization

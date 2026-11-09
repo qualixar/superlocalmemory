@@ -1,7 +1,6 @@
 """Local agent sessions register with an app and a name, and come back after a lost row."""
 
 from superlocalmemory.mcp import tools_mesh
-from tests.test_mesh.conftest import rows
 
 
 def test_registration_stores_app_and_display_name(broker) -> None:

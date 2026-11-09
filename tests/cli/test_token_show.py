@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from tests._portable import child_env_base
 
 REPO = Path(__file__).resolve().parents[2]

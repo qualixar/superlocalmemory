@@ -9,7 +9,6 @@ from superlocalmemory.infra.backup_obligations import (
     erase_profile_from_snapshot,
     scan_backup_snapshots_for_profile,
 )
-
 from tests.test_media._erase_support import add_image, make_root
 
 

@@ -23,13 +23,11 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from superlocalmemory.core.config import SLMConfig, RetrievalConfig
+from superlocalmemory.core.config import RetrievalConfig, SLMConfig
 from superlocalmemory.core.engine import MemoryEngine
 from superlocalmemory.storage.models import (
     AtomicFact,
-    FactType,
     MemoryLifecycle,
-    MemoryRecord,
     Mode,
     _new_id,
 )
@@ -109,8 +107,8 @@ def engine(db_path: Path) -> MemoryEngine:
 @pytest.fixture()
 def db(tmp_path: Path):
     """Standalone DB manager with full schema for unit-level tests."""
-    from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.storage import schema
+    from superlocalmemory.storage.database import DatabaseManager
 
     manager = DatabaseManager(tmp_path / "standalone.db")
     manager.initialize(schema)

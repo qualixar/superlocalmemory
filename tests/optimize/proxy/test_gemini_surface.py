@@ -7,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from superlocalmemory.optimize.config.schema import OptimizeConfig
+from superlocalmemory.optimize.proxy.gemini_surface import _validate_gemini_path
 from superlocalmemory.optimize.proxy.lifecycle import HookChain
 from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router
-from superlocalmemory.optimize.proxy.gemini_surface import _validate_gemini_path
 
 
 def test_validate_gemini_path_valid() -> None:

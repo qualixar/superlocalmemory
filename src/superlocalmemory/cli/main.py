@@ -15,6 +15,7 @@ from __future__ import annotations
 # GPU memory reservation on Apple Silicon. Without this, macOS Activity
 # Monitor shows 3-6 GB for what is actually a 40 MB process.
 import os as _os
+
 _os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
 _os.environ.setdefault('PYTORCH_MPS_MEM_LIMIT', '0')
 _os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
@@ -201,11 +202,12 @@ def main() -> None:
             # we defer — the next daemon start picks it up.
             try:
                 import logging as _logging
+
+                # route through slm_home() so all 3 env aliases are honoured.
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
                 from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
                     migrate_if_safe as _migrate_if_safe,
                 )
-                # route through slm_home() so all 3 env aliases are honoured.
-                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
                 _data = _slm_home()
                 _res = _migrate_if_safe(_data)
                 if _res.get("status") == "deferred":

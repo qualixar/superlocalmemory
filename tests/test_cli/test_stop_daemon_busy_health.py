@@ -62,7 +62,6 @@ import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 from superlocalmemory.infra.daemon_identity import build_descriptor, write_descriptor
 from tests._urlopen_fake import patch_urlopen
 

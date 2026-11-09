@@ -7,8 +7,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.test_governance.test_role_surface_matrix_mcp import store
-
 
 @pytest.mark.parametrize("connection", ["transport-session", "explicit-binding", "unidentified"])
 def test_cookieless_personal_switch_has_connection_continuity(store, monkeypatch, connection):

@@ -1,12 +1,12 @@
 """Actual HTTP route checks; cloud provider is a synthetic fixture."""
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import pytest
 
 try:
-    from superlocalmemory.remote_connections.service import RemoteConnectionService, GatewayReceipt
+    from superlocalmemory.remote_connections.service import GatewayReceipt, RemoteConnectionService
     from superlocalmemory.server.routes.connections import router
 except ImportError:
     RemoteConnectionService = None
@@ -213,6 +213,7 @@ def test_actual_daemon_advertises_dormant_web_connection_feature(caplog, tmp_pat
 
 def test_optional_router_import_failure_preserves_local_daemon(monkeypatch, caplog):
     import builtins
+
     from superlocalmemory.server.unified_daemon import create_app
     original_import = builtins.__import__
 

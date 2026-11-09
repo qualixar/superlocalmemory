@@ -18,9 +18,9 @@ from unittest.mock import patch
 
 import pytest
 
+from superlocalmemory.core.config import SLMConfig
 from superlocalmemory.core.engine_wiring import init_retrieval
 from superlocalmemory.core.modes import Mode
-from superlocalmemory.core.config import SLMConfig
 from tests.test_retrieval.cross_scope_fixture import build_store
 
 

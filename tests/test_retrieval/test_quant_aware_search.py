@@ -22,7 +22,6 @@ from superlocalmemory.retrieval.quantization_aware_search import (
     QuantizationAwareSearch,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

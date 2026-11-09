@@ -16,13 +16,11 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-
 from superlocalmemory.learning.features import FEATURE_DIM, FEATURE_NAMES
 from superlocalmemory.learning.signals import record_signal_batch
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
     open_conn,
 )
 

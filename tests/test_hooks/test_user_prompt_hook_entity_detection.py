@@ -21,8 +21,6 @@ import io
 import json
 import time
 
-
-
 # --------------------------------------------------------------------------
 # 1. Hook enriches topic signature with entity hits
 # --------------------------------------------------------------------------
@@ -67,8 +65,8 @@ def test_user_prompt_hook_enriches_topic_signature(monkeypatch):
     def _lookup_empty(self, text: str):
         return []
 
-    from superlocalmemory.learning import trigram_index as ti
     from superlocalmemory.core import context_cache as cc
+    from superlocalmemory.learning import trigram_index as ti
 
     # Force construction of a singleton index inside the hook to be a no-op.
     def _fake_get_or_none(*args, **kwargs):
@@ -126,8 +124,8 @@ def test_user_prompt_hook_budget_unchanged(monkeypatch):
     to every call; proven non-vacuous by
     test_user_prompt_hook_budget_catches_a_real_slowdown directly below.
     """
-    from superlocalmemory.learning import trigram_index as ti
     from superlocalmemory.core import context_cache as cc
+    from superlocalmemory.learning import trigram_index as ti
     from tests.test_hooks._timing import assert_median_under_budget
 
     class _FakeIdx:
@@ -151,9 +149,9 @@ def test_user_prompt_hook_budget_catches_a_real_slowdown(monkeypatch):
     hook's topic-signature step must still fail it. Test-only injection via
     monkeypatch -- never in production code.
     """
-    from superlocalmemory.learning import trigram_index as ti
     from superlocalmemory.core import context_cache as cc
     from superlocalmemory.core import topic_signature as ts
+    from superlocalmemory.learning import trigram_index as ti
     from tests.test_hooks._timing import assert_median_under_budget
 
     class _FakeIdx:

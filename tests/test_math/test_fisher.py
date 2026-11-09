@@ -22,12 +22,11 @@ import numpy as np
 import pytest
 
 from superlocalmemory.math.fisher import (
-    FisherRaoMetric,
     _VARIANCE_CEIL,
     _VARIANCE_FLOOR,
+    FisherRaoMetric,
     _stable_arccosh_1p_vec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Construction

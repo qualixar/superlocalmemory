@@ -239,6 +239,7 @@ class TestFcntlMigrationCallPath:
         That is the RED state before the msvcrt mock is provided.
         """
         import types
+
         import superlocalmemory.migrations.v3_4_25_to_v3_4_26 as mig
 
         # Minimal msvcrt stand-in with the two names the migration uses.

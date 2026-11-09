@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -458,6 +456,7 @@ def test_service_type_matches_remote_sync_browse_literal():
     exact literal appears in its source.
     """
     import inspect
+
     from superlocalmemory.mesh import remote_sync
     from superlocalmemory.mesh.discovery import _SERVICE_TYPE
 

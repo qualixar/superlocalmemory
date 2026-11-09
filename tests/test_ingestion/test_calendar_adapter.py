@@ -29,7 +29,6 @@ from superlocalmemory.ingestion import calendar_adapter
 from superlocalmemory.ingestion.base_adapter import AdapterConfig
 from superlocalmemory.ingestion.calendar_adapter import CalendarAdapter
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / builders
 # ---------------------------------------------------------------------------

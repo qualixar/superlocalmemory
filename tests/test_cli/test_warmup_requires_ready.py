@@ -16,7 +16,9 @@ import pytest
 
 from superlocalmemory.cli import commands
 from superlocalmemory.cli.warmup_readiness import (
-    describe_not_ready, is_fully_warm, wait_until_warm,
+    describe_not_ready,
+    is_fully_warm,
+    wait_until_warm,
 )
 
 _STARTING = {"status": "ok", "engine": "initialized", "ready": False,

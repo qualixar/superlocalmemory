@@ -29,7 +29,6 @@ import pytest
 from superlocalmemory.retrieval.semantic_channel import SemanticChannel
 from superlocalmemory.storage.models import AtomicFact
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

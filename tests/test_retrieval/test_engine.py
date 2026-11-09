@@ -21,22 +21,20 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from superlocalmemory.core.config import RetrievalConfig
+from superlocalmemory.retrieval.engine import RetrievalEngine
+
 # Imported at collection time on purpose: tests/conftest.py replaces the
 # module attribute with a MagicMock for the whole session so no test loads
 # the real model. Importing inside a test would get that mock instead.
 from superlocalmemory.retrieval.reranker import (
     CrossEncoderReranker as _RealCrossEncoderReranker,
 )
-
-
-from superlocalmemory.core.config import RetrievalConfig
-from superlocalmemory.retrieval.engine import RetrievalEngine
 from superlocalmemory.storage.models import (
     AtomicFact,
     Mode,
     RecallResponse,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

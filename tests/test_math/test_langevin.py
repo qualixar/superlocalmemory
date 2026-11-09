@@ -20,13 +20,12 @@ import numpy as np
 import pytest
 
 from superlocalmemory.math.langevin import (
-    LangevinDynamics,
     _MAX_NORM,
+    LangevinDynamics,
     _project_to_ball,
     _resize_position,
 )
 from superlocalmemory.storage.models import MemoryLifecycle
-
 
 # ---------------------------------------------------------------------------
 # Construction

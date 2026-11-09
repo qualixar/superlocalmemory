@@ -13,13 +13,11 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-
-from superlocalmemory.compliance.erasure_outcome import subject_ref
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from superlocalmemory.compliance.erasure_outcome import subject_ref
 
 # ---------------------------------------------------------------------------
 # DB factory helpers
@@ -104,9 +102,9 @@ def test_receipt_rewrite_attack_detected(tmp_path: Path, monkeypatch) -> None:
     _patch_manifest_key(monkeypatch)
     db = _fresh_db_with_m037(tmp_path)
 
-    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.core.transactions.concrete_owners import Bm25Owner, TemporalOwner
     from superlocalmemory.core.transactions.erasure import ErasureService, verify_receipt
+    from superlocalmemory.core.transactions.owners import OperationContext
 
     db.execute("INSERT INTO memories (memory_id, profile_id, content) VALUES ('m1', 'p1', 'x')")
     db.execute(
@@ -147,8 +145,8 @@ def test_manifest_rewrite_attack_detected(tmp_path: Path, monkeypatch) -> None:
     _patch_manifest_key(monkeypatch)
     db = _fresh_db_with_m037(tmp_path)
 
-    from superlocalmemory.core.transactions.owners import OperationContext, ObligationKind
     from superlocalmemory.core.transactions.obligations import ObligationLedger
+    from superlocalmemory.core.transactions.owners import ObligationKind, OperationContext
     from superlocalmemory.core.transactions.reconciler import Reconciler
 
     ledger = ObligationLedger()
@@ -248,10 +246,10 @@ def test_vector_unavailable_with_embedded_facts_returns_degraded(tmp_path: Path)
     """B1 (RED→GREEN): When the vector store is unavailable but facts have
     embeddings, VectorOwner.verify() must return ok=False (not vacuous VERIFIED).
     The result must signal required_unavailable in detail."""
+    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
+    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.storage import schema
     from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.core.transactions.owners import OperationContext
-    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
 
     db_path = tmp_path / "memory.db"
     db = DatabaseManager(db_path)
@@ -287,10 +285,10 @@ def test_vector_unavailable_with_embedded_facts_returns_degraded(tmp_path: Path)
 def test_vector_unavailable_no_embedded_facts_is_not_applicable(tmp_path: Path) -> None:
     """B2 (RED→GREEN): When the vector store is unavailable but NO facts have
     embeddings, VectorOwner.verify() must return ok=True (NOT_APPLICABLE)."""
+    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
+    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.storage import schema
     from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.core.transactions.owners import OperationContext
-    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
 
     db_path = tmp_path / "memory.db"
     db = DatabaseManager(db_path)
@@ -323,10 +321,10 @@ def test_vector_unavailable_no_embedded_facts_is_not_applicable(tmp_path: Path) 
 def test_vector_none_store_no_embedded_facts_is_ok(tmp_path: Path) -> None:
     """B3: When vector_store is None (no store configured) and no embeddings
     exist, VectorOwner.verify() must return ok=True."""
+    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
+    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.storage import schema
     from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.core.transactions.owners import OperationContext
-    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
 
     db_path = tmp_path / "memory.db"
     db = DatabaseManager(db_path)
@@ -495,9 +493,9 @@ def test_hmac_receipt_verify_rejects_all_tampered_fields(tmp_path: Path, monkeyp
     _patch_manifest_key(monkeypatch)
     db = _fresh_db_with_m037(tmp_path)
 
-    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.core.transactions.concrete_owners import Bm25Owner
     from superlocalmemory.core.transactions.erasure import ErasureService, verify_receipt
+    from superlocalmemory.core.transactions.owners import OperationContext
 
     db.store_bm25_tokens("f1", "p1", ["word"])
     ctx = OperationContext(
@@ -548,8 +546,8 @@ def test_manifest_version_downgrade_forgery_detected(tmp_path: Path, monkeypatch
     _patch_manifest_key(monkeypatch)
     db = _fresh_db_with_m037(tmp_path)
 
-    from superlocalmemory.core.transactions.owners import OperationContext, ObligationKind
     from superlocalmemory.core.transactions.obligations import ObligationLedger
+    from superlocalmemory.core.transactions.owners import ObligationKind, OperationContext
     from superlocalmemory.core.transactions.reconciler import Reconciler
 
     ledger = ObligationLedger()
@@ -618,9 +616,9 @@ def test_receipt_version_downgrade_forgery_detected(tmp_path: Path, monkeypatch)
     _patch_manifest_key(monkeypatch)
     db = _fresh_db_with_m037(tmp_path)
 
-    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.core.transactions.concrete_owners import Bm25Owner
-    from superlocalmemory.core.transactions.erasure import ErasureService, verify_receipt, _erasure_canonical
+    from superlocalmemory.core.transactions.erasure import ErasureService, _erasure_canonical, verify_receipt
+    from superlocalmemory.core.transactions.owners import OperationContext
 
     db.store_bm25_tokens("f-dg", "p1", ["token"])
     ctx = OperationContext(
@@ -692,6 +690,7 @@ def test_signing_key_fail_closed_on_corrupt(tmp_path: Path, monkeypatch) -> None
 def test_signing_key_fail_closed_on_unreadable(tmp_path: Path, monkeypatch) -> None:
     """TA4: OSError reading/creating key raises RuntimeError; never returns ephemeral."""
     import os
+
     from superlocalmemory.core.transactions import manifest_key as _mk
 
     key_path = tmp_path / ".manifest_signing_key"
@@ -727,7 +726,10 @@ def test_v1_manifest_uses_constant_time_compare(tmp_path: Path, monkeypatch) -> 
     db = _fresh_db(tmp_path)
 
     from superlocalmemory.core.transactions.manifest import (
-        ManifestState, OwnerEvidence, compute_envelope_hash, evidence_json,
+        ManifestState,
+        OwnerEvidence,
+        compute_envelope_hash,
+        evidence_json,
     )
     from superlocalmemory.core.transactions.owners import ObligationKind, ObligationState
     from superlocalmemory.core.transactions.reconciler import Reconciler
@@ -808,11 +810,12 @@ def test_forget_profile_produces_real_erasure_receipt(tmp_path: Path) -> None:
 def test_embedded_fact_ids_query_failure_returns_degraded(tmp_path: Path) -> None:
     """TB2: When _embedded_fact_ids DB query fails, VectorOwner.verify()
     must return ok=False (not vacuous NOT_APPLICABLE)."""
+    from unittest.mock import MagicMock, patch
+
+    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
+    from superlocalmemory.core.transactions.owners import OperationContext
     from superlocalmemory.storage import schema
     from superlocalmemory.storage.database import DatabaseManager
-    from superlocalmemory.core.transactions.owners import OperationContext
-    from superlocalmemory.core.transactions.concrete_owners import VectorOwner
-    from unittest.mock import MagicMock, patch
 
     db_path = tmp_path / "memory.db"
     db = DatabaseManager(db_path)
@@ -869,6 +872,7 @@ def test_obligation_schema_negative_cache_resets_after_migration(tmp_path: Path)
     """
     import sqlite3
     import types
+
     from superlocalmemory.core.remember_runtime import _obligation_schema_present
     from superlocalmemory.storage.migrations import (
         M033_projection_transactions,
@@ -1037,7 +1041,6 @@ def test_receipt_write_failure_is_surfaced_not_swallowed(tmp_path: Path) -> None
     """D4: when ErasureService.finalize raises, forget_profile must NOT silently
     swallow — it must propagate the failure so callers know a destructive wipe
     proceeded without a durable accountability record."""
-    import uuid
 
     db = _fresh_db(tmp_path, with_receipts=True)
     db.execute(

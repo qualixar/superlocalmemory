@@ -25,8 +25,8 @@ from superlocalmemory.core.ingestion_command import (
 )
 
 if TYPE_CHECKING:
-    from superlocalmemory.memory_core import PreparedContent
     from superlocalmemory.core.engine import MemoryEngine
+    from superlocalmemory.memory_core import PreparedContent
     from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
 

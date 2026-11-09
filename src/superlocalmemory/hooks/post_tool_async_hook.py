@@ -24,7 +24,6 @@ import urllib.request
 
 from superlocalmemory.infra.data_root import state_path
 
-
 _ALLOWED_DAEMON_HOSTS: frozenset[str] = frozenset({
     "127.0.0.1", "localhost", "::1", "[::1]",
 })

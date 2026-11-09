@@ -33,17 +33,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import sys
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Schema bootstrap — mirrors learning.db after M002+M009 and memory.db
@@ -981,6 +977,7 @@ def test_rollback_reason_logged(learning_db: Path, caplog) -> None:
     """execute_rollback writes rollback_reason on the rollback row AND
     logs a warning line carrying profile_id + reason."""
     import logging
+
     from superlocalmemory.learning.model_rollback import ModelRollback
 
     _seed_previous_model(learning_db, profile_id="p")

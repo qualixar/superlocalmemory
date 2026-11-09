@@ -15,13 +15,10 @@ try:
 except (ImportError, OSError):
     pytest.skip("lightgbm not available", allow_module_level=True)
 
-import lightgbm as lgb
-import numpy as np
 
 from superlocalmemory.learning import model_cache
 from superlocalmemory.learning.consolidation_worker import _retrain_ranker_impl
 from superlocalmemory.learning.features import FEATURE_NAMES
-from superlocalmemory.learning.labeler import label_gain
 from superlocalmemory.learning.model_cache import (
     ActiveModel,
     drift_mode,
@@ -30,8 +27,8 @@ from superlocalmemory.learning.model_cache import (
 from superlocalmemory.learning.ranker import AdaptiveRanker
 from superlocalmemory.learning.signals import SignalCandidate, record_signal_batch
 from tests.test_learning._signal_fixtures import (
-    make_db_with_migrations,
     make_batch,
+    make_db_with_migrations,
     open_conn,
 )
 
@@ -201,7 +198,6 @@ def test_invalidate_all(tmp_path):
 
 
 def test_drift_mode_classifies_three_ways():
-    from superlocalmemory.learning.model_cache import drift_mode
 
     class _M:
         def __init__(self, names):
@@ -402,7 +398,9 @@ def test_apply_shown_flip_noop_when_missing_fact(tmp_path):
 
 def test_reset_counters_helper():
     from superlocalmemory.learning.signals import (
-        get_counters, reset_counters, _bump,
+        _bump,
+        get_counters,
+        reset_counters,
     )
     _bump("signal_dropped_total", 5)
     assert get_counters()["signal_dropped_total"] >= 5

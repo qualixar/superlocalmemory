@@ -38,9 +38,9 @@ def test_missing_embedding_section_is_not_remote():
 def test_reconfigure_preserves_existing_custom_embedding(tmp_path, monkeypatch):
     """Re-running setup cannot replace a 1024d endpoint with local 768d."""
     monkeypatch.setenv("SLM_BASE_DIR", str(tmp_path))
+    from superlocalmemory.cli.setup_wizard import _build_wizard_config
     from superlocalmemory.core.config import EmbeddingConfig, SLMConfig
     from superlocalmemory.storage.models import Mode
-    from superlocalmemory.cli.setup_wizard import _build_wizard_config
 
     existing = SLMConfig.for_mode(Mode.C)
     existing.embedding = EmbeddingConfig(

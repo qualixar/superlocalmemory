@@ -21,7 +21,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # D-02: trigram_index module reference cached at module level
 # ---------------------------------------------------------------------------

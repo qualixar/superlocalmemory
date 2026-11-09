@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from superlocalmemory.core.deferred_admission import DeferredCommitter
 from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
     IngestionOperation,
@@ -33,7 +34,6 @@ from superlocalmemory.core.ingestion_command import (
     IngestionRequest,
     MaterializationResult,
 )
-from superlocalmemory.core.deferred_admission import DeferredCommitter
 from superlocalmemory.core.mutation_routing import MutationTarget, classify_target
 from superlocalmemory.core.remember_admission import (
     RememberAdmissionCommand,

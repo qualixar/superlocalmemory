@@ -1,8 +1,10 @@
 import pytest
-from superlocalmemory.remote_connections.runtime import NativeConnectionRuntime
-from superlocalmemory.remote_connections.native_enrollment import NativeEnrollmentStore
+
 from superlocalmemory.remote_connections.journal import EnrollmentJournal
+from superlocalmemory.remote_connections.native_enrollment import NativeEnrollmentStore
+from superlocalmemory.remote_connections.runtime import NativeConnectionRuntime
 from tests.test_remote_native_enrollment_store import Backend, record
+
 
 @pytest.mark.asyncio
 async def test_callback_rejects_unknown_state_before_cloud_or_key_creation(tmp_path):
@@ -29,10 +31,12 @@ def test_confirmed_remote_cleanup_preserves_terminal_local_cancellation(tmp_path
     assert row.state=='cancelled' and not row.cleanup_pending
 
 def test_dashboard_runtime_installation_has_no_keyring_or_network_start(tmp_path,monkeypatch):
-    from fastapi import FastAPI
     from types import SimpleNamespace
-    from superlocalmemory.remote_connections.runtime import install_runtime
+
+    from fastapi import FastAPI
+
     import superlocalmemory.remote_connections.native_enrollment as native
+    from superlocalmemory.remote_connections.runtime import install_runtime
     def forbidden():raise AssertionError('keyring must stay closed before opt-in')
     monkeypatch.setattr(native,'_native_backend',forbidden)
     app=FastAPI();app.state.daemon_descriptor=SimpleNamespace(port=18767)
@@ -42,8 +46,10 @@ def test_dashboard_runtime_installation_has_no_keyring_or_network_start(tmp_path
 
 @pytest.mark.asyncio
 async def test_callback_completes_scope_bound_credential_without_secrets_in_public_status(tmp_path,monkeypatch):
-    import json,time
+    import json
+    import time
     from dataclasses import replace
+
     from superlocalmemory.remote_connections.credentials import CredentialVault
     from superlocalmemory.server.remote_keys import RemoteKeyStore
     journal=EnrollmentJournal(tmp_path/'journal')
@@ -75,6 +81,7 @@ async def test_callback_completes_scope_bound_credential_without_secrets_in_publ
 def enrolled_runtime(tmp_path, *, session=False, expired=False):
     import json
     from dataclasses import replace
+
     from superlocalmemory.server.remote_keys import RemoteKeyStore
     journal=EnrollmentJournal(tmp_path/'journal')
     payload={'host':'muse','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':False,'correction':False,'session':session}}
@@ -107,7 +114,9 @@ async def test_expired_pending_cancel_uses_bootstrap_verifier_and_terminal_secur
 
 @pytest.mark.asyncio
 async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_key(tmp_path,monkeypatch):
-    import asyncio,threading,time
+    import asyncio
+    import threading
+    import time
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
     entered=threading.Event();release=threading.Event();original=runtime.keys.add;started=[]
@@ -188,7 +197,9 @@ async def test_local_only_restore_never_opens_keyring(tmp_path,monkeypatch):
 
 @pytest.mark.asyncio
 async def test_interrupted_callback_waits_for_mutating_thread_before_disconnect_ack(tmp_path,monkeypatch):
-    import asyncio,threading,time
+    import asyncio
+    import threading
+    import time
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
     entered=threading.Event();release=threading.Event();finished=threading.Event();original=runtime.keys.add
@@ -230,6 +241,7 @@ def test_expired_enrollment_is_identified_without_exposing_credentials(tmp_path)
 @pytest.mark.asyncio
 async def test_restart_revokes_old_request_and_concurrent_retries_share_new_intent(tmp_path):
     import asyncio
+
     from superlocalmemory.remote_connections.service import GatewayReceipt
     runtime, row = enrolled_runtime(tmp_path, expired=True)
     version = runtime.journal.get('owner', 'profile', row.connection_id).version

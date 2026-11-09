@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-
-
 # ---------------------------------------------------------------------------
 # Helper: mock server that counts registrations
 # ---------------------------------------------------------------------------
@@ -87,8 +85,8 @@ class TestToolRegistration:
 
     def test_tool_names_unique(self):
         """No duplicate names when both core and active tools are registered."""
-        from superlocalmemory.mcp.tools_core import register_core_tools
         from superlocalmemory.mcp.tools_active import register_active_tools
+        from superlocalmemory.mcp.tools_core import register_core_tools
 
         srv = _MockServer()
         get_engine = MagicMock()

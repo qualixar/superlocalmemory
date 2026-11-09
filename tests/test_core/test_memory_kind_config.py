@@ -11,10 +11,10 @@ switch can never bring back a consent someone withdrew.
 
 from __future__ import annotations
 
-import os
 import copy
 import dataclasses
 import json
+import os
 from pathlib import Path
 
 import pytest

@@ -29,6 +29,8 @@ from tests.test_retrieval.test_project_scope_ranking import (  # noqa: F401 - fi
     _contents,
     _is_project,
     _recall,
+)
+from tests.test_retrieval.test_project_scope_ranking import (
     store as project_store,
 )
 

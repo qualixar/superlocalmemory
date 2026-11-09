@@ -14,7 +14,7 @@ from superlocalmemory.mcp.profile_names import (
     save_tool_set,
     saved_tool_set,
 )
-from superlocalmemory.mcp.profiles import PROFILE_DESCRIPTIONS, _PROFILE_DEFINITIONS
+from superlocalmemory.mcp.profiles import _PROFILE_DEFINITIONS, PROFILE_DESCRIPTIONS
 
 _DEFAULT_SET = "full"
 

@@ -12,9 +12,9 @@ import sys
 from argparse import Namespace
 
 from superlocalmemory.cli.optimize_constants import (
+    _PRICING_DATE,
     DEFAULT_COST_PER_MILLION_INPUT_TOKENS,
     OPTIMIZE_DEFAULT_PORT,
-    _PRICING_DATE,
 )
 
 

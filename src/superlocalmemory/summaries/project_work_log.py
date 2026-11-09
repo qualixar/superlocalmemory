@@ -41,9 +41,6 @@ from pathlib import Path
 from superlocalmemory.storage.database import visible_fact_clause_for_connection
 
 from .base import (
-    clean_llm_summary,
-    format_highlight,
-    SUMMARY_SYSTEM_PROMPT,
     COVERAGE_FULL,
     COVERAGE_INSUFFICIENT,
     COVERAGE_PARTIAL,
@@ -51,10 +48,13 @@ from .base import (
     GENERATED_BY_EXTRACTIVE,
     GENERATED_BY_LLM_B,
     GENERATED_BY_LLM_C,
+    SUMMARY_SYSTEM_PROMPT,
     HiddenOf,
     SummaryResult,
-    without_hidden,
+    clean_llm_summary,
+    format_highlight,
     get_mode_str,
+    without_hidden,
 )
 
 logger = logging.getLogger("superlocalmemory.summaries.project")

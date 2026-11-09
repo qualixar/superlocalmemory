@@ -40,8 +40,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from superlocalmemory.core.config import PolarQuantConfig
-from superlocalmemory.math.orthogonal import haar_orthogonal
 from superlocalmemory.infra.data_root import state_path
+from superlocalmemory.math.orthogonal import haar_orthogonal
 
 logger = logging.getLogger(__name__)
 

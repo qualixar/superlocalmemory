@@ -84,7 +84,6 @@ import psutil
 import pytest
 from scipy.stats import linregress
 
-
 # ---------------------------------------------------------------------------
 # Thresholds — calibrated against mock-backed harness on macOS ARM, 2026
 # ---------------------------------------------------------------------------

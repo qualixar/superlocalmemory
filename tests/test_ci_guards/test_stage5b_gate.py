@@ -11,9 +11,7 @@ import stat
 import subprocess
 from pathlib import Path
 
-
 from tests._portable import committed_executable, require_posix_bash
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "stage5b_gate.sh"

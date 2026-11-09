@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 from superlocalmemory.optimize.adapters import withSLM
 from superlocalmemory.optimize.adapters._agent_registry import AGENT_REGISTRY
 from superlocalmemory.optimize.adapters.wrap import (
@@ -18,7 +17,6 @@ from superlocalmemory.optimize.config import (
     _set_config_store,
 )
 from superlocalmemory.optimize.config.store import ConfigStore
-
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -110,9 +108,9 @@ def test_openai_sync_cache_miss_then_hit(tmp_path: Path) -> None:
 def test_openai_streaming_passthrough(tmp_path: Path) -> None:
     """stream=True → must NOT call cache, always pass-through."""
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -130,9 +128,9 @@ def test_openai_streaming_passthrough(tmp_path: Path) -> None:
 def test_openai_tools_skips_cache(tmp_path: Path) -> None:
     """tools= present → skip cache, always pass-through."""
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -152,9 +150,9 @@ def test_openai_tools_skips_cache(tmp_path: Path) -> None:
 def test_openai_temperature_gt_zero_skips_cache(tmp_path: Path) -> None:
     """temperature>0 → no cache key → upstream every time."""
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -176,9 +174,9 @@ def test_openai_temperature_gt_zero_skips_cache(tmp_path: Path) -> None:
 
 def test_anthropic_sync_cache_miss_then_hit(tmp_path: Path) -> None:
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -205,9 +203,9 @@ def test_anthropic_sync_cache_miss_then_hit(tmp_path: Path) -> None:
 
 def test_anthropic_tools_skips_cache(tmp_path: Path) -> None:
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -226,9 +224,9 @@ def test_anthropic_tools_skips_cache(tmp_path: Path) -> None:
 
 def test_anthropic_streaming_passthrough(tmp_path: Path) -> None:
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
 
@@ -465,10 +463,10 @@ def test_openai_async_cache_miss_then_hit(tmp_path: Path) -> None:
     store = ConfigStore(config_path=p, poll_interval=3600.0)
     _set_config_store(store)
 
+    from superlocalmemory.optimize.adapters.openai_adapter import SLMOpenAIAdapter
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
-    from superlocalmemory.optimize.adapters.openai_adapter import SLMOpenAIAdapter
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
@@ -503,9 +501,9 @@ def test_openai_legacy_functions_skips_cache(tmp_path: Path) -> None:
     store = ConfigStore(config_path=p, poll_interval=3600.0)
     _set_config_store(store)
 
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
@@ -555,10 +553,10 @@ def test_anthropic_async_cache_miss_then_hit(tmp_path: Path) -> None:
     store = ConfigStore(config_path=p, poll_interval=3600.0)
     _set_config_store(store)
 
+    from superlocalmemory.optimize.adapters.anthropic_adapter import SLMAnthropicAdapter
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
-    from superlocalmemory.optimize.adapters.anthropic_adapter import SLMAnthropicAdapter
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
@@ -598,10 +596,10 @@ def test_anthropic_sync_cache_set_serialization_failure_does_not_raise(tmp_path:
     store = ConfigStore(config_path=p, poll_interval=3600.0)
     _set_config_store(store)
 
+    from superlocalmemory.optimize.adapters.anthropic_adapter import SLMAnthropicAdapter
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
-    from superlocalmemory.optimize.adapters.anthropic_adapter import SLMAnthropicAdapter
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
@@ -659,9 +657,9 @@ def test_withSLM_cache_unavailable_returns_client_unchanged(tmp_path: Path, monk
 def test_withSLM_anthropic_adapter_init_failure_returns_client(tmp_path: Path, monkeypatch) -> None:
     """SLMAnthropicAdapter.__init__ raises → pass-through, log WARNING."""
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))
@@ -683,9 +681,9 @@ def test_withSLM_anthropic_adapter_init_failure_returns_client(tmp_path: Path, m
 def test_withSLM_openai_adapter_init_failure_returns_client(tmp_path: Path, monkeypatch) -> None:
     """SLMOpenAIAdapter.__init__ raises → pass-through, log WARNING."""
     _enable_optimize_config(tmp_path)
+    from superlocalmemory.optimize.cache.key_builder import CacheConfig
     from superlocalmemory.optimize.cache.manager import CacheManager
     from superlocalmemory.optimize.storage.db import CacheDB
-    from superlocalmemory.optimize.cache.key_builder import CacheConfig
 
     test_db = CacheDB(tmp_path / "llmcache.db")
     CacheManager.set_instance(CacheManager(db=test_db, config=CacheConfig()))

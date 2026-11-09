@@ -27,7 +27,6 @@ from superlocalmemory.code_graph.models import (
     NodeKind,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -150,9 +149,9 @@ def tools(db: CodeGraphDatabase) -> dict:
 @pytest.fixture
 def tools_with_graph(db: CodeGraphDatabase, tools: dict) -> tuple[dict, dict]:
     """Tools with a pre-populated graph."""
-    from superlocalmemory.mcp import tools_code_graph
     from superlocalmemory.code_graph.config import CodeGraphConfig
     from superlocalmemory.code_graph.service import CodeGraphService
+    from superlocalmemory.mcp import tools_code_graph
 
     ids = _insert_test_graph(db)
 

@@ -10,8 +10,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from superlocalmemory.sources.store import SourceStore
 from superlocalmemory.sources.folder_watch import is_watching
+from superlocalmemory.sources.store import SourceStore
 
 
 @dataclass(frozen=True)

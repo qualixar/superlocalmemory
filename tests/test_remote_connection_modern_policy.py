@@ -1,8 +1,11 @@
 """Modern discovery through the existing remote policy, preserving legacy use."""
 import json
-from tests.test_security.test_remote_tool_policy import READ_KEY, WRITE_KEY, _run
-from superlocalmemory.server import remote_tool_policy as policy
+
 import pytest
+
+from superlocalmemory.server import remote_tool_policy as policy
+from tests.test_security.test_remote_tool_policy import READ_KEY, WRITE_KEY, _run
+
 
 class Discovery:
     def __init__(self):self.reached=[]

@@ -19,7 +19,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-from superlocalmemory.memory_core.save_scope import resolve_scope
 from superlocalmemory.memory_core.save_path import (
     ContentOrigin,
     effective_pii_redaction,
@@ -27,6 +26,7 @@ from superlocalmemory.memory_core.save_path import (
     prepare_key,
     prepare_metadata,
 )
+from superlocalmemory.memory_core.save_scope import resolve_scope
 
 logger = logging.getLogger(__name__)
 

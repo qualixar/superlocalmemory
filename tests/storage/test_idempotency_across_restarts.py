@@ -19,6 +19,8 @@ import pytest
 
 from superlocalmemory.core.ingestion_command import (
     IdempotencyConflict as IngestionConflict,
+)
+from superlocalmemory.core.ingestion_command import (
     IngestionCommand,
     IngestionOperationRepository,
     IngestionRequest,

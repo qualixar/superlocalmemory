@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from superlocalmemory.optimize.proxy._helpers import (
-    _MockTransport,
     _filter_response_headers,
+    _MockTransport,
     _parse_sse_to_json,
     _safe_compress,
     _stream_and_cache_forward,
@@ -19,7 +19,6 @@ from superlocalmemory.optimize.proxy.lifecycle import (
     HookChain,
     ProxyRequest,
 )
-
 
 # ---------------------------------------------------------------------------
 # _filter_response_headers — else branch (line 121)

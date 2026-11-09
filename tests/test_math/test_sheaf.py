@@ -24,15 +24,14 @@ import numpy as np
 import pytest
 
 from superlocalmemory.math.sheaf import (
+    TEMPORAL_TOLERANCE,
     ContradictionResult,
     SheafConsistencyChecker,
-    TEMPORAL_TOLERANCE,
     _restriction_for_edge_type,
     coboundary_norm,
     edge_residual,
 )
 from superlocalmemory.storage.models import AtomicFact, EdgeType, GraphEdge
-
 
 # ---------------------------------------------------------------------------
 # ContradictionResult

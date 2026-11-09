@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,13 +20,10 @@ from superlocalmemory.core.config import CCQConfig
 from superlocalmemory.encoding.cognitive_consolidator import (
     CCQPipelineResult,
     CognitiveConsolidator,
-    ConsolidationCluster,
-    GistResult,
 )
 from superlocalmemory.learning.consolidation_quantization_worker import CCQWorker
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import _new_id
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

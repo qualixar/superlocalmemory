@@ -72,6 +72,7 @@ def test_compress_align_removed_prints_notice(capsys, _isolate):
 
 def test_compress_prose_enables_compress(_isolate):
     import dataclasses
+
     from superlocalmemory.cli.compress_cmd import cmd_compress_prose
 
     # Pre-disable compress

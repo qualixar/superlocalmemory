@@ -18,8 +18,8 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from superlocalmemory.storage.database import DatabaseManager
     from superlocalmemory.core.config import ParameterizationConfig
+    from superlocalmemory.storage.database import DatabaseManager
 
 from superlocalmemory.parameterization.soft_prompt_generator import (
     SESSION_EXCLUDED_CATEGORIES,

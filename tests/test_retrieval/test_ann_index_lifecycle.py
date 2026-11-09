@@ -24,7 +24,6 @@ import pytest
 
 from superlocalmemory.retrieval.ann_index import ANNIndex
 
-
 # ---------------------------------------------------------------------------
 # Helpers — small dimension (4) for speed, real numpy math
 # ---------------------------------------------------------------------------

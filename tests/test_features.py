@@ -1,7 +1,11 @@
 """Tests for V3 Feature Extractor — Task 9 of V3 build."""
 import pytest
+
 from superlocalmemory.learning.features import (
-    FeatureExtractor, FeatureVector, FEATURE_DIM, FEATURE_NAMES,
+    FEATURE_DIM,
+    FEATURE_NAMES,
+    FeatureExtractor,
+    FeatureVector,
 )
 
 

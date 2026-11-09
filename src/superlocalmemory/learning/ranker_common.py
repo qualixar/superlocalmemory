@@ -100,6 +100,7 @@ def _build_training_matrix(rows: list[dict], feature_names):
     when no groups are discoverable (empty input).
     """
     import numpy as np
+
     from superlocalmemory.learning.labeler import label_for_row
 
     grouped: dict[str, list[dict]] = {}
@@ -140,8 +141,8 @@ def _shadow_test_improved(prior_row, booster_new, rows, feature_names) -> bool:
     we promote.
     """
     try:
-        import numpy as np
         import lightgbm as lgb
+        import numpy as np
     except ImportError:  # pragma: no cover
         return True
 

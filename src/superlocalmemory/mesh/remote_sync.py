@@ -25,6 +25,7 @@ Environment variables:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -32,7 +33,6 @@ import socket
 import ssl
 import threading
 import time
-import ipaddress
 from typing import Any
 
 import httpx
@@ -415,6 +415,7 @@ class RemoteSyncClient:
             return dict(base_headers)
 
         import secrets as _sec
+
         from .broker_security import sign_mesh_message
 
         from_peer = payload.get("from_peer", "")

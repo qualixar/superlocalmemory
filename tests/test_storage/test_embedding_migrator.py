@@ -23,7 +23,6 @@ from superlocalmemory.storage.embedding_migrator import (
     run_embedding_migration,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -404,9 +403,9 @@ class TestRunEmbeddingMigration:
 
     def test_concurrent_fact_aborts_snapshot_activation(self, tmp_path, monkeypatch):
         from superlocalmemory.retrieval.vector_store import VectorStore, VectorStoreConfig
+        from superlocalmemory.storage import embedding_migrator as migrator
         from superlocalmemory.storage import schema
         from superlocalmemory.storage.database import DatabaseManager
-        from superlocalmemory.storage import embedding_migrator as migrator
 
         db_path = tmp_path / "memory.db"
         db = DatabaseManager(db_path)

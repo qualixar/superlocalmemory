@@ -6,12 +6,12 @@ from superlocalmemory.evaluation.answer_quality import (
     load_gold,
     retrieval_report,
 )
-from superlocalmemory.evaluation.gold_presence import check_presence, presence_summary
 from superlocalmemory.evaluation.calibration import (
     CalibrationArtifactError,
     build_calibration_report,
     compute_calibration_metrics,
 )
+from superlocalmemory.evaluation.gold_presence import check_presence, presence_summary
 
 __all__ = [
     "CalibrationArtifactError",

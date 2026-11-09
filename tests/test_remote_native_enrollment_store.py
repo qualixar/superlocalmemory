@@ -1,6 +1,8 @@
 import pytest
-from superlocalmemory.remote_connections.native_enrollment import PendingEnrollment, NativeEnrollmentStore
+
+from superlocalmemory.remote_connections.native_enrollment import NativeEnrollmentStore, PendingEnrollment
 from superlocalmemory.remote_connections.proof import DeviceSigner
+
 
 class Backend:
     def __init__(self): self.values={}

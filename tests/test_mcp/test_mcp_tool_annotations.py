@@ -24,6 +24,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
 from superlocalmemory.mcp.http_transport import SLMFastMCP
 
 
@@ -89,14 +90,14 @@ def _build_server_with_all_tools() -> SLMFastMCP:
     # execute bodies at registration time, so this is safe.
     get_engine = MagicMock()
 
-    from superlocalmemory.mcp.tools_core import register_core_tools
-    from superlocalmemory.mcp.tools_v28 import register_v28_tools
-    from superlocalmemory.mcp.tools_v3 import register_v3_tools
     from superlocalmemory.mcp.tools_active import register_active_tools
-    from superlocalmemory.mcp.tools_v33 import register_v33_tools
-    from superlocalmemory.mcp.tools_mesh import register_mesh_tools
-    from superlocalmemory.mcp.tools_learning import register_learning_tools
+    from superlocalmemory.mcp.tools_core import register_core_tools
     from superlocalmemory.mcp.tools_evolution import register_evolution_tools
+    from superlocalmemory.mcp.tools_learning import register_learning_tools
+    from superlocalmemory.mcp.tools_mesh import register_mesh_tools
+    from superlocalmemory.mcp.tools_v3 import register_v3_tools
+    from superlocalmemory.mcp.tools_v28 import register_v28_tools
+    from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
     register_core_tools(server, get_engine)
     register_v28_tools(server, get_engine)

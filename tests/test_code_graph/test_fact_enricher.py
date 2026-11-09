@@ -14,9 +14,9 @@ from superlocalmemory.code_graph.bridge.fact_enricher import (
 )
 from superlocalmemory.code_graph.database import CodeGraphDatabase
 from superlocalmemory.code_graph.models import (
+    EdgeKind,
     GraphEdge,
     GraphNode,
-    EdgeKind,
     NodeKind,
 )
 

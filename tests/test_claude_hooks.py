@@ -20,7 +20,6 @@ import pytest
 
 from superlocalmemory.hooks import claude_code_hooks as hooks_mod
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

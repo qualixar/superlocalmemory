@@ -28,7 +28,6 @@ from superlocalmemory.retrieval.agentic import (
 )
 from superlocalmemory.storage.models import AtomicFact
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

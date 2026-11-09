@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Helpers — lightweight mock objects
 # ---------------------------------------------------------------------------

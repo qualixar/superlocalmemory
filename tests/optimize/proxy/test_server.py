@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from superlocalmemory.optimize.config.schema import OptimizeConfig
-from superlocalmemory.optimize.proxy.server import ProxyApp, build_proxy_router, _load_hooks
+from superlocalmemory.optimize.proxy.server import ProxyApp, _load_hooks, build_proxy_router
 
 
 def _make_config(**kwargs):

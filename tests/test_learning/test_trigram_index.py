@@ -33,7 +33,6 @@ from pathlib import Path
 
 import pytest
 
-
 # --------------------------------------------------------------------------
 # Fixtures
 # --------------------------------------------------------------------------
@@ -244,7 +243,9 @@ def test_lookup_p99_under_2ms(index):
 def test_lookup_ram_under_100mb(index):
     """Steady-state RAM delta from the lookup LRU + open connection
     must stay under 100 MB. Per LLD-13 §10."""
-    import psutil, os
+    import os
+
+    import psutil
     index.bootstrap()
     proc = psutil.Process(os.getpid())
     rss_before = proc.memory_info().rss
@@ -380,6 +381,7 @@ def test_lookup_sql_uses_parameterized_query(index):
 
     # Verify cache table is still intact after the malicious call.
     import sqlite3 as _sql
+
     from superlocalmemory.learning.trigram_index import TrigramIndex
     conn = _sql.connect(str(TrigramIndex.CACHE_DB_PATH))
     try:
@@ -393,6 +395,7 @@ def test_lookup_sql_uses_parameterized_query(index):
 
     # 2. Static: the module source uses parameterised lookup SQL.
     import inspect
+
     from superlocalmemory.learning import trigram_index as ti
     src = inspect.getsource(ti)
     # The lookup SELECT must have ``WHERE trigram IN (`` followed by

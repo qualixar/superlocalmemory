@@ -16,7 +16,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from tests.test_compliance.test_gdpr_erasure_wins import _live_index_has, _person_edits
 
 _WORDS = "Quorvantel stores the synthetic copper compass in the attic chest."

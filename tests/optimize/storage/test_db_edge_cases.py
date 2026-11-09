@@ -602,8 +602,8 @@ def test_vec_search_fail_open_on_db_error(tmp_cache_db) -> None:
 
 def test_vec_search_import_error(tmp_cache_db) -> None:
     """vec_search returns [] when numpy is not available."""
-    import struct
     import builtins
+    import struct
 
     v = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
     tmp_cache_db.set("k1", _tenant(), b"v", model="m", ttl_expires=None, tags=[])

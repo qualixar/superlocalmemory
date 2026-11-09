@@ -30,7 +30,6 @@ import pytest
 
 from superlocalmemory.retrieval.ann_index import ANNIndex
 
-
 # ---------------------------------------------------------------------------
 # ANNIndex — argpartition / argsort tie-breaking
 # ---------------------------------------------------------------------------

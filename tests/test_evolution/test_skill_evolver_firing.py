@@ -13,17 +13,13 @@ Author: Varun Pratap Bhardwaj / Qualixar
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from superlocalmemory.core.config import EvolutionConfig, SLMConfig
 from superlocalmemory.evolution.skill_evolver import SkillEvolver
-
 
 # ---------------------------------------------------------------------------
 # test_evolution_disabled_by_default
@@ -338,8 +334,9 @@ def test_run_consolidation_cycle_honours_budget_cycle_cap(
 
     We observe this by patching EvolutionBudget.cycle to count entries.
     """
-    from superlocalmemory.evolution import budget as budget_mod
     from contextlib import contextmanager
+
+    from superlocalmemory.evolution import budget as budget_mod
 
     cycle_entries: list[str] = []
 
