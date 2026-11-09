@@ -10,6 +10,12 @@ is written out as plain JSON lines (``restore-delta/<ts>/``):
   deleted.jsonl     facts / memories forgotten or   -> deleted again in the copy
                     erased since (a recorded intent;
                     a row merely missing comes back)
+                    + correction cases a person's    -> closed again in the copy
+                    action or ``slm corrections      (type "overtaken": the copy
+                    dismiss`` moved to the overtaken  holds them as open)
+                    table since, and cases a person
+                    put back since (type
+                    "overtaken_restored")            -> opened again in the copy
   kind_edits.jsonl  kinds a person confirmed since  -> applied again after the restore
                     (on new memories: matched by    (the newer confirmation wins)
                     the fact's words)
@@ -178,6 +184,41 @@ def _kind_of_memory(conn: sqlite3.Connection, memory_id: str) -> str | None:
     return kinds.pop() if len(kinds) == 1 else None
 
 
+def _overtaken_since(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Cases closed as overtaken (or dismissed) since the copy and still closed.
+
+    The copy holds each of them as an open ``proposed`` case, so a restore would
+    bring it back. ``overtake_id`` is local to a store and is not carried.
+    """
+    if "correction_cases_overtaken" not in _tables(conn, "main"):
+        return []
+    sql = "SELECT l.* FROM main.correction_cases_overtaken l WHERE l.restored_at IS NULL"
+    if "correction_cases_overtaken" in _tables(conn, "snap"):
+        sql += (" AND NOT EXISTS (SELECT 1 FROM snap.correction_cases_overtaken s "
+                "WHERE s.case_id = l.case_id AND s.overtaken_at = l.overtaken_at)")
+    return [{"type": "overtaken", **{k: v for k, v in dict(r).items() if k != "overtake_id"}}
+            for r in conn.execute(sql + " ORDER BY l.overtake_id")]
+
+
+def _restored_since(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Cases the copy holds as dismissed that a person put back since.
+
+    A restore carries what the person did after the copy, so putting a case back
+    is carried too. A case dismissed AND put back after the copy needs nothing:
+    the copy holds it open, which is where the person left it.
+    """
+    if "correction_cases_overtaken" not in _tables(conn, "main") \
+            or "correction_cases_overtaken" not in _tables(conn, "snap"):
+        return []
+    sql = ("SELECT l.* FROM main.correction_cases_overtaken l WHERE l.restored_at IS NOT NULL "
+           "AND EXISTS (SELECT 1 FROM snap.correction_cases_overtaken s WHERE s.case_id = "
+           "l.case_id AND s.overtaken_at = l.overtaken_at AND s.restored_at IS NULL) "
+           "ORDER BY l.overtake_id")
+    return [{"type": "overtaken_restored", **{k: v for k, v in dict(r).items()
+                                                if k != "overtake_id"}}
+            for r in conn.execute(sql)]
+
+
 def export_delta(conn: sqlite3.Connection, delta_dir: Path) -> dict[str, int]:
     """Write the delta files (0600). Returns the counts written."""
     delta_dir = Path(delta_dir)
@@ -191,6 +232,7 @@ def export_delta(conn: sqlite3.Connection, delta_dir: Path) -> dict[str, int]:
         f"SELECT s.fact_id, s.profile_id, s.memory_id {deleted_facts_sql(conn)}")]
     deleted += [{"type": "memory", "intent": INTENT_TOMBSTONE, **dict(r)} for r in conn.execute(
         f"SELECT s.memory_id, s.profile_id {deleted_memories_sql(conn)}")]
+    deleted += _restored_since(conn) + _overtaken_since(conn)
     kinds_sql = _kind_edit_sql(conn)
     kind_cols = ", ".join("f." + c for c in _KIND_COLS)
     kind_edits = [dict(r) for r in conn.execute(
@@ -381,6 +423,92 @@ def _intended(deleted: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     return [d for d in deleted if d.get("type") == kind and d.get("intent") == INTENT_TOMBSTONE]
 
 
+def _holds_pair(conn: sqlite3.Connection, row: dict[str, Any]) -> bool:
+    """The copy holds both facts of a case it has no row for, under its profile (and the profile)."""
+    tables = _tables(conn)
+    if "atomic_facts" not in tables or conn.execute(
+            "SELECT 1 FROM correction_cases WHERE case_id=?", (row["case_id"],)).fetchone():
+        return False   # no facts to name, or the copy holds the case in some other state
+    if "profiles" in tables and not conn.execute(
+            "SELECT 1 FROM profiles WHERE profile_id=?", (row["profile_id"],)).fetchone():
+        return False
+    found = conn.execute(
+        "SELECT COUNT(DISTINCT fact_id) FROM atomic_facts WHERE profile_id=? AND fact_id IN (?, ?)",
+        (row["profile_id"], row["predecessor_fact_id"], row["successor_fact_id"])).fetchone()
+    return found[0] == len({row["predecessor_fact_id"], row["successor_fact_id"]})
+
+
+def _carry_overtaken(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Close again, in the copy, the cases that were closed since it was taken.
+
+    A case is moved only if the copy still holds it as an open ``proposed`` case
+    between the same two facts. The event log goes with it, the way
+    ``overtaken_cases.overtake`` moves it, so no event row is left behind.
+
+    A dismissal of a case the copy does not hold is still kept when the copy holds
+    both of its facts: the save that proposed it may come back with the same ids,
+    and that row is what refuses the same proposal (``correction_dismissals``). No
+    open case is made. If the facts are not in the copy, the memory is re-imported
+    under new ids and the row would name nothing, so it is dropped.
+    """
+    if not rows or "correction_cases" not in _tables(conn):
+        return 0
+    from superlocalmemory.core.overtaken_cases import ensure_table
+    from superlocalmemory.storage.correction_dismissals import DISMISSED_USER_ACTION
+
+    ensure_table(conn)
+    carried = 0
+    for item in rows:
+        row = {k: v for k, v in item.items() if k != "type"}
+        key = (row["case_id"], row["predecessor_fact_id"], row["successor_fact_id"])
+        is_open = conn.execute(
+            "SELECT 1 FROM correction_cases WHERE case_id=? AND predecessor_fact_id=? AND "
+            "successor_fact_id=? AND status='proposed'", key).fetchone()
+        if not is_open and not (row.get("user_action") == DISMISSED_USER_ACTION
+                                and _holds_pair(conn, row)):
+            continue
+        if conn.execute("SELECT 1 FROM correction_cases_overtaken WHERE case_id=? AND "
+                        "overtaken_at=?", (row["case_id"], row["overtaken_at"])).fetchone():
+            continue
+        if is_open:
+            if "correction_events" in _tables(conn):
+                conn.execute("DELETE FROM correction_events WHERE case_id=?", (row["case_id"],))
+            conn.execute("DELETE FROM correction_cases WHERE case_id=? AND status='proposed'",
+                         (row["case_id"],))
+        carried += _insert_rows(conn, "correction_cases_overtaken", [row])
+    return carried
+
+
+def _reopen_restored(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Put back, in the copy, the cases a person put back after it was taken.
+
+    The same ``overtaken_cases.restore`` the person used, so a case whose facts
+    are gone, or that was proposed again, is refused and left dismissed. The
+    original restore time and actor are kept on the audit row.
+    """
+    if not rows or "correction_cases" not in _tables(conn):
+        return 0
+    from superlocalmemory.core.overtaken_cases import RestoreRefused, restore
+
+    reopened = 0
+    for row in rows:
+        waiting = conn.execute("SELECT overtake_id FROM correction_cases_overtaken WHERE "
+                               "case_id=? AND overtaken_at=? AND restored_at IS NULL",
+                               (row["case_id"], row["overtaken_at"])).fetchone()
+        if waiting is None:
+            continue
+        try:
+            restore(conn, row["case_id"], profile_id=row["profile_id"])
+        except RestoreRefused as exc:
+            logger.info("restored case %s stays dismissed in the copy: %s",
+                        row["case_id"][:12], exc)
+            continue
+        conn.execute("UPDATE correction_cases_overtaken SET restored_at=?, restored_by=? "
+                     "WHERE overtake_id=?", (row["restored_at"], row["restored_by"], waiting[0]))
+        reopened += 1
+    return reopened
+
+
 def apply_delta_to_staging(staging: Path, delta_dir: Path, *, data_root: Path) -> dict[str, int]:
     """Erasures, deletions and new profiles applied to the staging copy."""
     delta_dir = Path(delta_dir)
@@ -398,11 +526,19 @@ def apply_delta_to_staging(staging: Path, delta_dir: Path, *, data_root: Path) -
         conn.execute("PRAGMA foreign_keys=ON")
         fact_tables, virtual = _fact_tables(conn)
         counts = {"profiles_erased": n_profiles, "facts_erased": 0, "facts_deleted": 0,
-                  "memories_removed": 0, "kept_protected": 0, "profiles_added": 0}
+                  "memories_removed": 0, "kept_protected": 0, "profiles_added": 0,
+                  "overtaken_carried": 0, "overtaken_reopened": 0}
         conn.execute("BEGIN IMMEDIATE")
         try:
             counts["profiles_added"] = _insert_rows(
                 conn, "profiles", [{k: v for k, v in p.items() if k != "type"} for p in profiles])
+            # Before any fact is removed: an open case would protect its facts.
+            kept = [d for d in deleted if d.get("profile_id") not in erased_profiles]
+            # Put back first: a later dismissal of the same case is then carried on top.
+            counts["overtaken_reopened"] = _reopen_restored(
+                conn, [d for d in kept if d.get("type") == "overtaken_restored"])
+            counts["overtaken_carried"] = _carry_overtaken(
+                conn, [d for d in kept if d.get("type") == "overtaken"])
             plan = [(t["fact_id"], True) for t in tombstones]
             plan += [(d["fact_id"], False) for d in _intended(deleted, "fact")]
             for fact_id, erasure in plan:

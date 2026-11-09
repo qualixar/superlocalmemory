@@ -39,6 +39,8 @@ def _describe(summary: dict, review: tuple) -> str:
     by_action = summary["by_action"] or ""
     lines = [f"Saves to re-file: {summary['saves_to_refile']} {by_action}".rstrip(),
              f"Left alone for review: {summary['left_for_review']}"]
+    lines += [f"  {count} x {why}" for why, count in sorted(
+        summary["left_for_review_by_reason"].items(), key=lambda kv: -kv[1])]
     lines += [f"  {op_id}: {why}" for op_id, why in review[:20]]
     lines.append(f"Dead-letter entries of saves that later completed: "
                  f"{summary['stale_dead_letters']}")

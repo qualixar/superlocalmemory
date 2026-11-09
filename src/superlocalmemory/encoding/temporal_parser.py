@@ -25,6 +25,7 @@ from dateutil.parser import ParserError
 from dateutil.parser import parse as dateutil_parse
 from dateutil.relativedelta import relativedelta
 
+from superlocalmemory.encoding.interval_scan import interval_pattern
 from superlocalmemory.encoding.typed_values import looks_like_calendar_date
 from superlocalmemory.storage.models import AtomicFact, TemporalEvent
 
@@ -82,6 +83,8 @@ _DURATION = re.compile(
     r"\bfrom\s+(.+?)\s+to\s+(.+?)(?:\.|,|;|$)",
     re.IGNORECASE,
 )
+#: Same result as ``_DURATION.search``, in bounded time (interval_scan).
+_DURATION_SCAN = interval_pattern(_DURATION, r"\bfrom", r"to")
 
 _FOR_DURATION = re.compile(
     rf"\bfor\s+(\d+)\s+{_TIME_UNITS}\b",
@@ -209,10 +212,10 @@ class TemporalParser:
         interval_end: datetime | None = None
 
         # --- Pass 1: Duration expressions ("from X to Y") ---
-        dur_match = _DURATION.search(text)
+        dur_match = _DURATION_SCAN.groups(text)
         if dur_match:
-            start_dt = self._try_parse(dur_match.group(1).strip())
-            end_dt = self._try_parse(dur_match.group(2).strip())
+            start_dt = self._try_parse(dur_match[0].strip())
+            end_dt = self._try_parse(dur_match[1].strip())
             if start_dt is not None and end_dt is not None:
                 interval_start = start_dt
                 interval_end = end_dt

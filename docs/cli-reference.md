@@ -277,6 +277,52 @@ the memory it was about. `slm corrections overtaken [--limit N] [--profile P]`
 lists those closed cases, newest first, and `slm corrections restore-overtaken
 <case_id>` puts one back.
 
+### `slm corrections dismiss`
+
+In Mode B and Mode C, saving a memory can make SLM guess that it updates an
+older one, and SLM files that guess as a `proposed` correction case. Nobody is
+asked to review these, and on a busy store thousands pile up. They do not
+change what recall returns and they do not stop you deleting a memory, so
+nothing is wrong with leaving them. `slm corrections dismiss` clears them in
+one go.
+
+```bash
+slm corrections dismiss                          # dry run: counts and dates only
+slm corrections dismiss --older-than 30          # only cases older than 30 days
+slm corrections dismiss --reason temporal_contradiction --before 2026-11-01
+slm corrections dismiss --apply                  # do it
+```
+
+| Option | Description |
+|--------|-------------|
+| `--reason R` | Only this reason; repeat it for several. One of `temporal_contradiction`, `consolidation_update`, `consolidation_supersede` (default: all three) |
+| `--older-than DAYS` | Only cases created more than DAYS days ago |
+| `--before DATE` | Only cases created before this date, such as `2026-11-01`. With `--older-than`, a case must satisfy both |
+| `--profile P` | Profile to clean (default: the active one) |
+| `--apply` | Actually dismiss. Without it nothing changes |
+| `--json` | Structured output |
+
+The dry run prints how many cases would go, per reason, and the oldest and
+newest creation date. It never prints memory text. With `--apply`, SLM first
+saves a consistent copy of `memory.db` next to it and prints the path, then
+moves the cases in batches of 500 inside the running service.
+
+Only cases SLM proposed by itself and nobody reviewed are touched. A correction
+you made with `slm update`, one you applied, rejected or rolled back, and every
+other profile's cases are left alone. If a case is reviewed while the command
+runs, it is skipped and counted. A dismissed case is not filed again when its
+save is processed again (for example by `slm ops repair-saves`). Each dismissed
+case is kept, with its history, and `slm corrections restore-overtaken
+<case_id>` brings it back as long as both of its memories still exist. If the
+command times out on a very large store, run it again; it carries on where it
+stopped.
+
+**Why there is no bulk reject.** A rejected case counts as a decision somebody
+made, and a memory that is part of a decided case cannot be deleted. Rejecting
+17,000 cases would lock about 34,000 memories for good. Dismissing closes a
+case the same way a delete or an edit of yours already does, so it protects
+nothing and can be undone.
+
 ### `slm list [options]`
 
 List recent memories, newest first, with each one's kind and the id that

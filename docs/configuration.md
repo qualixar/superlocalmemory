@@ -68,6 +68,24 @@ slm provider set custom --endpoint http://localhost:8041/v1 --mode b
 Best for: developers who can operate the selected local model and separately
 govern optional networked integrations.
 
+**What it costs.** Saving one memory asks the model to extract facts, about one
+call per save. Then each stored fact costs one more call for its context
+sentence, plus up to five calls checking it against similar facts for
+contradictions. So a large backlog costs about six model calls per fact. Two
+settings (4.2.14) trade that enrichment for speed:
+
+```bash
+# Contradiction checks: 0 = embedding check only, no model calls (default 5)
+slm config set temporal_validator.max_llm_checks 0
+# Context sentences written by rule instead of by the model (default true)
+slm config set encoding.context_generation_llm false
+slm restart
+```
+
+Contradiction checks only file proposals for you to review
+(`slm corrections dismiss` clears unreviewed ones); they never change recall on
+their own. Each mode keeps its own values, like its model choice.
+
 ### Mode C: Full Power
 
 Uses your own endpoint, or a cloud provider such as OpenAI or Anthropic, for the best recall quality. Queries leave the device, and a cloud provider needs a key; a custom endpoint does not.

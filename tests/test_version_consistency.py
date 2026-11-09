@@ -83,6 +83,14 @@ def _read_hermes_source_manifest_version() -> str:
     return match.group(1)
 
 
+def _read_root_skill_version() -> str:
+    """Read the frontmatter 'version:' of the root SKILL.md (the CLI cheat sheet)."""
+    content = (_REPO_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    match = re.search(r'^version:\s*"([^"]+)"', content, re.MULTILINE)
+    assert match, "Could not find frontmatter version in SKILL.md"
+    return match.group(1)
+
+
 def _read_uv_lock_version() -> str:
     with (_REPO_ROOT / "uv.lock").open("rb") as stream:
         lock = tomllib.load(stream)
@@ -159,6 +167,7 @@ def test_all_versions_consistent() -> None:
         "CITATION.cff": _read_citation_field("version"),
         "uv.lock": _read_uv_lock_version(),
         "plugin-src/hermes/plugin.yaml": _read_hermes_source_manifest_version(),
+        "SKILL.md frontmatter": _read_root_skill_version(),
     }
     mismatches = {src: ver for src, ver in sources.items() if ver != EXPECTED_VERSION}
     assert not mismatches, (
@@ -175,6 +184,12 @@ def test_bump_version_stamps_the_hermes_manifest_source() -> None:
     """scripts/bump_version.py must list the Hermes manifest source, or it drifts again."""
     script = (_REPO_ROOT / "scripts" / "bump_version.py").read_text(encoding="utf-8")
     assert '"plugin-src/hermes/plugin.yaml"' in script
+
+
+def test_bump_version_stamps_the_root_skill() -> None:
+    """scripts/bump_version.py must list the root SKILL.md, or it sits stale again (4.1.25)."""
+    script = (_REPO_ROOT / "scripts" / "bump_version.py").read_text(encoding="utf-8")
+    assert '"SKILL.md frontmatter version"' in script
 
 
 def test_current_license_surfaces_are_agpl() -> None:

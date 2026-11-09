@@ -86,7 +86,9 @@ def test_facts_derived_after_the_replacement_never_surface(engine_with_mock_deps
         _undo(client, case)
         assert _current(engine, derived | {root}) == derived | {root}
         assert set(_recalled(client)) & (derived | {root})
-        assert _session(engine) & derived
+        # 4.2.14: a session shows one entry per memory (its whole-text fact),
+        # not one per sentence, so the memory is back by any of its facts.
+        assert _session(engine) & (derived | {root})
 
 
 def test_undone_before_enrichment_the_derived_facts_stay_current(engine_with_mock_deps) -> None:

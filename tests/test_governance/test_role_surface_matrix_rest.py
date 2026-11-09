@@ -226,6 +226,71 @@ def test_a_viewer_lists_corrections_but_cannot_act_on_them(matrix):
     assert "write" in acted.json().get("error", acted.json().get("detail", ""))
 
 
+def _pending_machine_case(engine, case_id: str, profile: str = "default") -> None:
+    from tests.test_server.test_dismiss_corrections_route import _case
+
+    _case(engine, case_id, profile=profile)
+
+
+def test_a_viewer_cannot_dry_run_or_apply_a_bulk_dismissal(matrix):
+    """Every POST passes the mutation gate (server/mutation_gate.py), which asks for
+    ``write`` unless the route is listed there as a read; the dismissal is not, so a
+    viewer is refused the dry run too, exactly like the restore route. Refused means
+    nothing is moved and no backup is taken."""
+    from pathlib import Path
+
+    app, client, who, _ = matrix
+    _company(app)
+    engine = app.state.engine
+    _pending_machine_case(engine, "m1")
+    folder = Path(engine._db.db_path).parent
+    url = "/api/overtaken-corrections/dismiss"
+
+    for body in ({"profile_id": "default"}, {"profile_id": "default", "apply": True},
+                 {"profile_id": "sales"}, {"profile_id": "sales", "apply": True}):
+        refused = client.post(url, json=body, headers=who["viewer_a"])
+        assert refused.status_code == 403, (body, refused.text[:200])
+        assert "write" in refused.json().get("error", refused.json().get("detail", ""))
+    assert list(folder.glob("*.before-*")) == []
+    left = engine._db.execute("SELECT COUNT(*) AS n FROM correction_cases")[0]
+    assert dict(left)["n"] == 1
+    try:
+        moved = engine._db.execute("SELECT COUNT(*) AS n FROM correction_cases_overtaken")[0]
+        assert dict(moved)["n"] == 0
+    except Exception as exc:   # the table is only created by a first overtake
+        assert "no such table" in str(exc).lower()
+
+
+def test_an_admin_applies_a_bulk_dismissal_in_their_own_workspace_only(matrix):
+    """The role that may act on corrections (same ``update`` policy as restore) can
+    dismiss in its own workspace; another workspace stays 403."""
+    app, client, who, _ = matrix
+    _company(app)
+    engine = app.state.engine
+    _pending_machine_case(engine, "m1")
+    url = "/api/overtaken-corrections/dismiss"
+
+    other = client.post(url, json={"profile_id": "sales", "apply": True}, headers=who["admin_a"])
+    assert other.status_code == 403
+    own = client.post(url, json={"profile_id": "default", "apply": True}, headers=who["admin_a"])
+    assert own.status_code == 200, own.text[:300]
+    assert own.json()["dismissed"] == 1 and own.json()["backup"]
+    assert dict(engine._db.execute("SELECT COUNT(*) AS n FROM correction_cases")[0])["n"] == 0
+
+
+def test_a_member_is_refused_a_bulk_dismissal_as_it_is_refused_a_restore(matrix):
+    app, client, who, _ = matrix
+    _company(app)
+    engine = app.state.engine
+    _pending_machine_case(engine, "m1")
+    restore = client.post("/api/overtaken-corrections/c1/restore", json={}, headers=who["member_a"])
+    dismiss = client.post("/api/overtaken-corrections/dismiss",
+                          json={"profile_id": "default", "apply": True}, headers=who["member_a"])
+    assert restore.status_code == dismiss.status_code
+    if dismiss.status_code == 403:
+        assert dict(engine._db.execute("SELECT COUNT(*) AS n FROM correction_cases")[0])["n"] == 1
+
+
 # -- PR 248 review, finding 1: installation-wide settings ----------------------------
 
 #: Every route that changes state shared by all workspaces (one value per install).

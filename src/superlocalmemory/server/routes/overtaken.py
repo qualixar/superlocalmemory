@@ -21,12 +21,23 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["corrections"])
 
 _MAX_LIMIT = 500
+
+
+class DismissRequest(BaseModel):
+    """``slm corrections dismiss``: which pending machine cases, and dry run or not."""
+
+    profile_id: str | None = None
+    reasons: list[str] = Field(default_factory=list, max_length=8)
+    older_than_days: int | None = Field(default=None, ge=0)
+    before: str | None = Field(default=None, max_length=64)
+    apply: bool = False
 
 
 def overtaken_for(engine: Any, profile_id: str, limit: int = 100) -> list[dict]:
@@ -87,4 +98,64 @@ async def restore_overtaken(request: Request, case_id: str):
         raise m._canonical_mutation_error(exc, "Overtaken correction restore error")
 
 
-__all__ = ["overtaken_for", "router"]
+def _dismiss_filter(profile: str, body: DismissRequest):
+    from superlocalmemory.core.dismissed_cases import DismissFilter, cutoff_for
+
+    try:
+        return DismissFilter(profile_id=profile, reasons=tuple(body.reasons),
+                             before=cutoff_for(older_than_days=body.older_than_days,
+                                               before=body.before))
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from None
+
+
+def _dismiss_apply(engine: Any, flt: Any, ctx: dict) -> dict:
+    """Backup, move in chunks, purge the cache. Only called when cases are eligible."""
+    import uuid
+    from pathlib import Path
+
+    from superlocalmemory.core.dismissed_cases import dismiss
+    from superlocalmemory.core.mutations import purge_profile_context_cache
+    from superlocalmemory.storage.save_repair_apply import backup_store
+
+    copy = backup_store(Path(engine._db.db_path))   # the copy `slm ops repair-saves` takes
+    result = dismiss(engine._db, flt, actor_id=str(ctx.get("agent_id") or ""),
+                     operation_id=f"dismiss-{uuid.uuid4().hex}")
+    purge_profile_context_cache(engine, flt.profile_id)  # machine cases made cached text a miss
+    return {**result, "backup": str(copy)}
+
+
+@router.post("/api/overtaken-corrections/dismiss")
+def dismiss_corrections(request: Request, body: DismissRequest):
+    """Dry run (a READ) or, with ``apply``, move the profile's pending machine cases
+    to the overtaken table, restorable one by one. Never rejects a case."""
+    from superlocalmemory.core.dismissed_cases import preview
+    from superlocalmemory.server.routes import memories as m
+
+    try:
+        profile = m._routed_profile(body.profile_id)
+        ctx: dict = {}
+        if body.apply:
+            engine, target, ctx = m._authorize_memory_mutation(
+                request, "update", "corrections-dismiss", run_pre_hook=False, profile=profile)
+        else:
+            engine, target = m._authorize_review_read(request, profile)
+        flt = _dismiss_filter(target, body)
+        summary = preview(engine._db, flt)
+        out = {"success": True, "profile_id": target, "dry_run": not body.apply, **summary}
+        if body.apply and summary["eligible"]:
+            out.update(_dismiss_apply(engine, flt, ctx))
+            m._announce("memory.updated", {"profile_id": target, "status": "dismissed",
+                                           "count": out["dismissed"]}, ctx["agent_id"])
+        elif body.apply:
+            out["dismissed"] = 0
+        return out
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Correction dismiss error")
+
+
+__all__ = ["DismissRequest", "overtaken_for", "router"]

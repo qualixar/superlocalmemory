@@ -79,6 +79,6 @@ company mode→`slm team status` · `slm team policy --require-login on|off` (on
 slm-scope · slm-governance · slm-profile · slm-remember · slm-recall · slm-web-access · slm-media
 
 # What NOT to do
-Never session_init twice; never forget without dry-run preview; never run `slm gdpr erase --yes` unasked; never store secrets; never bypass role checks; never claim an erasure succeeded without verifying via recall.
+Never session_init twice; never forget without dry-run preview; never run `slm gdpr erase --yes` unasked; never store secrets; never bulk-reject correction cases (a rejected case is "decided" and blocks deleting its memories for good; use `slm corrections dismiss`, dry run first, for unreviewed machine proposals); never bypass role checks; never claim an erasure succeeded without verifying via recall.
 
-SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later

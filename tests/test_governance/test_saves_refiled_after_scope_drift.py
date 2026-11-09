@@ -101,7 +101,7 @@ def test_the_dry_run_names_every_case_and_changes_nothing(drifted):
     assert actions == {ops["scope"].operation_id: "add_fact",
                        ops["content"].operation_id: "add_fact",
                        ops["missing"].operation_id: "add_memory_and_fact"}
-    assert dict(plan.review) == {ops["edited"].operation_id: "its text was changed after saving"}
+    assert dict(plan.review) == {ops["edited"].operation_id: save_repair.NOT_RESTORED_DIFFERENT}
     assert engine._db.execute("SELECT COUNT(*) AS n FROM memories")[0]["n"] == before
 
 

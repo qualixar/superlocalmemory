@@ -217,7 +217,11 @@ slm delete <fact_id> --yes --json
 ```
 
 Memories that belong to a reviewed correction cannot be deleted this way; the
-refusal names the case. After an erasure, confirm with `slm recall "<content>"`
+refusal names the case. A case SLM proposed by itself and nobody reviewed does
+not block a delete, and `slm corrections dismiss` (dry run first, `--apply`
+takes a backup) closes a pile of them. Never reject cases in bulk: a rejected
+case counts as decided, so rejecting thousands would lock their memories against
+deletion for good, including when a person asks for erasure. After an erasure, confirm with `slm recall "<content>"`
 that nothing comes back, and never try to re-derive erased content from other
 stored facts.
 
@@ -275,4 +279,4 @@ Before running any destructive or state-changing operation (`forget`,
 
 ---
 
-*SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later*

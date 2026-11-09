@@ -196,3 +196,58 @@ def test_a_fact_that_no_longer_matches_its_clamp_is_left_alone(long_conn) -> Non
                      ).fetchone()[0] == blanked
     assert c.execute("SELECT content FROM atomic_facts WHERE fact_id='f1'"
                      ).fetchone()[0] == "drifted elsewhere"
+
+
+# ---------------------------------------------------------------------------
+# A real credential the old redactor blanked must never be put back, by the
+# one-time repair or by any other caller of the shared restore.
+# ---------------------------------------------------------------------------
+
+_TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+SECRET_ORIGINAL = f"deploy with token {_TOKEN} from the ci box"
+SECRET_BLANKED = "deploy with token [REDACTED:GITHUB:q7R8] from the ci box"
+
+
+@pytest.fixture()
+def secret_conn(conn) -> sqlite3.Connection:
+    conn.execute("INSERT INTO memories VALUES ('ms', ?)", (SECRET_BLANKED,))
+    conn.execute("INSERT INTO atomic_facts VALUES ('fs', 'ms', ?, '[]')", (SECRET_BLANKED,))
+    conn.execute("INSERT INTO ingestion_operations VALUES ('ops', ?, ?, 'failed', ?, 9, 1e12, "
+                 "'', 0, '')", (SECRET_ORIGINAL, json.dumps(["fs"]), MISMATCH))
+    return conn
+
+
+def test_the_plan_leaves_a_secret_holding_original_and_counts_it(secret_conn) -> None:
+    from superlocalmemory.core.security_primitives import detect_secrets
+
+    assert is_blanked_copy(SECRET_BLANKED, SECRET_ORIGINAL) and detect_secrets(SECRET_ORIGINAL)
+    plan = plan_repair(secret_conn)
+    assert [i.operation_id for i in plan.restorable] == ["op1"]
+    assert "ops" in plan.not_restorable
+    assert plan.summary()["memories_left_alone"] == 2
+
+
+def test_apply_never_restores_a_secret_holding_original(secret_conn) -> None:
+    result = apply_repair(secret_conn, plan_repair(secret_conn))
+    assert (result.memories_restored, result.memories_skipped) == (1, 0)
+    assert secret_conn.execute("SELECT content FROM memories WHERE memory_id='ms'"
+                               ).fetchone()[0] == SECRET_BLANKED
+    assert secret_conn.execute("SELECT content FROM atomic_facts WHERE fact_id='fs'"
+                               ).fetchone()[0] == SECRET_BLANKED
+    assert secret_conn.execute("SELECT state FROM ingestion_operations WHERE operation_id='ops'"
+                               ).fetchone()[0] == "failed"
+
+
+def test_the_shared_restore_refuses_a_secret_as_a_last_guard(secret_conn) -> None:
+    # A hand-built plan, as a caller that skipped the planner would make.
+    from superlocalmemory.storage.store_repair import (
+        RepairPlan, RestoreItem, restore_blanked_text,
+    )
+
+    run = lambda sql, params=(): secret_conn.execute(sql, params).fetchall()  # noqa: E731
+    assert restore_blanked_text(run, "ms", SECRET_BLANKED, SECRET_ORIGINAL, ("fs",)) is False
+    item = RestoreItem("ops", "ms", ("fs",), SECRET_BLANKED, SECRET_ORIGINAL)
+    result = apply_repair(secret_conn, RepairPlan((item,), (), (), ()))
+    assert (result.memories_restored, result.memories_skipped) == (0, 1)
+    assert secret_conn.execute("SELECT content FROM memories WHERE memory_id='ms'"
+                               ).fetchone()[0] == SECRET_BLANKED

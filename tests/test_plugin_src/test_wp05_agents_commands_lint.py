@@ -101,6 +101,11 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "cache",
         "compress",
         "loop",   # slm loop demo|history|show — bounded loops (v3.8.0)
+        # 4.2.14 store upkeep, all real top-level commands (slm <cmd> --help):
+        "corrections",  # overtaken | restore-overtaken | dismiss
+        "ops",          # list | resolve | repair-saves | status
+        "config",       # get | set
+        "restart",
         "update",  # slm update <fact_id> <content> — proposes a reviewed correction
         "gdpr",    # slm gdpr status|export|erase|verify — subject-rights CLI
         "media",   # slm media enable|disable|status|gc|repair (4.1.25)

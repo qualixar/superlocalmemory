@@ -79,7 +79,7 @@ def test_repository_clone_has_only_scoped_lifecycle_installers() -> None:
         references = [
             path.relative_to(ROOT).as_posix()
             for path in ROOT.rglob(script_name)
-            if not {".backup", ".claude", ".worktrees"} & set(path.parts)
+            if not {".backup", ".claude", ".worktrees"} & set(path.relative_to(ROOT).parts)
         ]
         assert references == [f"scripts/{script_name}"]
 

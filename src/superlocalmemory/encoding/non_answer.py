@@ -37,8 +37,10 @@ _HOOK_SESSION = re.compile(
     + r'(?:\s*\|\s*files:\s*[^|\n]+)?$', re.I)
 # "[codex] session ended (exit) at 2026-10-13 11:01 in my project." plus the id
 # segments the checkpoint appends; a "last_action:" segment is real content.
+# The "[agent]" is optional for the same reason as above: ingestion derives
+# "session ended (exit) at 2026-11-07 13:49 in config." without it (4.2.14).
 _AGENT_CHECKPOINT = re.compile(
-    r'^\[[^\]\n]{1,200}\]\s+session\s+ended\s+\([^)\n]{0,100}\)\s+at\s+' + _DATE
+    r'^(?:\[[^\]\n]{1,200}\]\s+)?session\s+ended\s+\([^)\n]{0,100}\)\s+at\s+' + _DATE
     + r'\s+in\s+[^|\n]{1,300}?\.(?:\s*\|\s*(?:transcript|session_id):\s*[^|\n]+)*$', re.I)
 # The hook writes a basename; a name with a space is left as an answer (harmless).
 _BASENAME = r'[\w@+~#%=.-]+'

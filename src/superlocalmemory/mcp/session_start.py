@@ -58,7 +58,18 @@ def _relevant(response, threshold, max_age_days):
     ]
 
 
-def _priority_facts(engine, pid, project_path):
+def _recall_relevance(response) -> dict[str, float]:
+    """Memory id -> best score this session's recall gave any of its facts:
+    which standing rules matter to this session, at no extra cost."""
+    scores: dict[str, float] = {}
+    for result in getattr(response, "results", None) or []:
+        memory_id = str(getattr(result.fact, "memory_id", "") or "")
+        if memory_id:
+            scores[memory_id] = max(scores.get(memory_id, 0.0), float(result.score or 0.0))
+    return scores
+
+
+def _priority_facts(engine, pid, project_path, response=None):
     from superlocalmemory.core import standing_rules
     from superlocalmemory.mcp import remote_visibility
 
@@ -71,7 +82,8 @@ def _priority_facts(engine, pid, project_path):
         if standing_rules.enabled(getattr(engine, "config", None)):
             standing = list(
                 standing_rules.standing_facts(
-                    engine.db, pid, frozenset(f.fact_id for f in pins), project_path=project_path
+                    engine.db, pid, frozenset(f.fact_id for f in pins), project_path=project_path,
+                    relevance=_recall_relevance(response),
                 )
             )
     except Exception as exc:
@@ -138,9 +150,14 @@ def _context(engine, named, response, memories, cfg):
 
 
 def _memory_rows(memories, relevant, max_results, cfg):
+    """Rows for what the context carries. Pins and standing rules have caps of
+    their own; 4.2.14: they no longer use up the recall rows' ``max_results``
+    (with ten rules, recall's relevant memories used to get no row at all)."""
     contracts = {r.fact.fact_id: r for r in relevant[:max_results]}
+    priority = [m for m in memories if m.source_type != "recall"]
+    recalled = [m for m in memories if m.source_type == "recall"][:max_results]
     rows = []
-    for position, memory in enumerate(memories[:max_results], start=1):
+    for position, memory in enumerate(priority + recalled, start=1):
         if is_low_quality(memory.content):
             continue
         contract = contracts.get(memory.fact_id)
@@ -249,7 +266,7 @@ async def session_init(
         )
         threshold = rules.get_recall_config().get("relevance_threshold", 0.3)
         relevant = _relevant(response, threshold, max_age_days)
-        pins, standing, upcoming = _priority_facts(engine, pid, project_path)
+        pins, standing, upcoming = _priority_facts(engine, pid, project_path, response)
         context, rows = _render_session(
             engine, named, response, pins, standing, relevant, max_results
         )

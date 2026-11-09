@@ -33,8 +33,16 @@ memory (``metadata.ingestion_operation_id``) and decides:
 * ``add_fact``: own memory matches the operation; give it its searchable fact;
 * ``repoint``: own memory already has facts; point the operation at them;
 * ``add_memory_and_fact``: no own memory (never written); write both;
-* review: own memory no longer matches the operation (changed after saving,
-  or a pre-4.1.19 blanked copy for the store repair): left alone, listed.
+* ``restore_then_add_fact`` / ``restore_then_repoint``: own memory is a blanked
+  copy of the operation's text (a pre-4.1.19 build replaced spans with
+  ``[REDACTED:...]``, #308). Its text, and the text of its facts, is restored
+  with the guarded statements of ``store_repair`` (shared, not copied), then
+  the fact is added or the operation pointed at the restored facts. The
+  one-time store repair only ever looked at saves already failed when it ran,
+  so these saves were stuck for good. An original that holds a secret, or that
+  the ingest gate rejects, is not restored: it stays in review.
+* review: own memory no longer matches the operation (changed after saving):
+  left alone, listed.
 
 :func:`apply` does all of it in one transaction, each write guarded by the
 state it expects, then resets the operation to ``queryable`` (attempts 0) and
@@ -81,12 +89,29 @@ _SAME_SOURCE = (
 class RefileItem:
     operation_id: str
     profile_id: str
-    action: str             # add_fact | repoint | add_memory_and_fact
+    #: add_fact | repoint | add_memory_and_fact | restore_then_add_fact | restore_then_repoint
+    action: str
     memory_id: str
     reason: str
     fact_ids: tuple[str, ...] = ()
     operation_fingerprint: str = ""
     fact_fingerprint: str = ""
+    #: sha256 of the blanked memory text a restore replaces (empty for other actions).
+    memory_fingerprint: str = ""
+
+
+RESTORE_ACTIONS = frozenset({"restore_then_add_fact", "restore_then_repoint"})
+REPOINT_ACTIONS = frozenset({"repoint", "restore_then_repoint"})
+NOT_RESTORED_SECRET = "original holds what looks like a secret; review it"
+NOT_RESTORED_REJECTED = ("original is rejected by the ingest gate "
+                         "(prompt template or over 1 MB); review it")
+NOT_RESTORED_FACTS = "its searchable facts were changed after saving"
+#: 4.2.13 said "its text was changed after saving", but no SLM path rewrites a
+#: memory's text after a save (an edit adds a correction fact; #308 review), so
+#: that blamed the user for something else. Say what is known and what to do.
+NOT_RESTORED_DIFFERENT = ("its stored text differs from the save by more than redaction "
+                          "markers; compare the two, and if the save is not wanted run "
+                          "`slm ops resolve <operation id> --action cancel`")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,8 +127,11 @@ class SavePlan:
         actions: dict[str, int] = {}
         for item in self.refile:
             actions[item.action] = actions.get(item.action, 0) + 1
+        reasons: dict[str, int] = {}
+        for _, why in self.review:
+            reasons[why] = reasons.get(why, 0) + 1
         return {"saves_to_refile": len(self.refile), "by_action": actions,
-                "left_for_review": len(self.review),
+                "left_for_review": len(self.review), "left_for_review_by_reason": reasons,
                 "agent_names_to_backfill": len(self.attribution),
                 "memories_still_without_agent": dict(self.unattributed_by_source),
                 "stale_dead_letters": self.stale_dead_letters}
@@ -165,12 +193,11 @@ def _classify(conn: sqlite3.Connection, op: sqlite3.Row) -> RefileItem | tuple[s
         return RefileItem(op["operation_id"], op["profile_id"], "add_memory_and_fact",
                           uuid.uuid4().hex, op["last_error"], operation_fingerprint=fingerprint)
     mem = own[0]
-    if mem["content"] != op["raw_content"]:
-        from superlocalmemory.storage.store_repair import is_blanked_copy
-
-        why = ("blanked copy: the store repair restores it" if is_blanked_copy(
-            mem["content"], op["raw_content"]) else "its text was changed after saving")
-        return op["operation_id"], why
+    restore = mem["content"] != op["raw_content"]
+    if restore:
+        refusal = _restore_refusal(mem, op)
+        if refusal:
+            return op["operation_id"], refusal
     if (mem["scope"] or "personal") != op["scope"] or not _same_audience(
             mem["shared_with"], op["shared_with_json"]):
         return op["operation_id"], "its visibility was changed after saving"
@@ -178,9 +205,43 @@ def _classify(conn: sqlite3.Connection, op: sqlite3.Row) -> RefileItem | tuple[s
     if evidence is None:
         return op["operation_id"], "its searchable facts have different visibility"
     facts, fact_fingerprint = evidence
-    action = "repoint" if facts else "add_fact"
+    action = ("restore_then_" if restore else "") + ("repoint" if facts else "add_fact")
+    if restore and not _facts_restorable(conn, facts, mem["content"], op["raw_content"]):
+        return op["operation_id"], NOT_RESTORED_FACTS
     return RefileItem(op["operation_id"], op["profile_id"], action, mem["memory_id"],
-                      op["last_error"], facts, fingerprint, fact_fingerprint)
+                      op["last_error"], facts, fingerprint, fact_fingerprint,
+                      _fingerprint(mem["content"]) if restore else "")
+
+
+def _restore_refusal(mem: sqlite3.Row, op: sqlite3.Row) -> str:
+    """Why a differing memory text is not restored from the operation; empty if it can be."""
+    from superlocalmemory.core.ingest_gate import apply_ingest_gate
+    from superlocalmemory.core.security_primitives import detect_secrets
+    from superlocalmemory.storage.store_repair import is_blanked_copy
+
+    if not is_blanked_copy(mem["content"], op["raw_content"]):
+        return NOT_RESTORED_DIFFERENT
+    gate = apply_ingest_gate(op["raw_content"])
+    if gate.rejected:
+        return NOT_RESTORED_REJECTED
+    # The gate clamps and rejects but never redacts: restoring a span a 4.1.18
+    # build blanked could put a real credential back. Hit => a person decides.
+    if detect_secrets(op["raw_content"]):
+        return NOT_RESTORED_SECRET
+    return ""
+
+
+def _facts_restorable(conn: sqlite3.Connection, fact_ids: tuple[str, ...], blanked: str,
+                      original: str) -> bool:
+    """Every live fact of the memory is the gate's form of the blanked or restored text."""
+    from superlocalmemory.core.ingest_gate import apply_ingest_gate
+
+    if not fact_ids:
+        return True
+    allowed = {apply_ingest_gate(blanked).fact_content, apply_ingest_gate(original).fact_content}
+    marks = ",".join("?" * len(fact_ids))
+    rows = conn.execute(f"SELECT content FROM atomic_facts WHERE fact_id IN ({marks})", fact_ids)
+    return all(row[0] in allowed for row in rows)
 
 
 def _attribution(conn: sqlite3.Connection) -> tuple[list[tuple[str, str]], dict]:
@@ -211,5 +272,5 @@ def plan(conn: sqlite3.Connection) -> SavePlan:
                     count_stale_dead_letters(conn))
 
 
-__all__ = ["REASONS", "RefileItem", "STALE_DEAD_LETTERS", "SavePlan",
-           "count_stale_dead_letters", "plan"]
+__all__ = ["REASONS", "REPOINT_ACTIONS", "RESTORE_ACTIONS", "RefileItem",
+           "STALE_DEAD_LETTERS", "SavePlan", "count_stale_dead_letters", "plan"]

@@ -1,7 +1,7 @@
 ---
 name: slm-governance
 description: Governed-workspace behavior for SuperLocalMemory. Covers roles (admin/member/viewer) and company mode, who administers a company-mode workspace (a signed-in admin, or `slm team` on the SLM computer), `slm token show` in strict mode, what remote web apps can never see or change, retention and lifecycle settings, the audit trail, GDPR export and erasure, and how agents must behave when operating under workspace governance. The audit and retention tools need the power MCP profile. Agents must never bypass governance controls.
-version: "4.2.13"
+version: "4.2.14"
 agent: agent
 tools:
   - audit_trail
@@ -220,7 +220,11 @@ slm delete <fact_id> --yes --json
 ```
 
 Memories that belong to a reviewed correction cannot be deleted this way; the
-refusal names the case. After an erasure, confirm with `slm recall "<content>"`
+refusal names the case. A case SLM proposed by itself and nobody reviewed does
+not block a delete, and `slm corrections dismiss` (dry run first, `--apply`
+takes a backup) closes a pile of them. Never reject cases in bulk: a rejected
+case counts as decided, so rejecting thousands would lock their memories against
+deletion for good, including when a person asks for erasure. After an erasure, confirm with `slm recall "<content>"`
 that nothing comes back, and never try to re-derive erased content from other
 stored facts.
 
@@ -278,4 +282,4 @@ Before running any destructive or state-changing operation (`forget`,
 
 ---
 
-*SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later*

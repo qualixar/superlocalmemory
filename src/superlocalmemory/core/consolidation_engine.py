@@ -31,6 +31,8 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
+
 if TYPE_CHECKING:
     from superlocalmemory.core.config import ConsolidationConfig, SLMConfig
     from superlocalmemory.core.graph_analyzer import GraphAnalyzer
@@ -430,16 +432,19 @@ class ConsolidationEngine:
 
         # 4. active_decisions: signal_type='decision' with min access
         # CRITICAL: uses signal_type NOT fact_type (HIGH-2 fix)
+        not_prompt, not_prompt_params = source_filter()
         decision_facts = self._db.execute(
             "SELECT f.fact_id, f.content FROM atomic_facts f "
             "LEFT JOIN fact_access_log a ON f.fact_id = a.fact_id "
             "WHERE f.profile_id = ? AND f.signal_type = 'decision' "
-            "AND f.lifecycle = 'active' "
+            "AND f.lifecycle = 'active'" + not_prompt + " "
             "GROUP BY f.fact_id "
             "HAVING COUNT(a.log_id) >= ? "
-            "ORDER BY COUNT(a.log_id) DESC LIMIT 5",
-            (profile_id, self._consolidation_config.promotion_min_access),
+            "ORDER BY COUNT(a.log_id) DESC LIMIT ?",
+            (profile_id, *not_prompt_params, self._consolidation_config.promotion_min_access,
+             5 * OVERSAMPLE),
         )
+        decision_facts = keep_sources(decision_facts or [], 5)
         self._store_core_block(
             profile_id, "active_decisions",
             self._rows_to_content(decision_facts, block_limit),
@@ -449,12 +454,14 @@ class ConsolidationEngine:
 
         # 5. learned_preferences: opinion facts with high confidence
         pref_facts = self._db.execute(
-            "SELECT fact_id, content FROM atomic_facts "
-            "WHERE profile_id = ? AND fact_type = 'opinion' "
-            "AND confidence >= ? AND lifecycle = 'active' "
-            "ORDER BY confidence DESC LIMIT 5",
-            (profile_id, self._consolidation_config.promotion_min_trust),
+            "SELECT f.fact_id, f.content FROM atomic_facts f "
+            "WHERE f.profile_id = ? AND f.fact_type = 'opinion' "
+            "AND f.confidence >= ? AND f.lifecycle = 'active'" + not_prompt + " "
+            "ORDER BY f.confidence DESC LIMIT ?",
+            (profile_id, self._consolidation_config.promotion_min_trust, *not_prompt_params,
+             5 * OVERSAMPLE),
         )
+        pref_facts = keep_sources(pref_facts or [], 5)
         self._store_core_block(
             profile_id, "learned_preferences",
             self._rows_to_content(pref_facts, block_limit),
@@ -895,13 +902,15 @@ class ConsolidationEngine:
     ) -> list[dict]:
         """Get top facts by type and sort criteria."""
         type_placeholders = ",".join("?" * len(fact_types))
+        # 4.2.14: never a captured prompt or bookkeeping (core/block_sources).
+        not_prompt, not_prompt_params = source_filter()
 
         if sort_by == "recency":
             query = (
-                f"SELECT fact_id, content, fact_type FROM atomic_facts "
-                f"WHERE profile_id = ? AND fact_type IN ({type_placeholders}) "
-                f"AND lifecycle = 'active' "
-                f"ORDER BY created_at DESC LIMIT ?"
+                f"SELECT f.fact_id, f.content, f.fact_type FROM atomic_facts f "
+                f"WHERE f.profile_id = ? AND f.fact_type IN ({type_placeholders}) "
+                f"AND f.lifecycle = 'active'{not_prompt} "
+                f"ORDER BY f.created_at DESC LIMIT ?"
             )
         else:
             query = (
@@ -910,14 +919,15 @@ class ConsolidationEngine:
                 f"FROM atomic_facts f "
                 f"LEFT JOIN fact_access_log a ON f.fact_id = a.fact_id "
                 f"WHERE f.profile_id = ? AND f.fact_type IN ({type_placeholders}) "
-                f"AND f.lifecycle = 'active' "
+                f"AND f.lifecycle = 'active'{not_prompt} "
                 f"GROUP BY f.fact_id "
                 f"ORDER BY access_count DESC LIMIT ?"
             )
 
-        params: list[Any] = [profile_id] + fact_types + [limit]
+        params: list[Any] = ([profile_id] + fact_types + list(not_prompt_params)
+                             + [limit * OVERSAMPLE])
         rows = self._db.execute(query, tuple(params))
-        return [dict(r) for r in (rows or [])]
+        return keep_sources([dict(r) for r in (rows or [])], limit)
 
     def _facts_to_content(
         self, facts: list[dict], char_limit: int,

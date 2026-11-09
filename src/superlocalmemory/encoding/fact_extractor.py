@@ -42,6 +42,7 @@ from superlocalmemory.encoding.fact_extraction_result import (
     for_review,
     partition_facts,
 )
+from superlocalmemory.encoding.interval_scan import interval_pattern
 from superlocalmemory.encoding.prospective_markers import looks_prospective
 from superlocalmemory.encoding.speaker_spans import bounded_turns, normalize_speaker, speaker_spans
 from superlocalmemory.storage.models import AtomicFact, FactType, Mode, SignalType
@@ -96,6 +97,8 @@ _INTERVAL_RE = re.compile(
     r"\b(?:from|between)\s+(.+?)\s+(?:to|and|until|through)\s+(.+?)(?:[.,;]|$)",
     re.IGNORECASE,
 )
+#: Same result as ``_INTERVAL_RE.search``, in bounded time (interval_scan).
+_INTERVAL = interval_pattern(_INTERVAL_RE, r"\b(?:from|between)", r"(?:to|and|until|through)")
 
 _OPINION_MARKERS = re.compile(
     r"\b(?:I think|I believe|I feel|in my opinion|I prefer|I like|I love|"
@@ -222,10 +225,10 @@ _try_parse_date = try_parse_date
 
 def _extract_interval(text: str, ref_date: str | None = None) -> tuple[str | None, str | None]:
     """Extract temporal interval (start, end) from text."""
-    match = _INTERVAL_RE.search(text)
-    if not match:
+    found = _INTERVAL.groups(text)
+    if found is None:
         return None, None
-    start_raw, end_raw = match.group(1).strip(), match.group(2).strip()
+    start_raw, end_raw = found[0].strip(), found[1].strip()
     return _try_parse_date(start_raw, ref_date), _try_parse_date(end_raw, ref_date)
 
 
