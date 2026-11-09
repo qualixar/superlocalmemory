@@ -110,3 +110,12 @@ def test_the_hook_path_orders_its_memories_with_the_project_query(tmp_path, monk
     out = capsys.readouterr().out
     assert judge.calls and judge.calls[0][0] == "project context billing-api"
     assert out.index("about billing") < out.index("about caching")
+
+    # What the hooks actually run: `slm session-context <folder name>`.
+    judge.calls.clear()
+    cmd_session_context(Namespace(json=False, full=False, query="billing-api", max_age_days=0))
+    assert judge.calls[0][0] == "project context billing-api"
+    judge.calls.clear()
+    cmd_session_context(Namespace(json=False, full=False, query="what did we decide on billing",
+                                  max_age_days=0))
+    assert judge.calls[0][0] == "what did we decide on billing"

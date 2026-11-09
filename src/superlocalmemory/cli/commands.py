@@ -5760,8 +5760,15 @@ def _jev_session_order(args: Namespace, config: object, rows: list) -> list:
     from superlocalmemory.core.project_identity import session_context_query
     from superlocalmemory.core.session_jev import jev_order
 
-    query = (getattr(args, "query", "") or "").strip() or session_context_query(
-        os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    # The Claude and Codex hooks pass the project's folder name ("general" when
+    # there is none); a real question has spaces and is used as it is.
+    given = (getattr(args, "query", "") or "").strip()
+    if not given or (" " not in given and given != "general"):
+        query = session_context_query(given or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    elif given == "general":
+        query = session_context_query(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    else:
+        query = given
     return jev_order(query, rows, lambda row: row["content"], getattr(config, "retrieval", None))
 
 
