@@ -7,6 +7,8 @@ scene theme (the first 200 characters of the anchor fact) are not, so these
 tests cover the moment after completion too.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

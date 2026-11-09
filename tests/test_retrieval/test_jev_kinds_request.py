@@ -39,7 +39,7 @@ def key_store(tmp_path) -> JudgeKeyStore:
 
 def _choice(label: str, conf: float = 0.7) -> dict:
     return {"type": "choice", "choice": label, "confidence": conf,
-            "probabilities": {l: (conf if l == label else (1 - conf) / 7) for l in LABELS}}
+            "probabilities": {lab: (conf if lab == label else (1 - conf) / 7) for lab in LABELS}}
 
 
 def _reply(answers: dict, model: str = MODEL) -> httpx.Response:

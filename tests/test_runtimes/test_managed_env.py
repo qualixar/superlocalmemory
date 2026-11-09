@@ -118,7 +118,7 @@ def test_canary_exception_fails_without_raising(tmp_path, src, lock):
 
 def test_second_concurrent_install_does_nothing(tmp_path, src, lock):
     runner = Runner()
-    env = make(tmp_path, src, runner)
+    make(tmp_path, src, runner)
     other = make(tmp_path, src, Runner())
     from superlocalmemory.infra.instance_lock import InstanceLock
 

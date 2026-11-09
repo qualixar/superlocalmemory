@@ -7,6 +7,8 @@ All HTTP is mocked: GitHub through ``httpx`` and Google Drive through a fake
 service object. The bytes handed to each mock are captured and checked.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import io

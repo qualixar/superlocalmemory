@@ -1,5 +1,7 @@
 """Pictures and PDFs are saved from the bytes that were hashed, never re-opened by path."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import hashlib

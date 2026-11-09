@@ -581,7 +581,7 @@ def test_power_loss_during_migration_leaves_clean_state(
         )
         conn.commit()
     # Running apply_all should treat in_progress like failed → retry.
-    stats = mr.apply_all(learning_db, memory_db)
+    mr.apply_all(learning_db, memory_db)
     with sqlite3.connect(learning_db) as conn:
         row = conn.execute(
             "SELECT status FROM migration_log "

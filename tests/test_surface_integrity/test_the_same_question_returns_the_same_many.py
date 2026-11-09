@@ -22,13 +22,13 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
 from superlocalmemory.core.config import (
     BROWSE_PAGE_SIZE,
     CANONICAL_LIST_LIMIT,
     CANONICAL_RECALL_LIMIT,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _default(func, name: str = "limit"):

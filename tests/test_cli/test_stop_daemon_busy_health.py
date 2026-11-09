@@ -124,7 +124,7 @@ class TestBusyHealthIsNotDeath:
         """Negative control: a genuinely dead process must still read False."""
         from superlocalmemory.cli import daemon
 
-        descriptor = _owned_descriptor()
+        _owned_descriptor()
         with patch.object(daemon, "_descriptor_process_is_alive", return_value=False):
             assert daemon.owned_daemon_process_alive() is False
 

@@ -4,6 +4,8 @@
 """Backup key management: one key per machine, kept in the credential store,
 shown to the user as a recovery key, never logged, never silently replaced."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import base64

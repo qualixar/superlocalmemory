@@ -158,7 +158,7 @@ def test_mismatch_exits_5_and_stops_the_daemon(tmp_path, monkeypatch) -> None:
     proc = Proc()
     monkeypatch.setattr(demo, "owner_roots", lambda: [])
     monkeypatch.setattr(demo, "find_laya", lambda home: SimpleNamespace(state="ready"))
-    monkeypatch.setattr(demo, "prepare_demo", lambda d, l: None)
+    monkeypatch.setattr(demo, "prepare_demo", lambda d, laya: None)
     monkeypatch.setattr(demo, "start_daemon", lambda d, p: proc)
     monkeypatch.setattr(demo, "seed", lambda *a: None)
     monkeypatch.setattr(demo, "warm", lambda *a: None)

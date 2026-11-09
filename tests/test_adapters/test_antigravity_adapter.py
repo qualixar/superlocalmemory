@@ -19,7 +19,7 @@ def _make_adapter(tmp_path: Path, *, scope: str = "workspace",
                   recall=None, monkeypatch=None) -> AntigravityAdapter:
     if monkeypatch is not None:
         monkeypatch.setenv("SLM_ANTIGRAVITY_FORCE", "1")
-    fn = recall or (lambda q, l, p: [])
+    fn = recall or (lambda q, limit_arg, p: [])
     return AntigravityAdapter(
         scope=scope, base_dir=tmp_path,
         sync_log_db=tmp_path / "memory.db",

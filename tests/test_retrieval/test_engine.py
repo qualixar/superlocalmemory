@@ -419,6 +419,6 @@ class TestEmbedderRequirement:
             channels={"semantic": sem_ch},
             embedder=None,  # No embedder
         )
-        response = engine.recall("q", "default")
+        engine.recall("q", "default")
         # Semantic channel should be skipped
         sem_ch.search.assert_not_called()

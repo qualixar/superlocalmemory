@@ -82,7 +82,6 @@ class TestConsolidationTrigger:
         from fastapi.testclient import TestClient
 
         mock_cfg = _mock_slm_config()
-        mock_cfg_copy = _mock_slm_config()
 
         # Mock the consolidation engine to avoid needing full deps
         mock_engine = MagicMock()

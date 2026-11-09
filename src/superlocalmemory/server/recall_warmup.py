@@ -25,7 +25,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from superlocalmemory.core.answer_check_scope import skip_answer_check
+from superlocalmemory.core.answer_check_scope import not_a_read, skip_answer_check
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def run_warmup_recalls(engine: Any, profile_runtime: Any, *,
                        warm_spreading_activation: Callable[[Any, Any], Any]) -> None:
     """Fire the start-up recalls, then warm the on-device check's model."""
     try:
-        with skip_answer_check():
+        with skip_answer_check(), not_a_read():
             _recalls(engine, profile_runtime, warm_spreading_activation)
     except BaseException:
         _set_phase("failed")

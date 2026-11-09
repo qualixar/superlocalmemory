@@ -1,5 +1,7 @@
 """A copy that borrowed another source's picture is saved afresh once that picture is gone."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

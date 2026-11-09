@@ -111,7 +111,7 @@ parameters:
 end of parameters
 
 pandas_categorical:null
-"""
+"""  # noqa: E501 - verbatim LightGBM model text; line widths are part of the fixture
 
 
 class MockDataset:

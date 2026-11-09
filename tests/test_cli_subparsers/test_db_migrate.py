@@ -227,8 +227,8 @@ def test_resolve_paths_defaults(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "DEFAULT_HOME", tmp_path / "home")
     args = Namespace(status=True, dry_run=False)
     # The helper is private but testing the fallback is important.
-    l, m = mod._resolve_paths(args)
-    assert l == tmp_path / "home" / "learning.db"
+    learning_db, m = mod._resolve_paths(args)
+    assert learning_db == tmp_path / "home" / "learning.db"
     assert m == tmp_path / "home" / "memory.db"
 
 
@@ -238,8 +238,8 @@ def test_resolve_paths_uses_args(tmp_path):
         learning_db_path=tmp_path / "x.db",
         memory_db_path=tmp_path / "y.db",
     )
-    l, m = mod._resolve_paths(args)
-    assert l == tmp_path / "x.db"
+    learning_db, m = mod._resolve_paths(args)
+    assert learning_db == tmp_path / "x.db"
     assert m == tmp_path / "y.db"
 
 

@@ -298,7 +298,7 @@ class TestCheckConsistency:
 
         checker = SheafConsistencyChecker(db)
         fact = _make_fact()
-        results = checker.check_consistency(fact, "default")
+        checker.check_consistency(fact, "default")
         # Only checked once despite two edges to f2
         assert db.get_fact.call_count == 1
 

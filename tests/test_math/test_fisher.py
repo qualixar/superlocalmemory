@@ -348,7 +348,7 @@ class TestRoundTrip:
         f_mean, f_var = fm.compute_params(emb)
 
         # Score before confirmation
-        s_before = fm.similarity(q_mean, q_var, f_mean, f_var)
+        fm.similarity(q_mean, q_var, f_mean, f_var)
 
         # Confirm the fact 10 times
         for _ in range(10):

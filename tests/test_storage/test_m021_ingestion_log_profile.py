@@ -86,6 +86,8 @@ def test_idempotent_and_missing_table_safe(tmp_path):
     M.apply(conn)  # must not raise
     # Re-apply on an already-migrated table is a no-op.
     conn2 = _legacy_db(tmp_path / "m.db")
-    M.apply(conn2); conn2.commit()
-    M.apply(conn2); conn2.commit()  # second apply is a no-op
+    M.apply(conn2)
+    conn2.commit()
+    M.apply(conn2)
+    conn2.commit()  # second apply is a no-op
     assert M.verify(conn2) is True

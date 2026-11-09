@@ -19,7 +19,7 @@ def world(tmp_path, monkeypatch):
     store = open_media_store(create=True, data_root=tmp_path / "slm")
     pic = store.insert_item(profile_id="A", kind="image", source_sha256="a" * 64, mime="image/png", bytes=1,
                             origin="tool", thumb_webp=b"RIFFxxxxWEBP")
-    doc = store.insert_document(document_id="d" * 32, profile_id="A", sha256="b" * 64, title="t",
+    store.insert_document(document_id="d" * 32, profile_id="A", sha256="b" * 64, title="t",
                                 mime="application/pdf", bytes=1, source_relpath="bb/x.pdf", origin="user")
     job = store.enqueue_job("A", "document", 0, {"document_id": "d" * 32})
     yield roles, pic, "d" * 32, job

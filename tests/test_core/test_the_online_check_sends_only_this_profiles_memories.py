@@ -12,6 +12,8 @@ response says ``skipped``, and the results are exactly what retrieval returned.
 The on-device check sends nothing anywhere, so it judges as before.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from superlocalmemory.core.answer_check_stage import run_answer_check

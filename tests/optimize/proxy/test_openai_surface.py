@@ -90,7 +90,12 @@ async def test_chat_completions_cache_miss_then_hit() -> None:
                 return CachedResponse(hit=True, data=_cache["k1"], cache_key="k1", ttl_seconds=300)
             return CachedResponse(hit=False, data=None, cache_key="k1", ttl_seconds=300)
         def store(self, ctx, resp):
-            _cache["k1"] = b'{"id": "chatcmpl-1", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}'
+            _cache["k1"] = (
+                b'{"id": "chatcmpl-1", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": '
+                b'"assistant", "content": "hello"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, '
+                b'"completion_tokens": 5}}'
+            )
+
         def on_hit(self, ctx, resp, ts):
             pass
         def on_miss(self, ctx):
@@ -298,9 +303,12 @@ async def test_embeddings_invalid_json() -> None:
 def _make_openai_sse(content: str = "Hello!", completion_id: str = "chatcmpl-abc", model: str = "gpt-4o") -> bytes:
     """Build a minimal valid OpenAI SSE stream with a text response."""
     chunks = [
-        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}","choices":[{{"index":0,"delta":{{"role":"assistant","content":""}},"finish_reason":null}}]}}\n\n',
-        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}","choices":[{{"index":0,"delta":{{"content":"{content}"}},"finish_reason":null}}]}}\n\n',
-        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}","choices":[{{"index":0,"delta":{{}},"finish_reason":"stop"}}]}}\n\n',
+        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}",'
+        f'"choices":[{{"index":0,"delta":{{"role":"assistant","content":""}},"finish_reason":null}}]}}\n\n',
+        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}",'
+        f'"choices":[{{"index":0,"delta":{{"content":"{content}"}},"finish_reason":null}}]}}\n\n',
+        f'data: {{"id":"{completion_id}","object":"chat.completion.chunk","created":1234,"model":"{model}",'
+        f'"choices":[{{"index":0,"delta":{{}},"finish_reason":"stop"}}]}}\n\n',
         "data: [DONE]\n\n",
     ]
     return "".join(chunks).encode()
@@ -438,7 +446,7 @@ async def test_streaming_cache_miss_store_hit_cycle() -> None:
         body = {**_sample_req(), "stream": True}
         # Call 1 — upstream
         async with client.stream("POST", "/v1/chat/completions", json=body, headers=_openai_headers()) as r1:
-            chunks1 = [c async for c in r1.aiter_bytes() if c]
+            _ = [c async for c in r1.aiter_bytes() if c]
 
         # Call 2 — should hit cache (no new upstream call)
         async with client.stream("POST", "/v1/chat/completions", json=body, headers=_openai_headers()) as r2:

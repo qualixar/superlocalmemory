@@ -6,6 +6,8 @@ Issue #39 Issue 2 regression: a custom OpenAI-compatible endpoint
 and 401. The dashboard now sends ``base_url``; the backend must honor it.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import httpx

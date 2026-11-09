@@ -51,7 +51,9 @@ class MemDb:
             self.execute("INSERT INTO fact_entity_associations VALUES (?,?,?)", (profile, fact_id, eid))
 
     def edge(self, source, target, kind, profile="p1"):
-        self.execute("INSERT INTO graph_edges VALUES (?,?,?,?,?)", (f"{source}{target}{kind}", profile, source, target, kind))
+        self.execute(
+            "INSERT INTO graph_edges VALUES (?,?,?,?,?)", (f"{source}{target}{kind}", profile, source, target, kind)
+        )
 
 
 def make_root(tmp_path):

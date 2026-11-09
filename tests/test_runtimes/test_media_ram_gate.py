@@ -7,7 +7,9 @@ import logging
 
 import pytest
 
-media_env = importlib.import_module("superlocalmemory.runtimes.media_env")  # the package also exports a function of that name
+media_env = importlib.import_module(
+    "superlocalmemory.runtimes.media_env"
+)  # the package also exports a function of that name
 GIB = 1024 ** 3
 MEDIA_MIN_RAM_BYTES, media_ram_refusal = media_env.MEDIA_MIN_RAM_BYTES, media_env.media_ram_refusal
 

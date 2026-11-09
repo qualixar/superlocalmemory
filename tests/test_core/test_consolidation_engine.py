@@ -315,7 +315,7 @@ class TestConsolidationPromote:
         # Mark as expired
         tmp_db.store_temporal_validity(fid, "default", valid_until="2020-01-01T00:00:00")
 
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         # The expired fact should NOT have been promoted
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"  # Not promoted to 'warm'
@@ -334,7 +334,7 @@ class TestConsolidationPromote:
                 (_new_id(), fid, "default"),
             )
         # No temporal validity record = valid
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "warm"
         retention = tmp_db.execute(
@@ -356,7 +356,7 @@ class TestConsolidationPromote:
             "VALUES (?, ?, ?)",
             (_new_id(), fid, "default"),
         )
-        result = engine._step3_promote("default")
+        engine._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"
 
@@ -379,7 +379,7 @@ class TestConsolidationPromote:
                 "VALUES (?, ?, ?)",
                 (_new_id(), fid, "default"),
             )
-        result = eng._step3_promote("default")
+        eng._step3_promote("default")
         fact = tmp_db.get_fact(fid)
         assert fact.lifecycle.value == "active"  # confidence 0.8 < 0.99
 

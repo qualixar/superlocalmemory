@@ -884,7 +884,6 @@ def test_reset_default_close_error_non_fatal(tmp_path: Path, monkeypatch) -> Non
     CacheDB.reset_default()
     inst = CacheDB.get_default()
     # Force close to raise
-    original_close = inst._db.close
     inst._db.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
     try:
         CacheDB.reset_default()

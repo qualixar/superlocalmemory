@@ -9,6 +9,8 @@ rather than in a later audit. Only the routes in ``OPEN_ROUTES`` may answer
 without a session, and each one has a reason written next to it.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import re
@@ -27,13 +29,18 @@ OPEN_ROUTES = {
     "/": "the dashboard page itself; it has to load to show the sign-in form",
     "/favicon.ico": "a static icon",
     "/health": "liveness probe used by the CLI and the service manager; no memory content",
-    "/status": "daemon discovery probe the CLI uses; without a session it answers status, version, port, pid and instance only (see test_status_without_a_session_*)",
+    "/status": (
+        "daemon discovery probe the CLI uses; without a session it answers status, version, port, pid and "
+        "instance only (see test_status_without_a_session_*)"
+    ),
     "/api/version": "version string only",
     "/openapi.json": "the shape of the API, no data",
     "/docs": "API documentation page, no data",
     "/docs/oauth2-redirect": "API documentation helper page, no data",
     "/redoc": "API documentation page, no data",
-    "/internal/token": "serves the install token to loopback only; the token alone cannot administer or read in company mode",
+    "/internal/token": (
+        "serves the install token to loopback only; the token alone cannot administer or read in company mode"
+    ),
     "/api/v3/embed/ping": "readiness probe for the MCP embedder proxy (which has no session); names the model only",
     "/api/backup/oauth/github/callback": "OAuth redirect target; refuses anything without a matching state value",
     "/api/backup/oauth/google/callback": "OAuth redirect target; refuses anything without a matching state value",

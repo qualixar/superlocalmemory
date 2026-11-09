@@ -7,6 +7,8 @@ Status is key-free and needs READ. Showing the recovery key needs MANAGE and
 is a POST, so it is never prefetched, cached by URL, or left in history.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import inspect

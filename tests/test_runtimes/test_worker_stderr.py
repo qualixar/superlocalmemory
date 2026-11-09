@@ -87,7 +87,10 @@ def test_a_flood_is_rate_limited(noisy, caplog):
 
 
 def test_undecodable_bytes_do_not_stop_the_drain(noisy, caplog):
-    c = noisy('sys.stderr.buffer.write(b"bad \\xff\\xfe bytes\\n"); sys.stderr.buffer.write(b"still here\\n"); sys.stderr.flush()')
+    c = noisy(
+        'sys.stderr.buffer.write(b"bad \\xff\\xfe bytes\\n"); sys.stderr.buffer.write(b"still here\\n"); '
+        'sys.stderr.flush()'
+    )
     with caplog.at_level(logging.WARNING, logger=LOGGER):
         c.embed_texts(["a"], prompt="Document")
         assert _wait_until(lambda: any("still here" in r.getMessage() for r in caplog.records))

@@ -15,6 +15,8 @@ Hugging Face cache that holds it (offline) to prove that channel too; without
 it the semantic assertions are skipped, never faked.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

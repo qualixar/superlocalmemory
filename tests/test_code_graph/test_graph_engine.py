@@ -3,6 +3,8 @@
 
 """Tests for GraphEngine — rustworkx in-memory graph."""
 
+# ruff: noqa: E402 (the imports below deliberately follow the rustworkx availability guard and skip marker)
+
 from __future__ import annotations
 
 import pytest

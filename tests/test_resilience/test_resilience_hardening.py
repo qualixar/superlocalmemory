@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import sqlite3
 import sys
 import time
@@ -104,7 +103,9 @@ class TestBoundedRetryLoop:
         assert "8790" in str(exc_info.value)
         assert not issubclass(
             exc_info.type,
-            __import__("superlocalmemory.core.remember_runtime", fromlist=["CanonicalRememberUnavailable"]).CanonicalRememberUnavailable
+            __import__(
+                "superlocalmemory.core.remember_runtime", fromlist=["CanonicalRememberUnavailable"]
+            ).CanonicalRememberUnavailable,
         ), "Must be DaemonAlreadyServing, not CanonicalRememberUnavailable"
 
     def test_holder_dies_mid_loop_claim_succeeds(self):
@@ -341,7 +342,11 @@ class TestMeshExpiryBootWiring:
 
         # Simulate OperationalError on BEGIN IMMEDIATE
         def patched_connect(*args, **kwargs):
-            c = sqlite3.connect.__wrapped__(*args, **kwargs) if hasattr(sqlite3.connect, "__wrapped__") else sqlite3.connect(*args, **kwargs)
+            c = (
+                sqlite3.connect.__wrapped__(*args, **kwargs)
+                if hasattr(sqlite3.connect, "__wrapped__")
+                else sqlite3.connect(*args, **kwargs)
+            )
             original_execute = c.execute
 
             def tracked_execute(sql, *a, **kw):
@@ -553,7 +558,6 @@ class TestSocketRetry:
 
         connect_attempts = [0]
 
-        original_socket_class = socket.socket
 
         class _TrackingSocket:
             def __init__(self, *args, **kwargs):

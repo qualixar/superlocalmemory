@@ -361,7 +361,9 @@ def table_columns(db: Path) -> dict[str, list[str]]:
     conn, tmp = _open_copy(db)
     try:
         out = {}
-        rows = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
+        rows = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
         for name, sql in rows:
             if (sql or "").lstrip().upper().startswith("CREATE VIRTUAL"):
                 out[name] = [f"<virtual> {' '.join(sql.split())}"]
@@ -382,8 +384,10 @@ def schema_signature(db: Path) -> list[tuple]:
         return []
     conn, tmp = _open_copy(db)
     try:
-        return sorted(conn.execute("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall(),
-                      key=lambda r: (r[0], r[1]))
+        return sorted(
+            conn.execute("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall(),
+            key=lambda r: (r[0], r[1]),
+        )
     finally:
         conn.close()
         shutil.rmtree(tmp, ignore_errors=True)

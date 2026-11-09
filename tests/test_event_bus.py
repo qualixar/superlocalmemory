@@ -46,7 +46,9 @@ def test_multiple_subscribers(bus):
 
 def test_unsubscribe(bus):
     received = []
-    handler = lambda e: received.append(e)
+    def handler(e):
+        received.append(e)
+
     bus.subscribe(handler)
     bus.unsubscribe(handler)
     bus.publish("memory.stored", {})

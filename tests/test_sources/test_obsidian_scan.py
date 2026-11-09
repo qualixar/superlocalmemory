@@ -31,7 +31,9 @@ def test_auto_detect(env):
 
 def test_note_properties_tags_date_and_front_matter_removed(env):
     vault(env)
-    env.write("n.md", "---\ntags: [alpha, '#beta']\naliases: [Nick]\ndate: 2024-03-05\nstatus: draft\n---\n# Title\ntext")
+    env.write(
+        "n.md", "---\ntags: [alpha, '#beta']\naliases: [Nick]\ndate: 2024-03-05\nstatus: draft\n---\n# Title\ntext"
+    )
     sid = env.add_and_confirm()
     env.scan(sid)
     row = env.runtime.saved[0]

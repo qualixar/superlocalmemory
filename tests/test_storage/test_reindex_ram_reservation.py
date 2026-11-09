@@ -1,5 +1,7 @@
 """The re-embed loads its model under the shared RAM reservation: one model load at a time."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import threading

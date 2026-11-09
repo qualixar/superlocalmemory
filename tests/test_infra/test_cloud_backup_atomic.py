@@ -218,7 +218,7 @@ class TestCorruptJsonLogsWarning:
 
         with caplog.at_level(logging.WARNING, logger="superlocalmemory.cloud_backup"):
             # _delete_credential should not raise, but may log a warning
-            result = cb._delete_credential("missing_key")
+            cb._delete_credential("missing_key")
 
         # Should not raise; return value may be False or True depending on keyring
         # The key is that it doesn't crash

@@ -29,7 +29,10 @@ def tools(monkeypatch):
     def request(method, path, body=None, **kw):
         calls.append((method, path, body))
         if path == "/register":
-            return {"peer_id": "web-peer-id" if body.get("session_id") == "ref-1" else "other-web", "pending_messages": 0}
+            return {
+                "peer_id": "web-peer-id" if body.get("session_id") == "ref-1" else "other-web",
+                "pending_messages": 0,
+            }
         if "/wait" in path:
             return {"messages": [{"id": 3, "read": False, "content": "hello"}], "timed_out": False}
         if path.startswith("/inbox/"):

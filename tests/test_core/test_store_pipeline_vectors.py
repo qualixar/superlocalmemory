@@ -25,7 +25,8 @@ def _fact(fid: str = "f1", content: str = "merged superseded content", embedding
 def test_dualwrites_existing_embedding():
     fact = _fact(embedding=[0.1] * 8)
     ann = MagicMock()
-    vs = MagicMock(); vs.available = True
+    vs = MagicMock()
+    vs.available = True
     _upsert_fact_vectors(fact, "default", ann, vs, embedder=None)
     ann.add.assert_called_once_with("f1", [0.1] * 8)
     vs.upsert.assert_called_once()
@@ -35,9 +36,11 @@ def test_dualwrites_existing_embedding():
 def test_embeds_on_demand_when_missing():
     fact = _fact(embedding=None)
     assert fact.embedding is None
-    embedder = MagicMock(); embedder.embed.return_value = [0.2] * 8
+    embedder = MagicMock()
+    embedder.embed.return_value = [0.2] * 8
     ann = MagicMock()
-    vs = MagicMock(); vs.available = True
+    vs = MagicMock()
+    vs.available = True
     _upsert_fact_vectors(fact, "default", ann, vs, embedder=embedder)
     embedder.embed.assert_called_once_with("merged superseded content")
     ann.add.assert_called_once_with("f1", [0.2] * 8)
@@ -47,7 +50,8 @@ def test_embeds_on_demand_when_missing():
 def test_skips_when_no_embedding_and_no_embedder():
     fact = _fact(embedding=None)
     ann = MagicMock()
-    vs = MagicMock(); vs.available = True
+    vs = MagicMock()
+    vs.available = True
     _upsert_fact_vectors(fact, "default", ann, vs, embedder=None)
     ann.add.assert_not_called()
     vs.upsert.assert_not_called()
@@ -61,7 +65,8 @@ def test_respects_unavailable_vector_store():
     # the vector store.
     fact = _fact(embedding=[0.3] * 8)
     ann = MagicMock()
-    vs = MagicMock(); vs.available = False
+    vs = MagicMock()
+    vs.available = False
     result = _upsert_fact_vectors(fact, "default", ann, vs, embedder=None)
     assert result is False             # no projection → not findable by meaning
     ann.add.assert_not_called()        # ANN must not get the vector without a projection

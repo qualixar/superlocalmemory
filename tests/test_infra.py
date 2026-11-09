@@ -12,15 +12,15 @@ def test_rate_limiter_allows_within_limit():
     from superlocalmemory.infra.rate_limiter import RateLimiter
     limiter = RateLimiter(max_requests=10, window_seconds=60)
     for _ in range(10):
-        assert limiter.allow("agent-1") == True
+        assert limiter.allow("agent-1")
 
 
 def test_rate_limiter_blocks_over_limit():
     from superlocalmemory.infra.rate_limiter import RateLimiter
     limiter = RateLimiter(max_requests=2, window_seconds=60)
-    assert limiter.allow("agent-1") == True
-    assert limiter.allow("agent-1") == True
-    assert limiter.allow("agent-1") == False
+    assert limiter.allow("agent-1")
+    assert limiter.allow("agent-1")
+    assert not limiter.allow("agent-1")
 
 
 def test_rate_limiter_is_allowed_returns_remaining():
@@ -41,9 +41,9 @@ def test_rate_limiter_reset():
     from superlocalmemory.infra.rate_limiter import RateLimiter
     limiter = RateLimiter(max_requests=1, window_seconds=60)
     limiter.allow("a1")
-    assert limiter.allow("a1") == False
+    assert not limiter.allow("a1")
     limiter.reset("a1")
-    assert limiter.allow("a1") == True
+    assert limiter.allow("a1")
 
 
 def test_rate_limiter_cleanup():
@@ -65,9 +65,9 @@ def test_rate_limiter_get_stats():
 def test_rate_limiter_independent_clients():
     from superlocalmemory.infra.rate_limiter import RateLimiter
     limiter = RateLimiter(max_requests=1, window_seconds=60)
-    assert limiter.allow("a1") == True
-    assert limiter.allow("a1") == False
-    assert limiter.allow("a2") == True  # different client
+    assert limiter.allow("a1")
+    assert not limiter.allow("a1")
+    assert limiter.allow("a2")  # different client
 
 
 # -----------------------------------------------------------------------

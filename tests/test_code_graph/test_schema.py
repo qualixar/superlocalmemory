@@ -90,13 +90,15 @@ class TestSchemaCreation:
         )
         # Edge with valid FK should succeed
         conn.execute(
-            "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, updated_at) "
+            "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, "
+            "updated_at) "
             "VALUES ('e1', 'calls', 'n1', 'n1', 'test.py', 1.0, 1.0)"
         )
         # Edge with invalid FK should fail
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, updated_at) "
+                "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, "
+                "updated_at) "
                 "VALUES ('e2', 'calls', 'bogus', 'n1', 'test.py', 1.0, 1.0)"
             )
 
@@ -107,7 +109,8 @@ class TestSchemaCreation:
             "VALUES ('n1', 'function', 'foo', 'test.py::foo', 'test.py', 1.0, 1.0)"
         )
         conn.execute(
-            "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, updated_at) "
+            "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, created_at, "
+            "updated_at) "
             "VALUES ('e1', 'calls', 'n1', 'n1', 'test.py', 1.0, 1.0)"
         )
         conn.execute("DELETE FROM graph_nodes WHERE node_id = 'n1'")
@@ -129,14 +132,17 @@ class TestSchemaCreation:
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, confidence, created_at, updated_at) "
+                "INSERT INTO graph_edges (edge_id, kind, source_node_id, target_node_id, file_path, confidence, "
+                "created_at, updated_at) "
                 "VALUES ('e1', 'calls', 'n1', 'n1', 'test.py', 1.5, 1.0, 1.0)"
             )
 
     def test_fts5_auto_sync_on_insert(self, conn: sqlite3.Connection):
         conn.execute(
-            "INSERT INTO graph_nodes (node_id, kind, name, qualified_name, file_path, signature, created_at, updated_at) "
-            "VALUES ('n1', 'function', 'authenticate_user', 'auth.py::authenticate_user', 'auth.py', 'def authenticate_user(token)', 1.0, 1.0)"
+            "INSERT INTO graph_nodes (node_id, kind, name, qualified_name, file_path, signature, created_at, "
+            "updated_at) "
+            "VALUES ('n1', 'function', 'authenticate_user', 'auth.py::authenticate_user', 'auth.py', 'def "
+            "authenticate_user(token)', 1.0, 1.0)"
         )
         conn.commit()
         results = conn.execute(

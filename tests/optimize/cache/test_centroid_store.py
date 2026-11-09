@@ -111,7 +111,9 @@ def test_centroid_store_thread_safety():
             errors.append(exc)
 
     threads = [threading.Thread(target=updater, args=(i,)) for i in range(4)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     assert errors == []
     assert cs.count("t") == 200

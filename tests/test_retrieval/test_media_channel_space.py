@@ -160,7 +160,9 @@ def test_a_paired_match_of_0_08_survives_the_floor_and_a_separate_one_does_not()
 
     pp = SpacePlan("paired", "v", "", 4, NOMIC, True, "t", 0.05)
     hit = FusionResult(fact_id="f", fused_score=0.5, channel_scores={"media": 0.08})
-    keep = lambda fl: RetrievalEngine._apply_evidence_floor([hit], {}, 0.60, fl)
+    def keep(fl):
+        return RetrievalEngine._apply_evidence_floor([hit], {}, 0.60, fl)
+
     assert keep(floor_for(pp)) == [hit]
     assert keep(floor_for(separate())) == []
     assert RetrievalEngine._media_floor(SimpleNamespace(_config=RetrievalConfig(),

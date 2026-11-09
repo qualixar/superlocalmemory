@@ -10,6 +10,8 @@ port, process id and instance id. The command line and MCP send the key file's
 capability, a signed-in dashboard sends its session, so both keep the full answer.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

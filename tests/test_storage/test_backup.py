@@ -357,7 +357,7 @@ class TestGcOldBackups:
         root = tmp_path / "snapshots"
         names = [f"memory-2026010{i}-120000" for i in range(5)]
         # offsets: 400s, 300s, 200s, 100s, 10s ago → oldest first in the list
-        files = self._make_snapshot_files(root, names, [400, 300, 200, 100, 10])
+        self._make_snapshot_files(root, names, [400, 300, 200, 100, 10])
 
         _gc_old_backups(root, keep=2)
 

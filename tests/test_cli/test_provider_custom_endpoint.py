@@ -268,7 +268,7 @@ class TestCliWiring:
             capture_output=True, text=True, timeout=30, env=env,
         )
         line = next(
-            (l for l in result.stderr.splitlines() if l.startswith("CAPTURED:")),
+            (out_line for out_line in result.stderr.splitlines() if out_line.startswith("CAPTURED:")),
             None,
         )
         assert line is not None, f"parse_args was never reached: {result.stderr}"

@@ -80,7 +80,7 @@ class TestSchemaMigration:
 
     def test_migration_creates_ingestion_log(self, tmp_db):
         from superlocalmemory.storage.schema_v343 import apply_v343_schema
-        result = apply_v343_schema(str(tmp_db))
+        apply_v343_schema(str(tmp_db))
 
         conn = sqlite3.connect(str(tmp_db))
         tables = [r[0] for r in conn.execute(
@@ -105,7 +105,7 @@ class TestSchemaMigration:
 
     def test_migration_idempotent(self, tmp_db):
         from superlocalmemory.storage.schema_v343 import apply_v343_schema
-        r1 = apply_v343_schema(str(tmp_db))
+        apply_v343_schema(str(tmp_db))
         r2 = apply_v343_schema(str(tmp_db))
         # Second call should skip
         assert "already applied" in str(r2.get("skipped", []))

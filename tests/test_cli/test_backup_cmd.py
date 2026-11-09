@@ -7,6 +7,8 @@ The recovery key is read from stdin, never from the command line, so it does
 not end up in shell history or the process list.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import argparse

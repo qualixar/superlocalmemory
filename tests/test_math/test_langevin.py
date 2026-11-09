@@ -207,7 +207,13 @@ class TestBatchStep:
         facts = [
             {"fact_id": "f1", "position": [0.0] * 4, "access_count": 10, "age_days": 1.0, "importance": 0.8},
             {"fact_id": "f2", "position": [0.2] * 4, "access_count": 0, "age_days": 30.0, "importance": 0.2},
-            {"fact_id": "f3", "position": [0.1, -0.1, 0.05, 0.0], "access_count": 5, "age_days": 7.0, "importance": 0.5},
+            {
+                "fact_id": "f3",
+                "position": [0.1, -0.1, 0.05, 0.0],
+                "access_count": 5,
+                "age_days": 7.0,
+                "importance": 0.5,
+            },
         ]
         results = ld.batch_step(facts, seed=42)
         assert len(results) == 3

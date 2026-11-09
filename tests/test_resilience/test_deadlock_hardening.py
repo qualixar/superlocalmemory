@@ -298,7 +298,7 @@ class TestStalePlainPidFiles:
         _write_plain_pid(reranker_pid, _dead_pid())
         _write_plain_pid(embedding_lock, _dead_pid())
 
-        report = reap_stale_artifacts(tmp_path)
+        reap_stale_artifacts(tmp_path)
         assert not reranker_pid.exists()
         assert not embedding_lock.exists()
 

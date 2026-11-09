@@ -30,7 +30,6 @@ def _make_req(
 
 
 def _make_req_with_content(content: str, compress_mode: str = "safe") -> ProxyRequest:
-    large_content = "word " * 400  # non-JSON, non-code, just prose
     # Embed the target content in a JSON-understood block to force JSON detection
     # For JSON content tests, use actual JSON
     return ProxyRequest(
@@ -211,7 +210,7 @@ def test_on_compress_called_on_success() -> None:
     """on_compress fires when Layer 1 normalization reduces tokens."""
     router = CompressRouter()
     calls: list = []
-    router.on_compress = lambda b, a, l: calls.append((b, a, l))
+    router.on_compress = lambda b, a, is_lossy: calls.append((b, a, is_lossy))
 
     # Prose with excessive whitespace bloat — Layer 1 should normalize it
     bloated_prose = ("word " * 50 + "   \n") * 30 + "\n\n\n\n" + ("more prose " * 50 + "   \n") * 30
@@ -369,18 +368,25 @@ def test_compress_tool_result_nested_content() -> None:
             "messages": [
                 {
                     "role": "assistant",
-                    "content": [{
-                        "type": "tool_result",
-                        "content": [{"type": "text", "text": large_text}],
-                    }],
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "content": [{"type": "text", "text": large_text}],
+                        }
+                    ],
                 },
             ]
         },
-        body_bytes=json.dumps({
-            "messages": [
-                {"role": "assistant", "content": [{"type": "tool_result", "content": [{"type": "text", "text": large_text}]}]},
-            ]
-        }).encode(),
+        body_bytes=json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_result", "content": [{"type": "text", "text": large_text}]}],
+                    },
+                ]
+            }
+        ).encode(),
         request_id="test-nested-tool-result",
         stream=False,
         has_tools=False,

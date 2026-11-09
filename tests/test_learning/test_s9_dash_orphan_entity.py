@@ -118,7 +118,7 @@ def test_mine_entity_preferences_skips_orphan(tmp_path: Path) -> None:
         })
 
     store = BehavioralPatternStore(str(tmp_path / "learning.db"))
-    gen = pattern_miner._mine_entity_preferences(
+    pattern_miner._mine_entity_preferences(
         store, conn, facts, profile_id="p", dry_run=False,
     )
 

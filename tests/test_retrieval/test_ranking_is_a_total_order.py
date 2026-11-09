@@ -169,7 +169,6 @@ def test_no_score_only_numpy_top_k_in_retrieval_path() -> None:
 def test_numpy_detector_can_actually_fail() -> None:
     """Guard on the numpy detector: a detector that always returns nothing cannot pass."""
     bad = ast.parse("top = np.argsort(-scores)[:k]")
-    good = ast.parse("top = np.argsort(-scores)[:k]  # tie-break: caller re-sorts by fact_id")
     assert _numpy_top_k_without_tiebreak(bad), "detector missed np.argsort"
     # The tree has no source lines, so the comment-based exemption cannot fire
     # from the tree alone — callers that want exemption must pass source text.

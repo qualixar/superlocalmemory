@@ -56,7 +56,6 @@ def _age(engine, fact_id: str, seconds: float) -> None:
 
 
 def _state(engine, fact_id: str) -> dict:
-    index = engine._retrieval_engine._bm25
     return {
         "fact": _n(engine, "SELECT COUNT(*) AS n FROM atomic_facts WHERE fact_id = ?", (fact_id,)),
         "bm25": _n(engine, "SELECT COUNT(*) AS n FROM bm25_tokens WHERE fact_id = ?", (fact_id,)),

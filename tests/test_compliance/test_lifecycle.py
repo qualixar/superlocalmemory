@@ -42,7 +42,6 @@ def db(tmp_path: Path) -> DatabaseManager:
     db_path = tmp_path / "lifecycle_test.db"
     mgr = DatabaseManager(db_path)
     mgr.initialize(real_schema)
-    db_path_str = str(db_path)
     mgr.store_memory(MemoryRecord(memory_id="m0", content="parent"))
     return mgr
 
@@ -253,7 +252,7 @@ class TestRunMaintenance:
             langevin_position=[0.1, 0.2],
             created_at=datetime.now(UTC).isoformat(),
         ))
-        counts = mgr.run_maintenance("default")
+        mgr.run_maintenance("default")
         assert mock_langevin.step.called
 
 

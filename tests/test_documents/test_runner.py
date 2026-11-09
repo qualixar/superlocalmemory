@@ -47,8 +47,14 @@ def run(store, tmp_path, pages, *, client=None, runtime=None, config=CFG, **spec
 def test_pages_become_memories_with_their_source(store, tmp_path, root):
     receipt = submit(store, pdf_input(("one", "two", "three"), file_name="scan.pdf"), content=f"my note {KEY}")
     long_text = f"Invoice number 42 total due, key {KEY} end"
-    service, client, runtime = run(store, tmp_path, [long_text, "", ""], client=FakeClient(ocr={2: "Scanned receipt text here"}),
-                                   title="Quarterly", created="2024-01-31")
+    service, client, runtime = run(
+        store,
+        tmp_path,
+        [long_text, "", ""],
+        client=FakeClient(ocr={2: "Scanned receipt text here"}),
+        title="Quarterly",
+        created="2024-01-31",
+    )
     assert service.process_next() is True and service.process_next() is False
     doc = store.get_document(receipt.document_id)
     assert doc["state"] == "ready" and doc["page_count"] == 3 and doc["title"] == "Quarterly"
@@ -66,7 +72,12 @@ def test_pages_become_memories_with_their_source(store, tmp_path, root):
     assert words[0].metadata["_slm_source"] == {"type": "document", "document_id": receipt.document_id}
     assert client.kinds("ocr") == [2, 3] and client.kinds("embed") == [1, 2, 3]
     item = store.get_item(pages[1]["media_id"])
-    assert (item["kind"], item["document_id"], item["page_no"], item["origin"]) == ("page", receipt.document_id, 1, "document")
+    assert (item["kind"], item["document_id"], item["page_no"], item["origin"]) == (
+        "page",
+        receipt.document_id,
+        1,
+        "document",
+    )
     assert item["anchor_memory_id"] == "mem1" and item["thumb_webp"] == b"RIFFthumb" and item["remote_ok"] == 0
     assert store.get_item(pages[2]["media_id"])["remote_ok"] == 1
     job = store.get_job(receipt.job_id)

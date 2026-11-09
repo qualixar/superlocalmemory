@@ -1,5 +1,7 @@
 """Stored originals belong to one profile: the same bytes saved by two profiles are two files."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from superlocalmemory.media import erasure, files

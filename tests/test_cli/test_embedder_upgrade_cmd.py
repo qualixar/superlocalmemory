@@ -51,7 +51,9 @@ def _run(**kw):
 
 def _tty(monkeypatch, value, answer=""):
     monkeypatch.setattr(embedder_cmd, "_is_tty", lambda: value)
-    monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()) if answer is None else answer)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()) if answer is None else answer
+    )
 
 
 def _posts(seen):

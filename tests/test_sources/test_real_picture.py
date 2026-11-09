@@ -19,7 +19,9 @@ def pics(env, monkeypatch):
     monkeypatch.setattr("superlocalmemory.runtimes.worker_client.media_embedder", lambda: FakeClient())
     db = sqlite3.connect(":memory:", check_same_thread=False)
     db.row_factory = sqlite3.Row
-    db.execute("CREATE TABLE atomic_facts(fact_id, memory_id, lifecycle DEFAULT 'active', profile_id DEFAULT 'default')")
+    db.execute(
+        "CREATE TABLE atomic_facts(fact_id, memory_id, lifecycle DEFAULT 'active', profile_id DEFAULT 'default')"
+    )
     env.runtime._db = ListDb(db)
     remember, archive = env.runtime.remember, env.runtime.archive_fact
 

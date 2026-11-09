@@ -22,6 +22,8 @@ These tests cover the WRITE-PATH guard (POST requests from untrusted browser
 Origin) which is a DIFFERENT code path from the token-route client check.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import pytest

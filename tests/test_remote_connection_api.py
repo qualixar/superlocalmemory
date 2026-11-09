@@ -33,11 +33,14 @@ def configured(tmp_path, monkeypatch):
     assert router is not None and RemoteConnectionService is not None
     from superlocalmemory.core import security_primitives
     monkeypatch.setattr(security_primitives, "verify_install_token", lambda token: token == "synthetic-local-token")
-    app = FastAPI(); app.include_router(router)
+    app = FastAPI()
+    app.include_router(router)
     app.state.profile_runtime = SimpleNamespace(snapshot=SimpleNamespace(profile_id="default"))
     app.state.daemon_descriptor = SimpleNamespace(port=9999)
     provider = Provider()
-    app.state.remote_connections = RemoteConnectionService(EnrollmentJournal(tmp_path / "remote"), provider, hosts=("muse",))
+    app.state.remote_connections = RemoteConnectionService(
+        EnrollmentJournal(tmp_path / "remote"), provider, hosts=("muse",)
+    )
     with TestClient(app, base_url="http://127.0.0.1:9999", client=("127.0.0.1", 5000)) as client:
         yield client, provider, app
 
@@ -48,7 +51,8 @@ def headers(**extra):
 
 def test_disabled_endpoint_does_not_create_remote_state(tmp_path):
     assert router is not None
-    app = FastAPI(); app.include_router(router)
+    app = FastAPI()
+    app.include_router(router)
     app.state.profile_runtime = SimpleNamespace(snapshot=SimpleNamespace(profile_id="default"))
     with TestClient(app, base_url="http://127.0.0.1:9999", client=("127.0.0.1", 5000)) as client:
         response = client.get("/api/v3/connections/status")
@@ -73,20 +77,30 @@ def test_real_route_acks_pending_and_retry_does_not_repeat_provider(configured):
 
 def test_mutation_requires_explicit_install_credential(configured):
     client, provider, _ = configured
-    assert client.post("/api/v3/connections/initiate", headers={"Idempotency-Key": "a" * 32}, json=payload()).status_code == 403
+    assert (
+        client.post("/api/v3/connections/initiate", headers={"Idempotency-Key": "a" * 32}, json=payload()).status_code
+        == 403
+    )
     assert provider.calls == 0
 
 
 @pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1:4444", "null"])
 def test_cross_origin_denied_even_with_install_token(configured, origin):
     client, provider, _ = configured
-    assert client.post("/api/v3/connections/initiate", headers=headers(Origin=origin), json=payload()).status_code == 403
+    assert (
+        client.post("/api/v3/connections/initiate", headers=headers(Origin=origin), json=payload()).status_code == 403
+    )
     assert provider.calls == 0
 
 
 def test_same_origin_allowed(configured):
     client, _, _ = configured
-    assert client.post("/api/v3/connections/initiate", headers=headers(Origin="http://127.0.0.1:9999"), json=payload()).status_code == 200
+    assert (
+        client.post(
+            "/api/v3/connections/initiate", headers=headers(Origin="http://127.0.0.1:9999"), json=payload()
+        ).status_code
+        == 200
+    )
 
 
 def test_network_peer_and_dns_rebinding_host_denied(configured):
@@ -99,9 +113,11 @@ def test_network_peer_and_dns_rebinding_host_denied(configured):
 
 def test_selected_profile_and_host_cannot_be_forged(configured):
     client, provider, _ = configured
-    data = payload(); data["profile_id"] = "other"
+    data = payload()
+    data["profile_id"] = "other"
     assert client.post("/api/v3/connections/initiate", headers=headers(), json=data).status_code == 409
-    data = payload(); data["host"] = "chatgpt"
+    data = payload()
+    data["host"] = "chatgpt"
     assert client.post("/api/v3/connections/initiate", headers=headers(), json=data).status_code == 403
     assert provider.calls == 0
 
@@ -114,7 +130,8 @@ def test_selected_profile_and_host_cannot_be_forged(configured):
 ])
 def test_strict_consent_schema(configured, change):
     client, provider, _ = configured
-    data = payload(); change(data)
+    data = payload()
+    change(data)
     assert client.post("/api/v3/connections/initiate", headers=headers(), json=data).status_code == 422
     assert provider.calls == 0
 
@@ -122,7 +139,8 @@ def test_strict_consent_schema(configured, change):
 def test_intent_conflict_and_no_sensitive_metadata(configured):
     client, _, _ = configured
     client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
-    changed = payload(); changed["permissions"]["write"] = True
+    changed = payload()
+    changed["permissions"]["write"] = True
     assert client.post("/api/v3/connections/initiate", headers=headers(), json=changed).status_code == 409
     response = client.get("/api/v3/connections/status")
     for field in ["synthetic-local-token", "lease_token", "remote_reference", "authorization_url", "deviceToken"]:
@@ -143,17 +161,30 @@ def test_sign_in_receipt_is_bound_and_survives_service_restart(configured):
     client, provider, app = configured
     async def enroll(**args):
         provider.calls += 1
-        return GatewayReceipt(args["connection_id"], "https://auth.superlocalmemory.com/owner-login?connection_id=" + args["connection_id"])
+        return GatewayReceipt(
+            args["connection_id"],
+            "https://auth.superlocalmemory.com/owner-login?connection_id=" + args["connection_id"],
+        )
+
     provider.enroll = enroll
     first = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
     assert first.status_code == 200 and first.json()["authorization_url"]
     service = app.state.remote_connections
-    app.state.remote_connections = RemoteConnectionService(EnrollmentJournal(service.journal.path.parent), provider, hosts=("muse",))
+    app.state.remote_connections = RemoteConnectionService(
+        EnrollmentJournal(service.journal.path.parent), provider, hosts=("muse",)
+    )
     second = client.post("/api/v3/connections/initiate", headers=headers(), json=payload())
     assert second.json() == first.json() and provider.calls == 1
 
 
-@pytest.mark.parametrize("url", ["https://evil.example/owner-login?connection_id=x", "https://auth.superlocalmemory.com/owner-login?connection_id=foreign", "https://auth.superlocalmemory.com/owner-login?connection_id=x&token=SECRET"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/owner-login?connection_id=x",
+        "https://auth.superlocalmemory.com/owner-login?connection_id=foreign",
+        "https://auth.superlocalmemory.com/owner-login?connection_id=x&token=SECRET",
+    ],
+)
 def test_untrusted_provider_receipt_is_not_exposed(configured, url):
     client, provider, _ = configured
     async def enroll(**args):
@@ -180,8 +211,18 @@ def test_cancelled_intent_and_late_provider_receipt_never_ack_connected(configur
 
 def test_sec_fetch_site_and_missing_retry_key_are_denied(configured):
     client, provider, _ = configured
-    assert client.post("/api/v3/connections/initiate", headers=headers(**{"Sec-Fetch-Site": "cross-site"}), json=payload()).status_code == 403
-    assert client.post("/api/v3/connections/initiate", headers={"X-Install-Token": "synthetic-local-token"}, json=payload()).status_code == 400
+    assert (
+        client.post(
+            "/api/v3/connections/initiate", headers=headers(**{"Sec-Fetch-Site": "cross-site"}), json=payload()
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/v3/connections/initiate", headers={"X-Install-Token": "synthetic-local-token"}, json=payload()
+        ).status_code
+        == 400
+    )
     assert provider.calls == 0
 
 
@@ -267,7 +308,8 @@ def test_cancel_cannot_cross_profile_or_discover_foreign_connections(configured)
 
 def test_generic_mcp_client_still_requires_allowed_catalog_and_opt_in(configured):
     client, provider, app = configured
-    data = payload(); data['host'] = 'other_mcp'
+    data = payload()
+    data["host"] = "other_mcp"
     assert client.post('/api/v3/connections/initiate', headers=headers(), json=data).status_code == 403
     app.state.remote_connections.hosts = ('muse', 'other_mcp')
     data['remote_opt_in'] = False
@@ -313,7 +355,21 @@ class AppsRuntime:
     async def list_apps(self, owner, profile, connection_id):
         if self.error:
             raise ValueError(self.error)
-        return {"connection_id": connection_id, "apps": [{"authorization_id": "app-1", "name": "Composio", "client_host": "backend.composio.dev", "permissions": {"read": True, "save": True, "session": False}, "version": 1, "connected_at_ms": 1, "last_used_at_ms": None}]}
+        return {
+            "connection_id": connection_id,
+            "apps": [
+                {
+                    "authorization_id": "app-1",
+                    "name": "Composio",
+                    "client_host": "backend.composio.dev",
+                    "permissions": {"read": True, "save": True, "session": False},
+                    "version": 1,
+                    "connected_at_ms": 1,
+                    "last_used_at_ms": None,
+                }
+            ],
+        }
+
     async def revoke_app(self, owner, profile, connection_id, authorization_id, expected_version):
         if self.error:
             raise ValueError(self.error)
@@ -331,11 +387,15 @@ def test_connected_apps_list_is_served_to_the_local_dashboard(configured):
 
 def test_removing_an_app_needs_the_install_credential_and_current_profile(configured):
     client, _, app = configured
-    runtime = AppsRuntime(); app.state.remote_connection_runtime = runtime
+    runtime = AppsRuntime()
+    app.state.remote_connection_runtime = runtime
     url = "/api/v3/connections/" + "c" * 32 + "/apps/app-1/revoke"
     assert client.post(url, json={"profile_id": "default", "expected_version": 1}).status_code == 403
     assert client.post(url, headers=headers(), json={"profile_id": "work", "expected_version": 1}).status_code == 409
-    assert client.post(url, headers=headers(), json={"profile_id": "default", "expected_version": 1, "x": 1}).status_code == 422
+    assert (
+        client.post(url, headers=headers(), json={"profile_id": "default", "expected_version": 1, "x": 1}).status_code
+        == 422
+    )
     ok = client.post(url, headers=headers(), json={"profile_id": "default", "expected_version": 1})
     assert ok.status_code == 200 and ok.json() == {"revoked": True}
     assert runtime.removed == [(runtime.removed[0][0], "default", "c" * 32, "app-1", 1)]
@@ -346,7 +406,11 @@ def test_connected_apps_errors_are_mapped_and_sanitized(configured, code, status
     client, _, app = configured
     app.state.remote_connection_runtime = AppsRuntime(code)
     listed = client.get("/api/v3/connections/" + "c" * 32 + "/apps")
-    removed = client.post("/api/v3/connections/" + "c" * 32 + "/apps/app-1/revoke", headers=headers(), json={"profile_id": "default", "expected_version": 1})
+    removed = client.post(
+        "/api/v3/connections/" + "c" * 32 + "/apps/app-1/revoke",
+        headers=headers(),
+        json={"profile_id": "default", "expected_version": 1},
+    )
     assert listed.status_code == status and removed.status_code == status
     assert "SECRET" not in listed.text and "SECRET" not in removed.text
 
@@ -378,7 +442,8 @@ class AbilitiesRuntime(AppsRuntime):
 def test_the_dashboard_reads_and_sets_the_second_yes(configured):
     """Package D: the mesh/media opt-in is a dashboard click, not only a terminal command."""
     client, _, app = configured
-    runtime = AbilitiesRuntime(); app.state.remote_connection_runtime = runtime
+    runtime = AbilitiesRuntime()
+    app.state.remote_connection_runtime = runtime
     url = "/api/v3/connections/" + "c" * 32 + "/abilities"
     got = client.get(url)
     assert got.status_code == 200 and got.json() == {"connection_id": "c" * 32, "mesh": False, "media": False}

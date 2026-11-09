@@ -51,24 +51,24 @@ def migrator(tmp_path):
 
 def test_detect_v2_when_exists(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db")
-    assert migrator.detect_v2() == True
+    assert migrator.detect_v2()
 
 
 def test_detect_v2_when_missing(tmp_path, migrator):
-    assert migrator.detect_v2() == False
+    assert not migrator.detect_v2()
 
 
 def test_v2_stats(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db", n_memories=25)
     stats = migrator.get_v2_stats()
-    assert stats["exists"] == True
+    assert stats["exists"]
     assert stats["memory_count"] == 25
 
 
 def test_migrate_creates_v3_dir(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db")
     result = migrator.migrate()
-    assert result["success"] == True
+    assert result["success"]
     assert (tmp_path / ".superlocalmemory").exists()
 
 
@@ -102,17 +102,17 @@ def test_migrate_preserves_data(tmp_path, migrator):
 
 def test_is_already_migrated(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db")
-    assert migrator.is_already_migrated() == False
+    assert not migrator.is_already_migrated()
     migrator.migrate()
-    assert migrator.is_already_migrated() == True
+    assert migrator.is_already_migrated()
 
 
 def test_migrate_idempotent(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db")
     result1 = migrator.migrate()
-    assert result1["success"] == True
+    assert result1["success"]
     result2 = migrator.migrate()
-    assert result2["success"] == True
+    assert result2["success"]
     assert result2.get("message") == "Already migrated"
 
 
@@ -120,17 +120,17 @@ def test_rollback(tmp_path, migrator):
     _create_v2_db(tmp_path / ".claude-memory" / "memory.db", n_memories=10)
     migrator.migrate()
     result = migrator.rollback()
-    assert result["success"] == True
+    assert result["success"]
     # Original .claude-memory should be restored (as dir, not symlink)
     assert (tmp_path / ".claude-memory").exists()
 
 
 def test_migrate_no_v2(tmp_path, migrator):
     result = migrator.migrate()
-    assert result["success"] == False
+    assert not result["success"]
     assert "No V2" in result["error"]
 
 
 def test_v2_stats_no_install(tmp_path, migrator):
     stats = migrator.get_v2_stats()
-    assert stats["exists"] == False
+    assert not stats["exists"]

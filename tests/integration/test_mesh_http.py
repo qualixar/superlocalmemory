@@ -6,6 +6,8 @@ also covers the v3.6.12 fixes: shared-secret enforcement for non-loopback
 callers (mesh-1) and lock-release rowcount honesty (mesh-2).
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import sqlite3

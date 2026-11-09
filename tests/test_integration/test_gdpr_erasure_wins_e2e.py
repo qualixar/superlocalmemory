@@ -9,6 +9,8 @@ truthfully, the case is closed with a text-free audit row, and the memory's
 words are left in no table of any database in the data root.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import time

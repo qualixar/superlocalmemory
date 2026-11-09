@@ -340,16 +340,19 @@ class TestM01KNNScoreNormalization:
         After  fix: both normalize to 0.85, max() is a tie, no bias.
         """
         raw_score = 0.7
-        expected = (raw_score + 1.0) / 2.0  # 0.85
 
         # Simulate external_score for the same cosine similarity.
-        external_score_for_same_cosine = (raw_score + 1.0) / 2.0
 
         channel = self._make_channel([("fact-001", raw_score)])
         q_vec = np.ones(4, dtype=np.float32) * 0.5
 
         # Make the DB report the same fact as external too.
-        external_vec = np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float32)  # same direction as q_vec
+        # A WEAKER external copy: cosine 0.5 with q_vec, normalised (0.5 + 1) / 2
+        # = 0.75. On one scale the KNN hit (0.7 -> 0.85) must win; before the
+        # fix the raw 0.7 lost to the external 0.75.
+        along = np.ones(4, dtype=np.float32) / 2.0
+        across = np.array([1.0, -1.0, 0.0, 0.0], dtype=np.float32) / np.sqrt(2.0)
+        external_vec = (0.5 * along + np.sqrt(0.75) * across).astype(np.float32)
         channel._db.get_external_visible_embeddings.return_value = [
             ("fact-001", external_vec),
         ]
@@ -361,13 +364,10 @@ class TestM01KNNScoreNormalization:
             top_k=5,
         )
 
-        if result:
-            score = result[0][1]
-            # After fix: score is max(normalized_knn, external) = max(0.85, external)
-            # Both should be in the same range.
-            assert score >= 0.5, (
-                f"Merged score {score:.4f} must be >= 0.5 after normalization fix"
-            )
+        assert result, "the fact must be returned"
+        score = result[0][1]
+        # max(normalised KNN 0.85, external 0.75) = 0.85, not the external 0.75.
+        assert score == pytest.approx(0.85, abs=0.01), score
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ on a private port and a synthetic store.
 Needs ``SLM_TEST_MODEL_CACHE`` (see test_erasure_integrity_e2e.py).
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

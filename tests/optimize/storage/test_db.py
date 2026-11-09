@@ -310,7 +310,7 @@ def test_c06_aes_key_persisted_to_file(tmp_path: Path) -> None:
     original = db_mod._KEY_FILE
     db_mod._KEY_FILE = key_file
     try:
-        db = CacheDB(tmp_path / "llmcache.db")
+        CacheDB(tmp_path / "llmcache.db")
         assert key_file.exists(), "opt-key.bin must be created on first DB open"
         key_bytes = key_file.read_bytes()
         assert len(key_bytes) == 32, f"Persisted key must be 32 bytes, got {len(key_bytes)}"

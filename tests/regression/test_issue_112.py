@@ -232,5 +232,5 @@ class TestDashboardDescribesTheModeNotTheVendor:
 
         js = (Path(__file__).resolve().parents[2] / "src" / "superlocalmemory"
               / "ui" / "js" / "dashboard.js").read_text(encoding="utf-8")
-        line = next(l for l in js.splitlines() if "'dashboard-mode-desc'" in l)
+        line = next(candidate for candidate in js.splitlines() if "'dashboard-mode-desc'" in candidate)
         assert "mode_tagline" in line and "provider" not in line

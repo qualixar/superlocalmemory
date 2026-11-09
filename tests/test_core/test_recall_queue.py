@@ -239,7 +239,7 @@ def test_completed_without_result_json_forbidden(tmp_path: Path) -> None:
 # -----------------------------------------------------------------------
 
 def test_idempotency_key_unique_per_job_type(tmp_path: Path) -> None:
-    rq = _imports()
+    _imports()
     q = _make_queue(tmp_path)
     r1 = q.enqueue_job(
         job_type="consolidate", idempotency_key="mem-1:ep-5",

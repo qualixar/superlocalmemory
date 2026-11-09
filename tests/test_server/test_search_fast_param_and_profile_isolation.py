@@ -278,7 +278,6 @@ def test_concurrent_recalls_do_not_corrupt_each_others_disabled_channels(
         barrier.wait(timeout=2)  # synchronize both recalls at channel-execution
         return original_run_channels(query, profile_id, strat, **kwargs)
 
-    results: dict[str, object] = {}
     exc_holder: dict[str, Exception] = {}
 
     def _fast_recall() -> None:
@@ -350,7 +349,7 @@ def test_search_returns_new_profile_data_after_switch(
     app.state.engine = engine
     app.state.config = engine._config
     client = TestClient(app)
-    headers = _daemon_headers(app)
+    _daemon_headers(app)
 
     # Store alpha-only content
     canonical_store(

@@ -42,6 +42,12 @@ each other's stores.
   the same thing. A result that names only other versions now goes below the
   rest, both before recall cuts to your limit and in the final order. An exact
   match still comes first, and nothing is dropped.
+- Recall records which memories it returned again. 3.8.6 dropped the write to
+  `fact_access_log`; on one store the last recall row was dated 26 July 2026.
+  Retention's access clock and the "active decisions" Core Memory block read
+  that table, so every recall since then counted as unread: a memory you kept
+  recalling still aged as unused, and no new decision reached the block. SLM's
+  own warm-up recalls are not counted.
 - `PromptInjector.inject_into_context` ignored its documented `total_budget`
   override; it is now split between soft prompts and memories in the configured
   ratio.

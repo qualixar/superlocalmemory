@@ -7,6 +7,8 @@ unvetted picture must not be able to remove it: the delete follows the same view
 as recall. A caller on this computer deletes anything in its profile, as before.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import asyncio

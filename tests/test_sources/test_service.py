@@ -33,7 +33,7 @@ def wait_for(cond, seconds=10.0):
 
 def test_feature_on_runs_a_queued_scan(env):
     env.write("a.md", "hello")
-    sid = env.add_and_confirm()
+    env.add_and_confirm()
     service = SourceScanService(env.host, poll_s=0.01, interval_s=3600)
     env.host.sleep = lambda s: None
     service.start()
@@ -76,7 +76,7 @@ def test_job_progress_is_recorded(env):
 
 def test_due_sources_are_rescanned_on_the_interval(env):
     env.write("a.md", "hello")
-    sid = env.add_and_confirm()
+    env.add_and_confirm()
     service = SourceScanService(env.host, poll_s=0.01, interval_s=0.0)
     env.host.sleep = lambda s: None
     service.start()

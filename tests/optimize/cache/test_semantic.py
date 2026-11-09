@@ -253,7 +253,7 @@ def test_vcache_ann_search_skips_wrong_context_fp(config_enabled, tmp_db, req_fa
     cfg = config_enabled
     # Single-turn query (no prior context) — context_fp is sentinel.
     tier = VCacheSemantic(db=tmp_db, config=cfg)
-    req = req_factory(
+    req_factory(
         [{"role": "user", "content": text}],
     )
     # Sanity: the in-memory index has one entry with empty ctx_fp.
@@ -301,7 +301,8 @@ def test_vcache_centroid_defense_blocks_outlier(config_enabled, tmp_db, req_fact
         cur.execute("UPDATE llmcache_entries SET entry_id=? WHERE cache_key=?",
                     (surrogate, f"kc_{i}"))
         cur.execute(
-            "INSERT OR REPLACE INTO llmcache_semantic_vectors (entry_id, tenant_id, vector_blob, vector_dim, model_name) "
+            "INSERT OR REPLACE INTO llmcache_semantic_vectors (entry_id, tenant_id, vector_blob, vector_dim, "
+            "model_name) "
             "VALUES (?, ?, ?, ?, ?)",
             (surrogate, tenant, v.tobytes(), _EMBED_DIM, tier._space_id),
         )

@@ -260,7 +260,7 @@ def test_chaos_6_wal_checkpoint_concurrent(queue):
 
     latencies: list[float] = []
     for i in range(200):
-        rid = queue.enqueue(query=f"c6-{i}", limit_n=3, mode="a",
+        queue.enqueue(query=f"c6-{i}", limit_n=3, mode="a",
                             agent_id="chaos6", session_id=f"s-{i % 5}")
         t0 = time.perf_counter()
         claimed = queue.claim_pending(priority="high", stall_timeout_s=5.0)
@@ -341,7 +341,7 @@ def test_chaos_8_low_fd_limit(queue):
     def _worker(tag):
         try:
             for i in range(20):
-                rid = queue.enqueue(
+                queue.enqueue(
                     query=f"c8-{tag}-{i}", limit_n=3, mode="a",
                     agent_id=f"c8-{tag}", session_id="s",
                 )

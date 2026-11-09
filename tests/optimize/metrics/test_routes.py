@@ -20,7 +20,7 @@ def _client(tmp_path, monkeypatch):
     MetricsCollector._instance = None
 
     store = ConfigStore(config_path=tmp_path / "optimize.json")
-    db = CacheDB(tmp_path / "llmcache.db")
+    CacheDB(tmp_path / "llmcache.db")
 
     monkeypatch.setattr(
         "superlocalmemory.server.routes.optimize.__name__", "optimize"
@@ -29,7 +29,6 @@ def _client(tmp_path, monkeypatch):
     # Patch the imports inside the route handlers
     import superlocalmemory.server.routes.optimize as mod
 
-    original_get_store = None
     try:
         monkeypatch.setattr(mod, "ConfigStore", lambda: store)
     except Exception:

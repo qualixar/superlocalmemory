@@ -17,6 +17,8 @@ its words.
 
 Composed path: a REAL daemon subprocess and a REAL ``slm mcp`` stdio child.
 """
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import time

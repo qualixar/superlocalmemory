@@ -621,20 +621,18 @@ class TestPostSessionTrigger:
         # Insert 5 Skill events, 2 of which are followed by Bash errors.
         for invoc in range(5):
             conn.execute(
-                "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, created_at) "
+                "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, "
+                "created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                ("sess-1", "default", "Skill",
-                 json.dumps({"skill": "bad-skill"}), "",
-                 f"2026-04-15T00:0{invoc}:00Z"),
+                ("sess-1", "default", "Skill", json.dumps({"skill": "bad-skill"}), "", f"2026-04-15T00:0{invoc}:00Z"),
             )
             # First 2 invocations get Bash error followers (negative signals)
             if invoc < NEGATIVE_SIGNALS_THRESHOLD:
                 conn.execute(
-                    "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, created_at) "
+                    "INSERT INTO tool_events (session_id, profile_id, tool_name, input_summary, output_summary, "
+                    "created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    ("sess-1", "default", "Bash", "",
-                     "error: command failed",
-                     f"2026-04-15T00:0{invoc}:01Z"),
+                    ("sess-1", "default", "Bash", "", "error: command failed", f"2026-04-15T00:0{invoc}:01Z"),
                 )
         conn.commit()
         conn.close()

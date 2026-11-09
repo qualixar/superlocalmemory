@@ -44,8 +44,15 @@ def _slm_help(cmd):
 def test_recall_help_works():
     """slm recall --help should work."""
     result = subprocess.run(
-        [sys.executable, "-c", "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','recall','--help']; main()"],
-        capture_output=True, text=True, timeout=15, env=_env(),
+        [
+            sys.executable,
+            "-c",
+            "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','recall','--help']; main()",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=_env(),
     )
     assert result.returncode == 0
     assert "query" in result.stdout.lower() or "recall" in result.stdout.lower()
@@ -53,16 +60,30 @@ def test_recall_help_works():
 
 def test_serve_help_works():
     result = subprocess.run(
-        [sys.executable, "-c", "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','serve','--help']; main()"],
-        capture_output=True, text=True, timeout=15, env=_env(),
+        [
+            sys.executable,
+            "-c",
+            "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','serve','--help']; main()",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=_env(),
     )
     assert result.returncode == 0
 
 
 def test_list_help_works():
     result = subprocess.run(
-        [sys.executable, "-c", "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','list','--help']; main()"],
-        capture_output=True, text=True, timeout=15, env=_env(),
+        [
+            sys.executable,
+            "-c",
+            "from superlocalmemory.cli.main import main; import sys; sys.argv=['slm','list','--help']; main()",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=_env(),
     )
     assert result.returncode == 0
 

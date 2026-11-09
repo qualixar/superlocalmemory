@@ -1,5 +1,7 @@
 """A profile delete whose picture move fails still completes, and the move is finished later."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import asyncio

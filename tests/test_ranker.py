@@ -72,4 +72,4 @@ def test_train_needs_enough_data():
     # Not enough data
     small_data = [{"features": {}, "label": 1.0}] * 10
     result = ranker.train(small_data)
-    assert result == False
+    assert not result

@@ -103,6 +103,31 @@ def _apply_markers_to_response(response: RecallResponse) -> None:
         r.marker = _emit_marker(r.fact.fact_id)
 
 
+def _log_recall_exposure(access_log: Any, results: list, profile_id: str) -> None:
+    """Record which memories this recall returned (``fact_access_log``).
+
+    The write was lost in 3.8.6 and nothing noticed: on the author's store the
+    last recall row is dated 26 Jul 2026. Retention's access clock and the
+    "active decisions" Core Memory block (decisions read at least N times) both
+    read this table, so every recall since then counted as unread. One batched
+    write of the final results, never raises, and skipped for SLM's own
+    warm-up recalls (``answer_check_scope.not_a_read``).
+    """
+    if access_log is None or not results:
+        return
+    from superlocalmemory.core.answer_check_scope import is_a_read
+
+    if not is_a_read():
+        return
+    try:
+        access_log.store_access_batch(
+            fact_ids=[r.fact.fact_id for r in results if getattr(r, "fact", None)],
+            profile_id=profile_id, access_type="recall",
+        )
+    except Exception as exc:  # noqa: BLE001 - logging a read never fails a recall
+        logger.debug("recall exposure log failed: %s", exc)
+
+
 def _preserve_exact_lexical_evidence(
     response: RecallResponse,
     query: str,
@@ -1632,6 +1657,8 @@ def run_recall(
     # starts from what was actually shown.
     if _sid:
         _admit_to_working_memory(response.results, profile_id, _sid)
+
+    _log_recall_exposure(access_log, response.results, profile_id)
 
     _mark("TOTAL(fisher+trust+markers)")
     response.answer_check_trace = build_trace(  # 4.1.20: Answer Check history

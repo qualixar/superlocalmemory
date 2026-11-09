@@ -20,6 +20,8 @@ Here a switch measures every memory in the target space before the swap, in
 the same job, and publishes the rows inside the swap's own transaction.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import json

@@ -105,7 +105,7 @@ def test_prompt_ebbinghaus_decay():
             "updated_at": past,
         }
     ]
-    r_high = lifecycle.compute_prompt_retention("p_high")
+    lifecycle.compute_prompt_retention("p_high")
 
     # High effectiveness + more versions = slower decay = higher retention
     # Both use 48h floor, but p_high: S_raw = 2*0.8*5 = 8 -> S=48 (floored)

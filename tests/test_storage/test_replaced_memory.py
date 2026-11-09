@@ -5,6 +5,8 @@
 """A fact written for a memory its caller already replaced is retired in the
 write's own transaction, and restored exactly when the replacement is undone."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord

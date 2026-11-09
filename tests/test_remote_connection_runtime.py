@@ -8,14 +8,33 @@ from tests.test_remote_native_enrollment_store import Backend, record
 
 @pytest.mark.asyncio
 async def test_callback_rejects_unknown_state_before_cloud_or_key_creation(tmp_path):
-    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),NativeEnrollmentStore(tmp_path/'secure',backend=Backend()),current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
-    with pytest.raises(ValueError,match='invalid_callback_state'):await runtime.callback('x'*43,'synthetic-code')
+    runtime = NativeConnectionRuntime(
+        None,
+        EnrollmentJournal(tmp_path / "journal"),
+        NativeEnrollmentStore(tmp_path / "secure", backend=Backend()),
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri="http://127.0.0.1:18767/api/v3/connections/callback",
+    )
+    with pytest.raises(ValueError, match="invalid_callback_state"):
+        await runtime.callback("x" * 43, "synthetic-code")
+
 
 @pytest.mark.asyncio
 async def test_callback_refuses_revoked_creator_permission(tmp_path):
-    store=NativeEnrollmentStore(tmp_path/'secure',backend=Backend());store.save(record())
-    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),store,current_profile=lambda:'profile',can_manage=lambda owner,profile:False,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
-    with pytest.raises(ValueError,match='creator_permission_changed'):await runtime.callback('s'*43,'synthetic-code')
+    store = NativeEnrollmentStore(tmp_path / "secure", backend=Backend())
+    store.save(record())
+    runtime = NativeConnectionRuntime(
+        None,
+        EnrollmentJournal(tmp_path / "journal"),
+        store,
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: False,
+        redirect_uri="http://127.0.0.1:18767/api/v3/connections/callback",
+    )
+    with pytest.raises(ValueError, match="creator_permission_changed"):
+        await runtime.callback("s" * 43, "synthetic-code")
+
 
 def test_confirmed_remote_cleanup_preserves_terminal_local_cancellation(tmp_path):
     journal=EnrollmentJournal(tmp_path/'journal')
@@ -39,7 +58,8 @@ def test_dashboard_runtime_installation_has_no_keyring_or_network_start(tmp_path
     from superlocalmemory.remote_connections.runtime import install_runtime
     def forbidden():raise AssertionError('keyring must stay closed before opt-in')
     monkeypatch.setattr(native,'_native_backend',forbidden)
-    app=FastAPI();app.state.daemon_descriptor=SimpleNamespace(port=18767)
+    app = FastAPI()
+    app.state.daemon_descriptor = SimpleNamespace(port=18767)
     runtime=install_runtime(app,root=tmp_path)
     assert app.state.remote_connections is runtime.service
     assert not runtime._companions
@@ -57,14 +77,25 @@ async def test_callback_completes_scope_bound_credential_without_secrets_in_publ
     pending=journal.begin('owner','profile','a'*32,payload)
     lease=journal.claim('owner','profile',pending.connection_id)
     assert journal.acknowledge('owner','profile',pending.connection_id,lease.token,lease.version,pending.connection_id)
-    backend=Backend();store=NativeEnrollmentStore(tmp_path/'secure',backend=backend)
+    backend = Backend()
+    store = NativeEnrollmentStore(tmp_path / "secure", backend=backend)
     row=replace(record(),installation_id=journal.installation_id,connection_id=pending.connection_id,intent_json=json.dumps(payload))
     store.save(row)
-    runtime=NativeConnectionRuntime(None,journal,store,current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri=row.redirect_uri)
+    runtime = NativeConnectionRuntime(
+        None,
+        journal,
+        store,
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri=row.redirect_uri,
+    )
     runtime.keys=RemoteKeyStore(tmp_path/'remote_keys.json')
     class Provider:
         async def exchange(self,row,code):return replace(row,access_token='synthetic-access')
-        async def provision(self,row):return {'device_token':'d'*64,'generation':1,'expires_at_ms':int(time.time()*1000)+60000}
+
+        async def provision(self, row):
+            return {"device_token": "d" * 64, "generation": 1, "expires_at_ms": int(time.time() * 1000) + 60000}
+
     runtime.provider=Provider()
     started=[]
     async def start(row):started.append(row.connection_id)
@@ -88,11 +119,26 @@ def enrolled_runtime(tmp_path, *, session=False, expired=False):
     pending=journal.begin('owner','profile','a'*32,payload)
     lease=journal.claim('owner','profile',pending.connection_id)
     journal.acknowledge('owner','profile',pending.connection_id,lease.token,lease.version,pending.connection_id)
-    backend=Backend();store=NativeEnrollmentStore(tmp_path/'secure',backend=backend,clock=lambda:100)
-    row=replace(record(),installation_id=journal.installation_id,connection_id=pending.connection_id,intent_json=json.dumps(payload),expires_at_ms=101000 if expired else 9999999999999)
+    backend = Backend()
+    store = NativeEnrollmentStore(tmp_path / "secure", backend=backend, clock=lambda: 100)
+    row = replace(
+        record(),
+        installation_id=journal.installation_id,
+        connection_id=pending.connection_id,
+        intent_json=json.dumps(payload),
+        expires_at_ms=101000 if expired else 9999999999999,
+    )
     store.save(row)
-    if expired:store=NativeEnrollmentStore(tmp_path/'secure',backend=backend,clock=lambda:102)
-    runtime=NativeConnectionRuntime(None,journal,store,current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri=row.redirect_uri)
+    if expired:
+        store = NativeEnrollmentStore(tmp_path / "secure", backend=backend, clock=lambda: 102)
+    runtime = NativeConnectionRuntime(
+        None,
+        journal,
+        store,
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri=row.redirect_uri,
+    )
     runtime.keys=RemoteKeyStore(tmp_path/'remote_keys.json')
     return runtime,row
 
@@ -110,7 +156,9 @@ async def test_expired_pending_cancel_uses_bootstrap_verifier_and_terminal_secur
     assert result['state']=='cancelled' and not result['cleanup_pending']
     assert calls==[row.verifier]
     assert runtime.store.by_connection(row.connection_id,for_cleanup=True) is None
-    with pytest.raises(ValueError):runtime.store.save(row)
+    with pytest.raises(ValueError):
+        runtime.store.save(row)
+
 
 @pytest.mark.asyncio
 async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_key(tmp_path,monkeypatch):
@@ -119,7 +167,11 @@ async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_
     import time
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
-    entered=threading.Event();release=threading.Event();original=runtime.keys.add;started=[]
+    entered = threading.Event()
+    release = threading.Event()
+    original = runtime.keys.add
+    started = []
+
     def delayed(*args,**kwargs):
         entered.set()
         assert release.wait(3)
@@ -127,7 +179,10 @@ async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_
     monkeypatch.setattr(runtime.keys,'add',delayed)
     class Provider:
         async def exchange(self,value,code):return replace(value,access_token='synthetic')
-        async def provision(self,value):return {'device_token':'d'*64,'generation':1,'expires_at_ms':int(time.time()*1000)+60000}
+
+        async def provision(self, value):
+            return {"device_token": "d" * 64, "generation": 1, "expires_at_ms": int(time.time() * 1000) + 60000}
+
         async def revoke(self,value):return {'revoked':True}
     runtime.provider=Provider()
     async def start(value):started.append(value.connection_id)
@@ -138,11 +193,14 @@ async def test_cancel_during_delayed_local_key_add_never_starts_and_revokes_own_
     cancel=asyncio.create_task(runtime.service.cancel(row.owner,row.profile,row.connection_id,current.version))
     try:
         for _ in range(100):
-            if runtime.journal.get(row.owner,row.profile,row.connection_id).state=='cancelled':break
+            if runtime.journal.get(row.owner, row.profile, row.connection_id).state == "cancelled":
+                break
             await asyncio.sleep(.005)
         assert runtime.journal.get(row.owner,row.profile,row.connection_id).state=='cancelled'
-    finally:release.set()
-    with pytest.raises(ValueError,match='enrollment_cancelled'):await callback
+    finally:
+        release.set()
+    with pytest.raises(ValueError, match="enrollment_cancelled"):
+        await callback
     assert (await cancel)['state']=='cancelled'
     assert not started and not any(key.active for key in runtime.keys.list())
 
@@ -153,7 +211,10 @@ async def test_session_only_consent_provisions_session_capable_origin_key(tmp_pa
     runtime,row=enrolled_runtime(tmp_path,session=True)
     class Provider:
         async def exchange(self,value,code):return replace(value,access_token='synthetic')
-        async def provision(self,value):return {'device_token':'d'*64,'generation':1,'expires_at_ms':int(time.time()*1000)+60000}
+
+        async def provision(self, value):
+            return {"device_token": "d" * 64, "generation": 1, "expires_at_ms": int(time.time() * 1000) + 60000}
+
     runtime.provider=Provider()
     async def start(value):pass
     monkeypatch.setattr(runtime,'start',start)
@@ -165,11 +226,15 @@ async def test_session_only_consent_provisions_session_capable_origin_key(tmp_pa
 async def test_completed_opt_in_restarts_stopped_companion(tmp_path):
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
-    row=replace(row,completed=True);runtime.store.save(row)
+    row = replace(row, completed=True)
+    runtime.store.save(row)
+
     class Stopped:
         _running=False
         async def start(self):self._running=True
-    stopped=Stopped();runtime._companions[row.connection_id]=stopped
+
+    stopped = Stopped()
+    runtime._companions[row.connection_id] = stopped
     await runtime.resume(row.owner,row.profile)
     assert stopped._running
 
@@ -177,19 +242,30 @@ async def test_completed_opt_in_restarts_stopped_companion(tmp_path):
 async def test_startup_restores_only_completed_authorized_current_profile_opt_ins(tmp_path,monkeypatch):
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
-    runtime.store.save(replace(row,completed=True));started=[]
+    runtime.store.save(replace(row, completed=True))
+    started = []
+
     async def start(value):started.append(value.connection_id)
     monkeypatch.setattr(runtime,'start',start)
     await runtime.restore()
     assert started==[row.connection_id]
-    started.clear();runtime.current_profile=lambda:'another-profile'
+    started.clear()
+    runtime.current_profile = lambda: "another-profile"
     await runtime.restore()
     assert not started
 
 @pytest.mark.asyncio
 async def test_local_only_restore_never_opens_keyring(tmp_path,monkeypatch):
     store=NativeEnrollmentStore(tmp_path/'secure',backend=Backend())
-    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),store,current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+    runtime = NativeConnectionRuntime(
+        None,
+        EnrollmentJournal(tmp_path / "journal"),
+        store,
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri="http://127.0.0.1:18767/api/v3/connections/callback",
+    )
+
     def forbidden(*args,**kwargs):raise AssertionError('no opt-in, no keyring')
     monkeypatch.setattr(store,'by_connection',forbidden)
     await runtime.restore()
@@ -202,16 +278,26 @@ async def test_interrupted_callback_waits_for_mutating_thread_before_disconnect_
     import time
     from dataclasses import replace
     runtime,row=enrolled_runtime(tmp_path)
-    entered=threading.Event();release=threading.Event();finished=threading.Event();original=runtime.keys.add
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    original = runtime.keys.add
+
     def delayed(*args,**kwargs):
         entered.set()
         assert release.wait(3)
-        try:return original(*args,**kwargs)
-        finally:finished.set()
+        try:
+            return original(*args, **kwargs)
+        finally:
+            finished.set()
+
     monkeypatch.setattr(runtime.keys,'add',delayed)
     class Provider:
         async def exchange(self,value,code):return replace(value,access_token='synthetic')
-        async def provision(self,value):return {'device_token':'d'*64,'generation':1,'expires_at_ms':int(time.time()*1000)+60000}
+
+        async def provision(self, value):
+            return {"device_token": "d" * 64, "generation": 1, "expires_at_ms": int(time.time() * 1000) + 60000}
+
         async def revoke(self,value):return {'revoked':True}
     runtime.provider=Provider()
     callback=asyncio.create_task(runtime.callback(row.state,'code'))
@@ -222,8 +308,10 @@ async def test_interrupted_callback_waits_for_mutating_thread_before_disconnect_
     try:
         await asyncio.sleep(.05)
         assert not cancel.done(), 'disconnect must wait for the mutation already in progress'
-    finally:release.set()
-    with pytest.raises(asyncio.CancelledError):await callback
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await callback
     await cancel
     assert finished.is_set()
     assert not any(key.active for key in runtime.keys.list())
@@ -255,7 +343,9 @@ async def test_restart_revokes_old_request_and_concurrent_retries_share_new_inte
             calls.append(('enroll', kwargs['connection_id']))
             return GatewayReceipt(kwargs['connection_id'])
     runtime.service.provider = Provider()
-    a, b = await asyncio.gather(*[runtime.service.restart('owner', 'profile', row.connection_id, version) for _ in range(2)])
+    a, b = await asyncio.gather(
+        *[runtime.service.restart("owner", "profile", row.connection_id, version) for _ in range(2)]
+    )
     assert a['connection_id'] == b['connection_id'] != row.connection_id
     assert len([x for x in calls if x[0] == 'enroll']) == 1
     old = runtime.journal.get('owner', 'profile', row.connection_id)
@@ -286,7 +376,9 @@ async def test_restart_identity_is_canonical_across_accepted_versions_and_servic
     runtime.cancel = cancel
     class Provider:
         async def enroll(self, **kwargs): return GatewayReceipt(kwargs['connection_id'])
-    provider = Provider();runtime.service.provider = provider
+
+    provider = Provider()
+    runtime.service.provider = provider
     first = await runtime.service.restart('owner', 'profile', row.connection_id, version)
     replacement = ManagedConnectionService(runtime.journal, provider, hosts=runtime.service.hosts, runtime=runtime)
     second = await replacement.restart('owner', 'profile', row.connection_id, version + 1)
@@ -319,7 +411,15 @@ def _verify_runtime(tmp_path, outcomes):
     """Runtime whose provider verify() yields the given outcomes in order (Exception = failure)."""
     import asyncio
     from types import SimpleNamespace
-    runtime=NativeConnectionRuntime(None,EnrollmentJournal(tmp_path/'journal'),NativeEnrollmentStore(tmp_path/'secure',backend=Backend()),current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+
+    runtime = NativeConnectionRuntime(
+        None,
+        EnrollmentJournal(tmp_path / "journal"),
+        NativeEnrollmentStore(tmp_path / "secure", backend=Backend()),
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri="http://127.0.0.1:18767/api/v3/connections/callback",
+    )
     row=SimpleNamespace(connection_id='c'*32)
     runtime.store=SimpleNamespace(by_connection=lambda identifier:row)
     async def current(_row):return None
@@ -328,12 +428,15 @@ def _verify_runtime(tmp_path, outcomes):
     class Provider:
         async def exchange(self,latest,code):return latest
         async def verify(self,latest):
-            calls.append(1);outcome=outcomes[min(len(calls),len(outcomes))-1]
-            if isinstance(outcome,Exception):raise outcome
+            calls.append(1)
+            outcome = outcomes[min(len(calls), len(outcomes)) - 1]
+            if isinstance(outcome, Exception):
+                raise outcome
             return outcome
     runtime.provider=Provider()
     runtime._verify_retry_base_s=0.01
-    runtime._epochs[row.connection_id]=1;runtime._states[row.connection_id]='transport_ready'
+    runtime._epochs[row.connection_id] = 1
+    runtime._states[row.connection_id] = "transport_ready"
     return runtime,row,calls,asyncio
 
 @pytest.mark.asyncio
@@ -343,7 +446,8 @@ async def test_transient_verification_failure_recovers_without_a_reconnect(tmp_p
     await runtime.verify(row,1)
     assert runtime._states[row.connection_id]=='verification_unavailable'
     for _ in range(200):
-        if runtime._states[row.connection_id]=='ready_for_client':break
+        if runtime._states[row.connection_id] == "ready_for_client":
+            break
         await asyncio.sleep(0.01)
     assert runtime._states[row.connection_id]=='ready_for_client' and len(calls)==2
     await runtime.shutdown() if hasattr(runtime,'shutdown') else None
@@ -353,9 +457,15 @@ async def test_verification_retry_never_applies_to_a_changed_connection(tmp_path
     ok={'verified':True,'connection_id':'c'*32}
     runtime,row,calls,asyncio=_verify_runtime(tmp_path,[TimeoutError(),ok])
     await runtime.verify(row,1)
-    runtime._epochs[row.connection_id]=2;runtime._states[row.connection_id]='reconnecting'
+    runtime._epochs[row.connection_id] = 2
+    runtime._states[row.connection_id] = "reconnecting"
     await asyncio.sleep(0.2)
-    assert runtime._states[row.connection_id]=='reconnecting' and row.connection_id not in runtime._verified and len(calls)==1
+    assert (
+        runtime._states[row.connection_id] == "reconnecting"
+        and row.connection_id not in runtime._verified
+        and len(calls) == 1
+    )
+
 
 @pytest.mark.asyncio
 async def test_verification_retries_are_bounded(tmp_path):
@@ -371,14 +481,32 @@ def _apps_runtime(tmp_path, gateway_apps):
     journal=EnrollmentJournal(tmp_path/'journal')
     payload={'host':'composio','profile_id':'profile','remote_opt_in':True,'permissions':{'read':True,'write':True,'correction':False,'session':False}}
     pending=journal.begin('owner','profile','a'*32,payload)
-    runtime=NativeConnectionRuntime(None,journal,NativeEnrollmentStore(tmp_path/'secure',backend=Backend()),current_profile=lambda:'profile',can_manage=lambda owner,profile:True,redirect_uri='http://127.0.0.1:18767/api/v3/connections/callback')
+    runtime = NativeConnectionRuntime(
+        None,
+        journal,
+        NativeEnrollmentStore(tmp_path / "secure", backend=Backend()),
+        current_profile=lambda: "profile",
+        can_manage=lambda owner, profile: True,
+        redirect_uri="http://127.0.0.1:18767/api/v3/connections/callback",
+    )
     row=SimpleNamespace(connection_id=pending.connection_id,completed=True,access_token='old')
-    runtime.store=SimpleNamespace(by_connection=lambda identifier,for_cleanup=False:row if identifier==pending.connection_id else None)
+    runtime.store = SimpleNamespace(
+        by_connection=lambda identifier, for_cleanup=False: row if identifier == pending.connection_id else None
+    )
     calls=[]
     class Provider:
-        async def exchange(self,latest,code):calls.append('refresh');return SimpleNamespace(**{**vars(latest),'access_token':'fresh'})
-        async def list_apps(self,latest):calls.append(('list',latest.access_token));return gateway_apps
-        async def revoke_app(self,latest,authorization_id,expected_version):calls.append(('revoke',latest.access_token,authorization_id,expected_version));return {'revoked':True,'version':expected_version+1}
+        async def exchange(self, latest, code):
+            calls.append("refresh")
+            return SimpleNamespace(**{**vars(latest), "access_token": "fresh"})
+
+        async def list_apps(self, latest):
+            calls.append(("list", latest.access_token))
+            return gateway_apps
+
+        async def revoke_app(self, latest, authorization_id, expected_version):
+            calls.append(("revoke", latest.access_token, authorization_id, expected_version))
+            return {"revoked": True, "version": expected_version + 1}
+
     runtime.provider=Provider()
     return runtime,pending.connection_id,calls
 
@@ -396,8 +524,10 @@ async def test_connected_apps_refreshes_the_owner_token_and_keeps_only_well_form
 async def test_connected_apps_are_only_visible_to_the_owning_profile(tmp_path):
     runtime,connection,calls=_apps_runtime(tmp_path,{'apps':[GOOD_APP]})
     for owner,profile in [('intruder','profile'),('owner','work')]:
-        with pytest.raises(ValueError,match='not_found'):await runtime.list_apps(owner,profile,connection)
-        with pytest.raises(ValueError,match='not_found'):await runtime.revoke_app(owner,profile,connection,'app-1',1)
+        with pytest.raises(ValueError, match="not_found"):
+            await runtime.list_apps(owner, profile, connection)
+        with pytest.raises(ValueError, match="not_found"):
+            await runtime.revoke_app(owner, profile, connection, "app-1", 1)
     assert calls==[]
 
 @pytest.mark.asyncio

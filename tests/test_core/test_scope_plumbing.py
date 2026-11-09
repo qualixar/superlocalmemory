@@ -212,8 +212,10 @@ class TestConcurrentRecallScopeIsolation:
 
             t_true = threading.Thread(target=_recall, args=(True,))
             t_false = threading.Thread(target=_recall, args=(False,))
-            t_true.start(); t_false.start()
-            t_true.join(); t_false.join()
+            t_true.start()
+            t_false.start()
+            t_true.join()
+            t_false.join()
         finally:
             re._run_channels = orig
 

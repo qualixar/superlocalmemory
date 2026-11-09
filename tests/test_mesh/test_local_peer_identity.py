@@ -27,9 +27,11 @@ def test_overview_reports_stale_and_hides_expired(broker) -> None:
         ts = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         c = broker._conn()
         c.execute("UPDATE mesh_peers SET last_heartbeat=? WHERE peer_id=?", (ts, peer))
-        c.commit(); c.close()
+        c.commit()
+        c.close()
 
-    beat(old, 10); beat(gone, 45)
+    beat(old, 10)
+    beat(gone, 45)
     status = {p["peer_id"]: p["status"] for p in broker.list_peer_overview()}
     assert status == {fresh: "active", old: "stale"}
 

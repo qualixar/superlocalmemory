@@ -21,9 +21,9 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import hashlib
-import json
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from superlocalmemory.core.config import RetrievalConfig, SLMConfig
 from superlocalmemory.core.engine import MemoryEngine
+from superlocalmemory.storage.embedding_codec import decode_embedding, decode_float_vector
 from superlocalmemory.storage.models import (
     Mode,
     RecallResponse,
@@ -195,7 +196,7 @@ def db_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def engine(db_path: Path) -> MemoryEngine:
+def engine(db_path: Path) -> Iterator[MemoryEngine]:
     """Create a Mode A MemoryEngine with mock embedder, no cross-encoder."""
     config = SLMConfig.for_mode(Mode.A, base_dir=db_path.parent)
     config.db_path = db_path
@@ -205,6 +206,9 @@ def engine(db_path: Path) -> MemoryEngine:
         use_cross_encoder=False,
         agentic_max_rounds=0,
     )
+    # Sheaf consistency is opt-in since 4.1.18 (it changed no recall answer in
+    # a measured A/B). This file is the math-layer ship gate, so it opts in.
+    config.math.sheaf_at_encoding = True
 
     eng = MemoryEngine(config)
 
@@ -218,7 +222,8 @@ def engine(db_path: Path) -> MemoryEngine:
     # artifact assertions run after materialization. See
     # tests/conftest.force_sync_enrichment.
     from tests.conftest import force_sync_enrichment
-    return force_sync_enrichment(eng)
+    yield force_sync_enrichment(eng)
+    eng.close()  # its recall threads must not outlive the test
 
 
 @pytest.fixture()
@@ -255,9 +260,12 @@ class TestStoreConversation:
     def test_fact_count_matches(self, loaded_engine: MemoryEngine) -> None:
         """Engine fact_count should match stored IDs."""
         db_count = loaded_engine.fact_count
-        stored = len(loaded_engine._test_stored_ids)  # type: ignore[attr-defined]
         assert db_count >= 10, (
             f"DO NOT SHIP: DB has only {db_count} facts (expected >= 10)"
+        )
+        stored = len(loaded_engine._test_stored_ids)  # type: ignore[attr-defined]
+        assert db_count == stored, (
+            f"fact_count {db_count} does not match the {stored} stored IDs"
         )
 
 
@@ -525,8 +533,9 @@ class TestMathLayers:
         )
         assert len(rows) > 0, "DO NOT SHIP: No facts have Fisher params in DB"
         d = dict(rows[0])
-        fisher_mean = json.loads(d["fisher_mean"])
-        fisher_variance = json.loads(d["fisher_variance"])
+        # Stored as float32 BLOBs (older stores: JSON text); one reader for both.
+        fisher_mean = decode_float_vector(d["fisher_mean"], field="fisher_mean")
+        fisher_variance = decode_float_vector(d["fisher_variance"], field="fisher_variance")
         assert len(fisher_mean) == 768, (
             f"Fisher mean dimension {len(fisher_mean)} != 768"
         )
@@ -564,10 +573,9 @@ class TestMathLayers:
             )
         }
         assert expected_exposures
-        assert all(
-            logged.get(fact_id, 0) >= count
-            for fact_id, count in expected_exposures.items()
-        )
+        missing = {f: (c, logged.get(f, 0)) for f, c in expected_exposures.items()
+                   if logged.get(f, 0) < c}
+        assert not missing, missing
 
         after = {
             str(row["fact_id"]): (int(row["access_count"]), row["fisher_variance"])
@@ -601,8 +609,8 @@ class TestMathLayers:
         if len(rows) < 2:
             pytest.skip("Need 2 facts with embeddings for sheaf test")
 
-        emb_a = np.array(json.loads(dict(rows[0])["embedding"]))
-        emb_b = np.array(json.loads(dict(rows[1])["embedding"]))
+        emb_a = np.array(decode_embedding(dict(rows[0])["embedding"]))
+        emb_b = np.array(decode_embedding(dict(rows[1])["embedding"]))
         dim = emb_a.shape[0]
         R = np.eye(dim)
         severity = coboundary_norm(emb_a, emb_b, R, R)

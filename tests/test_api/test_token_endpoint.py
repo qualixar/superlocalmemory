@@ -7,6 +7,8 @@ Contract (v3.4.22 post-ship UX fix):
 - Missing / empty token file → 500 "token_unavailable" (never echoes path)
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import tempfile

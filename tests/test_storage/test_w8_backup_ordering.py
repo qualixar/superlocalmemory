@@ -49,7 +49,7 @@ class TestApplyAllCallsBackup:
         with mock.patch(
             "superlocalmemory.storage.migration_runner._pre_migration_backup",
             wraps=lambda ld, md, **kw: _pre_migration_backup(ld, md, backups_root=backups_root),
-        ) as patched:
+        ):
             result = mr.apply_all(learning_db, memory_db)
 
         assert "_backup" in result["details"], (

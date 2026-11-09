@@ -9,7 +9,9 @@ import pytest
 
 from superlocalmemory.runtimes import media_models, space_plan, worker_client
 
-media_env = importlib.import_module("superlocalmemory.runtimes.media_env")  # the package re-exports a function of that name
+media_env = importlib.import_module(
+    "superlocalmemory.runtimes.media_env"
+)  # the package re-exports a function of that name
 
 EG2 = "google/embeddinggemma-2"
 NOMIC_VISION = "nomic-ai/nomic-embed-vision-v1.5"

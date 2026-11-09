@@ -693,7 +693,6 @@ def test_signing_key_fail_closed_on_unreadable(tmp_path: Path, monkeypatch) -> N
 
     from superlocalmemory.core.transactions import manifest_key as _mk
 
-    key_path = tmp_path / ".manifest_signing_key"
     # Simulate unreadable path by pointing at a directory
     bad_path = tmp_path / "adir"
     bad_path.mkdir()

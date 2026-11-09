@@ -75,7 +75,9 @@ def test_a_folder_that_became_unsafe_is_offline_and_nothing_is_saved(env):
     assert stats.offline is True and stats.offline_reason == "holds_credentials"
     assert env.runtime.contents() == ["note a"] and "b.md" not in env.files(sid)
     row = source_row(env, sid)
-    assert row["state"] == "offline" and json.loads(row["last_scan_stats_json"])["offline_reason"] == "holds_credentials"
+    assert (
+        row["state"] == "offline" and json.loads(row["last_scan_stats_json"])["offline_reason"] == "holds_credentials"
+    )
     (env.root / ".ssh").rmdir()
     env.scan(sid)
     assert source_row(env, sid)["state"] == "active" and env.files(sid)["b.md"]["state"] == "indexed"

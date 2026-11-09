@@ -84,7 +84,7 @@ class TestDoctorInstallVersions:
         ]
         output = _run_doctor(tmp_path=tmp_path, installs=installs)
         # No WARN about install versions when they match
-        lines = [l for l in output.splitlines() if "install_versions" in l.lower()]
+        lines = [out_line for out_line in output.splitlines() if "install_versions" in out_line.lower()]
         for line in lines:
             assert "WARN" not in line
 
@@ -115,7 +115,7 @@ class TestDoctorInstallVersions:
             },
         ]
         output = _run_doctor(tmp_path=tmp_path, installs=installs)
-        lines = [l for l in output.splitlines() if "install_versions" in l.lower()]
+        lines = [out_line for out_line in output.splitlines() if "install_versions" in out_line.lower()]
         for line in lines:
             assert "WARN" not in line
 
@@ -175,8 +175,8 @@ class TestDoctorInstallVersions:
         output = captured.getvalue()
         # migration_errors check must appear (with PASS) or simply not appear (no errors found)
         if "migration_errors" in output.lower():
-            lines = [l for l in output.splitlines() if "migration_errors" in l.lower()]
-            assert all("FAIL" not in l and "WARN" not in l for l in lines)
+            lines = [out_line for out_line in output.splitlines() if "migration_errors" in out_line.lower()]
+            assert all("FAIL" not in out_line and "WARN" not in out_line for out_line in lines)
 
     def test_doctor_json_output_includes_install_versions(self, tmp_path):
         """doctor --json output contains install_versions check."""

@@ -133,7 +133,7 @@ def build(version: str, out: Path, venv: Path, py: str) -> dict:
     data = home / env.DATA_SUBDIR
     data.mkdir(parents=True, exist_ok=True)
     inst = env.Instance(bin_dir=venv / "bin", data_dir=data, home=home, version=version)
-    errors, status, settled, start_s = [], "", 0, 0.0
+    errors, status, settled = [], "", 0
     with inst.session() as (up, start_s, note):
         if up:
             errors += write_corpus(inst)

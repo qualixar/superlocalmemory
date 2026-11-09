@@ -35,7 +35,7 @@ def _make_adapter(tmp_path: Path, *, scope: str = "project", recall=None,
                   monkeypatch=None) -> CursorAdapter:
     if monkeypatch is not None:
         monkeypatch.setenv("SLM_CURSOR_FORCE", "1")
-    fn = recall or (lambda q, l, p: [])
+    fn = recall or (lambda q, limit_arg, p: [])
     base = tmp_path if scope == "project" else tmp_path / "home"
     base.mkdir(parents=True, exist_ok=True)
     return CursorAdapter(

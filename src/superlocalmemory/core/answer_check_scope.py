@@ -64,6 +64,27 @@ def context_load() -> Iterator[None]:
         _CONTEXT.reset(token)
 
 
+_NOT_A_READ: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "slm_recall_not_a_read", default=False,
+)
+
+
+@contextlib.contextmanager
+def not_a_read() -> Iterator[None]:
+    """Within this block a recall is SLM's own (the daemon's warm-up): nobody
+    reads its results, so they are not logged as recalled (4.2.17)."""
+    token = _NOT_A_READ.set(True)
+    try:
+        yield
+    finally:
+        _NOT_A_READ.reset(token)
+
+
+def is_a_read() -> bool:
+    """Whether the current recall's results reach a person or an agent."""
+    return not _NOT_A_READ.get()
+
+
 def answer_check_skipped() -> bool:
     """Whether the current context asked for the answer check to be skipped."""
     return _SKIPPED.get()
@@ -86,6 +107,8 @@ def wants_context(value: object) -> bool:
 
 
 __all__ = [
+    "is_a_read",
+    "not_a_read",
     "ANSWER_CHECK_CONTEXT",
     "ANSWER_CHECK_PARAM",
     "ANSWER_CHECK_SKIP",

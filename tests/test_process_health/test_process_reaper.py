@@ -1025,7 +1025,7 @@ class TestReapStaleOrphanKillPath:
         mgr.register(55555, 1)  # ppid=1 => orphan
 
         # Patch the started_at to be old
-        records = mgr.read_all()
+        mgr.read_all()
         # Manually rewrite with old timestamp
         import json
         from datetime import UTC, datetime, timedelta
@@ -1177,7 +1177,7 @@ class TestReapStaleOrphanKillPath:
             lambda config: [],
         )
 
-        result = reap_stale_on_startup(config, mgr)
+        reap_stale_on_startup(config, mgr)
         # PID should NOT have been removed (PermissionError = keep it)
         records = mgr.read_all()
         pids = [r.pid for r in records]
@@ -1371,7 +1371,7 @@ class TestCleanupForceSkipsSelf:
             "superlocalmemory.infra.process_reaper.kill_orphan", mock_kill
         )
 
-        result = cleanup_all_orphans(default_reaper_config, force=True)
+        cleanup_all_orphans(default_reaper_config, force=True)
         # Self should NOT be killed
         assert os.getpid() not in killed_pids
         assert 88888 in killed_pids

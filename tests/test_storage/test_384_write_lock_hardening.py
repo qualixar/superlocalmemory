@@ -138,7 +138,7 @@ class TestNoLongWriteLockHoldAcrossSlowOp:
                 " pagerank_score REAL, computed_at TEXT)"
             )
 
-        lock = get_write_lock(db_path)
+        get_write_lock(db_path)
         memory_write_called: list[bool] = []
 
         from superlocalmemory.storage import memory_write as mw_mod

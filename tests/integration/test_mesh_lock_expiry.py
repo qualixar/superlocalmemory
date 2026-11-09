@@ -49,7 +49,8 @@ def test_expired_lock_is_free(broker):
     conn = sqlite3.connect(db)
     conn.execute("UPDATE mesh_locks SET expires_at=? WHERE file_path=?",
                  ("2000-01-01T00:00:00+00:00", "f.py"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     r = b.lock_action("f.py", "peerB", "acquire")
     assert r.get("ok") and r["action"] == "acquired"
 
@@ -60,6 +61,7 @@ def test_legacy_never_expires_lock_does_not_deadlock(broker):
     conn = sqlite3.connect(db)
     conn.execute("UPDATE mesh_locks SET expires_at=? WHERE file_path=?",
                  (_NEVER_EXPIRES, "g.py"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     r = b.lock_action("g.py", "peerB", "acquire")
     assert r.get("ok") and r["action"] == "acquired"

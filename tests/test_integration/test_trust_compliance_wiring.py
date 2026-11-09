@@ -183,7 +183,7 @@ class TestProvenanceWiring:
         from superlocalmemory.trust.provenance import ProvenanceTracker
         fid = _insert_stub_fact(db, "prov_f1")
         tracker = ProvenanceTracker(db)
-        rec = tracker.record(
+        tracker.record(
             fact_id=fid, profile_id="default",
             source_type="conversation", source_id="session_1",
             created_by="agent_x",
@@ -494,21 +494,18 @@ class TestProfileSecurityWiring:
     def test_graph_edges_are_profile_scoped(self, engine: MemoryEngine) -> None:
         self._create_profile(engine, "alpha")
         self._create_profile(engine, "beta")
+        # Two memories per profile that share people, so linking has edges to
+        # build; with one memory per profile the check below was vacuous.
         engine.profile_id = "alpha"
         engine.store("Alice met Bob at the central park near downtown during the annual festival.", session_id="s1")
+        engine.store("Alice and Bob planned the next festival at the central park.", session_id="s1")
         engine.profile_id = "beta"
         engine.store("Charlie met Diana at the beach.", session_id="s2")
-        alpha_edges = engine._db.execute(
-            "SELECT COUNT(*) AS c FROM graph_edges WHERE profile_id = ?", ("alpha",)
-        )
-        beta_edges = engine._db.execute(
-            "SELECT COUNT(*) AS c FROM graph_edges WHERE profile_id = ?", ("beta",)
-        )
-        # Both should have some edges from entity linking
-        # Key assertion: edges in alpha reference alpha entities, not beta
+        engine.store("Charlie and Diana went back to the beach in the summer.", session_id="s2")
         alpha_edge_rows = engine._db.execute(
             "SELECT source_id, target_id FROM graph_edges WHERE profile_id = ?", ("alpha",)
         )
+        assert alpha_edge_rows, "alpha's related memories must be linked"
         beta_facts = {
             dict(r)["fact_id"]
             for r in engine._db.execute(

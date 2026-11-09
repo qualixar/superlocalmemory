@@ -152,17 +152,22 @@ def test_writer_priority_blocks_new_readers() -> None:
         with lock.read():
             r2_in.set()
 
-    t_r1 = threading.Thread(target=r1); t_r1.start()
+    t_r1 = threading.Thread(target=r1)
+    t_r1.start()
     assert r1_in.wait(timeout=1.0)
-    t_w = threading.Thread(target=w); t_w.start()
+    t_w = threading.Thread(target=w)
+    t_w.start()
     assert w_queued.wait(timeout=1.0)
     time.sleep(0.1)
-    t_r2 = threading.Thread(target=r2); t_r2.start()
+    t_r2 = threading.Thread(target=r2)
+    t_r2.start()
     assert not r2_in.wait(timeout=0.3), "Reader entered despite waiting writer"
     r1_hold.set()
     assert w_done.wait(timeout=1.0), "Writer never acquired"
     assert r2_in.wait(timeout=1.0), "Reader never acquired after writer released"
-    t_r1.join(timeout=1.0); t_w.join(timeout=1.0); t_r2.join(timeout=1.0)
+    t_r1.join(timeout=1.0)
+    t_w.join(timeout=1.0)
+    t_r2.join(timeout=1.0)
 
 
 def test_exception_releases_reader() -> None:

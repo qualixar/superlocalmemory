@@ -110,7 +110,6 @@ def test_creates_venv_on_first_run(tmp_path: pytest.TempPathFactory) -> None:
     assert result.returncode == 0, (
         f"ensure-venv.sh failed on first run.\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
     )
-    venv_slm = data / "venv" / "bin" / "slm"
     # NOTE: iniconfig doesn't install a 'slm' console script — that's from superlocalmemory.
     # We verify the venv itself was created and pip-installed iniconfig.
     venv_pip = data / "venv" / "bin" / "pip"
@@ -242,9 +241,7 @@ def test_truncated_sentinel_triggers_rebuild(tmp_path: pytest.TempPathFactory) -
     sentinel.write_text("", encoding="utf-8")
 
     # Second run must re-run (not take fast-path) because sentinel hash won't match
-    t0 = time.monotonic()
     r2 = _run_venv_sh(root, data)
-    elapsed = time.monotonic() - t0
 
     assert r2.returncode == 0, f"Run after sentinel truncation failed: {r2.stderr}"
     # Should NOT be fast (must have re-installed)

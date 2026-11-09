@@ -1,5 +1,7 @@
 """A picture saved without its vector says so, and `slm media repair` fixes it (audit F9)."""
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import pytest

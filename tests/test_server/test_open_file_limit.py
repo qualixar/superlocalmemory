@@ -1,5 +1,7 @@
 """The daemon raises a low open-file soft limit (launchd's 256) at start."""
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import pytest

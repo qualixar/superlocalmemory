@@ -55,7 +55,6 @@ def test_wrap_agent_proxy_disabled_returns_1(tmp_path: Path) -> None:
 
 def test_wrap_agent_print_only_prints_instructions(capsys) -> None:
     """print-only agents print help text and return 0."""
-    cfg_path = Path("/tmp/__not_used__.json")
     # ensure_proxy_running checks module-level store; we need it to think proxy is on
     import tempfile
 

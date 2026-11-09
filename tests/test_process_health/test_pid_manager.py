@@ -156,6 +156,7 @@ class TestAtomicWrite:
         restored = mgr.read_all()
         assert len(restored) >= 1
         assert any(r.pid == 1234 for r in restored)
+        assert tmp_pid_file.read_text(encoding="utf-8") == original_content
 
 
 class TestPidRecord:
@@ -245,8 +246,6 @@ class TestWriteAllTempFileCleanup:
 
         mgr = PidManager(tmp_pid_file)
 
-        original_replace = os.replace
-        original_unlink = Path.unlink
 
         def fail_replace(src, dst):
             raise OSError("Disk full")

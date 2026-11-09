@@ -10,6 +10,8 @@ file, a picture not cleared for remote apps) is answered like an id that does no
 and nothing is written. A caller on this computer is unchanged.
 """
 
+# ruff: noqa: F811 (pytest fixtures are imported and redeclared as parameters)
+
 from __future__ import annotations
 
 import asyncio

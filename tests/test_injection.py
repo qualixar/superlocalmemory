@@ -451,7 +451,9 @@ class TestClampContent:
 class TestRenderFiltersGarbageGapFix:
     def test_no_placeholder_in_output(self):
         mems = [
-            InjectableMemory("[active_decisions] No data available.", 1.0, fact_id="j1", importance=1.0, access_count=9),
+            InjectableMemory(
+                "[active_decisions] No data available.", 1.0, fact_id="j1", importance=1.0, access_count=9
+            ),
             InjectableMemory("Real fact: SLM uses 6-channel fusion.", 0.9, fact_id="r1", importance=0.4),
         ]
         out = render_context(mems, mode="B", cfg=None, wrap=False)

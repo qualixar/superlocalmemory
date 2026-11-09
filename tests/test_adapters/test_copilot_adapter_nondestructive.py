@@ -36,7 +36,7 @@ def _adapter(tmp_path: Path, recall=None) -> CopilotAdapter:
     return CopilotAdapter(
         base_dir=tmp_path,
         sync_log_db=tmp_path / "memory.db",
-        recall_fn=recall or (lambda q, l, p: []),
+        recall_fn=recall or (lambda q, limit, p: []),
     )
 
 

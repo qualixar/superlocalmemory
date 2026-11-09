@@ -53,14 +53,14 @@ class TestDedupeBlockContent:
         lines = ["Alice likes Python.", "alice likes python.", "Bob uses Go."]
         result = dedupe_block_content(lines)
         # Only one of the Alice lines should remain
-        alice_lines = [l for l in result if "alice" in l.lower() and "python" in l.lower()]
+        alice_lines = [line for line in result if "alice" in line.lower() and "python" in line.lower()]
         assert len(alice_lines) == 1
 
     def test_whitespace_normalized_duplicates_removed(self) -> None:
         """Extra-whitespace duplicates are removed."""
         lines = ["Alice  likes   Python.", "Alice likes Python.", "Bob uses Go."]
         result = dedupe_block_content(lines)
-        alice_lines = [l for l in result if "alice" in l.lower()]
+        alice_lines = [line for line in result if "alice" in line.lower()]
         assert len(alice_lines) == 1
 
     def test_empty_lines_removed(self) -> None:

@@ -9,9 +9,19 @@ from tests.test_documents.index_support import add_document, make_root
 
 def _setup(tmp_path):
     root, db, store = make_root(tmp_path)
-    add_document(root, store, db, "d1", title="Alpha", created="2026-02-01T00:00:00Z",
-                 pages=[("text_layer", ("Ann", "Bob", "Cy"), None), ("text_layer", ("Ann", "Bob", "Di", "Ed", "Flo"), None),
-                        ("none", (), None)])
+    add_document(
+        root,
+        store,
+        db,
+        "d1",
+        title="Alpha",
+        created="2026-02-01T00:00:00Z",
+        pages=[
+            ("text_layer", ("Ann", "Bob", "Cy"), None),
+            ("text_layer", ("Ann", "Bob", "Di", "Ed", "Flo"), None),
+            ("none", (), None),
+        ],
+    )
     add_document(root, store, db, "d2", title="Beta", created="2026-02-02T00:00:00Z",
                  pages=[("ocr", ("Zed",), None)])
     add_document(root, store, db, "d3", title="Other", profile="p2", pages=[("text_layer", ("Qux",), None)])
@@ -69,5 +79,7 @@ def test_second_call_is_served_from_the_cache_until_something_changes(tmp_path):
 
 
 def test_no_media_store_gives_an_empty_index(tmp_path):
-    out = document_index("p1", 10, "", store=None, db=None, cache=SqliteDeriveCache(tmp_path / "c.db"), data_root=tmp_path)
+    out = document_index(
+        "p1", 10, "", store=None, db=None, cache=SqliteDeriveCache(tmp_path / "c.db"), data_root=tmp_path
+    )
     assert out == {"documents": [], "next_cursor": None}

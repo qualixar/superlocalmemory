@@ -202,7 +202,9 @@ def test_get_instance_wires_semantic_tier_when_enabled(
         classmethod(lambda cls: tmp_cache_db),
     )
     config = replace(DEFAULT_OPTIMIZE_CONFIG, semantic_enabled=True)
-    embedder = lambda text: [0.0] * 768
+    def embedder(text):
+        return [0.0] * 768
+
     CacheManager.reset_instance()
     try:
         manager = CacheManager.get_instance(

@@ -133,6 +133,12 @@ def test_shadow_router_route_query_uses_install_token(
         profile_id="p",
     )
     arm_a = router_a.route_query("query-abc")
+    # Before the rotation the arm already follows the original install token.
+    token_a = (tmp_path / ".install_token").read_text(encoding="utf-8").strip()
+    expected_h_a = hashlib.sha256(
+        (token_a + "query-abc").encode("utf-8"),
+    ).hexdigest()[:8]
+    assert arm_a == ("candidate" if int(expected_h_a, 16) % 2 == 1 else "baseline")
 
     # Rotate install token → arm for same query_id may flip.
     new_token_file = tmp_path / ".install_token_rotated"

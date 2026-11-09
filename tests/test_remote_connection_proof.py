@@ -34,10 +34,13 @@ def test_signed_proof_binds_token_method_target_and_fresh_nonce():
 @pytest.mark.parametrize('key',['bad','-----BEGIN PRIVATE KEY-----\nbad\n-----END PRIVATE KEY-----'])
 def test_invalid_private_key_is_sanitized(key):
     assert DeviceSigner is not None
-    with pytest.raises(ValueError,match='invalid_device_key'):DeviceSigner(key)
+    with pytest.raises(ValueError, match="invalid_device_key"):
+        DeviceSigner(key)
+
 
 def test_proof_refuses_insecure_or_ambiguous_target():
     assert DeviceSigner is not None
     signer=DeviceSigner.generate()
     for target in ['http://connect.superlocalmemory.com/connector','https://name:pass@connect.superlocalmemory.com/connector','https://connect.superlocalmemory.com/connector#fragment']:
-        with pytest.raises(ValueError):signer.proof('GET',target,token='synthetic')
+        with pytest.raises(ValueError):
+            signer.proof("GET", target, token="synthetic")

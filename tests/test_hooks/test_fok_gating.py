@@ -27,7 +27,9 @@ def _make_invoker_with_candidates(
             return [{"access_count": 0}]
         if "atomic_facts" in sql and "content" in sql:
             fact_id = params[0]
-            return [{"fact_id": fact_id, "content": f"Content {fact_id}", "fact_type": "semantic", "lifecycle": "active"}]
+            return [
+                {"fact_id": fact_id, "content": f"Content {fact_id}", "fact_type": "semantic", "lifecycle": "active"}
+            ]
         return []
 
     db.execute.side_effect = mock_execute
@@ -136,7 +138,7 @@ class TestFOKGating:
             config=cfg,
         )
 
-        results = invoker.invoke("test", "test", limit=10)
+        invoker.invoke("test", "test", limit=10)
         # The low-scoring fact should be gated before enrichment
         # Only the high-scoring fact should trigger enrichment
         assert "fact_low" not in enrich_calls

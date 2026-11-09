@@ -473,7 +473,7 @@ class TestLockDeltaRoute:
 
     def test_route_returns_locks_and_node_id(self, db: tuple, tmp_path: Path) -> None:
         """GET /mesh/lock/delta returns live locks + node_id for this node."""
-        fastapi_mod = pytest.importorskip("fastapi", reason="fastapi not installed")
+        pytest.importorskip("fastapi", reason="fastapi not installed")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 

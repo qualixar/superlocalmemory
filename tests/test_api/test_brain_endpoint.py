@@ -10,6 +10,8 @@ brain router and the strict security-headers middleware — avoiding the
 full unified daemon to keep tests fast and deterministic.
 """
 
+# ruff: noqa: E402 (the imports below deliberately follow pytest.importorskip, so the module skips when the dependency is missing)
+
 from __future__ import annotations
 
 import sqlite3

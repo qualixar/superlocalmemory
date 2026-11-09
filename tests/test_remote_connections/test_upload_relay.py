@@ -240,7 +240,9 @@ async def test_another_upload_cannot_restart_or_finish_one_that_is_moving(setup)
     await call(relay, frame("chunk", minted.token, 0, len(body), PNG, nonce=NONCE))
     swap = await call(relay, frame("chunk", minted.token, 0, len(body), b"\x89PNG\r\n\x1a\nEVIL", nonce=OTHER_NONCE))
     assert swap["ok"] is False and swap["code"] == "in_progress"
-    assert (await call(relay, frame("chunk", minted.token, 1, len(body), b"12345", nonce=OTHER_NONCE)))["code"] == "in_progress"
+    assert (await call(relay, frame("chunk", minted.token, 1, len(body), b"12345", nonce=OTHER_NONCE)))[
+        "code"
+    ] == "in_progress"
     assert (await call(relay, frame("finish", minted.token, 0, len(body), nonce=OTHER_NONCE)))["code"] == "in_progress"
     assert (await call(relay, frame("chunk", minted.token, 1, len(body), b"12345")))["received"] == len(body)
     assert (await call(relay, frame("finish", minted.token, 0, len(body))))["done"] is True
