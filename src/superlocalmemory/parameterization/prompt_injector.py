@@ -22,11 +22,14 @@ if TYPE_CHECKING:
     from superlocalmemory.core.config import ParameterizationConfig
 
 from superlocalmemory.parameterization.soft_prompt_generator import (
+    SESSION_EXCLUDED_CATEGORIES,
     SoftPromptGenerator,
     SoftPromptTemplate,
 )
 
 logger = logging.getLogger(__name__)
+
+_NOT_FOR_SESSIONS: tuple[str, ...] = tuple(sorted(SESSION_EXCLUDED_CATEGORIES))
 
 
 class PromptInjector:
@@ -68,8 +71,9 @@ class PromptInjector:
             "source_pattern_ids, effectiveness, active, version "
             "FROM soft_prompt_templates "
             "WHERE profile_id = ? AND active = 1 AND retention_score >= 0.1 "
+            f"AND category NOT IN ({','.join('?' for _ in _NOT_FOR_SESSIONS)}) "
             "ORDER BY confidence DESC",
-            (profile_id,),
+            (profile_id, *_NOT_FOR_SESSIONS),
         )
 
         if not rows:

@@ -5,6 +5,23 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Old auto-learned prompts were never retired, so sessions kept starting
+  with them.** Every daily refresh of the auto-learned "soft prompts" stopped
+  with a database error before its clean-up step: it tried to store a category
+  the table does not accept. Nothing reported it, so a prompt like "The user's
+  preferred technology stack includes: file, session, ended, ..." stayed
+  active for months and every session started with it. The refresh now only
+  produces categories the store accepts, the clean-up always runs, and old
+  prompts are retired on the next refresh.
+- **Session start no longer includes tool-usage statistics** ("frequently uses
+  Read (6816 times)"). They are still recorded and shown on the dashboard.
+- A copied session marker in the form "the session ended <date> <time>" is now
+  recognised as bookkeeping, like the other marker forms.
+
 ## [4.2.14] — No more hangs on unusual text, repairable old saves, Mode B cost control
 
 Fixes for #310, #308 and #309, and two problems found while working on them.

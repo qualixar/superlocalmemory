@@ -5175,11 +5175,17 @@ def cmd_session_context(args: Namespace) -> None:
 
         # V3.3 Soft prompts (auto-learned patterns) — append as high-importance
         try:
+            from superlocalmemory.parameterization.soft_prompt_generator import (
+                SESSION_EXCLUDED_CATEGORIES,
+            )
+
+            skip = tuple(sorted(SESSION_EXCLUDED_CATEGORIES))  # tool telemetry
             sp_rows = _read_rows(
                 "SELECT category, content FROM soft_prompt_templates "
                 "WHERE profile_id = ? AND active = 1 "
+                f"AND category NOT IN ({','.join('?' for _ in skip)}) "
                 "ORDER BY confidence DESC LIMIT 5",
-                (pid,),
+                (pid, *skip),
             )
             for r in sp_rows:
                 inj_mems.append(InjectableMemory(
