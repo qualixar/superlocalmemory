@@ -69,12 +69,22 @@ def _columns(conn: sqlite3.Connection) -> set[str]:
 
 def apply(conn: sqlite3.Connection) -> None:
     """Flag every unflagged, undecided stub, in resumable batches."""
+    flag_stubs(conn, "M062")
+
+
+def flag_stubs(conn: sqlite3.Connection, label: str) -> int:
+    """Flag every unflagged, undecided row the CURRENT stub rule recognises.
+
+    Shared with later migrations that run it again after the rule learns a new
+    shape (M068), so each one flags what was stored before it. Returns the
+    number of rows flagged.
+    """
     from superlocalmemory.encoding.non_answer import is_stub
 
     columns = _columns(conn)
     if not {"content", "non_answer"} <= columns:
-        logger.debug("M062: no atomic_facts.non_answer column; nothing to flag")
-        return
+        logger.debug("%s: no atomic_facts.non_answer column; nothing to flag", label)
+        return 0
     undecided = " AND non_answer_user IS NULL" if "non_answer_user" in columns else ""
     cursor, read, flagged = 0, 0, 0
     while True:
@@ -90,7 +100,8 @@ def apply(conn: sqlite3.Connection) -> None:
         read += len(batch)
         stubs = [(row[0],) for row in batch if is_stub(row[1])]
         flagged += _flag(conn, stubs, undecided)
-    logger.info("M062: read %d unflagged short facts; flagged %d as stubs", read, flagged)
+    logger.info("%s: read %d unflagged short facts; flagged %d as stubs", label, read, flagged)
+    return flagged
 
 
 def _flag(conn: sqlite3.Connection, rows: list[tuple[int]], undecided: str) -> int:

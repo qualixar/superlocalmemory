@@ -15,10 +15,15 @@ the Stop hook's "[project] session ended <date> <time>" with its optional
 "| files: ..." tail, the Write/Edit hook's "File changed: <name>", a bare
 "files: a.py, b.md" list (what a stored summary splits into) and the
 Codex/agents "[agent] session ended (reason) at <date> <time> in <project>."
-A summary that carries a branch, commits or the agent's last action is real
-content and is not matched. Measured on one real store, about 1,056 of 5,443
-facts written in 7 days were such lines, and they answered "what am I
-working on?" with bookkeeping.
+A summary that carries commits ("| recent: ...") or the agent's last action is
+real content and is not matched. One that adds only the branch name and the
+``git diff --stat`` total ("| branch: main | uncommitted: 2 files changed, ...")
+is still bookkeeping (4.2.16: 100 such rows on one store, three of them shown
+at a session start), and so are the copies ingestion derives from it: the bare
+diff total and "the user's session ended <date> <time>".
+
+Measured on one real store, about 1,056 of 5,443 facts written in 7 days were
+such lines, and they answered "what am I working on?" with bookkeeping.
 """
 
 from __future__ import annotations
@@ -27,13 +32,33 @@ import re
 
 _EMPTY = re.compile(r'^[\s\[\]{}(),;:]*$')
 _DATE = r'\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?'
-_SESSION = re.compile(r'^(?:\[\]\s*)?(?:the\s+)?session\s+(?:ended|closed)(?:\s+at)?\s+'
-                      + _DATE + r'[.!]?$', re.I)
-# "[Agentic_official] session ended 2026-10-13 09:54 | files: NOTICE, formats.md".
-# The "[project]" is optional: ingestion also derives the same line without it
-# ("session ended 2026-10-13 09:54 | files: ..."), and that copy was unflagged.
+# "session ended <stamp>" and the copies the extractor paraphrases from it:
+# "The session ended on <stamp>", "A session ended at <stamp> in config",
+# "Varun's session ended on <stamp>", "<date> is the date when the session
+# ended". Nothing but the stamp, an optional one-word owner and an optional
+# one-token project ("in config"), so "ended at 10:00 in a deadlock we never
+# reproduced" or "ended on <date> because the laptop died" stays an answer.
+_WHO = r'(?:(?:the|a|an)\s+)?(?:[\w.-]{1,60}[\'\u2019]s\s+|[\w-]{1,40}\s+)?'
+_STAMP = r'(?:' + _DATE + r'|\d{1,2}:\d{2}(?::\d{2})?)'
+_SESSION = re.compile(r'^(?:\[\]\s*)?' + _WHO + r'session\s+(?:ended|closed)'
+                      r'(?:\s+(?:at|on))?\s+' + _STAMP
+                      + r'(?:\s+in\s+[\w.@-]{1,100}?)?[.!]?$', re.I)
+_SESSION_DATE_FIRST = re.compile(r'^' + _DATE + r'\s+is\s+the\s+date\s+(?:when\s+|that\s+)?'
+                                 + _WHO + r'session\s+(?:ended|closed)[.!]?$', re.I)
+# The last line of ``git diff --stat``: "2 files changed, 0 insertions(+), 0 deletions(-)".
+_DIFF_STAT = (r'\d+\s+files?\s+changed(?:,\s*\d+\s+insertions?\(\+\))?'
+              r'(?:,\s*\d+\s+deletions?\(-\))?')
+_GIT_STAT = re.compile(r'^(?:uncommitted:\s*)?' + _DIFF_STAT + r'$', re.I)
+# "[Agentic_official] session ended 2026-10-13 09:54 | files: NOTICE, formats.md",
+# with the Stop hook's optional "| branch: <name>" and "| uncommitted: <diff
+# total>" in the order it writes them. A "| recent:" segment (commits) is real
+# content, so it is not in the pattern. The "[project]" is optional: ingestion
+# also derives the same line without it, and that copy was unflagged; it is
+# "[]" when the project folder's name is empty.
 _HOOK_SESSION = re.compile(
-    r'^(?:\[[^\]\n]{1,200}\]\s+)?session\s+ended\s+' + _DATE
+    r'^(?:\[[^\]\n]{0,200}\]\s*)?session\s+ended\s+' + _DATE
+    + r'(?:\s*\|\s*branch:\s*[^\s|]+)?'
+    + r'(?:\s*\|\s*uncommitted:\s*' + _DIFF_STAT + r')?'
     + r'(?:\s*\|\s*files:\s*[^|\n]+)?$', re.I)
 # "[codex] session ended (exit) at 2026-10-13 11:01 in my project." plus the id
 # segments the checkpoint appends; a "last_action:" segment is real content.
@@ -63,12 +88,14 @@ def is_empty_structure(text: str) -> bool:
 def is_stub(text: str) -> bool:
     value = (text or '').strip()
     return bool(value and (_EMPTY.fullmatch(value) or _SESSION.fullmatch(value)
+                           or _SESSION_DATE_FIRST.fullmatch(value)
                            or _RECEIPT.fullmatch(value) or _hook_line(value)))
 
 
 def _hook_line(value: str) -> bool:
     return bool(_HOOK_SESSION.fullmatch(value) or _AGENT_CHECKPOINT.fullmatch(value)
-                or _FILE_CHANGED.fullmatch(value) or _FILE_LIST.fullmatch(value))
+                or _FILE_CHANGED.fullmatch(value) or _FILE_LIST.fullmatch(value)
+                or _GIT_STAT.fullmatch(value))
 
 
 def _columns(db) -> frozenset:

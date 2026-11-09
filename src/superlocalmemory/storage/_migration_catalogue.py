@@ -205,6 +205,7 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M066_wrongly_archived_memories_are_restored as _M066,
     M067_projection_follows_every_fact_change as _M067,
+    M068_newer_bookkeeping_shapes_are_flagged as _M068,
 )
 
 # Order matters: M003 creates the log table. The runner handles M003's own
@@ -444,4 +445,9 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # earlier migrations add, and the queue table M033 creates.
     Migration(name=_M067.NAME, db_target="memory", ddl=_M067.DDL,
               dependencies=(_M033.NAME,)),
+    # M068 runs M062's stub pass again with the current rule, for the shapes it
+    # learned since (agent checkpoints without "[agent]", "the session ended",
+    # git-only Stop summaries). Deferred: it reads atomic_facts.non_answer.
+    Migration(name=_M068.NAME, db_target="memory", ddl=_M068.DDL,
+              dependencies=(_M060.NAME, _M062.NAME)),
 ]

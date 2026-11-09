@@ -178,7 +178,9 @@ import pytest
 #: 67 as of 4.2.11: +M067_projection_follows_every_fact_change (deferred,
 #: memory.db; one trigger that queues fact changes for the projections),
 #: downgrade floor 51.
-_EXPECTED_SCHEMA_VERSION: int = 67
+#: 68 as of 4.2.16: +M068_newer_bookkeeping_shapes_are_flagged (deferred,
+#: memory.db; sets an existing flag column), downgrade floor 51.
+_EXPECTED_SCHEMA_VERSION: int = 68
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -207,7 +209,7 @@ _EXPECTED_SCHEMA_VERSION: int = 67
 # 63 as of 4.2.8: +M064_orphan_index_rows_are_removed (deferred, memory.db).
 # 65 as of 4.2.8: +M065_fabricated_dates_are_removed,
 #                 +M066_wrongly_archived_memories_are_restored (deferred, memory.db).
-_EXPECTED_MIGRATION_COUNT: int = 66  # +M067 (4.2.11)
+_EXPECTED_MIGRATION_COUNT: int = 67  # +M068 (4.2.16)
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:
