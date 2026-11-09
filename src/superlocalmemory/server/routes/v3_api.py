@@ -1660,6 +1660,39 @@ _RUNTIME_CONFIG_FIELDS = (
 )
 
 
+def _persist_runtime_updates(live, updates: dict[str, dict]) -> None:
+    """Write only the fields this request changed (4.2.14).
+
+    Saving the whole daemon config wrote its start-up copy of every section,
+    so a dashboard change undid anything another writer (`slm config set`,
+    the CLI) had put in config.json since. A locked, atomic read-modify-write
+    of just these fields keeps both. With no config.json yet, the full save
+    still creates it, exactly as before: the existence check and that save
+    run under the config lock, so a writer creating the file in between is
+    never overwritten (the lock is re-entrant for save()'s own take).
+    """
+    from superlocalmemory.infra.config_lock import config_file_lock
+    from superlocalmemory.server.config_file import update_config
+
+    def _apply(data: dict) -> None:
+        for section, changes in updates.items():
+            current = data.get(section)
+            data[section] = {**(current if isinstance(current, dict) else {}), **changes}
+
+    path = Path(live.base_dir) / "config.json"
+    with config_file_lock(path):
+        if path.exists():
+            written = update_config(path, _apply)
+            # The file now holds this object's change: record that, so a later
+            # full save of this object does not count the field as its own
+            # change again and put it back over a newer `slm config set`.
+            record = getattr(live, "_record_sync", None)
+            if callable(record):
+                record(path, written, from_load=False)
+        else:
+            live.save(mode_change=False)
+
+
 def _runtime_config_snapshot(config) -> dict:
     """Current values of the exposed runtime fields, grouped by section."""
     out: dict = {}
@@ -1758,7 +1791,7 @@ async def set_runtime_config(request: Request):
                 # assigning the attribute is an atomic reference swap.
                 setattr(cfg, section, _dc.replace(sec, **changes))
         request.app.state.config = live
-        live.save(mode_change=False)  # durable across restart
+        _persist_runtime_updates(live, updates)  # durable across restart
         return {"success": True, "config": _runtime_config_snapshot(live)}
     except Exception:
         return _internal_error()

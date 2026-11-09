@@ -1319,6 +1319,8 @@ def cmd_config(args: Namespace) -> None:
             # SLM adds no memories to an agent's context on its own; auto_invoke.enabled off
             # stops the auto-invoke engine. Explicit recall and search keep working.
             "injection.enabled", "auto_invoke.enabled",
+            # #309: Mode B/C model calls per stored fact (defaults = 4.2.13's).
+            "temporal_validator.max_llm_checks", "encoding.context_generation_llm",
         }
         if key not in _ALLOWED_CONFIG_KEYS:
             if use_json:
@@ -1369,9 +1371,19 @@ def cmd_config(args: Namespace) -> None:
             else:
                 print(f"Error: {message}")
             sys.exit(1)
+        if key == "temporal_validator.max_llm_checks" and not (
+                isinstance(parsed_value, int) and not isinstance(parsed_value, bool)
+                and parsed_value >= 0):
+            message = f"{key} must be a whole number, 0 or more (0 = no model checks)"
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("config", error={"code": "INVALID_VALUE", "message": message})
+            else:
+                print(f"Error: {message}")
+            sys.exit(1)
         if key in {
             "scope.recall_include_global", "scope.recall_include_shared",
-            "injection.enabled", "auto_invoke.enabled",
+            "injection.enabled", "auto_invoke.enabled", "encoding.context_generation_llm",
         } and not isinstance(parsed_value, bool):
             message = f"{key} must be true or false"
             if use_json:
@@ -1437,22 +1449,40 @@ def cmd_config(args: Namespace) -> None:
                     print(f"{key}: applied to resident daemon -> {result.get(field)}")
                 return
 
-        # Set via dot-notation (e.g. "evolution.enabled" -> cfg["evolution"]["enabled"])
+        # Set via dot-notation (e.g. "evolution.enabled" -> cfg["evolution"]["enabled"]).
+        # 4.2.14: under the config file lock, re-read and replaced atomically, so
+        # a crash mid-write or a daemon saving at the same moment loses nothing.
+        from superlocalmemory.server.config_file import update_config
+
         parts = key.split(".")
-        node = cfg
-        for part in parts[:-1]:
-            if part not in node or not isinstance(node.get(part), dict):
-                node[part] = {}
-            node = node[part]
-        old_value = node.get(parts[-1])
-        node[parts[-1]] = parsed_value
+        previous: dict = {}
 
-        # Write back
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        def _apply(data: dict) -> None:
+            node = data
+            for part in parts[:-1]:
+                if part not in node or not isinstance(node.get(part), dict):
+                    node[part] = {}
+                node = node[part]
+            previous["value"] = node.get(parts[-1])
+            node[parts[-1]] = parsed_value
 
-        # The auto-invoke engine is built when the daemon starts; hooks read injection each run.
-        restart_required = key == "auto_invoke.enabled"
+        try:
+            update_config(config_path, _apply)
+        except (ValueError, OSError) as exc:  # JSONDecodeError is a ValueError
+            message = (f"{config_path} could not be read ({type(exc).__name__}); "
+                       "nothing was changed. Fix or restore that file, then try again.")
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("config", error={"code": "CONFIG_UNREADABLE", "message": message})
+            else:
+                print(f"Error: {message}")
+            sys.exit(1)
+        old_value = previous.get("value")
+
+        # Built when the daemon starts: auto-invoke and the #309 cost settings.
+        # Hooks read injection on each run.
+        restart_required = key in {"auto_invoke.enabled", "temporal_validator.max_llm_checks",
+                                   "encoding.context_generation_llm"}
         if use_json:
             from superlocalmemory.cli.json_output import json_print
             json_print("config", data={
@@ -5075,6 +5105,8 @@ def cmd_session_context(args: Namespace) -> None:
         try:
             cm_rows = _core_block_rows(db_path, pid)
             for r in cm_rows:
+                if r["block_type"] in _BLOCKS_NOT_FOR_SESSIONS:
+                    continue
                 content = f"[{r['block_type']}] {r['content']}"
                 inj_mems.append(InjectableMemory(
                     content=content, score=1.0, fact_id="",
@@ -5091,14 +5123,18 @@ def cmd_session_context(args: Namespace) -> None:
             if max_age > 0 else ""
         )
         try:
+            from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
+
+            not_prompt, not_prompt_params = source_filter()  # 4.2.14
             fact_rows = _read_rows(
-                "SELECT fact_id, content, importance, access_count, fact_type FROM atomic_facts "
-                "WHERE profile_id = ? "
-                f"{age_clause}"
-                "AND lifecycle = 'active' "
-                "ORDER BY importance DESC, created_at DESC LIMIT 10",
-                (pid,),
+                "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
+                "FROM atomic_facts f WHERE f.profile_id = ? "
+                f"{age_clause.replace('created_at', 'f.created_at')}"
+                "AND f.lifecycle = 'active'" + not_prompt + " "
+                "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
+                (pid, *not_prompt_params, 10 * OVERSAMPLE),
             )
+            fact_rows = keep_sources(fact_rows, 10)
             for r in fact_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -5112,12 +5148,17 @@ def cmd_session_context(args: Namespace) -> None:
 
         # Session markers (last session summary)
         try:
-            sess_rows = _read_rows(
+            # The last sessions' summaries: a bare marker ("session ended
+            # <date>") says nothing and is left out (4.2.14, non_answer).
+            from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources
+
+            sess_rows = keep_sources(_read_rows(
                 "SELECT fact_id, content, importance, access_count FROM atomic_facts "
                 "WHERE profile_id = ? AND content LIKE 'Session%' "
-                "ORDER BY created_at DESC LIMIT 3",
-                (pid,),
-            )
+                "AND COALESCE(non_answer, 0) = 0 "
+                "ORDER BY created_at DESC LIMIT ?",
+                (pid, 3 * OVERSAMPLE),
+            ), 3)
             for r in sess_rows:
                 inj_mems.append(InjectableMemory(
                     content=r["content"],
@@ -5660,16 +5701,36 @@ def cmd_reap(args: Namespace) -> None:
         print("  Use --all to kill ALL slm mcp sessions (after IDE switch).")
 
 
+#: 4.2.14: compiled for the dashboard and soft prompts, never put in a session:
+#: "time_of_day: hour_21", "query_type: general" are telemetry, not memory.
+_BLOCKS_NOT_FOR_SESSIONS = frozenset({"behavioral_patterns"})
+
+
 def _core_block_rows(db_path: object, profile_id: str) -> list:
     """Core-memory blocks for context injection, minus any that quote a fact
-    whose erasure has started (projection_tombstones)."""
+    whose erasure has started (projection_tombstones), and (4.2.14) minus any
+    still built from a captured prompt or a hook marker: a block compiled
+    before 4.2.14 waits for its next daily recompile (core/block_sources)."""
+    import json as _json
+
+    from superlocalmemory.core.block_sources import not_sources
     from superlocalmemory.storage.erasure_visibility import aggregate_erasure_clause
     from superlocalmemory.storage.memory_write import memory_read
 
     with memory_read(db_path) as conn:
-        return conn.execute(
-            "SELECT block_type, content FROM core_memory_blocks WHERE profile_id = ?"
+        rows = conn.execute(
+            "SELECT block_type, content, source_fact_ids FROM core_memory_blocks "
+            "WHERE profile_id = ?"
             + aggregate_erasure_clause(conn, "core_memory_blocks", column="source_fact_ids")
             + " ORDER BY block_type",
             (profile_id,),
         ).fetchall()
+        kept = []
+        for row in rows:
+            try:
+                ids = _json.loads(row["source_fact_ids"] or "[]")
+            except (TypeError, ValueError):
+                ids = []
+            if not not_sources(conn, ids if isinstance(ids, list) else []):
+                kept.append(row)
+        return kept

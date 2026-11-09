@@ -12,9 +12,12 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+import tempfile
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from superlocalmemory.core import answer_check_state as _answer_check_state
@@ -23,6 +26,7 @@ from superlocalmemory.core import memory_kind_config as _memory_kind_config
 from superlocalmemory.core import model_catalog as _catalog
 from superlocalmemory.core.hopfield_config import HopfieldConfig, load_hopfield_config
 from superlocalmemory.core.memory_kind_config import MemoryKindConfig
+from superlocalmemory.infra.config_lock import config_file_lock
 from superlocalmemory.infra.data_root import DynamicStatePath, canonical_data_root
 from superlocalmemory.storage.models import Mode
 
@@ -42,6 +46,107 @@ def _restrict_config_to_owner(path: Path) -> None:
         restrict_to_owner(path)
     except OSError as exc:
         logger.warning("could not make %s readable only by you: %s", path.name, exc)
+
+
+def _carry_raw_preserved(target: "SLMConfig", source: "SLMConfig") -> "SLMConfig":
+    """``target`` (a fresh dataclasses.replace() copy of ``source``) with the
+    copy of the file ``source`` was loaded from, which replace() drops.
+    Without it save() leaves out every section no dataclass models."""
+    raw = getattr(source, "_raw_preserved", None)
+    if raw is not None:
+        target._raw_preserved = dict(raw)  # type: ignore[attr-defined]
+    return target
+
+
+def _read_existing_config(path: Path) -> dict:
+    """The config file as it is now; an unreadable or damaged one reads as empty."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_config_atomically(path: Path, data: dict) -> None:
+    """Atomic write: a crash mid-write must NOT leave a truncated/corrupt
+    config.json (which would make every subsequent `slm` call fail to load)."""
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        _restrict_config_to_owner(tmp)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Make the rename itself durable, as ``update_config`` does. POSIX only:
+    Windows cannot open a directory for fsync."""
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+_MISSING = object()
+
+
+@dataclass(frozen=True)
+class _SyncPoint:
+    """What one config object knows about one file, as of its last load from
+    or save to it (4.2.14).
+
+    ``raw``: the file's contents then. ``baseline``: what the object would
+    serialize for its modelled sections then. ``from_load``: taken by load(),
+    whose object may hold values normalised or upgraded from ``raw``.
+    """
+
+    raw: dict
+    baseline: dict
+    from_load: bool
+
+
+def _three_way(ours: object, base: object, theirs: object, synced: object,
+               *, from_load: bool) -> object:
+    """One modelled value settled against the file as it is now.
+
+    A value the object changed since its sync point (``ours != base``) always
+    wins. One it did not change keeps the file's current value (``theirs``):
+    another writer may have set it since. Except right after load(): a file
+    value nobody touched since (``theirs == synced``) still gets the object's
+    value, so load-time normalisation and upgrades are written as before.
+    Dicts recurse on the object's keys; everything else is a leaf.
+    """
+    if isinstance(ours, dict) and isinstance(base, dict):
+        theirs_d = theirs if isinstance(theirs, dict) else {}
+        synced_d = synced if isinstance(synced, dict) else {}
+        return {
+            key: _three_way(value, base.get(key, _MISSING),
+                            theirs_d.get(key, _MISSING), synced_d.get(key, _MISSING),
+                            from_load=from_load)
+            for key, value in ours.items()
+        }
+    if base is _MISSING or ours != base or theirs is _MISSING:
+        return ours
+    if from_load and theirs == synced:
+        return ours
+    return theirs
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +401,23 @@ def _load_coverage_settings(encoding: "EncodingConfig", section: object) -> None
             setattr(encoding, key, value)
 
 
+def _load_llm_cost_settings(config: "SLMConfig", data: dict) -> None:
+    """The two Mode B/C cost settings (#309), over the mode's preset.
+
+    Only these two fields are read: the rest of ``temporal_validator`` (such as
+    recall's demotion factor) stays the preset's. A value of the wrong type
+    keeps the default, so a 4.2.13 config.json loads exactly as before."""
+    validator = data.get("temporal_validator")
+    if isinstance(validator, dict):
+        checks = validator.get("max_llm_checks")
+        if isinstance(checks, int) and not isinstance(checks, bool) and checks >= 0:
+            config.temporal_validator = replace(config.temporal_validator,
+                                                max_llm_checks=checks)
+    encoding = data.get("encoding")
+    if isinstance(encoding, dict) and isinstance(encoding.get("context_generation_llm"), bool):
+        config.encoding.context_generation_llm = encoding["context_generation_llm"]
+
+
 @dataclass
 class EncodingConfig:
     """Configuration for the encoding (memory creation) pipeline."""
@@ -308,6 +430,9 @@ class EncodingConfig:
     # 4.2.5: the same, for memories saved before it (the daemon backfill);
     # config.json "encoding" turns it on, e.g. 10
     coverage_backfill_per_memory: int = 0  # off until measured on a large store
+    # 4.2.14 (#309): Mode B/C ask the model for each fact's context sentence;
+    # false = rule-based sentences (Mode A's), one model call less per fact
+    context_generation_llm: bool = True
     min_fact_confidence: float = 0.3
 
     # Entity resolution
@@ -1480,6 +1605,7 @@ class SLMConfig:
         # V3.3 config fields (additive — defaults work if missing from JSON)
         config.hopfield = load_hopfield_config(data.get("hopfield"))
         _load_coverage_settings(config.encoding, data.get("encoding"))
+        _load_llm_cost_settings(config, data)
         fg = data.get("forgetting", {})
         if fg:
             config.forgetting = ForgettingConfig(**{
@@ -1727,7 +1853,11 @@ class SLMConfig:
         # so dataclasses.asdict() and dataclasses.replace() ignore it — callers
         # that clone a config via replace() will lose unknown-key preservation,
         # which is acceptable: the primary contract is load→save round-trip.
-        config._raw_preserved: dict = dict(data)  # type: ignore[attr-defined]
+        #
+        # 4.2.14: _record_sync() also keeps, per file, what this object would
+        # write for its modelled sections, so save() can tell a field this
+        # object changed from one another writer changed (_three_way).
+        config._record_sync(Path(path), data, from_load=True)
         _answer_check_state.remember_baseline(config)
         return config
 
@@ -1749,31 +1879,72 @@ class SLMConfig:
         Callers that intentionally switch mode (``slm mode b``, the MCP
         ``set_mode`` tool, the dashboard PUT ``/api/v3/mode``) MUST pass
         ``mode_change=True``.
+
+        4.2.14: reading the file, merging and replacing it run under the lock
+        ``slm config set`` takes (infra/config_lock.py); a CLI change committed
+        between this method's read and its replace used to be undone. Only
+        that runs under the lock. Everything that may write another file runs
+        first: ``retrieval_to_save()`` can create answer_check.json and strip
+        old copies out of config.json and mode_*.json through
+        ``update_config``, which takes the config lock itself.
         """
-        import json
         path = config_path or (self.base_dir / "config.json")
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Read existing config to preserve V3.3 fields not in this save
-        existing = {}
-        if path.exists():
-            try:
-                existing = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        # v3.4.34: mode protection — preserve user's mode unless explicitly changing
-        effective_mode = self.mode.value
-        existing_mode = existing.get("mode")
-        if existing_mode and existing_mode != effective_mode and not mode_change:
-            logger.warning(
-                "SLMConfig.save(): mode change blocked (%s → %s). "
-                "Pass mode_change=True to override. Preserving '%s'.",
-                existing_mode, effective_mode, existing_mode,
-            )
-            effective_mode = existing_mode
-
         data = {
-            "mode": effective_mode,
+            **self._core_sections_to_save(path, mode_change=mode_change),
+            **self._extra_sections_to_save(),
+        }
+        with config_file_lock(path):
+            existing = _read_existing_config(path)
+            merged = self._merge_with_disk(data, existing, path, mode_change=mode_change)
+            _write_config_atomically(path, merged)
+        # The file now holds ``merged``: later saves to it settle against that.
+        self._record_sync(path, merged, from_load=False)
+
+    def _record_sync(self, path: Path, written: dict, *, from_load: bool) -> None:
+        """Remember ``path`` as holding ``written`` while this object holds
+        what it holds now. New mappings each time, never mutated in place:
+        copy.copy() clones share them."""
+        key = str(Path(path).resolve())
+        point = _SyncPoint(raw=deepcopy(written), baseline=self._modelled_snapshot(),
+                           from_load=from_load)
+        self._synced = {**getattr(self, "_synced", {}), key: point}  # type: ignore[attr-defined]
+        self._loaded_from = key  # type: ignore[attr-defined]
+        self._raw_preserved = deepcopy(written)  # type: ignore[attr-defined]
+
+    def _modelled_snapshot(self) -> dict:
+        """What save() writes for the modelled sections, from the same pure
+        builders. Leaves out ``mode`` (settled by the mode protection) and
+        ``retrieval``: building that may write answer_check.json and config
+        files, so it keeps its object-wins behaviour."""
+        core = {k: v for k, v in self._core_sections_pure().items() if k != "mode"}
+        return deepcopy({
+            **core,
+            **self._extra_sections_to_save(),
+            **{name: asdict(obj) for name, obj in self._typed_section_objects()},
+        })
+
+    def _core_sections_to_save(self, path: Path, *, mode_change: bool) -> dict:
+        """mode (settled against the disk later), profile, backends, llm,
+        embedding, retrieval. Runs outside the config lock (see save())."""
+        return {
+            **self._core_sections_pure(),
+            # Persist the complete retrieval contract.  Saving only the
+            # cross-encoder subset silently reset channel limits, evidence
+            # floors, and agentic settings on the next mode/provider change.
+            # The answer check's settings are the exception once they have
+            # their own file (core/answer_check_state.retrieval_to_save).
+            # This call may write answer_check.json and config files: it must
+            # never run while save() holds the config lock.
+            "retrieval": _answer_check_state.retrieval_to_save(
+                self, path.parent, mode_change=mode_change),
+        }
+
+    def _core_sections_pure(self) -> dict:
+        """The core sections save() writes before ``retrieval``, in file order.
+        No side effects."""
+        return {
+            "mode": self.mode.value,
             "active_profile": self.active_profile,
             "graph_backend": self.graph_backend,
             "vector_backend": self.vector_backend,
@@ -1797,15 +1968,12 @@ class SLMConfig:
                 "ollama_model": self.embedding.ollama_model,
                 "ollama_base_url": self.embedding.ollama_base_url,
             },
-            # Persist the complete retrieval contract.  Saving only the
-            # cross-encoder subset silently reset channel limits, evidence
-            # floors, and agentic settings on the next mode/provider change.
-            # The answer check's settings are the exception once they have
-            # their own file (core/answer_check_state.retrieval_to_save).
-            "retrieval": _answer_check_state.retrieval_to_save(
-                self, path.parent, mode_change=mode_change),
         }
 
+    def _extra_sections_to_save(self) -> dict:
+        """Evolution, injection, scope, pruning and scalar settings, written
+        explicitly so a load-then-save is lossless for them."""
+        data: dict = {}
         # V3.4.11: Persist evolution config (C-CONFIGSAVE fix)
         data["evolution"] = {
             "enabled": self.evolution.enabled,
@@ -1866,7 +2034,65 @@ class SLMConfig:
         data["mesh"] = {**(data.get("mesh") or {}), "retention_days": self.mesh_retention_days}
         # v4.0.6: GDPR retention window — always written so load→save is lossless.
         data["retention_window_days"] = self.retention_window_days
+        return data
 
+    def _merge_with_disk(
+        self, data: dict, existing: dict, path: Path, *, mode_change: bool,
+    ) -> dict:
+        """``data`` settled against the file as it is now: the mode
+        protection, sections this version only partly models, and keys it does
+        not model. Called by save() under the config lock."""
+        # v3.4.34: mode protection — preserve user's mode unless explicitly changing
+        effective_mode = self.mode.value
+        existing_mode = existing.get("mode")
+        if existing_mode and existing_mode != effective_mode and not mode_change:
+            logger.warning(
+                "SLMConfig.save(): mode change blocked (%s → %s). "
+                "Pass mode_change=True to override. Preserving '%s'.",
+                existing_mode, effective_mode, existing_mode,
+            )
+            effective_mode = existing_mode
+        data = {**data, "mode": effective_mode, **self._typed_sections_with_disk(existing)}
+
+        # 4.2.14: saving to a file this object last loaded from or saved to,
+        # each modelled value it did not change since keeps the file's current
+        # value; another writer (`slm config set`) may have set it. Values it
+        # did change win. A file it never synced with keeps object-wins: the
+        # mode switch writing mode_<x>.json must write the loaded values.
+        _point = getattr(self, "_synced", {}).get(str(path.resolve()))
+        if _point is not None:
+            data = _three_way(data, _point.baseline, existing, _point.raw,
+                              from_load=_point.from_load)
+
+        # Merge any keys from the last load() that are not covered by the
+        # explicit serialization above.  This includes unknown forward-compat
+        # top-level keys and nested sections whose subkeys this version does
+        # not model (e.g. a "health" dict that carries vendor-extension fields).
+        # Explicitly serialized keys always take precedence; preserved keys are
+        # only written when the slot is vacant in the output dict.
+        #
+        # 4.2.14: saving to a file this object last loaded from or saved to,
+        # the file as it is NOW wins for those keys: another writer (`slm
+        # config set`, the CLI, a hook) may have changed one since, and the
+        # daemon's start-up copy used to undo it silently. Saving to a file it
+        # never synced with (a mode switch writing mode_<x>.json) keeps the
+        # loaded values, exactly as before (the 4.2.9 round-trip fix).
+        _raw = getattr(self, "_raw_preserved", None) or {}
+        _fill = {**_point.raw, **existing} if _point is not None else _raw
+        for _k, _v in _fill.items():
+            if _k not in data:
+                data[_k] = _v
+
+        # embedding_signature has no typed in-memory model — it is an opaque blob
+        # written by external tooling.  Preserve the on-disk value verbatim so a
+        # load→save cycle does not erase externally written metadata.
+        if "embedding_signature" in existing:
+            data["embedding_signature"] = existing["embedding_signature"]
+        return data
+
+    def _typed_sections_with_disk(self, existing: dict) -> dict:
+        """The typed sections, each over its on-disk (or loaded) subkeys."""
+        data: dict = {}
         # Typed in-memory config sections.  Preserve any on-disk subkeys this
         # version does not model (forward-compat or externally-tuned fields such
         # as forgetting.half_life_days), then overlay the current in-memory
@@ -1884,15 +2110,7 @@ class SLMConfig:
         # either one, by hand or by switching mode, survived until the next
         # restart and then silently reverted to the dataclass default, with
         # nothing said. Reported as #124.
-        for _section, _obj in (
-            ("hopfield", self.hopfield),
-            ("forgetting", self.forgetting),
-            ("quantization", self.quantization),
-            ("sagq", self.sagq),
-            ("auto_invoke", self.auto_invoke),
-            ("math", self.math),
-            ("channel_weights", self.channel_weights),
-        ):
+        for _section, _obj in self._typed_section_objects():
             # Saving to a new path has no on-disk section yet: start from the
             # section this config was loaded with so unknown keys survive.
             _base = existing.get(_section)
@@ -1901,50 +2119,19 @@ class SLMConfig:
             _merged = dict(_base) if isinstance(_base, dict) else {}
             _merged.update(asdict(_obj))
             data[_section] = _merged
+        return data
 
-        # Merge any keys from the last load() that are not covered by the
-        # explicit serialization above.  This includes unknown forward-compat
-        # top-level keys and nested sections whose subkeys this version does
-        # not model (e.g. a "health" dict that carries vendor-extension fields).
-        # Explicitly serialized keys always take precedence; preserved keys are
-        # only written when the slot is vacant in the output dict.
-        _raw = getattr(self, "_raw_preserved", None)
-        if _raw:
-            for _k, _v in _raw.items():
-                if _k not in data:
-                    data[_k] = _v
-
-        # embedding_signature has no typed in-memory model — it is an opaque blob
-        # written by external tooling.  Preserve the on-disk value verbatim so a
-        # load→save cycle does not erase externally written metadata.
-        if "embedding_signature" in existing:
-            data["embedding_signature"] = existing["embedding_signature"]
-
-        # Atomic write: a crash mid-write must NOT leave a truncated/corrupt
-        # config.json (which would make every subsequent `slm` call fail to load).
-        import os as _os
-        import tempfile as _tempfile
-
-        _fd, _tmp_name = _tempfile.mkstemp(
-            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+    def _typed_section_objects(self) -> tuple[tuple[str, object], ...]:
+        """The sections save() writes as asdict() over their on-disk subkeys."""
+        return (
+            ("hopfield", self.hopfield),
+            ("forgetting", self.forgetting),
+            ("quantization", self.quantization),
+            ("sagq", self.sagq),
+            ("auto_invoke", self.auto_invoke),
+            ("math", self.math),
+            ("channel_weights", self.channel_weights),
         )
-        _tmp = Path(_tmp_name)
-        try:
-            _restrict_config_to_owner(_tmp)
-            with _os.fdopen(_fd, "w", encoding="utf-8") as _handle:
-                json.dump(data, _handle, indent=2)
-                _handle.write("\n")
-                _handle.flush()
-                _os.fsync(_handle.fileno())
-            _os.chmod(_tmp, 0o600)
-            _os.replace(_tmp, path)
-            _os.chmod(path, 0o600)
-        except BaseException:
-            try:
-                _tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
 
     @staticmethod
     def provider_presets() -> dict[str, dict[str, str]]:
@@ -2316,28 +2503,30 @@ class SLMConfig:
         else:
             # First time switching to this mode: start from old config, change mode only.
             # Use dataclasses.replace() to produce a new frozen-compatible object.
-            new_config = dataclasses.replace(old_config, mode=new_mode_val)
+            # 4.2.14: replace() drops the copy of the loaded file, so sections
+            # no dataclass models (temporal_validator, encoding, forward-compat
+            # keys) were left out of config.json; carry it over. Not
+            # _loaded_from: this config is saved to another file than the one
+            # old_config came from.
+            new_config = _carry_raw_preserved(
+                dataclasses.replace(old_config, mode=new_mode_val), old_config)
 
         # 3. LLM default population — ONLY if user has no provider AND switching to B/C.
         #    Never overwrites an existing provider.
         if new_mode_val in (_M.B, _M.C) and not new_config.llm.provider:
             if new_mode_val == _M.B:
-                new_config = dataclasses.replace(
-                    new_config,
-                    llm=LLMConfig(
-                        provider="ollama",
-                        model=_catalog.DEFAULT_LOCAL_LLM,
-                        api_base="http://localhost:11434",
-                    ),
+                _default_llm = LLMConfig(
+                    provider="ollama",
+                    model=_catalog.DEFAULT_LOCAL_LLM,
+                    api_base="http://localhost:11434",
                 )
             else:  # Mode C
-                new_config = dataclasses.replace(
-                    new_config,
-                    llm=LLMConfig(
-                        provider="openrouter",
-                        model=_catalog.DEFAULT_HOSTED_LLM,
-                    ),
+                _default_llm = LLMConfig(
+                    provider="openrouter",
+                    model=_catalog.DEFAULT_HOSTED_LLM,
                 )
+            new_config = _carry_raw_preserved(
+                dataclasses.replace(new_config, llm=_default_llm), new_config)
 
         # 4. Save as active config.json (backward compat)
         new_config.save(_base / "config.json", mode_change=True)

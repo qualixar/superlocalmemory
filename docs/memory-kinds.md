@@ -45,6 +45,11 @@ new agent session through MCP `session_init`. Proposed, rejected, archived,
 quarantined and replaced items are never included. Turn it off with
 `slm kinds settings --standing-rules off`.
 
+Each saved rule counts once, however many sentences it has. When there are more
+rules than slots, rules saved in the session's project come first, then the
+ones the session's opening recall found relevant, then the newest. Rules and
+decisions never take the places of the session's recall results.
+
 ## Asking for a kind
 
 ```bash

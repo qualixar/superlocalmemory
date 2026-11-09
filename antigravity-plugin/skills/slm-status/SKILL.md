@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair"
+when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections"
 allowed-tools: slm_optimize_stats, get_status, get_brain_evidence_status, Bash(slm:*)
 ---
 
@@ -132,6 +132,7 @@ slm db repair [--json]                # preview of what a repair would do (read-
 slm db repair --apply --root <data folder> [--batch-size N] [--pause-ms MS] [--max-seconds S]
 slm db repair --undo <run_id> --root <data folder>
 slm ops list | status | resolve <operation_id> --action retry|force_reconcile|cancel
+slm ops repair-saves [--apply] [--json]   # re-file saves that failed for good; dry run unless --apply
 slm brain status [--json]             # observation-only Living Brain evidence totals
 slm embedder status                   # progress of an embedding-model switch
 slm models                            # recommended and installed local models
@@ -152,6 +153,45 @@ was erased, deleted or withheld. `slm ops` lists failed, stuck or degraded
 operations and, for an owner or admin, resolves them. The MCP counterpart for
 Living Brain totals is `get_brain_evidence_status(profile_id="")`; it only
 observes and does not change recall, ranking or review.
+
+### Saves that failed for good: `slm ops repair-saves`
+
+A save that failed ten times is parked, and `slm ops list` shows it as failed.
+`slm ops repair-saves` re-files those saves from the save itself. A plain run
+is a dry run: it lists what it would do and writes nothing. `--apply` copies
+`memory.db` first (the path is printed) and then repairs. Run it with `--json`
+for structured output. It cannot be undone, so the copy is the way back.
+
+Since 4.2.14 it also handles saves from 4.1.1x builds whose text was blanked
+with `[REDACTED:...]` markers (#308). Those show as `restore_then_add_fact` or
+`restore_then_repoint`: it puts the original text back, with the same guarded
+writes the one-time store repair used, and files the fact again. An original
+that looks like it holds a secret, or that the ingest gate rejects, is never
+restored automatically; it is listed under "left for review" with the reason.
+When the stored text differs from the save by more than redaction markers, the
+review line says so. If that save is not wanted, close it with
+`slm ops resolve <operation_id> --action cancel`. Never restore or cancel on
+the user's behalf without showing the dry run first.
+
+### Too many model calls in Mode B or C
+
+In Mode B and C, each stored fact costs one model call for its context sentence
+and up to five for contradiction checks. Two settings trade that for speed. Both
+default to what 4.2.13 did (5 and true), so nothing changes until the user
+chooses, and each mode keeps its own value:
+
+```bash
+slm config set temporal_validator.max_llm_checks 0     # 0 = embedding check only; default 5
+slm config set encoding.context_generation_llm false   # context sentences by rule; default true
+slm restart                                            # needed to apply
+```
+
+Contradiction checks only file correction proposals for a person to review;
+they never change recall. If a pile of unreviewed proposals has built up, use
+`slm corrections dismiss` (see `slm-remember`). `slm config set` now stops and
+changes nothing when `config.json` cannot be read, rather than starting from an
+empty file. A setting changed in the dashboard no longer undoes one made with
+`slm config set`.
 
 ## Memory health: SLM looks after older memories
 
@@ -228,4 +268,4 @@ the memory-engine upgrade is pending.
 
 ---
 
-SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later

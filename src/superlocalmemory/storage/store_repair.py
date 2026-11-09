@@ -31,9 +31,11 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from superlocalmemory.core.ingest_gate import apply_ingest_gate
+from superlocalmemory.core.security_primitives import detect_secrets
 
 _MARKER = re.compile(r"\[REDACTED:[A-Z_]+:[^\]]*\]")
 _MISMATCH = "queryable ingestion memory content mismatch"
@@ -89,14 +91,30 @@ class RepairResult:
 
 
 def is_blanked_copy(stored: str, original: str) -> bool:
-    """True when ``stored`` is ``original`` with some spans replaced by markers."""
+    """True when ``stored`` is ``original`` with some spans replaced by markers.
+
+    Each marker stands for at least one character of the original. The text
+    between markers must appear in the original in the same order, so the
+    check walks the pieces with ``str.find`` taking the earliest match of each:
+    the earliest placement leaves the most room for the rest, so it finds a
+    split whenever one exists. Linear in the text, where one regex of N lazy
+    gaps backtracked polynomially.
+    """
     if not isinstance(stored, str) or not isinstance(original, str):
         return False
     if stored == original or not _MARKER.search(stored):
         return False
     parts = _MARKER.split(stored)
-    pattern = "(?:.+?)".join(re.escape(p) for p in parts)
-    return re.fullmatch(pattern, original, re.DOTALL) is not None
+    head, tail = parts[0], parts[-1]
+    if not original.startswith(head) or not original.endswith(tail):
+        return False
+    pos, end = len(head), len(original) - len(tail)
+    for piece in parts[1:-1]:
+        found = original.find(piece, pos + 1, end)
+        if found < 0:
+            return False
+        pos = found + len(piece)
+    return end - pos >= 1
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -124,7 +142,10 @@ def _plan_restores(conn: sqlite3.Connection) -> tuple[list[RestoreItem], list[st
             "JOIN memories m ON m.memory_id = f.memory_id WHERE f.fact_id=?",
             (fact_ids[0],),
         ).fetchone()
-        if found is None or not is_blanked_copy(found[1], original):
+        # A span the old redactor blanked may be a real credential: a person
+        # decides, never this repair (the same rule save_repair applies).
+        if (found is None or not is_blanked_copy(found[1], original)
+                or apply_ingest_gate(original).rejected or detect_secrets(original)):
             left.append(operation_id)
             continue
         restorable.append(RestoreItem(operation_id, str(found[0]), fact_ids,
@@ -173,49 +194,73 @@ def plan_repair(conn: sqlite3.Connection) -> RepairPlan:
                       tuple(_plan_wrong_replacements(conn)))
 
 
+def _rows_of(conn: sqlite3.Connection) -> Callable[..., list]:
+    def run(sql: str, params: tuple = ()) -> list:
+        return conn.execute(sql, params).fetchall()
+    return run
+
+
+def restore_blanked_text(
+    execute: Callable[..., Sequence], memory_id: str, blanked: str, original: str,
+    fact_ids: Sequence[str] = (), *, accept_restored_facts: bool = False,
+) -> bool:
+    """Put ``original`` back over its blanked copy: the memory and its facts, or nothing.
+
+    The guarded statements of the store repair, shared with ``save_repair``.
+    ``execute(sql, params)`` returns the rows of a statement inside a write
+    transaction the caller holds. Every row is verified before any is written:
+    the memory must hold ``blanked`` and every fact the gate's form of it. A
+    memory over the ingest gate's 24k-char cap has a CLAMPED fact (head plus
+    tail), never the memory's text verbatim, so both sides pass through
+    :func:`apply_ingest_gate`; short text passes through unchanged. Each write
+    is guarded by the value it replaces (``UPDATE ... WHERE content=<expected>``).
+
+    False, with nothing written, when a row is not what was planned or when the
+    gate rejects ``original`` (restoring it would only fail again) or when it
+    holds a credential shape (the redactor may have blanked a real secret; a
+    person decides, and nothing here logs it).
+    ``accept_restored_facts`` lets a fact that already holds the restored form
+    stand, which a save repair needs and the one-time store repair never did.
+    """
+    gate = apply_ingest_gate(original)
+    if gate.rejected or detect_secrets(original):
+        return False
+    expected_fact = apply_ingest_gate(blanked).fact_content
+    restored_fact = gate.fact_content
+    current_facts = {
+        str(row[0]): row[1] for row in execute(
+            "SELECT fact_id, content FROM atomic_facts WHERE fact_id IN ({})"
+            .format(",".join("?" for _ in fact_ids)), tuple(fact_ids),
+        )
+    } if fact_ids else {}
+    allowed = (expected_fact, restored_fact) if accept_restored_facts else (expected_fact,)
+    facts_match = all(current_facts.get(fid) in allowed for fid in fact_ids)
+    mem_row = execute("SELECT content FROM memories WHERE memory_id=?", (memory_id,))
+    if not (mem_row and mem_row[0][0] == blanked and facts_match):
+        return False
+    execute("UPDATE memories SET content=? WHERE memory_id=? AND content=?",
+            (original, memory_id, blanked))
+    for fact_id in fact_ids:
+        execute("UPDATE atomic_facts SET content=? WHERE fact_id=? AND content=?",
+                (restored_fact, fact_id, expected_fact))
+    return True
+
+
 def apply_repair(conn: sqlite3.Connection, plan: RepairPlan) -> RepairResult:
     """Apply ``plan`` in one transaction. Rows changed since planning are skipped."""
     restored = skipped = removed = undone = 0
     conn.execute("BEGIN IMMEDIATE")
     try:
+        run = _rows_of(conn)
         for item in plan.restorable:
-            # A memory over the ingest gate's 24k-char cap has a CLAMPED fact
-            # (core/ingest_gate.py): atomic_facts.content is head+tail of the
-            # memory's text, never the memory's full text verbatim. Guarding
-            # the fact UPDATE by ``item.blanked`` (the whole blanked memory)
-            # can never match a clamped row, so the fact stayed blanked and
-            # the write was still counted as a restore. Re-running the same
-            # gate on both sides gets the comparison and the replacement back
-            # onto what was actually stored: unclamped content passes through
-            # unchanged, so short memories behave exactly as before.
-            expected_fact = apply_ingest_gate(item.blanked).fact_content
-            restored_fact = apply_ingest_gate(item.original).fact_content
-            current_facts = {
-                str(row[0]): row[1] for row in conn.execute(
-                    "SELECT fact_id, content FROM atomic_facts WHERE fact_id IN ({})"
-                    .format(",".join("?" for _ in item.fact_ids)),
-                    item.fact_ids,
-                )
-            } if item.fact_ids else {}
-            facts_match = all(current_facts.get(fid) == expected_fact
-                              for fid in item.fact_ids)
-            mem_row = conn.execute(
-                "SELECT content FROM memories WHERE memory_id=?",
-                (item.memory_id,)).fetchone()
-            mem_matches = mem_row is not None and mem_row[0] == item.blanked
-            # Verify every row this item touches before writing any of them:
-            # a restore is reported only for what is actually, fully applied,
-            # never a memory restored with its fact left blanked.
-            if not (mem_matches and facts_match):
+            # One set of guarded statements, shared with save_repair: it verifies
+            # the memory and every fact before writing any, so a restore is
+            # counted only for what is fully applied, and an original the
+            # ingest gate rejects is skipped (it would only fail again).
+            if not restore_blanked_text(run, item.memory_id, item.blanked, item.original,
+                                        item.fact_ids):
                 skipped += 1
                 continue
-            conn.execute(
-                "UPDATE memories SET content=? WHERE memory_id=? AND content=?",
-                (item.original, item.memory_id, item.blanked))
-            for fact_id in item.fact_ids:
-                conn.execute(
-                    "UPDATE atomic_facts SET content=? WHERE fact_id=? AND content=?",
-                    (restored_fact, fact_id, expected_fact))
             conn.execute(
                 "UPDATE ingestion_operations SET state='queryable', attempt_count=0, "
                 "next_retry_at=0, last_error='', lease_owner='', lease_expires_at=0, "
@@ -249,4 +294,4 @@ def apply_repair(conn: sqlite3.Connection, plan: RepairPlan) -> RepairResult:
 
 
 __all__ = ["RepairPlan", "RepairResult", "RestoreItem", "apply_repair",
-           "is_blanked_copy", "plan_repair"]
+           "is_blanked_copy", "plan_repair", "restore_blanked_text"]

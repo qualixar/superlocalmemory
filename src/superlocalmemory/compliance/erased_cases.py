@@ -143,11 +143,22 @@ def erase_profile_cases(db: Any, profile_id: str, *, erasure_id: str) -> int:
             if closed:  # the table exists: close_for_erasure created it
                 db.execute("DELETE FROM correction_cases_erased WHERE profile_id = ?",
                            (profile_id,))
+            _erase_overtaken(db, profile_id)
     except Exception as exc:
         if "no such table: correction_cases" in str(exc):
             return 0  # a store from before the correction ledger
         raise
     return len(closed) + len(own)
+
+
+def _erase_overtaken(db: Any, profile_id: str) -> None:
+    """The profile's cases a user action or a bulk dismissal moved out of the
+    ledger (core/overtaken_cases.py): they name its facts and outlive nothing."""
+    try:
+        db.execute("DELETE FROM correction_cases_overtaken WHERE profile_id = ?", (profile_id,))
+    except Exception as exc:
+        if "no such table: correction_cases_overtaken" not in str(exc):
+            raise  # a store that never overtook a case has no such table
 
 
 __all__ = ["ERASED_ON_REQUEST", "close_for_erasure", "delete_erased_facts",

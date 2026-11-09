@@ -126,13 +126,16 @@ def ensure_table(target: Any) -> None:
 
 
 def overtake(target: Any, cases: Iterable[dict], *, user_action: str, actor_id: str,
-             operation_id: str) -> list[str]:
+             operation_id: str, closed_reason: str = OVERTAKEN) -> list[str]:
     """Close machine-pending cases for a user action. Call inside the action's
     own write transaction so the case closes only if the action happens.
 
     Each case is removed only if it is STILL a pending machine proposal; if it
     changed since it was read (reviewed meanwhile), nothing is moved and
     ``OvertakeRaced`` aborts the caller's transaction, action included.
+
+    ``closed_reason`` is the audit text; the default says a user action closed
+    the case. The bulk dismissal (core/dismissed_cases.py) passes its own.
     """
     closed: list[str] = []
     todo = [c for c in cases if is_machine_pending(c)]
@@ -151,7 +154,7 @@ def overtake(target: Any, cases: Iterable[dict], *, user_action: str, actor_id: 
             (case_id, str(case["profile_id"]), str(case["predecessor_fact_id"]),
              str(case["successor_fact_id"]), str(case["reason_code"]),
              json.dumps(case, sort_keys=True), json.dumps(events, sort_keys=True),
-             user_action, actor_id or "unknown", operation_id, OVERTAKEN, now))
+             user_action, actor_id or "unknown", operation_id, closed_reason, now))
         target.execute("DELETE FROM correction_events WHERE case_id = ?", (case_id,))
         gone = _run(target, "DELETE FROM correction_cases WHERE case_id = ? AND status = ? "
                     "AND version = ? RETURNING case_id",
@@ -160,8 +163,10 @@ def overtake(target: Any, cases: Iterable[dict], *, user_action: str, actor_id: 
             raise OvertakeRaced(f"correction case {case_id} changed while the {user_action} "
                                 "ran; nothing was changed, try again")
         closed.append(case_id)
-    logger.info("correction cases overtaken by a user %s: %s", user_action,
-                ",".join(c[:12] for c in closed))
+    # A bulk dismissal logs one summary line itself; one line per case would be thousands.
+    log = logger.info if closed_reason == OVERTAKEN else logger.debug
+    log("correction cases overtaken by a user %s: %s", user_action,
+        ",".join(c[:12] for c in closed))
     return closed
 
 

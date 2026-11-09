@@ -5,6 +5,87 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.14] — No more hangs on unusual text, repairable old saves, Mode B cost control
+
+Fixes for #310, #308 and #309, and two problems found while working on them.
+Every new setting defaults to what 4.2.13 did, so nothing changes until you
+choose. No migration. Nothing needs re-indexing: the stored output of every
+fixed text matcher is identical.
+
+### Fixed
+
+- **A save or a recall question could hang on one unusual word** (#310). The
+  matcher that finds lower-case technical names ("llama3.2", "snake_case")
+  backtracked exponentially on a word with a long run of digits followed by
+  `-`, `/` or `_`: `img2026100418461234567890-edit` took minutes, and every
+  retry of that save hung again. It now runs in milliseconds and returns
+  exactly the same names. That was checked on all 48 million strings up to
+  length 8 over its alphabet and on every text of a 57,000-text store.
+- **Two more slow matchers, found by auditing every pattern after #310.** The
+  date-range readers ("from X to Y", "between X and Y") took 29 seconds on a
+  save whose text had a long run of spaces, as text copied from a PDF often
+  does. They now finish in milliseconds and return the same dates. That was
+  checked on 23.5 million strings and on every text of the same real store.
+  The trade: a memory over 5,000 characters spends up to about 70 ms more
+  reading its dates; shorter text is unaffected.
+- **`slm ops repair-saves` repairs the saves the one-time store repair
+  missed** (#308). Saves from 4.1.1x builds whose text was blanked with
+  `[REDACTED:…]` markers stayed failed forever when they failed after the
+  4.1.19 store repair had already run. `repair-saves` now restores them from
+  the save itself and re-files them. It uses the same guarded writes the store
+  repair used, with a dry run first and a backup before `--apply`. An original
+  that looks like it holds a secret, or that the ingest gate rejects, is
+  listed for you to review and never restored automatically. The review reason
+  "its text was changed after saving" was wrong (no SLM path rewrites a
+  memory's text after a save) and now says what is known and what to do.
+- **Session start showed sentence fragments as rules, and dropped recall
+  results.** Since 4.2.5 every sentence of a memory is also stored as its own
+  fact, and each carried the memory's "rule" label, so one seven-sentence rule
+  took seven of the ten rule slots, fragments included. Each rule is now one
+  entry. When there are more than ten, rules saved in this project come first,
+  then the ones this session's recall found relevant, then the newest. Recall
+  results always keep their places in `memories`.
+- **Session start no longer injects your own prompts and the hooks' markers
+  as "Core Memory".** The pinned Core Memory blocks that every Claude Code and
+  Codex session starts with were compiled from the most-read, newest and most
+  confident facts of any origin. On a real store, 14 of the 15 facts behind
+  them were fragments of prompts the auto-capture hook stored ("You need to
+  give me a google flow avatar prompt.") or the hooks' own "session ended" and
+  "File changed" markers. The blocks are now built only from memories, and
+  the behaviour-telemetry block ("time_of_day: hour_21") is no longer
+  injected. Captured prompts stay stored and searchable. A block compiled
+  before upgrading is held back until its daily recompile.
+- **`slm config set` could erase your settings.** On an unreadable
+  `config.json` it started from an empty file and wrote that back. It now
+  stops and changes nothing, and every write is locked and atomic.
+- **A dashboard setting could undo a `slm config set` change.** The daemon
+  saved the whole configuration as it was when it started, so changing, say,
+  recall depth in the dashboard put back any value the CLI had changed since.
+  The dashboard now writes only the setting you changed.
+- **The one-time store repair could put a blanked secret back.** On a store
+  upgraded from a 4.1.1x build, the repair that runs once at start-up restored
+  every `[REDACTED:…]` span from the original save, including one that held a
+  real credential. A save whose original looks like it holds a secret is now
+  left as it is, in that repair and in `repair-saves`.
+- **Profile erase left overtaken correction cases behind**, and restoring a
+  snapshot could reopen correction cases you had closed or bring back ones you
+  had dismissed. All three are fixed.
+
+### Added
+
+- **Two Mode B/C cost settings** (#309). Each stored fact costs one model call
+  for its context sentence and up to five for contradiction checks.
+  `slm config set temporal_validator.max_llm_checks 0` keeps only the
+  embedding-based check, and `slm config set encoding.context_generation_llm
+  false` writes context sentences by rule. Run `slm restart` to apply. Each
+  mode keeps its own value. The defaults (5 and true) are 4.2.13's.
+- **`slm corrections dismiss`** (#309) closes the correction proposals SLM
+  made by itself and nobody reviewed. Filter with `--reason`, `--older-than`
+  and `--before`. It shows what it would do first; `--apply` takes a backup.
+  Each case can be put back with `slm corrections restore-overtaken`. There is
+  deliberately no bulk reject: a rejected case counts as decided, and a decided
+  case keeps its facts from ever being deleted.
+
 ## [4.2.13] — Lighter ingestion on large stores, fresh graph scores
 
 Three fixes for large stores, from reports on #306 and #304. No migration and

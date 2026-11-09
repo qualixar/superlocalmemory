@@ -94,6 +94,9 @@ def test_the_file_change_hook_line_is_a_stub(hook_outputs):
     '[claude] session ended (stop) at 2026-10-13 11:01 in Agentic_official.',
     '[codex] session ended (exit) at 2026-10-13 11:01 in my project.'
     ' | transcript: /tmp/x.jsonl | session_id: 9f8e7d6c-1234',
+    # 4.2.14: ingestion derives this one without its "[agent]" prefix too
+    # (7 such rows were injected at one session start on a real store)
+    'session ended (exit) at 2026-11-07 13:49 in config.',
 ])
 def test_known_hook_shapes_are_stubs(text):
     assert is_stub(text)

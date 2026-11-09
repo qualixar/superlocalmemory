@@ -125,7 +125,8 @@ computer, not Grok's. Then you have:
    ```
    session_init(project_path="<where you are working>", query="")
    ```
-   Returns recent relevant memories and a session id to pass to later calls.
+   Returns the user's pinned memories, confirmed standing rules (one entry per
+   rule), recent relevant memories and a session id to pass to later calls.
 
 2. **`remember`** one real fact, before doing anything else, as a smoke test:
    ```
@@ -194,4 +195,4 @@ quality on a shared box.
 
 ---
 
-*SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later*

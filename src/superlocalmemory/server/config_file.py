@@ -5,40 +5,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable
 
-_PROCESS_LOCK = threading.RLock()
+from superlocalmemory.infra.config_lock import config_file_lock
 
-
-@contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
-    """Serialize config access across daemon, CLI, and worker processes."""
-    lock_path = path.with_name(f".{path.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with _PROCESS_LOCK, lock_path.open("a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-
-            handle.seek(0)
-            handle.write(b"\0")
-            handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+# The lock moved to infra (4.2.14) so SLMConfig.save() can take the same one.
+# The old private name stays: server/backup_bundle.py imports it.
+_file_lock = config_file_lock
 
 
 def _read_unlocked(path: Path) -> dict:

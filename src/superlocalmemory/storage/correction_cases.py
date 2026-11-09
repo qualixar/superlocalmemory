@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Literal, Mapping
 from uuid import uuid4
 
+from superlocalmemory.storage.correction_dismissals import dismissed_in_bulk
 from superlocalmemory.storage.write_lock import get_write_lock
 
 _SCOPES = frozenset({"personal", "project", "shared", "global"})
@@ -63,6 +64,10 @@ class CorrectionFactErasingError(CorrectionCompareAndSetError):
 
 class CorrectionIdempotencyError(CorrectionCaseError):
     """A replay key names a different correction proposal."""
+
+
+class CorrectionDismissedError(CorrectionCaseError):
+    """The user dismissed this machine proposal in bulk; it is not filed again."""
 
 
 class CorrectionNotFoundError(CorrectionCaseError):
@@ -312,6 +317,14 @@ def propose_on_connection(
             raise CorrectionIdempotencyError("proposal replay key names different data")
         return case
 
+    if (
+        actor.actor_kind == "host_attested"  # only the save path's own guesses are remembered
+        and (reason_code == TEMPORAL_CANDIDATE_REASON
+             or reason_code.startswith(CONSOLIDATION_CANDIDATE_PREFIX))
+        and dismissed_in_bulk(conn, profile_id, case_id)
+    ):
+        raise CorrectionDismissedError(
+            "this machine proposal was dismissed by the user and is not filed again")
     refuse_if_being_deleted(conn, (predecessor_fact_id, successor_fact_id), "proposed")
     now = _now()
     conn.execute(

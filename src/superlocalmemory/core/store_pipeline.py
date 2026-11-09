@@ -79,6 +79,7 @@ def _record_correction_candidate(
     from superlocalmemory.storage.correction_cases import (
         CorrectionActor,
         CorrectionCaseError,
+        CorrectionDismissedError,
         open_case_id,
         propose_on_connection,
     )
@@ -132,6 +133,11 @@ def _record_correction_candidate(
                 is_profile_active=lambda candidate_profile: candidate_profile == profile_id,
                 is_actor_trusted=lambda candidate_actor: candidate_actor == actor,
             )
+    except CorrectionDismissedError:
+        # The user dismissed this very proposal (slm corrections dismiss); a
+        # save materialized again must not bring it back. Not a fault.
+        logger.debug("Correction candidate for %s skipped: dismissed by the user",
+                     successor_fact_id)
     except (CorrectionCaseError, sqlite3.Error, ValueError) as exc:
         # A missing/hot-upgrading M042 ledger must not make memory ingestion
         # unavailable. The candidate is advisory and has no retrieval effect;

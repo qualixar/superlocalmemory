@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import re
 
+from superlocalmemory.encoding.lower_tech_scan import lower_tech_spans
+
 #: Words that are capitalised only by position, address someone, or label a
 #: note. Never a name on their own, removed from inside runs as well.
 STOP_WORDS: frozenset[str] = frozenset("""
@@ -87,8 +89,6 @@ _NAME_WORD = (r"(?:[A-Z][a-z0-9]*(?:[A-Z][a-z0-9]*)*|[a-z]+[A-Z][A-Za-z0-9]*)"
 _VERSION = r"v?\d+(?:\.\d+)+|\d+"
 _RUN = re.compile(rf"(?<![\w./~\\-])({_NAME_WORD}(?:[ ](?:{_NAME_WORD}|{_VERSION}))*)"
                   r"(?![\w/\\-]|\.\w)")
-_LOWER_TECH = re.compile(r"(?<![\w.:/~\\-])([a-z][a-z0-9]*(?:[_:.][a-z0-9]+|\d[a-z0-9.]*)+"
-                         r"|[a-z]{4,})(?![\w/\\-])")
 _LETTER_AFTER = re.compile(r"\b([a-z]{3,}) ([A-Z])(?![\w-])")
 _SYSTEM_PHRASE = re.compile(r"(?<![\w-])([a-z]{3,}) (" + "|".join(sorted(_SYSTEM_NOUNS)) + r")\b")
 _QUOTED = re.compile(r"\"([^\"]{2,60})\"")
@@ -178,8 +178,9 @@ def _technical(word: str) -> bool:
 
 
 def _lower_mentions(text: str, out: _Found) -> None:
-    for m in _LOWER_TECH.finditer(text):
-        word = m.group(1)
+    # Bounded time, identical words (#310): see encoding/lower_tech_scan.py.
+    for start, end in lower_tech_spans(text):
+        word = text[start:end]
         if word.isalpha():
             if _coined(word):
                 out.add(word)

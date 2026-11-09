@@ -176,3 +176,7 @@ Memory and local configuration are kept.
 - `slm-mesh` — bot messages, `mesh_wait` and `ack`
 - `slm-bot-memory` and `slm-getting-started-bot` — bots that share one computer
 - `slm-governance` — roles and company mode
+
+---
+
+*SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later*

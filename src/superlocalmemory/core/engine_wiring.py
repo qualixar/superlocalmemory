@@ -322,14 +322,16 @@ def _init_access_log(db: DatabaseManager) -> Any | None:
 
 
 def _init_context_generator(config: SLMConfig, llm: Any) -> Any | None:
-    """Create ContextGenerator for Phase 2 contextual descriptions."""
+    """Create ContextGenerator for Phase 2 contextual descriptions.
+
+    Always a generator, never ``None``: AutoLinker skips its own work when the
+    generator is missing. ``encoding.context_generation_llm`` false (#309)
+    gives the rule-based one, the same Mode A uses or Mode B with its model
+    down; the default keeps the model, exactly as 4.2.13 did."""
     try:
         from superlocalmemory.encoding.context_generator import ContextGenerator
-        if hasattr(config, "auto_invoke") and config.auto_invoke.enabled:
-            return ContextGenerator(llm=llm)
-        # Still create the generator (rules-only) even when disabled,
-        # so store pipeline can generate context when called directly.
-        return ContextGenerator(llm=llm)
+        use_llm = getattr(getattr(config, "encoding", None), "context_generation_llm", True)
+        return ContextGenerator(llm=llm if use_llm is not False else None)
     except Exception as exc:
         logger.debug("ContextGenerator init failed: %s", exc)
         return None
@@ -350,11 +352,14 @@ def _init_temporal(
         from superlocalmemory.trust.scorer import TrustScorer
 
         trust_scorer = TrustScorer(db)
+        # max_llm_checks 0 (#309): no model, so the sheaf check alone runs -
+        # the path Mode A, or Mode B with its model down, already takes.
+        use_llm = config.temporal_validator.max_llm_checks > 0
         tv = TemporalValidator(
             db=db,
             sheaf_checker=sheaf_checker,
             trust_scorer=trust_scorer,
-            llm=llm,
+            llm=llm if use_llm else None,
             config=config.temporal_validator,
         )
         logger.info("TemporalValidator initialized (mode=%s)", config.temporal_validator.mode)

@@ -1,7 +1,7 @@
 ---
 name: superlocalmemory
 description: "AI agent memory with mathematical foundations. Store, recall, search, and manage memories locally. Local data root; optional networked features have separate behavior."
-version: "4.1.25"
+version: "4.2.14"
 author: "Varun Pratap Bhardwaj"
 license: AGPL-3.0-or-later
 homepage: https://superlocalmemory.com
@@ -107,6 +107,32 @@ slm connect --json                        # Auto-configure IDEs
 slm connect --list --json                 # List supported IDEs
 ```
 
+### Repair and upkeep (4.2.14; preview first, ask the user before `--apply`)
+
+```bash
+slm ops list --json                       # failed, stuck or degraded operations
+slm ops repair-saves --json               # dry run: saves that failed for good, and what would be re-filed
+slm ops repair-saves --apply              # copies memory.db first, then repairs; cannot be undone
+slm ops resolve <operation_id> --action cancel   # drop a save the user does not want (also retry, force_reconcile)
+slm corrections dismiss --json            # dry run: unreviewed correction proposals SLM made by itself
+slm corrections dismiss --older-than 30 --apply   # filters: --reason R, --older-than DAYS, --before DATE, --profile P
+slm corrections restore-overtaken <case_id>       # put a dismissed or overtaken case back
+```
+
+`repair-saves` restores saves whose text a 4.1.1x build blanked with
+`[REDACTED:...]` markers and files them again; an original that looks like a
+secret is left for the user to review. There is no bulk reject for corrections on
+purpose: a rejected case counts as decided, and its memories can then never be
+deleted. In Mode B or C, two settings cut the model calls per stored fact (defaults
+are 5 and true; run `slm restart` after):
+
+```bash
+slm config set temporal_validator.max_llm_checks 0     # embedding check only
+slm config set encoding.context_generation_llm false   # context sentences by rule
+```
+
+`slm config set` stops without changing anything when `config.json` cannot be read.
+
 ### Bounded Loops
 
 ```bash
@@ -173,7 +199,7 @@ Error responses:
 
 SuperLocalMemory works via both MCP and CLI:
 
-- **MCP**: 38 tools (`code` profile), 57 (`full`, the default; 62 with pictures and documents on) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`, bot-message tools `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait` (a connected web app passes each reply's `ack_ids` back as `ack`) and `mesh_state`
+- **MCP**: 39 tools (`code` profile), 58 (`full`, the default; 62 with pictures and documents on) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`, bot-message tools `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait` (a connected web app passes each reply's `ack_ids` back as `ack`) and `mesh_state`
 - **CLI**: commands with `--json` for scripts, CI/CD, and agent frameworks; includes `slm loop demo/history/show`
 
 ---

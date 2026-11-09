@@ -1,7 +1,7 @@
 ---
 name: slm-remember
 description: Capture durable facts, decisions, constraints, and gotchas into SuperLocalMemory. Use when the user says "remember that", "save this decision", "note this constraint", or when a session produces a conclusion worth persisting across sessions. Always recall first to avoid duplicates.
-version: "4.2.13"
+version: "4.2.14"
 agent: agent
 tools:
   - remember
@@ -201,7 +201,9 @@ happened) or `semantic` (a lasting fact). An unknown value is refused with
 
 Set it whenever you know. A kind you declare is confirmed, and confirmed rules
 (up to 10) and confirmed decisions (up to 5) are loaded by `session_init` at
-the start of later sessions. Leave `kind` empty when unsure: SLM may suggest
+the start of later sessions. A rule counts once however many sentences it has;
+with more than ten, rules saved in the session's project come first, then those
+the opening recall found relevant, then the newest. Leave `kind` empty when unsure: SLM may suggest
 one later, and a suggestion changes nothing until someone confirms it. Never
 set a kind just to get a memory loaded at session start.
 
@@ -245,6 +247,19 @@ your action wins and the guess is closed as overtaken (`slm corrections
 overtaken` lists them, `slm corrections restore-overtaken <case_id>` puts one
 back). A correction a person proposed, or one already decided, is kept
 permanently and protects the memories in it from being deleted.
+
+When thousands of unreviewed guesses pile up (a Mode B/C store can file one per
+save), close them in bulk with `slm corrections dismiss`. It is a dry run until
+`--apply`, which copies `memory.db` first. Filters: `--reason R` (repeatable:
+`temporal_contradiction`, `consolidation_update`, `consolidation_supersede`),
+`--older-than DAYS`, `--before DATE`, `--profile P`, `--json`. It touches only
+guesses nobody reviewed, never a correction a person made, applied, rejected or
+rolled back. Each dismissed case can be put back with
+`slm corrections restore-overtaken <case_id>`. There is deliberately no bulk
+reject: a rejected case counts as decided, and a memory in a decided case can
+never be deleted, so rejecting thousands would lock their memories for good.
+Never reject cases in bulk to tidy the list. To cut the guesses at the source,
+see `slm-status` ("Too many model calls").
 
 ### 7. One fact per call
 
@@ -377,4 +392,4 @@ sessions on this machine, so use it only when the user asks to move. See
 
 ---
 
-*SuperLocalMemory v4.2.13 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.14 · Qualixar · AGPL-3.0-or-later*

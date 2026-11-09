@@ -20,6 +20,19 @@ any fact linked to correction history returns a conflict instead of pretending
 the writer is unavailable; a dedicated erasure workflow owns privacy deletion
 across the fact and its ledger.
 
+## Cases SLM proposes by itself
+
+In Mode B and Mode C the save path also files a `proposed` case when it only
+guesses that a new memory updates an older one (reasons
+`temporal_contradiction`, `consolidation_update`, `consolidation_supersede`).
+These guesses never withhold a memory from recall and never block a delete, and
+a delete, replace or edit of yours closes them automatically (see
+`slm corrections overtaken`). When they pile up unreviewed, `slm corrections
+dismiss` clears them in bulk, with a dry run, a backup before `--apply` and a
+restore for each case. There is no bulk reject, because a rejected case counts
+as decided and then protects its memories from deletion for good. Details:
+[`slm corrections dismiss`](cli-reference.md#slm-corrections-dismiss).
+
 ## Time-aware recall
 
 Current recall performs hard correction admission before fusion and again after

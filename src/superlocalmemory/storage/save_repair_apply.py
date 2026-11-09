@@ -22,9 +22,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from superlocalmemory.storage.save_repair import (
+    REPOINT_ACTIONS,
+    RESTORE_ACTIONS,
     STALE_DEAD_LETTERS,
     RefileItem,
     SavePlan,
+    _fingerprint,
     count_stale_dead_letters,
 )
 
@@ -98,15 +101,33 @@ def _new_fact(db, op: dict, memory_id: str) -> str:
     return db.insert_fact_immutable(fact)
 
 
+def _restore_text(db, op: dict, item: RefileItem) -> bool:
+    """Restore a blanked memory (and its facts) from the operation; False writes nothing.
+
+    The statements are ``store_repair``'s own, shared: every row is verified
+    before any is written, each write guarded by the text it replaces. The
+    reviewed memory text is checked again against the plan's fingerprint.
+    """
+    from superlocalmemory.storage.store_repair import restore_blanked_text
+
+    rows = db.execute("SELECT content FROM memories WHERE memory_id=?", (item.memory_id,))
+    if not rows or _fingerprint(rows[0]["content"]) != item.memory_fingerprint:
+        return False
+    return restore_blanked_text(db.execute, item.memory_id, rows[0]["content"],
+                                op["raw_content"], item.fact_ids, accept_restored_facts=True)
+
+
 def _refile(db, item: RefileItem) -> bool:
     rows = db.execute("SELECT * FROM ingestion_operations WHERE operation_id=? "
                       "AND state='failed'", (item.operation_id,))
     if not rows:
         return False
     op = dict(rows[0])
+    if item.action in RESTORE_ACTIONS and not _restore_text(db, op, item):
+        return False        # nothing was written: the memory or a fact is no longer as reviewed
     if item.action == "add_memory_and_fact":
         db.store_memory(_memory_for(op, item.memory_id))
-    fact_ids = list(item.fact_ids) if item.action == "repoint" else [
+    fact_ids = list(item.fact_ids) if item.action in REPOINT_ACTIONS else [
         _new_fact(db, op, item.memory_id)]
     db.execute(
         "UPDATE ingestion_operations SET state='queryable', attempt_count=0, next_retry_at=0, "
