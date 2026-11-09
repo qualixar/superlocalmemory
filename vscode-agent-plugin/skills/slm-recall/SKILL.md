@@ -515,4 +515,4 @@ See `slm-profile`.
 
 ---
 
-*SuperLocalMemory v4.2.16 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.17 · Qualixar · AGPL-3.0-or-later*

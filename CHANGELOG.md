@@ -5,7 +5,7 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.2.17] — Replaced memories leave session start; one command to hide a memory
 
 The last fixes of this cycle, batched into one release. No new settings and no
 data migration: the store stays at schema 68, so 4.2.16 and 4.2.17 can open
