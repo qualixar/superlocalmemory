@@ -12,10 +12,6 @@ on:
   push:
     branches: ["rc/**"]
   workflow_dispatch:
-    inputs:
-      shards:
-        description: "Number of shards"
-        default: "6"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,7 +43,7 @@ jobs:
       - name: Pick this shard's test files
         env:
           SHARD: ${{ matrix.shard }}
-          SHARDS: ${{ inputs.shards || '6' }}
+          SHARDS: "6"  # must equal the matrix length
         run: |
           uv run python - <<'EOF' > shard-files.txt
           import os, pathlib, zlib
