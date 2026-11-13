@@ -8,6 +8,7 @@ same root remain manageable when the operator changes the configured port.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import shlex
@@ -21,6 +22,8 @@ from superlocalmemory.cli.service_live import verified_live
 from superlocalmemory.infra.data_root import canonical_data_root
 from superlocalmemory.infra.service_files import ServiceFiles
 from superlocalmemory.infra.service_mutation import check_lock, serialized
+
+logger = logging.getLogger(__name__)
 
 LEGACY_NAMES = {"macos": "com.qualixar.superlocalmemory", "linux": "superlocalmemory",
                 "windows": "SuperLocalMemory"}
@@ -43,7 +46,10 @@ def write(path: Path, content: str) -> bool:
         with ServiceFiles(path.parent, create=True) as files:
             files.write(path.name, content)
         return True
-    except OSError:
+    except OSError as exc:
+        # Issue #319: this used to vanish, leaving only "Check logs." Say
+        # which file and which guard refused it.
+        logger.error("Could not write service definition %s: %s", path, exc)
         return False
 
 

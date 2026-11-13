@@ -1,0 +1,43 @@
+name: Windows
+
+# The first Windows lane (issue #319). SLM lists 64-bit Windows as supported,
+# yet nothing ran there: every Windows bug so far was found by a user. This
+# job runs the tests that pin Windows-specific behaviour on a real Windows
+# runner (filesystem, sockets, service definitions), not the whole suite,
+# which has never been tuned for Windows runners. Widen the list as each
+# area is proven there.
+on:
+  push:
+    branches: [main, "release/**", "rc/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows checks (Python 3.12)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
+      - name: Install the locked environment
+        run: uv sync --frozen --python 3.12
+      - name: Windows-specific checks
+        shell: bash
+        run: |
+          uv run python -m pytest -q -p no:randomly \
+            tests/test_cli/test_daemon_cold_start_wait.py \
+            tests/test_cli/test_service_definition_handles.py \
+            tests/test_cli/test_service_removal_races.py \
+            tests/test_cli/test_serve_install_exit_code.py \
+            tests/core/test_bm25_zero_token_facts.py \
+            tests/core/test_imported_harness_wrappers.py \
+            tests/core/test_remember_admission.py \
+            tests/storage/test_admission_journal.py

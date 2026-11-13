@@ -174,6 +174,7 @@ def validate_deterministic_admission(
     *,
     max_verbatim_chars: int = 24_000,
     max_ingest_bytes: int = 1_048_576,
+    source_type: str | None = None,
 ) -> None:
     """Reject deterministic non-evidence before it can enter the journal.
 
@@ -187,12 +188,17 @@ def validate_deterministic_admission(
 
     if not content_passes_admission(content):
         raise AdmissionPayloadError("content rejected by deterministic admission policy")
-    if apply_ingest_gate(
+    gate = apply_ingest_gate(
         content,
         max_verbatim_chars=max_verbatim_chars,
         max_ingest_bytes=max_ingest_bytes,
-    ).rejected:
-        raise AdmissionPayloadError("content rejected by deterministic ingest policy")
+        source_type=source_type,
+    )
+    if gate.rejected:
+        raise AdmissionPayloadError(
+            "content rejected by deterministic ingest policy "
+            f"({gate.rejection_code or 'rejected'})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1106,7 +1112,10 @@ class CanonicalRememberRuntime:
                 try:
                     receipt = command_impl.submit(ingestion_request)
                 except IngestionRejectedError as exc:
-                    raise CommandRejectedError() from exc
+                    # Issue #319: the journal records why, not only that it
+                    # was refused. Bounded: the journal takes 128 characters.
+                    code = getattr(exc, "code", "") or "no_queryable_facts"
+                    raise CommandRejectedError(f"COMMAND_REJECTED:{code}"[:128]) from exc
                 self._record_projection_obligations(conn, request, receipt)
         return WriteResult.from_receipt(
             command,

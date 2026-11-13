@@ -530,3 +530,39 @@ def test_the_first_probe_comes_out_of_the_same_budget(stubs, no_spawn, monkeypat
     assert daemon.daemon_request("POST", "/remember", {"content": "probe"}) is None
     took = time.monotonic() - began
     assert took < 1.5 + 0.6, took  # old: >= 0.8 + 1.5
+
+
+# Issue #319: on Windows a READY daemon whose process is alive was given the
+# same 0.5 s /health read as a port nobody bound, so a busy-but-healthy
+# daemon came back as DAEMON_UNAVAILABLE. The short read exists only to stop
+# a closed port's slow refusal from costing 2 s; a live ready daemon is not
+# that case.
+def test_windows_ready_daemon_with_live_process_gets_the_posix_read(monkeypatch):
+    from superlocalmemory.cli import daemon, daemon_startup
+    from superlocalmemory.cli.daemon_startup import health_probe_timeout
+
+    monkeypatch.setattr(daemon_startup.sys, "platform", "win32")
+    monkeypatch.delenv("SLM_DAEMON_HEALTH_PROBE_S", raising=False)
+    monkeypatch.setattr(daemon, "_is_pid_alive", lambda pid: pid == 4242)
+    assert health_probe_timeout(SimpleNamespace(state="ready", pid=4242)) == 2.0
+    # Dead process or no PID on record: still the fast-fail read.
+    assert health_probe_timeout(SimpleNamespace(state="ready", pid=7)) == 0.5
+    assert health_probe_timeout(SimpleNamespace(state="ready")) == 0.5
+    # A starting daemon keeps the short polling read everywhere.
+    assert health_probe_timeout(SimpleNamespace(state="starting", pid=4242)) == 0.5
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("5", 5.0), ("0.01", 0.25), ("600", 10.0), ("nonsense", 2.0), ("", 2.0)],
+)
+def test_health_probe_read_is_configurable_within_bounds(raw, expected, monkeypatch):
+    from superlocalmemory.cli import daemon, daemon_startup
+    from superlocalmemory.cli.daemon_startup import health_probe_timeout
+
+    monkeypatch.setattr(daemon_startup.sys, "platform", "win32")
+    monkeypatch.setattr(daemon, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setenv("SLM_DAEMON_HEALTH_PROBE_S", raw)
+    assert health_probe_timeout(SimpleNamespace(state="ready", pid=1)) == expected
+    # The setting never lengthens a starting daemon's polling read.
+    assert health_probe_timeout(SimpleNamespace(state="starting", pid=1)) == 0.5

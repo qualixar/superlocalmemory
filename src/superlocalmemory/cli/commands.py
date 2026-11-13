@@ -925,7 +925,10 @@ def cmd_serve(args: Namespace) -> None:
             print("  slm serve status    — check service status")
             print("  slm serve uninstall — remove auto-start")
         else:
-            print("Failed to install service. Check logs.")
+            # Issue #319: a failed install exited 0, so scripts read it as done.
+            print("Failed to install service (the reason is printed above).",
+                  file=sys.stderr)
+            sys.exit(1)
         return
 
     if action == 'uninstall':
@@ -933,7 +936,8 @@ def cmd_serve(args: Namespace) -> None:
         if uninstall_service():
             print("OS service removed \u2713 — SLM will no longer auto-start.")
         else:
-            print("Failed to remove service.")
+            print("Failed to remove service.", file=sys.stderr)
+            sys.exit(1)
         return
 
     # Default: start

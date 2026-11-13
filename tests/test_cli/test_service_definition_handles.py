@@ -77,3 +77,49 @@ def test_windows_removal_targets_bound_handle_and_byte_sized_disposition(monkeyp
             assert size == 1  # FILE_DISPOSITION_INFO.DeleteFile is BOOLEAN, not BOOL
             assert ctypes.cast(pointer, ctypes.POINTER(ctypes.c_ubyte)).contents.value == 1
             assert (tmp_path / "owned.vbs").read_text() == "owned content"  # no path unlink
+
+
+def _fake_stat(*, dev=7, ino=11, size=64, mtime_ns=2_000_000_000, ctime_ns):
+    return SimpleNamespace(st_dev=dev, st_ino=ino, st_size=size,
+                           st_mtime_ns=mtime_ns, st_ctime_ns=ctime_ns)
+
+
+def test_windows_revision_ignores_ctime_that_stat_and_fstat_disagree_on(monkeypatch):
+    """Issue #319: on Windows, CPython's path stat and handle fstat can report
+    different st_ctime_ns for one unchanged file (identity, size and mtime
+    agree). The guard compared that field, so every install refused its own
+    freshly written wrapper. Content is still pinned by the SHA-256 digest
+    and the deny-write handle, so dropping ctime there weakens nothing."""
+    proxy = SimpleNamespace(**vars(os))
+    proxy.name = "nt"
+    monkeypatch.setattr(service_files, "os", proxy)
+    by_path, by_handle = _fake_stat(ctime_ns=1), _fake_stat(ctime_ns=999)
+    assert service_files._revision(by_path) == service_files._revision(by_handle)
+    # Identity, size and mtime still count.
+    assert service_files._revision(by_path) != service_files._revision(
+        _fake_stat(ctime_ns=1, size=65))
+    assert service_files._revision(by_path) != service_files._revision(
+        _fake_stat(ctime_ns=1, mtime_ns=3))
+
+
+def test_posix_revision_still_includes_ctime(monkeypatch):
+    proxy = SimpleNamespace(**vars(os))
+    proxy.name = "posix"
+    monkeypatch.setattr(service_files, "os", proxy)
+    assert service_files._revision(_fake_stat(ctime_ns=1)) != service_files._revision(
+        _fake_stat(ctime_ns=2))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the real Windows stat/fstat pair")
+def test_real_windows_wrapper_written_then_verified_passes_its_own_check(tmp_path):
+    """Issue #319 end to end on a real Windows filesystem: write the wrapper
+    the way `slm serve install` does, then bind and re-check it."""
+    directory = tmp_path / "service"
+    with service_files.ServiceFiles(directory, create=True) as files:
+        files.write("start-daemon.vbs", 'WScript.Echo "slm"\n')
+    with service_files.ServiceFiles(directory) as files:
+        with files.verified("start-daemon.vbs") as bound:
+            bound.check()
+        content, revision = files.snapshot("start-daemon.vbs")
+        with files.verified("start-daemon.vbs", content, revision) as bound:
+            bound.check()

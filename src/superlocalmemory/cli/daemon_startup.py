@@ -205,9 +205,43 @@ def health_probe_timeout(descriptor: Any) -> float:
     """
     if getattr(descriptor, "state", "") == "starting":
         return STARTING_PROBE_S
-    if sys.platform == "win32":
+    if sys.platform == "win32" and not _recorded_process_is_alive(descriptor):
+        # Issue #319: only a descriptor whose process is gone (or unknown)
+        # needs the short read. A live, ready daemon on Windows is the same
+        # busy-but-alive case POSIX already waits for; giving it 0.5 s turned
+        # a slow /health answer into DAEMON_UNAVAILABLE.
         return STARTING_PROBE_S
-    return 2.0
+    return ready_probe_seconds()
+
+
+READY_PROBE_S = 2.0
+_READY_PROBE_BOUNDS = (0.25, 10.0)
+
+
+def ready_probe_seconds() -> float:
+    """The /health read for a ready daemon: ``SLM_DAEMON_HEALTH_PROBE_S``,
+    clamped to 0.25-10 s, default 2 s. Never applies to a starting daemon."""
+    raw = os.environ.get("SLM_DAEMON_HEALTH_PROBE_S", "").strip()
+    try:
+        value = float(raw) if raw else READY_PROBE_S
+    except ValueError:
+        return READY_PROBE_S
+    if value != value:  # NaN
+        return READY_PROBE_S
+    low, high = _READY_PROBE_BOUNDS
+    return min(high, max(low, value))
+
+
+def _recorded_process_is_alive(descriptor: Any) -> bool:
+    pid = getattr(descriptor, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    from superlocalmemory.cli import daemon as _d
+
+    try:
+        return bool(_d._is_pid_alive(pid))
+    except Exception:  # a liveness check must never break the probe
+        return False
 
 
 def wait_for_starting_daemon(

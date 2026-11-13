@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from superlocalmemory.storage.admission_journal import (
+    UNEXPLAINED_REJECTION,
     Actor,
     AdmissionJournal,
     AdmissionJournalUnavailable,
@@ -152,7 +153,13 @@ class RememberService:
         if prepared.original_receipt is not None:
             return RememberReceipt.from_mapping(prepared.original_receipt)
         if prepared.state == "rejected":
-            raise AdmissionRejected(prepared.error_code or "COMMAND_REJECTED")
+            reopened = None
+            reopen = getattr(self._journal, "reopen_unexplained_rejection", None)
+            if prepared.error_code == UNEXPLAINED_REJECTION and reopen is not None:
+                reopened = reopen(prepared.journal_id, deadline=deadline)
+            if reopened is None:
+                raise AdmissionRejected(prepared.error_code or UNEXPLAINED_REJECTION)
+            prepared = reopened
         try:
             return self._commit_prepared(prepared, request, commit_deadline)
         except _CONTENTION:
@@ -212,7 +219,9 @@ class RememberService:
                 return RememberReceipt.from_mapping(receipt)
             return RememberReceipt.from_mapping(committed.original_receipt or receipt)
 
-        error_code = str(_result_value(result, "error_code") or "COMMAND_REJECTED")
+        # Never the bare legacy code: that one marks a pre-4.2.18 refusal
+        # that may be judged once more (reopen_unexplained_rejection).
+        error_code = str(_result_value(result, "error_code") or "COMMAND_REJECTED:unspecified")
         if state == "rejected":
             try:
                 self._journal.mark_rejected(
