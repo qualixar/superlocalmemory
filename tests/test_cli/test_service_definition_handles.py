@@ -76,7 +76,9 @@ def test_windows_removal_targets_bound_handle_and_byte_sized_disposition(monkeyp
             assert kind == 4  # FileDispositionInfo
             assert size == 1  # FILE_DISPOSITION_INFO.DeleteFile is BOOLEAN, not BOOL
             assert ctypes.cast(pointer, ctypes.POINTER(ctypes.c_ubyte)).contents.value == 1
-            assert (tmp_path / "owned.vbs").read_text() == "owned content"  # no path unlink
+    # Read after the guard handle closes: on real Windows it denies other
+    # opens while held. The file is still there, so nothing unlinked a path.
+    assert (tmp_path / "owned.vbs").read_text() == "owned content"
 
 
 def _fake_stat(*, dev=7, ino=11, size=64, mtime_ns=2_000_000_000, ctime_ns):

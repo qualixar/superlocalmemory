@@ -177,10 +177,11 @@ def test_the_wait_is_bounded_and_ends_with_a_truthful_starting_answer(
     assert daemon_unavailable_error().startswith("DAEMON_UNAVAILABLE (daemon_starting):")
 
     # remember retries three times inside one tool call; they must not each
-    # wait the whole budget again.
+    # wait the whole 1.5 s budget again. One short probe is allowed: on
+    # Windows a connect to a port nobody bound takes the full 0.5 s probe.
     began = time.monotonic()
     assert daemon.daemon_request("POST", "/remember", {"content": "probe"}) is None
-    assert time.monotonic() - began < 0.5
+    assert time.monotonic() - began < 1.0
 
 
 def test_a_port_reserved_before_http_is_up_cannot_stretch_the_wait(
@@ -198,12 +199,7 @@ def test_a_port_reserved_before_http_is_up_cannot_stretch_the_wait(
     assert time.monotonic() - began < 2.5  # 0.5 s first probe + 1 s budget + slack
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX-only guarantee: Windows deliberately uses the short "
-           "probe here (health_probe_timeout), not this 2 s one",
-)
-def test_a_slow_but_alive_health_reply_is_not_reported_unavailable_on_posix(
+def test_a_slow_but_alive_health_reply_is_not_reported_unavailable(
     stubs, no_spawn, monkeypatch,
 ):
     """4.1.22 correction (CRIT #1): shortening the Windows fail-fast probe
@@ -212,7 +208,8 @@ def test_a_slow_but_alive_health_reply_is_not_reported_unavailable_on_posix(
     not "starting"), then takes 1.2 s to answer /health -- well under the
     2 s POSIX budget and well over the 0.5 s Windows-only one, so this
     would wrongly read DAEMON_UNAVAILABLE if the short probe ever leaked
-    onto POSIX."""
+    onto POSIX. Since issue #319 the same holds on Windows for a ready
+    daemon whose process is alive."""
     from superlocalmemory.cli import daemon
     from superlocalmemory.cli.daemon_startup import STARTING_PROBE_S
 
@@ -518,12 +515,12 @@ def test_the_first_probe_comes_out_of_the_same_budget(stubs, no_spawn, monkeypat
     real_probe = daemon_startup.probe_health
     calls = []
 
-    def slow_first_probe(d, port, remaining):
+    def slow_first_probe(d, port, remaining, **options):
         calls.append(remaining)
         if len(calls) == 1:
             time.sleep(0.8)
             return None
-        return real_probe(d, port, remaining)
+        return real_probe(d, port, remaining, **options)
 
     monkeypatch.setattr(daemon_startup, "probe_health", slow_first_probe)
     began = time.monotonic()
@@ -566,3 +563,72 @@ def test_health_probe_read_is_configurable_within_bounds(raw, expected, monkeypa
     assert health_probe_timeout(SimpleNamespace(state="ready", pid=1)) == expected
     # The setting never lengthens a starting daemon's polling read.
     assert health_probe_timeout(SimpleNamespace(state="starting", pid=1)) == 0.5
+
+
+# Issue #319 follow-up: the long read for a live daemon must not make a
+# closed port slow on Windows, and the configured read must really be used.
+def test_windows_closed_port_fails_on_the_short_connect(monkeypatch):
+    from superlocalmemory.cli import daemon_startup
+
+    monkeypatch.setattr(daemon_startup.sys, "platform", "win32")
+    tried = []
+    monkeypatch.setattr(daemon_startup, "loopback_accepts",
+                        lambda port, timeout: tried.append(timeout) or False)
+    stub = _RecordingDaemonModule(reachable=True)
+    assert daemon_startup.probe_health(stub, port=1, remaining=2.0,
+                                       connect_first=True) is None
+    assert tried == [daemon_startup.STARTING_PROBE_S]
+    assert stub.fetch_calls == []  # never waited the long read
+
+
+def test_windows_listening_daemon_gets_the_whole_read(monkeypatch):
+    from superlocalmemory.cli import daemon_startup
+
+    monkeypatch.setattr(daemon_startup.sys, "platform", "win32")
+    monkeypatch.setattr(daemon_startup, "loopback_accepts", lambda port, timeout: True)
+    stub = _RecordingDaemonModule(reachable=True)
+    assert daemon_startup.probe_health(stub, port=1, remaining=5.0, ceiling=10.0,
+                                       connect_first=True) == {"status": "ok"}
+    assert stub.fetch_calls == [5.0]
+
+
+def test_connect_first_is_windows_only(monkeypatch):
+    from superlocalmemory.cli import daemon_startup
+
+    monkeypatch.setattr(daemon_startup.sys, "platform", "darwin")
+    monkeypatch.setattr(daemon_startup, "loopback_accepts",
+                        lambda port, timeout: pytest.fail("POSIX refuses at once"))
+    stub = _RecordingDaemonModule(reachable=True)
+    assert daemon_startup.probe_health(stub, port=1, remaining=2.0,
+                                       connect_first=True) == {"status": "ok"}
+
+
+def test_configured_read_reaches_the_http_call(monkeypatch):
+    """SLM_DAEMON_HEALTH_PROBE_S above 2 s must not be cut back to 2 s."""
+    import urllib.request
+
+    from superlocalmemory.cli import daemon
+
+    seen = []
+
+    def fake_urlopen(url, timeout):
+        seen.append(timeout)
+        raise OSError("not listening")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert daemon._fetch_health(1, timeout=5.0) is None
+    assert daemon._fetch_health(1, timeout=60.0) is None
+    assert seen == [5.0, 10.0]
+
+
+def test_loopback_accepts_reports_a_closed_port():
+    import socket
+
+    from superlocalmemory.cli import daemon_startup
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+        assert daemon_startup.loopback_accepts(port, 0.5) is True
+    assert daemon_startup.loopback_accepts(port, 0.5) is False

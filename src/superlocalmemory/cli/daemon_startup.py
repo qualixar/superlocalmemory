@@ -172,18 +172,43 @@ def _mark_expired(instance_id: str) -> None:
         _expired_at[instance_id] = time.monotonic()
 
 
-def probe_health(d: Any, port: int, remaining: float) -> dict | None:
+def probe_health(
+    d: Any, port: int, remaining: float, *,
+    ceiling: float = 2.0, connect_first: bool = False,
+) -> dict | None:
     """One health probe that cannot outlive the wait's own deadline.
 
     A starting daemon reserves its port early, so a connect can succeed and
     then hang until the read limit; capping by ``remaining`` keeps the whole
-    wait inside its budget.
+    wait inside its budget. ``ceiling`` caps a single read (2 s unless the
+    caller passes the ready-daemon setting).
+
+    ``connect_first`` (issue #319, Windows only): Windows takes about 2 s to
+    refuse a loopback connect to a port nobody bound, so a long read limit
+    would make that case slow. A short connect is tried first; only when it
+    succeeds does the probe wait the full read limit, so a closed port still
+    fails within ``STARTING_PROBE_S`` while a busy, listening daemon gets the
+    whole read.
     """
-    limit = max(0.05, min(2.0, remaining))
+    limit = max(0.05, min(ceiling, remaining))
+    if (connect_first and sys.platform == "win32" and limit > STARTING_PROBE_S
+            and not loopback_accepts(port, STARTING_PROBE_S)):
+        return None
     try:
         return d._fetch_health(port, timeout=limit)
     except TypeError:  # a stand-in that takes only the port
         return d._fetch_health(port)
+
+
+def loopback_accepts(port: int, timeout: float) -> bool:
+    """True when something accepts a TCP connect on 127.0.0.1:``port``."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
 
 
 def health_probe_timeout(descriptor: Any) -> float:
@@ -215,7 +240,8 @@ def health_probe_timeout(descriptor: Any) -> float:
 
 
 READY_PROBE_S = 2.0
-_READY_PROBE_BOUNDS = (0.25, 10.0)
+READY_PROBE_MAX_S = 10.0
+_READY_PROBE_BOUNDS = (0.25, READY_PROBE_MAX_S)
 
 
 def ready_probe_seconds() -> float:

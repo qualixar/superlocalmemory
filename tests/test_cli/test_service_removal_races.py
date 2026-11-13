@@ -1,6 +1,7 @@
 """PR-245 recheck #1: concurrent legacy adoption must never stop another root."""
 
 import plistlib
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,20 @@ from tests.test_cli.test_legacy_service_migration import (
 
 sandbox = _sandbox_fixture
 
+WINDOWS_HOST = sys.platform == "win32"
+_LOCKED_ON_WINDOWS = (
+    "replays another installer rewriting the definition mid-operation; on a "
+    "Windows host the bound definition is held with write and delete sharing "
+    "denied, so that rewrite cannot happen (see test_service_definition_handles)"
+)
+
+
+def skip_simulated_posix_on_windows(platform):
+    """macOS/Linux cases fake the service manager but use the host
+    filesystem, whose rename and inode rules differ on Windows."""
+    if WINDOWS_HOST and platform != "windows":
+        pytest.skip("simulates a POSIX service manager on the host filesystem")
+
 
 def destructive(argv, platform, name):
     actions = {"macos": {"unload"}, "linux": {"stop", "disable"},
@@ -22,6 +37,7 @@ def destructive(argv, platform, name):
     return name in " ".join(argv) and bool(actions.intersection(argv))
 
 
+@pytest.mark.skipif(WINDOWS_HOST, reason=_LOCKED_ON_WINDOWS)
 @pytest.mark.parametrize("platform", ["macos", "linux", "windows"])
 @pytest.mark.parametrize("operation", ["install", "uninstall"])
 def test_manager_query_swap_never_mutates_foreign_service(
@@ -61,6 +77,7 @@ def test_manager_query_swap_never_mutates_foreign_service(
         assert environment["SLM_DATA_DIR"] == str(foreign)
 
 
+@pytest.mark.skipif(WINDOWS_HOST, reason="macOS launchctl race on a POSIX filesystem")
 def test_exact_reviewer_launchctl_list_interleaving(sandbox, monkeypatch):
     _, path = write_definition(sandbox, "macos")
     foreign = sandbox.root / "B"
@@ -90,6 +107,7 @@ def test_exact_reviewer_launchctl_list_interleaving(sandbox, monkeypatch):
 def test_foreign_effective_job_with_unchanged_owned_file_is_preserved(
     sandbox, monkeypatch, platform,
 ):
+    skip_simulated_posix_on_windows(platform)
     from tests.test_cli.test_legacy_service_migration import task_xml
 
     name, path = write_definition(sandbox, platform)
@@ -121,6 +139,7 @@ def test_foreign_effective_job_with_unchanged_owned_file_is_preserved(
 def test_swap_after_first_destructive_step_prevents_the_next(
     sandbox, monkeypatch, platform, swap,
 ):
+    skip_simulated_posix_on_windows(platform)
     from tests.test_cli.test_legacy_service_migration import task_xml
 
     name, path = write_definition(sandbox, platform)
@@ -153,6 +172,7 @@ def test_swap_after_first_destructive_step_prevents_the_next(
 def test_identical_bytes_replaced_by_new_inode_are_not_the_verified_object(
     sandbox, platform,
 ):
+    skip_simulated_posix_on_windows(platform)
     from superlocalmemory.cli import service_inventory
 
     _, path = write_definition(sandbox, platform)
