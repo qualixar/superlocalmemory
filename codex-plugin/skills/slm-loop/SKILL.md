@@ -171,4 +171,4 @@ Guides: `docs/skill-evolution.md`, `docs/bounded-loops-bridge.md`.
 
 ---
 
-SuperLocalMemory v4.2.17 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.18 · Qualixar · AGPL-3.0-or-later
