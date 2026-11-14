@@ -53,6 +53,9 @@ REVIEWED: dict[tuple[str, str, str], tuple[int, str]] = {
             "listener (configured host:port), verified with its CA; sends no data"),
     (_S + "cli/daemon.py", "_fetch_health", "urllib.request.urlopen"):
         (1, "PROBE: GET /health on 127.0.0.1, no body; identity checked after"),
+    (_S + "cli/daemon_startup.py", "loopback_accepts", "socket.create_connection"):
+        (1, "PROBE: Windows-only TCP connect to 127.0.0.1:<descriptor port> before the "
+            "/health read above; sends nothing and closes at once (#319)"),
     # cli/optimize_cmd.py, cli/proxy_cmd.py and optimize/proxy/lifecycle.py have
     # no entry: since 4.1.21 their loopback probes go through
     # cli.daemon.owned_daemon_answers (the _fetch_health probe above), so a port
