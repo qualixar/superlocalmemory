@@ -5,6 +5,36 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.19] — Merge an evidence bundle into a profile that has memories
+
+One new option for moving memories between machines. No data migration: the
+store stays at schema 68, so 4.2.18 and 4.2.19 can open each other's stores.
+
+### Added
+
+- `slm evidence import <bundle> --merge` adds a bundle to a profile that
+  already has memories, for example one exported on another machine. Rows the
+  profile already has are kept exactly as they are, so merging the same bundle
+  twice changes nothing. Without `--execute` it previews the exact counts and
+  writes nothing; with `--execute` it needs `--rollback-dir` and writes the
+  profile's current state there first. If an id in the bundle belongs to a
+  different profile, the merge stops before writing. Entities are not combined
+  across machines. Restart the daemon afterwards so it loads the new memories
+  and computes their embeddings (#322).
+
+### Fixed
+
+- `slm evidence export` could write a bundle that `slm evidence verify` then
+  rejected. A memory edited after it was saved (by a correction, a supersede or
+  an update) kept a record pointing at its old text, and export trusted it.
+  Export now uses that record only when it still matches, searches the source
+  otherwise, and reports the link as unresolved when the text is no longer
+  there. On a real store of 43,000 memories, 24 such memories made the export
+  invalid; it now verifies (#322).
+- `slm evidence rebuild` wrote keyword-index rows with a different tokenizer
+  from the live index, keeping common words such as "the", and wrote a row for
+  memories with no words. It now writes exactly the rows a normal save writes.
+
 ## [4.2.18] — Windows service install and health checks; imports that finish
 
 Fixes reported from a Windows install in #319, batched into one release. No
