@@ -5,6 +5,63 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.18] — Windows service install and health checks; imports that finish
+
+Fixes reported from a Windows install in #319, batched into one release. No
+data migration: the store stays at schema 68, so 4.2.17 and 4.2.18 can open
+each other's stores. One new optional setting, `SLM_DAEMON_HEALTH_PROBE_S`.
+
+### Fixed
+
+- Windows: a ready daemon that was busy but alive was reported as unavailable,
+  because its `/health` check got 0.5 seconds. That short wait is meant only for
+  a port nobody is listening on, which Windows is slow to refuse. A ready daemon
+  whose process is alive now gets the same 2 seconds as on macOS and Linux, and
+  `SLM_DAEMON_HEALTH_PROBE_S` (0.25 to 10 seconds) sets it on any platform. On
+  Windows a short connect is tried first, so a port nobody is listening on is
+  still reported within half a second. A starting daemon still gets the short
+  check (#319).
+- Windows: `slm serve install` could not install the service. Its safety check
+  compared the file's ctime, which CPython can report differently through a path
+  and through an open handle for the same unchanged file, so every install
+  refused its own new wrapper. On Windows the check no longer uses ctime. The
+  file is still pinned by its SHA-256 and held open against writes and deletes,
+  so the check is no weaker. A failed install or uninstall now exits with code 1
+  instead of 0, and the reason is printed instead of only "Check logs" (#319).
+- A memory with no searchable words (for example a Markdown divider of 99
+  hyphens) left a keyword-index obligation that failed verification forever,
+  because the keyword index rightly skips text with no words. Such a memory no
+  longer owes a keyword-index entry, and stale keyword tokens of a memory edited
+  down to no words are removed. Obligations already stuck this way clear on
+  their next automatic retry (#319).
+- Importing a saved conversation that quotes agent-harness notices (a
+  `<task-notification>` block) stopped part-way, because the filter for prompt
+  machinery treated quoted history in a file you chose to import as machinery.
+  Folder and document imports now keep that text as untrusted source text.
+  Automatic capture still refuses it, and prompt templates are still refused
+  from every source (#319).
+- A refused save now says why. The admission journal records the reason (for
+  example `COMMAND_REJECTED:ingest_gate:prompt_template`) instead of a bare
+  code, and the folder report names it along with the part where the file
+  stopped (`at part 61/821`) (#319).
+- A file refused under the old rule could never finish, even after the rule was
+  fixed. A refusal is stored under its idempotency key, and a folder retry
+  re-sends the same keys so that parts already saved are not saved twice. A
+  refusal recorded before this release (with no reason) is now judged once more
+  when the same request arrives, so the next scan finishes the file without
+  duplicating the parts already saved (#319).
+
+- The Claude Code Stop hook saved its session summary without a session id: it
+  read only the `CLAUDE_SESSION_ID` environment variable, while Claude Code sends
+  the id in the hook payload. A session-summary lookup for the live session
+  therefore found nothing. The hook now reads the payload first and falls back
+  to the variable (#319).
+
+### Added
+
+- A Windows CI lane runs the Windows-specific tests on a real Windows runner on
+  every pull request (#319).
+
 ## [4.2.17] — Replaced memories leave session start; one command to hide a memory
 
 The last fixes of this cycle, batched into one release. No new settings and no

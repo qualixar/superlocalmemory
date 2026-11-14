@@ -471,6 +471,7 @@ have the `mesh_*` MCP tools and the dashboard **Mesh Peers** tab.
 | `SLM_EMBED_RESPONSE_TIMEOUT` | Timeout (s) for a single embedding request | `180` |
 | `SLM_RERANKER_ENABLED` | Process-only override for whether the cross-encoder reranker runs, regardless of the persisted `retrieval.use_cross_encoder` choice — never written back to config.json. `false`/`0`/`no`/`off` disables it; anything else (including unset) leaves the persisted choice in force | unset |
 | `SLM_RERANKER_IDLE_TIMEOUT` | Seconds before an idle reranker worker exits | `1800` |
+| `SLM_DAEMON_HEALTH_PROBE_S` | Seconds a client waits for a ready daemon's `/health` answer before calling it unavailable (clamped 0.25–10; a starting daemon always gets 0.5) | `2` |
 | `SLM_MIN_AVAILABLE_MEMORY_GB` | Minimum free system RAM before SLM defers heavy operations | `1.0` |
 | `SLM_TRIGRAM_BOOTSTRAP_RAM_MB` | Max RAM for trigram index bootstrap | `512` |
 
