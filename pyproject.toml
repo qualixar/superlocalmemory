@@ -106,7 +106,7 @@ dependencies = [
     "llmlingua==0.2.2",
     # LLMLingua pulls NLTK transitively. Pin above the disclosed traversal
     # advisories so clean installs cannot resolve to a vulnerable release.
-    "nltk==3.10.3",
+    "nltk==3.10.4",
     # Security floors for packages SuperLocalMemory does not import directly.
     # `pip install --upgrade` keeps an already-installed transitive version
     # when it still satisfies the dependents' ranges, so without these floors

@@ -94,13 +94,9 @@ jobs:
           # --locked: audit the committed lock; fail if it no longer matches pyproject.
           uv export --locked --no-dev --no-emit-project --format requirements-txt \
             --output-file /tmp/slm-runtime-requirements.txt
-          # GHSA-8mgp-746c-j5xp (nltk, no patched release): SLM never calls the
-          # affected model-file APIs or enables nltk pathsec; llmlingua uses only
-          # nltk.sent_tokenize. See docs/security/dependency-audit-exceptions.md.
           uvx --from pip-audit==2.9.0 pip-audit \
             --requirement /tmp/slm-runtime-requirements.txt \
-            --no-deps --disable-pip \
-            --ignore-vuln GHSA-8mgp-746c-j5xp
+            --no-deps --disable-pip
       - name: Reject high-confidence high-severity Python findings
         run: uvx --from bandit==1.8.6 bandit -r src/superlocalmemory -q -lll -iii
 

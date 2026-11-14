@@ -57,6 +57,13 @@ each other's stores. One new optional setting, `SLM_DAEMON_HEALTH_PROBE_S`.
   therefore found nothing. The hook now reads the payload first and falls back
   to the variable (#319).
 
+### Security
+
+- NLTK (pulled in by LLMLingua) is pinned to 3.10.4, which fixes nine advisories
+  against 3.10.3, including the one the dependency audit had been ignoring
+  because no fix existed. The audit now has no exceptions. SuperLocalMemory
+  never called the affected NLTK APIs.
+
 ### Added
 
 - A Windows CI lane runs the Windows-specific tests on a real Windows runner on
