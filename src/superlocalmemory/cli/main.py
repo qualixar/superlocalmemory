@@ -1059,6 +1059,11 @@ def main() -> None:
     evidence_import.add_argument("bundle")
     evidence_import.add_argument("--profile", default="default")
     evidence_import.add_argument("--replace", action="store_true")
+    evidence_import.add_argument(
+        "--merge", action="store_true",
+        help="Add the bundle to a profile that already has memories; "
+             "existing rows are kept, never overwritten",
+    )
     evidence_import.add_argument("--rollback-dir", default=None)
     evidence_import.add_argument("--execute", action="store_true")
     evidence_import.add_argument("--json", action="store_true")
