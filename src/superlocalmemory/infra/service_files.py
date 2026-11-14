@@ -99,7 +99,16 @@ def _definition_fd(files: ServiceFiles, name: str) -> int:
 
 
 def _revision(info: os.stat_result) -> tuple:
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    """The fields that must not change between authorizing and acting.
+
+    On Windows ``st_ctime_ns`` is left out (issue #319): CPython's path
+    ``stat`` and handle ``fstat`` can report different values for one
+    unchanged file, so the guard refused every freshly written wrapper.
+    Nothing is lost: the bytes are pinned by the SHA-256 digest, and the
+    handle is opened deny-write/deny-delete while it is checked and used.
+    """
+    revision = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    return revision if os.name == "nt" else (*revision, info.st_ctime_ns)
 
 
 class BoundDefinition:
@@ -107,11 +116,15 @@ class BoundDefinition:
 
     def __init__(self, files: ServiceFiles, name: str, fd: int) -> None:
         self.files, self.name, self.fd = files, name, fd
-        self.revision = _revision(os.fstat(fd))
+        self.bound_stat = os.fstat(fd)
         data = self._bytes()
         self.digest = hashlib.sha256(data).digest()
         self.content = data.decode("utf-8").replace("\r\n", "\n")
         self.directory = files.path.stat()
+
+    @property
+    def revision(self) -> tuple:
+        return _revision(self.bound_stat)
 
     def _bytes(self) -> bytes:
         os.lseek(self.fd, 0, os.SEEK_SET)
@@ -129,8 +142,9 @@ class BoundDefinition:
         ):
             raise OSError("Service directory was redirected")
         _owned(os.fstat(self.fd))
-        if (_revision(current) != self.revision
-                or _revision(os.fstat(self.fd)) != self.revision
+        bound = self.revision
+        if (_revision(current) != bound
+                or _revision(os.fstat(self.fd)) != bound
                 or hashlib.sha256(self._bytes()).digest() != self.digest):
             raise OSError("Verified service definition changed")
 

@@ -359,7 +359,7 @@ def _fetch_health(port: int, timeout: float = 2.0) -> dict | None:
 
         expected_url = f"http://127.0.0.1:{port}/health"
         response = urllib.request.urlopen(
-            expected_url, timeout=max(0.05, min(float(timeout), 2.0)),
+            expected_url, timeout=max(0.05, min(float(timeout), 10.0)),
         )
         if response.status != 200:
             return None
@@ -689,6 +689,7 @@ def daemon_request(
             probe_began = time.monotonic()
             health = _startup.probe_health(
                 sys.modules[__name__], descriptor.port, _startup.health_probe_timeout(descriptor),
+                ceiling=_startup.READY_PROBE_MAX_S, connect_first=True,
             )
             if health is None and unpinned:
                 ready = _startup.wait_for_starting_daemon(

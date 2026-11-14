@@ -509,6 +509,28 @@ def _hook_checkpoint() -> None:
 # 5. STOP — Stop hook (session end)
 # ---------------------------------------------------------------------------
 
+def _payload_session_id() -> str:
+    """``session_id`` from the hook's stdin payload, or ``""``.
+
+    Read only when ``handle_hook`` has already buffered stdin
+    (``normalize_stdin`` leaves a ``StringIO``), so this can never block on
+    an open pipe inside the Stop hook's 10-second limit.
+    """
+    import io
+
+    stream = sys.stdin
+    if not isinstance(stream, io.StringIO):
+        return ""
+    try:
+        data = json.loads(stream.getvalue() or "{}")
+    except ValueError:
+        return ""
+    value = data.get("session_id") if isinstance(data, dict) else None
+    if isinstance(value, str) and 0 < len(value.strip()) <= 200:
+        return value.strip()
+    return ""
+
+
 def _hook_stop(deadline: "HookDeadline | None" = None) -> None:
     """Save rich session summary + trigger auto-consolidation.
 
@@ -586,7 +608,9 @@ def _hook_stop(deadline: "HookDeadline | None" = None) -> None:
         parts.append(f"files: {modified}")
 
     summary = " | ".join(parts)
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+    # Issue #319: Claude Code sends the session id in the hook payload; the
+    # environment variable is only a fallback for hosts that set it.
+    session_id = _payload_session_id() or os.environ.get("CLAUDE_SESSION_ID", "")
 
     # --- Save to SLM (v3.4.13: daemon HTTP, not subprocess) ---
     # 4.1.25: only while auto_capture.capture_session_summary is on.

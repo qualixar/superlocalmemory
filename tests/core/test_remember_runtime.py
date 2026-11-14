@@ -122,7 +122,9 @@ def test_terminal_admission_rejection_cannot_poison_restart(tmp_path) -> None:
         )
         assert entry is not None
         assert entry.state == "rejected"
-        assert entry.error_code == "COMMAND_REJECTED"
+        # Issue #319: the journal records why ("no queryable facts"), never
+        # the bare legacy code that marks a pre-fix refusal to judge again.
+        assert entry.error_code == "COMMAND_REJECTED:no_queryable_facts"
     finally:
         first.stop()
 

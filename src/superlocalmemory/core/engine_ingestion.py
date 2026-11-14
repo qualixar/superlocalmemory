@@ -229,7 +229,9 @@ def build_immediate_admission_handler(
         if not request.trusted_actor_id:
             raise ValueError("trusted actor identity is required")
         if not content_passes_admission(request.content):
-            return []
+            from superlocalmemory.core.ingestion_command import IngestionRejectedError
+
+            raise IngestionRejectedError(code="admission_policy")
 
         from datetime import UTC, datetime
 
@@ -253,9 +255,15 @@ def build_immediate_admission_handler(
             content,
             max_verbatim_chars=max_verbatim_chars,
             max_ingest_bytes=max_ingest_bytes,
+            source_type=request.source_type,
         )
         if gate.rejected:
-            return []
+            from superlocalmemory.core.ingestion_command import IngestionRejectedError
+
+            raise IngestionRejectedError(
+                gate.rejection_reason or "ingestion produced no queryable facts",
+                code=f"ingest_gate:{gate.rejection_code or 'rejected'}",
+            )
         fact_content = gate.fact_content
         now = datetime.now(UTC).isoformat()
         observation_date = request.session_date or now[:10]

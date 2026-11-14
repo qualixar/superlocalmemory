@@ -287,7 +287,7 @@ def _promote_locked(db: Any, tx: sqlite3.Connection, candidate: Candidate) -> st
         "ingestion_operations o ON o.operation_id = ? WHERE m.memory_id = ?",
         (candidate.operation_id, candidate.memory_id)).fetchone()
     content, scope, shared, session_id, session_date, created_at, raw_meta, source, actor = row
-    gate = apply_ingest_gate(content)
+    gate = apply_ingest_gate(content, source_type=source)
     if gate.rejected:
         return None
     metadata = _meta(raw_meta)

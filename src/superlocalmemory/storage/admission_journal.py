@@ -91,6 +91,13 @@ class AdmissionPayloadError(ValueError):
     """The admission body is invalid, oversized, or cannot be encoded safely."""
 
 
+#: The code every deterministic refusal carried before 4.2.18, when the
+#: reason was not recorded. The only producer was "ingestion produced no
+#: queryable facts" (an ingest-policy refusal). Since 4.2.18 no code path
+#: writes it bare: each refusal names its reason (``COMMAND_REJECTED:<why>``).
+UNEXPLAINED_REJECTION = "COMMAND_REJECTED"
+
+
 class TerminalAdmissionError(RuntimeError):
     """A replayable command was deterministically rejected after journaling."""
 
@@ -426,6 +433,37 @@ class AdmissionJournal:
             error_code=error_code,
             deadline=deadline,
         )
+
+    def reopen_unexplained_rejection(
+        self,
+        journal_id: str,
+        *,
+        deadline: float | None = None,
+    ) -> AdmissionEntry | None:
+        """Return a pre-4.2.18 refusal to ``prepared`` so it is judged once more.
+
+        Issue #319: a refusal is cached under its idempotency key, and a
+        folder retry re-sends the same keys (that is what keeps the parts
+        already saved from being saved twice). A part refused by an older,
+        stricter policy therefore stayed refused forever. Only an entry whose
+        code is the bare ``UNEXPLAINED_REJECTION`` reopens, and a second
+        refusal records its reason, so each entry is re-judged at most once.
+        Returns the reopened entry, or ``None`` when nothing was reopened.
+        """
+        def update(conn: sqlite3.Connection) -> AdmissionEntry | None:
+            cursor = conn.execute(
+                "UPDATE admission_journal SET state='prepared', error_code=NULL, "
+                "updated_at_ms=? WHERE journal_id=? AND state='rejected' AND error_code=?",
+                (_now_ms(), journal_id, UNEXPLAINED_REJECTION),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = conn.execute(
+                "SELECT * FROM admission_journal WHERE journal_id=?", (journal_id,)
+            ).fetchone()
+            return self._entry_from_row(row)
+
+        return self._writer.submit(update, deadline=deadline)
 
     def mark_committed(
         self,

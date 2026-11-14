@@ -29,7 +29,11 @@ class TestPromptTemplatePatterns:
     def test_prompt_template_patterns_exists(self) -> None:
         """_PROMPT_TEMPLATE_PATTERNS is importable from injection.py."""
         assert _PROMPT_TEMPLATE_PATTERNS is not None
-        assert len(_PROMPT_TEMPLATE_PATTERNS) >= 4
+        # Issue #319: the <task-notification> rule moved to its own list,
+        # because imported files keep quoted notices while capture refuses them.
+        from superlocalmemory.core.injection import _HARNESS_WRAPPER_PATTERNS
+        assert len(_PROMPT_TEMPLATE_PATTERNS) >= 3
+        assert len(_HARNESS_WRAPPER_PATTERNS) >= 1
 
     def test_summarizing_session_pattern(self) -> None:
         """Matches 'You are summarizing a Claude Code session'."""

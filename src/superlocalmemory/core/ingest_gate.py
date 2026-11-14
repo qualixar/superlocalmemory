@@ -52,12 +52,17 @@ class IngestGateResult:
     rejected: bool = False
     rejection_reason: str = ""
     truncated: bool = False
+    #: Short machine code for a rejection ("oversize", "prompt_template",
+    #: "harness_wrapper"), carried to the admission journal (issue #319).
+    rejection_code: str = ""
 
 
 def apply_ingest_gate(
     content: str,
     max_verbatim_chars: int = _MAX_VERBATIM_CHARS,
     max_ingest_bytes: int = _MAX_INGEST_BYTES,
+    *,
+    source_type: str | None = None,
 ) -> IngestGateResult:
     """Apply the ingest quality gate to content before storing.
 
@@ -79,6 +84,7 @@ def apply_ingest_gate(
             fact_content=content,
             full_content=content,
             rejected=True,
+            rejection_code="oversize",
             rejection_reason=(
                 f"Content size {byte_len} bytes exceeds maximum "
                 f"{max_ingest_bytes} bytes (1MB). "
@@ -98,12 +104,14 @@ def apply_ingest_gate(
     # --- Prompt-template firewall ---
     # Extends the v3.6.4 remember-write-02 quality gate.
     try:
-        from superlocalmemory.core.injection import is_prompt_template
-        if is_prompt_template(content):
+        from superlocalmemory.core.injection import prompt_template_kind
+        kind = prompt_template_kind(content, source_type=source_type)
+        if kind:
             return IngestGateResult(
                 fact_content=content,
                 full_content=content,
                 rejected=True,
+                rejection_code=kind,
                 rejection_reason=(
                     "Content matches internal prompt-template patterns "
                     "(low-quality gate). Prompt machinery must not be stored as memory."

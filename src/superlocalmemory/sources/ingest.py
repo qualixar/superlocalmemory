@@ -48,11 +48,16 @@ class Ingested:
 
 
 class PartialSave(RuntimeError):
-    """A file failed part-way: ``entries`` are the parts already saved, kept so they stay owned."""
+    """A file failed part-way: ``entries`` are the parts already saved, kept so they stay owned.
 
-    def __init__(self, entries: list[dict[str, Any]]):
+    ``part``/``total`` name the part that failed (1-based), so the folder report can say where
+    the file stopped, not only that it did (issue #319)."""
+
+    def __init__(self, entries: list[dict[str, Any]], *, part: int = 0, total: int = 0):
         super().__init__("a folder file was saved only in part")
         self.entries = entries
+        self.part = part
+        self.total = total
 
 
 class SaveBudgetSpent(PartialSave):
@@ -139,7 +144,7 @@ def save_parts(host: SourceHost, runtime: Any, source: dict, relpath: str, parts
                 raise SaveBudgetSpent(out.entries) from None
             continue
         except Exception as exc:
-            raise PartialSave(out.entries) from exc
+            raise PartialSave(out.entries, part=number, total=len(parts)) from exc
         # ``k`` is kept beside the ids: a retry of this version re-sends the same key, and the
         # entry it gets back is recognised as the same save (see ``reconcile._supersede``).
         out.entries.append({"m": saved.memory_id, "f": list(saved.fact_ids), "v": version, "k": key})

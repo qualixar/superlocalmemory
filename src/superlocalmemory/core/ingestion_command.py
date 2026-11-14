@@ -67,7 +67,17 @@ class IdempotencyConflict(ValueError):
 
 
 class IngestionRejectedError(RuntimeError):
-    """Deterministic evidence policy produced no queryable projection."""
+    """Deterministic evidence policy produced no queryable projection.
+
+    ``code`` is a short machine reason (``ingest_gate:harness_wrapper``,
+    ``admission_policy``...) that reaches the admission journal, so a refusal
+    says why instead of only that it happened (issue #319).
+    """
+
+    def __init__(self, message: str = "ingestion produced no queryable facts",
+                 *, code: str = "no_queryable_facts") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class InvalidStateTransition(RuntimeError):

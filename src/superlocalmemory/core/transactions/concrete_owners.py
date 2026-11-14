@@ -225,6 +225,39 @@ class Bm25Owner(_FactScopedOwner):
         super().__init__(db)
         self._retrieval = retrieval
 
+    def _without_words(self, context: OperationContext) -> set[str]:
+        """Facts whose stored text yields no BM25 tokens at all.
+
+        Issue #319: BM25 deliberately skips an empty token list (a Markdown
+        divider of hyphens has nothing to search for), so demanding an index
+        row for such a fact failed verification forever. Fail closed: a fact
+        whose canonical row is missing or cannot be tokenized stays required.
+        """
+        from superlocalmemory.retrieval.bm25_channel import tokenize
+
+        empty: set[str] = set()
+        for fact_id in context.fact_ids:
+            content = self._fact_content(context, fact_id)
+            if content is None:
+                continue
+            try:
+                if not tokenize(content):
+                    empty.add(fact_id)
+            except Exception:  # noqa: BLE001 - unknown means still required
+                continue
+        return empty
+
+    def _required(self, context: OperationContext) -> set[str]:
+        return super()._required(context) - self._without_words(context)
+
+    def apply(self, context: OperationContext) -> OwnerResult:
+        # Text edited down to no words keeps its old tokens otherwise, and
+        # keyword search would still match what the fact no longer says.
+        stale = self._without_words(context) & self._physical_present(context)
+        for fact_id in sorted(stale):
+            self._remove(context, fact_id)
+        return super().apply(context)
+
     def _fingerprints(self, context: OperationContext) -> dict[str, str]:
         if not context.fact_ids:
             return {}

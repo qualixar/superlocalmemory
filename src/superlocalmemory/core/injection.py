@@ -49,11 +49,38 @@ _PROMPT_TEMPLATE_PATTERNS = (
     re.compile(r"you are summarizing a claude code session", re.IGNORECASE),
     re.compile(r"you are a memory consolidation agent", re.IGNORECASE),
     re.compile(r"apply maximum non-destructive compression", re.IGNORECASE),
+)
+
+# Agent-harness wrappers (a background task's completion notice arrives as a
+# user turn). Captured automatically they are machinery, not memory. Inside a
+# file the user chose to import (a saved conversation export) they are quoted
+# history, so the import keeps them as untrusted source text (issue #319).
+_HARNESS_WRAPPER_PATTERNS = (
     re.compile(r"<task-notification\b", re.IGNORECASE),
 )
 
+#: Saves of files the user picked (folder sources, documents): their text is
+#: source material, never this process's own prompt traffic.
+IMPORTED_SOURCE_TYPES = frozenset({"folder", "document"})
 
-def is_prompt_template(content: str) -> bool:
+
+def prompt_template_kind(content: str, *, source_type: str | None = None) -> str:
+    """``"prompt_template"``, ``"harness_wrapper"`` or ``""`` for *content*.
+
+    Harness wrappers do not count for an imported file (``IMPORTED_SOURCE_TYPES``).
+    """
+    if not content:
+        return ""
+    if any(pat.search(content) for pat in _PROMPT_TEMPLATE_PATTERNS):
+        return "prompt_template"
+    if source_type in IMPORTED_SOURCE_TYPES:
+        return ""
+    if any(pat.search(content) for pat in _HARNESS_WRAPPER_PATTERNS):
+        return "harness_wrapper"
+    return ""
+
+
+def is_prompt_template(content: str, *, source_type: str | None = None) -> bool:
     """True if *content* matches internal prompt-template patterns.
 
     Used by:
@@ -62,11 +89,10 @@ def is_prompt_template(content: str) -> bool:
 
     Separate from is_low_quality() so the firewall can be applied without
     the full quality-check heuristics (e.g. at raw ingest before any
-    other processing).
+    other processing). ``source_type`` exempts imported files from the
+    harness-wrapper rule only (see ``prompt_template_kind``).
     """
-    if not content:
-        return False
-    return any(pat.search(content) for pat in _PROMPT_TEMPLATE_PATTERNS)
+    return bool(prompt_template_kind(content, source_type=source_type))
 
 # Leading category tag like "[active_decisions] " / "[learned_preferences] ".
 _CATEGORY_TAG_RE = re.compile(r"^\s*\[[a-z0-9_]+\]\s*", re.IGNORECASE)
