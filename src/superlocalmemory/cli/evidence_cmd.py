@@ -65,6 +65,10 @@ def cmd_evidence(args: Namespace) -> None:
         }, as_json=as_json)
         return
 
+    if action == "import" and bool(getattr(args, "merge", False)):
+        _merge(args, profile, as_json=as_json)
+        return
+
     if action == "import":
         if not bool(getattr(args, "execute", False)):
             print(
@@ -98,6 +102,42 @@ def cmd_evidence(args: Namespace) -> None:
         return
 
     raise SystemExit("choose an evidence subcommand: export, verify, import, or rebuild")
+
+
+def _merge(args: Namespace, profile: str, *, as_json: bool) -> None:
+    """``slm evidence import --merge``: preview by default, write with --execute."""
+    from superlocalmemory.core.evidence_merge import merge_evidence_bundle
+
+    if bool(getattr(args, "replace", False)):
+        raise SystemExit("choose --merge or --replace, not both")
+    execute = bool(getattr(args, "execute", False))
+    try:
+        report = merge_evidence_bundle(
+            _database(),
+            args.bundle,
+            target_profile_id=profile,
+            execute=execute,
+            rollback_dir=getattr(args, "rollback_dir", None),
+        )
+    except ValueError as exc:
+        raise SystemExit(f"merge refused: {exc}") from None
+    _emit({
+        "mode": "merge" if execute else "merge preview (nothing written)",
+        "bundle_id": report.bundle_id,
+        "profile_id": profile,
+        "added": report.added,
+        "kept_existing": report.kept,
+        "keyword_index_rows": report.keyword_rows,
+        "rollback_dir": report.rollback_dir,
+    }, as_json=as_json)
+    if not as_json:
+        if not execute:
+            print("Re-run with --execute --rollback-dir <empty folder> to merge.")
+        elif report.facts_added:
+            print(
+                "Restart the daemon (slm serve stop, then slm serve start) so it "
+                "loads the new memories and computes their embeddings."
+            )
 
 
 __all__ = ["cmd_evidence"]

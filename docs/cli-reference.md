@@ -1021,6 +1021,8 @@ slm evidence export /path/to/bundle.jsonl --profile default
 slm evidence verify /path/to/bundle.jsonl
 slm evidence import /path/to/bundle.jsonl --execute
 slm evidence import /path/to/bundle.jsonl --replace --rollback-dir ./slm-rollback --execute
+slm evidence import /path/to/bundle.jsonl --merge             # preview a merge
+slm evidence import /path/to/bundle.jsonl --merge --rollback-dir ./slm-rollback --execute
 slm evidence rebuild --execute   # Rebuild derived lexical state
 ```
 
@@ -1028,7 +1030,8 @@ slm evidence rebuild --execute   # Rebuild derived lexical state
 |-----------|-------------|
 | `export <dest>` | Write a deterministic checksummed JSONL bundle |
 | `verify <bundle>` | Verify checksums and source reconciliation |
-| `import <bundle>` | Import relational truth; a dry run unless `--execute`. Replacing existing memories (`--replace`) also requires `--rollback-dir` |
+| `import <bundle>` | Import relational truth; a dry run unless `--execute`. Without a flag the target profile must be empty. Replacing existing memories (`--replace`) also requires `--rollback-dir` |
+| `import <bundle> --merge` | Add a bundle to a profile that already has memories, for example one copied from another machine. Rows already in the profile are kept unchanged, so merging the same bundle twice changes nothing. The merge stops before writing if an id in the bundle belongs to another profile. Without `--execute` it previews the exact counts; with `--execute` it needs `--rollback-dir` and writes the profile's prior state there first. Entities are not combined across machines. Restart the daemon afterwards so it computes embeddings for the new memories |
 | `rebuild` | Rebuild derived lexical state; a dry run unless `--execute` |
 
 ### `slm diagnostics export <dest>` and `slm diagnostics reliability`

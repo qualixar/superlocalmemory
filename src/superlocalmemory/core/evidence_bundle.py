@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -147,13 +146,19 @@ def _source_spans(
                     f"fact {fact_id} has no exact span in operation {operation['operation_id']}"
                 )
                 continue
-            start = (
-                int(recorded["source_start"])
-                if recorded is not None
+            start = -1
+            if (
+                recorded is not None
                 and recorded.get("source_status") == "exact"
                 and recorded.get("source_start") is not None
-                else raw.find(content)
-            )
+            ):
+                start = int(recorded["source_start"])
+            # A fact edited after it was saved (a correction, a supersede, an
+            # update) keeps its old "exact" lineage, which no longer reproduces
+            # the text. Export only spans that verify: otherwise search the
+            # source again, and report the link as unresolved if it is gone.
+            if start < 0 or raw[start:start + len(content)] != content:
+                start = raw.find(content)
             if start < 0:
                 unresolved.append(
                     f"fact {fact_id} has no exact span in operation {operation['operation_id']}"
@@ -424,7 +429,10 @@ def import_evidence_bundle(
     return verify_evidence_bundle(bundle)
 
 
-_TOKEN_RE = re.compile(r"[\w'-]+", re.UNICODE)
+def _keyword_tokens(content: Any) -> list[str]:
+    from superlocalmemory.retrieval.bm25_channel import tokenize
+
+    return tokenize(str(content or ""))
 
 
 def rebuild_derived_state(
@@ -442,12 +450,16 @@ def rebuild_derived_state(
     with db.transaction():
         db.execute("DELETE FROM bm25_tokens WHERE profile_id=?", (profile_id,))
         for fact in facts:
-            tokens = [token.lower() for token in _TOKEN_RE.findall(str(fact["content"]))]
-            db.execute(
-                "INSERT INTO bm25_tokens (fact_id, profile_id, tokens) VALUES (?,?,?)",
-                (fact["fact_id"], profile_id, json.dumps(tokens, separators=(",", ":"))),
-            )
-            bm25_rows += 1
+            # The live keyword index's own tokenizer: a rebuilt row must equal
+            # the row ingestion would have stored, and a fact with no words
+            # owes no row (see Bm25Owner).
+            tokens = _keyword_tokens(fact["content"])
+            if tokens:
+                db.execute(
+                    "INSERT INTO bm25_tokens (fact_id, profile_id, tokens) VALUES (?,?,?)",
+                    (fact["fact_id"], profile_id, json.dumps(tokens)),
+                )
+                bm25_rows += 1
             if embedder is not None:
                 vector = embedder.embed(str(fact["content"]))
                 db.execute(
@@ -503,10 +515,9 @@ def verify_rebuild_equivalence(
         mismatches.append("atomic_facts_fts")
 
     expected_tokens = {
-        str(row["fact_id"]): [
-            token.lower() for token in _TOKEN_RE.findall(str(row.get("content") or ""))
-        ]
+        str(row["fact_id"]): tokens
         for row in facts
+        if (tokens := _keyword_tokens(row.get("content")))
     }
     actual_tokens = {
         str(row["fact_id"]): json.loads(row["tokens"] or "[]")
