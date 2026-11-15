@@ -42,6 +42,10 @@ class SlotConflictError(RuntimeError):
     """The slot changed between read and write; the caller retries."""
 
 
+class StaleDisputeError(LookupError):
+    """The dispute no longer names the slot's current value; it was dismissed."""
+
+
 @dataclass(frozen=True)
 class Binding:
     outcome: str
@@ -204,8 +208,15 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
         raise LookupError(f"no open dispute {dispute_id}")
     slot_id, rev_a, rev_b = row
     now = _now()
-    version = int(conn.execute("SELECT version FROM memory_slots WHERE slot_id = ?",
-                               (slot_id,)).fetchone()[0])
+    head, version = conn.execute("SELECT head_revision_id, version FROM memory_slots "
+                                 "WHERE slot_id = ?", (slot_id,)).fetchone()
+    if head != rev_a:
+        # The slot moved on since this dispute opened (another dispute was settled
+        # first): deciding it now would act on a value that is no longer current.
+        conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = ?, "
+                     "resolved_at = ? WHERE dispute_id = ?", (resolved_by, now, dispute_id))
+        raise StaleDisputeError(f"dispute {dispute_id} no longer names the current value")
+    version = int(version)
     winner, loser = {"a": (rev_a, rev_b), "b": (rev_b, rev_a)}.get(resolution, (None, None))
     retire: tuple[str, ...] = ()
     if winner is not None:
@@ -231,9 +242,36 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     conn.execute("UPDATE slot_disputes SET state = 'resolved', resolution = ?, resolved_by = ?, "
                  "resolved_at = ? WHERE dispute_id = ?", (resolution, resolved_by, now,
                                                          dispute_id))
+    _reanchor(conn, slot_id, dispute_id, now)
     return retire
 
 
+def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) -> None:
+    """Point the slot's other open disputes at its head (or dismiss them).
+
+    Without this, a dispute opened against an old head could later be settled
+    as "same" and move the head back onto a value already superseded.
+    """
+    head = conn.execute("SELECT head_revision_id FROM memory_slots WHERE slot_id = ?",
+                        (slot_id,)).fetchone()[0]
+    others = conn.execute("SELECT dispute_id, revision_a, revision_b FROM slot_disputes "
+                          "WHERE slot_id = ? AND state = 'open' AND dispute_id != ?",
+                          (slot_id, settled)).fetchall()
+    for dispute_id, rev_a, rev_b in others:
+        if rev_a == head:
+            continue
+        if head is None or rev_b == head:
+            conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = "
+                         "'reanchor', resolved_at = ? WHERE dispute_id = ?", (now, dispute_id))
+        else:
+            conn.execute("UPDATE slot_disputes SET revision_a = ? WHERE dispute_id = ?",
+                         (head, dispute_id))
+    state = "disputed" if conn.execute(
+        "SELECT 1 FROM slot_disputes WHERE slot_id = ? AND state = 'open'", (slot_id,)
+    ).fetchone() else ("current" if head is not None else "empty")
+    conn.execute("UPDATE memory_slots SET state = ? WHERE slot_id = ?", (state, slot_id))
+
+
 __all__ = ["Binding", "RESOLUTIONS", "resolve_dispute", "COMPATIBLE", "DISPUTE", "DUPLICATE", "HEAD", "HISTORICAL",
-           "SUPERSEDE", "SUPERSEDE_CONFIDENCE", "SlotConflictError", "bind", "open_dispute",
+           "SUPERSEDE", "SUPERSEDE_CONFIDENCE", "SlotConflictError", "StaleDisputeError", "bind", "open_dispute",
            "record_case", "revision_id_for", "slot_id_for"]

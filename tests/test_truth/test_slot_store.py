@@ -157,3 +157,27 @@ def test_record_case_links_the_ledger(conn) -> None:
     ss.record_case(conn, new.revision_id, "case-9")
     assert conn.execute("SELECT case_id FROM slot_revisions WHERE revision_id = ?",
                         (new.revision_id,)).fetchone() == ("case-9",)
+
+
+def test_a_dispute_against_a_superseded_head_cannot_move_the_head_back(conn) -> None:
+    """Fable's reproduction: A head; B and C both dispute A; settle (A,B) as b, then (A,C) as same."""
+    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), confidence=0.5))
+    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), confidence=0.5))
+    c = _bind(conn, "f3", "", "2026-03-01", key=replace(_explicit("daily"), confidence=0.5))
+    assert (b.outcome, c.outcome) == (ss.DISPUTE, ss.DISPUTE)
+    assert ss.resolve_dispute(conn, b.dispute_id, "b", resolved_by="user") == ("f1",)
+    anchored = conn.execute("SELECT revision_a FROM slot_disputes WHERE dispute_id = ?",
+                            (c.dispute_id,)).fetchone()[0]
+    assert anchored == b.revision_id  # re-anchored on the new head
+    ss.resolve_dispute(conn, c.dispute_id, "same", resolved_by="user")
+    assert _slot(conn, a.slot_id)[0] == b.revision_id  # never back on superseded A
+
+
+def test_a_stale_dispute_is_dismissed_not_applied(conn) -> None:
+    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), confidence=0.5))
+    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), confidence=0.5))
+    conn.execute("UPDATE memory_slots SET head_revision_id = ?", (b.revision_id,))
+    with pytest.raises(ss.StaleDisputeError):
+        ss.resolve_dispute(conn, b.dispute_id, "a", resolved_by="user")
+    assert conn.execute("SELECT state FROM slot_disputes").fetchone() == ("dismissed",)
+    assert _slot(conn, a.slot_id)[0] == b.revision_id

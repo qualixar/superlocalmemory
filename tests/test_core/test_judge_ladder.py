@@ -43,7 +43,7 @@ def _receipts(conn):
 def test_a_sure_first_tier_decides_and_later_tiers_are_not_asked(conn) -> None:
     second = Scripted("jev", [TierAnswer("same", 0.99)])
     ladder = JudgeLadder([Scripted("laya", [TierAnswer("both_true", 0.9)]), second])
-    [d] = ladder.decide(conn, SLOT_RELATION, _items())
+    [d] = ladder.decide_and_record(conn, SLOT_RELATION, _items())
     assert (d.verdict, d.tier, len(d.receipts)) == ("both_true", "laya", 1)
     assert second.calls == []
 
@@ -51,7 +51,7 @@ def test_a_sure_first_tier_decides_and_later_tiers_are_not_asked(conn) -> None:
 def test_an_unsure_answer_escalates_and_both_are_receipted(conn) -> None:
     ladder = JudgeLadder([Scripted("laya", [TierAnswer("replaces", 0.8)]),
                           Scripted("jev", [TierAnswer("replaces", 0.9)])])
-    [d] = ladder.decide(conn, SLOT_RELATION, _items())
+    [d] = ladder.decide_and_record(conn, SLOT_RELATION, _items())
     assert (d.verdict, d.tier) == ("replaces", "jev")
     assert sorted(_receipts(conn)) == [("jev", "replaces", 1, 0.85), ("laya", "replaces", 0, 0.85)]
 
@@ -63,7 +63,7 @@ def test_replacing_needs_more_confidence_than_other_labels() -> None:
 
 def test_nobody_sure_means_abstain(conn) -> None:
     ladder = JudgeLadder([Scripted("laya", [TierAnswer("replaces", 0.6)])])
-    [d] = ladder.decide(conn, SLOT_RELATION, _items())
+    [d] = ladder.decide_and_record(conn, SLOT_RELATION, _items())
     assert d.abstained and d.verdict == ABSTAIN and len(d.receipts) == 1
 
 
@@ -77,7 +77,7 @@ def test_malformed_or_failing_tiers_are_skipped(conn, bad) -> None:
         return bad
 
     ladder = JudgeLadder([Scripted("laya", broken), Scripted("jev", [TierAnswer("same", 0.9)])])
-    [d] = ladder.decide(conn, SLOT_RELATION, _items())
+    [d] = ladder.decide_and_record(conn, SLOT_RELATION, _items())
     assert d.tier == "jev"
 
 
@@ -86,15 +86,15 @@ def test_batches_are_split_and_answers_stay_with_their_items(conn) -> None:
     tier = Scripted("laya", lambda items: [
         TierAnswer("same" if it.subject_id.endswith(("0", "2", "4", "6", "8")) else "both_true",
                    0.9) for it in items], calls)
-    decisions = JudgeLadder([tier]).decide(conn, SLOT_RELATION, _items(20))
+    decisions = JudgeLadder([tier]).decide_and_record(conn, SLOT_RELATION, _items(20))
     assert calls == [16, 4]
     assert [d.verdict for d in decisions[:4]] == ["same", "both_true", "same", "both_true"]
 
 
 def test_receipts_hold_ids_numbers_and_a_hash_never_text(conn) -> None:
     item = Item("slot_dispute", "d1", "p", {"older": "secret older", "newer": "secret newer"})
-    JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9, {"same": 0.9}, "m", "cal")])]).decide(
-        conn, SLOT_RELATION, [item])
+    JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9, {"same": 0.9}, "m", "cal")])]
+                ).decide_and_record(conn, SLOT_RELATION, [item])
     row = conn.execute("SELECT * FROM judge_receipts").fetchone()
     assert "secret" not in json.dumps(row)
     names = [d[0] for d in conn.execute("SELECT * FROM judge_receipts").description]
@@ -117,7 +117,7 @@ def test_every_question_fits_the_worker_limits() -> None:
         assert len(q.instructions) <= 300 and 2 <= len(q.criteria) <= 10
 
 
-def test_laya_tier_answers_only_a_sure_same(monkeypatch) -> None:
+def test_laya_tier_returns_every_score_and_routes_by_its_floor(monkeypatch) -> None:
     from superlocalmemory.core import judge_tiers
     from superlocalmemory.retrieval import judge_ask
 
@@ -127,7 +127,8 @@ def test_laya_tier_answers_only_a_sure_same(monkeypatch) -> None:
 
     monkeypatch.setattr(judge_ask, "ask_laya_statement", lambda *a, **k: [0.93, 0.4])
     out = judge_tiers.LayaTier(lambda: Laya()).answer(SLOT_RELATION, _items(2))
-    assert out[0] is not None and out[0].verdict == "same" and out[1] is None
+    assert [(a.verdict, a.confidence) for a in out] == [("same", 0.93), ("same", 0.4)]
+    assert judge_tiers.LayaTier.floors == {"same": 0.8}
 
 
 def test_laya_tier_skips_a_jev_judge_and_unmeasured_questions() -> None:
@@ -176,3 +177,42 @@ def test_a_real_value_change_is_left_to_the_models() -> None:
 
 def test_slot_relation_v2_has_an_event_label() -> None:
     assert SLOT_RELATION.version == "2" and "separate_events" in SLOT_RELATION.criteria
+
+
+def test_decide_touches_no_database_and_returns_rows() -> None:
+    decisions, rows = JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9, model="m")])]).decide(
+        SLOT_RELATION, _items())
+    assert decisions[0].verdict == "same" and decisions[0].model == "m"
+    assert [r.receipt_id for r in rows] == list(decisions[0].receipts)
+
+
+def test_every_model_ask_is_receipted_including_misses(conn) -> None:
+    tier = Scripted("laya", lambda items: [None, TierAnswer("same", 0.1)])
+    JudgeLadder([tier]).decide_and_record(conn, SLOT_RELATION, _items(2))
+    rows = conn.execute("SELECT verdict, accepted FROM judge_receipts ORDER BY verdict").fetchall()
+    assert rows == [("no_answer", 0), ("same", 0)]
+
+
+def test_rule_misses_are_not_receipted(conn) -> None:
+    JudgeLadder([RulesTier()]).decide_and_record(conn, SLOT_RELATION, _items())
+    assert conn.execute("SELECT COUNT(*) FROM judge_receipts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("older,newer", [
+    ("The server listens on port 8080", "The server listens on port 8443"),
+    ("The cache is enabled", "The cache is not enabled"),
+    ("Alex owns the repo", "Sam owns the repo"),
+    ("The build runs on CI", "CI runs the build"),
+])
+def test_rules_never_call_a_changed_statement_same(older, newer) -> None:
+    assert RulesTier().answer(SLOT_RELATION, [Item("x", "1", "p", {"older": older,
+                                                                  "newer": newer})]) == [None]
+
+
+def test_a_tier_floor_routes_but_never_lowers_the_question_threshold(conn) -> None:
+    class Floored(Scripted):
+        floors = {"same": 0.8}
+
+    tier = Floored("laya", [TierAnswer("same", 0.75)])
+    [d] = JudgeLadder([tier]).decide_and_record(conn, SLOT_RELATION, _items())
+    assert d.abstained

@@ -36,8 +36,10 @@ class LayaTier:
     """
 
     name = "laya"
-    #: Positive pairs scored 0.66-0.95 and negatives at most 0.09 in that run.
-    SAME_FLOOR = 0.8
+    #: Routing only: an answer at or above this stops escalation. Whether it may
+    #: change memory is decided by ``judge_calibration.ActingGate`` from labels.
+    #: (25 labelled pairs: positives 0.66-0.95, negatives at most 0.09.)
+    floors = {"same": 0.8}
 
     def __init__(self, supplier: JudgeSupplier) -> None:
         self._supplier = supplier
@@ -54,9 +56,10 @@ class LayaTier:
         if scores is None:
             return None
         model = _model_name(judge, "laya")
+        # Every score is returned, below the floor too: a receipt for each ask is
+        # what lets the floor be calibrated later instead of guessed.
         return [TierAnswer("same", s, {"same": s}, model=model,
-                           calibration_id=f"laya:{model}:same-v1")
-                if s >= self.SAME_FLOOR else None for s in scores]
+                           calibration_id=f"laya:{model}:same-v1") for s in scores]
 
 
 class JevTier:
