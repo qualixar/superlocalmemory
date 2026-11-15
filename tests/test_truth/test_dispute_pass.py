@@ -41,20 +41,32 @@ def _open(db) -> int:
 
 
 def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="audit"):
-    """Seed labelled receipts, as a person's reviews would, so the gate can decide."""
-    n = n if n is not None else (80 if verdict == "replaces" else 400)
+    """Seed labelled receipts, as a person's reviews would, so the gate can decide.
+
+    A closing verdict needs 459 clean audits (alpha_close at delta/2) and a tier
+    inbox with real replacements in it (M-02), seeded under another model.
+    """
+    n = n if n is not None else (80 if verdict == "replaces" else 500)
+    if verdict != "replaces":
+        _seed(db, "replaces", 300, tier=tier, model="inbox-model", label="replaces", tag="inbox")
+    _seed(db, verdict, n, tier=tier, model="fake", wrong=wrong, blind=blind, source=source)
+
+
+def _seed(db, verdict, n, *, tier, model, wrong=0, blind=1, source="audit", label=None, tag=None):
+    tag = tag or verdict
     with db.raw_connection() as conn:
         for i in range(n):
-            rid = f"seed-{verdict}-{i}"
+            rid = f"seed-{tag}-{i}"
             conn.execute(
                 "INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                 "question_version, subject_kind, subject_id, population, tier, model, verdict, "
-                "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at) VALUES "
-                "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, 'slot_dispute', ?, 'fake', ?, 0.95, "
-                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00')",
-                (rid, SLOT_RELATION.version, rid, tier, verdict, "seed-" + rid))
-            truth = ("replaces" if verdict != "replaces" else "unrelated") if i < wrong \
-                else verdict
+                "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at, "
+                "audit_selected, audit_probability) VALUES "
+                "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, 'slot_dispute', ?, ?, ?, 0.95, "
+                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00', 1, 0.1)",
+                (rid, SLOT_RELATION.version, rid, tier, model, verdict, "seed-" + rid))
+            truth = label or (("replaces" if verdict != "replaces" else "unrelated") if i < wrong
+                              else verdict)
             conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
                          "labelled_at) VALUES (?, ?, ?, 'auditor', ?, ?)",
                          (rid, truth, source, blind,
@@ -238,3 +250,40 @@ def test_with_no_model_tier_the_page_limit_does_not_block_the_rules(disputed) ->
     _pass(db, CountingRules(), limit=0)
     assert CountingRules.calls == 1
     assert _pass(db, CountingRules(), Fixed("same"), limit=0) == {}  # a model tier: limit holds
+
+
+# -- R-04 / M-18 / R-36: rules act only on an audit of their own decisions --------------------
+
+class RuleSame:
+    """A deterministic tier answering "same", as Tier 0 does for identical statements."""
+    name = "rules"
+    is_model = False
+    log_abstentions = False
+
+    def answer(self, question, items):
+        return [TierAnswer("same", 1.0, {"same": 1.0}, model="rules-v3",
+                           calibration_id="rules-v3")] * len(items)
+
+
+def test_a_rule_receipt_has_no_made_up_score(disputed) -> None:
+    db, _old, _new = disputed
+    _pass(db, RuleSame())
+    rows = db.execute("SELECT tier, verdict, confidence, raw_score FROM judge_receipts")
+    assert [(r["tier"], r["verdict"], r["confidence"], r["raw_score"]) for r in rows] == [
+        ("rules", "same", None, None)]
+
+
+def test_rules_do_not_close_a_dispute_without_an_audit_of_their_own(disputed) -> None:
+    db, _old, _new = disputed
+    counts = _pass(db, RuleSame(), **{"judge.ladder": "on"})
+    assert counts["held_uncalibrated"] == 1 and _open(db) == 1
+
+
+def test_audited_rules_close_a_dispute(disputed) -> None:
+    db, _old, _new = disputed
+    _calibrate(db, "same", tier="rules")  # alpha_close at delta/2: 459 clean audits
+    with db.raw_connection() as conn:
+        conn.execute("UPDATE judge_receipts SET model = 'rules-v3', confidence = NULL "
+                     "WHERE tier = 'rules'")
+    counts = _pass(db, RuleSame(), **{"judge.ladder": "on"})
+    assert counts["resolved_same"] == 1 and _open(db) == 0

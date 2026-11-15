@@ -113,7 +113,8 @@ class ReceiptRow:
     tier_index: int
     model: str
     verdict: str
-    confidence: float
+    #: None for a deterministic tier: a rule has no score (R-36).
+    confidence: float | None
     raw_score: float | None
     threshold: float
     accepted: bool
@@ -128,6 +129,8 @@ class ReceiptRow:
     decided_at: str
     failure_kind: str | None = None
     consent_ref: str | None = None
+    audit_selected: bool = False
+    audit_probability: float | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,8 @@ class Context:
     #: HMAC key for ``inputs_hash`` (``core/receipt_key``). None: an unkeyed
     #: digest, for tests and store copies only.
     hash_key: bytes | None = None
+    #: The audit draw probability (``core/audit_sampler``, M-04); None: no sampling.
+    audit_probability: float | None = None
 
 
 class Tier(Protocol):
@@ -190,21 +195,28 @@ class _Batch:
 
 def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, threshold: float,
          accepted: bool, ctx: Context, batch: _Batch, position: int,
-         failure_kind: str | None = None) -> ReceiptRow:
+         failure_kind: str | None = None, scored: bool = True) -> ReceiptRow:
+    from superlocalmemory.core.audit_sampler import select
+
+    receipt_id = "jr_" + uuid.uuid4().hex
+    selected, probability = select(ctx.hash_key, receipt_id, answer.verdict,
+                                   ctx.audit_probability)
     # A hosted ask's consent applies to every row of its batch, misses included.
     return ReceiptRow(
-        receipt_id="jr_" + uuid.uuid4().hex, profile_id=item.profile_id,
+        receipt_id=receipt_id, profile_id=item.profile_id,
         question_id=question.question_id, question_version=question.version,
         subject_kind=item.subject_kind, subject_id=item.subject_id, population=ctx.population,
         fact_ids_json=json.dumps(sorted(item.fact_ids)), tier=tier, tier_index=batch.tier_index,
-        model=answer.model or tier, verdict=answer.verdict, confidence=float(answer.confidence),
-        raw_score=float(answer.confidence), threshold=threshold, accepted=accepted,
+        model=answer.model or tier, verdict=answer.verdict,
+        confidence=float(answer.confidence) if scored else None,
+        raw_score=float(answer.confidence) if scored else None, threshold=threshold, accepted=accepted,
         probabilities_json=json.dumps(dict(answer.probabilities), sort_keys=True),
         calibration_id=answer.calibration_id,
         inputs_hash=inputs_hash(question, item, ctx.hash_key), batch_id=batch.batch_id,
         batch_size=batch.size, batch_position=position, peers_hash=batch.peers_hash,
         flag_state=ctx.flag_state, decided_at=_now(), failure_kind=failure_kind,
-        consent_ref=answer.consent_ref or batch.consent_ref)
+        consent_ref=answer.consent_ref or batch.consent_ref, audit_selected=selected,
+        audit_probability=probability)
 
 
 _RECEIPT_COLUMNS = (
@@ -212,7 +224,7 @@ _RECEIPT_COLUMNS = (
     "population", "fact_ids_json", "tier", "tier_index", "model", "verdict", "confidence",
     "raw_score", "threshold", "accepted", "probabilities_json", "calibration_id", "inputs_hash",
     "batch_id", "batch_size", "batch_position", "peers_hash", "flag_state", "decided_at",
-    "failure_kind", "consent_ref")
+    "failure_kind", "consent_ref", "audit_selected", "audit_probability")
 
 
 def write_receipts(conn: sqlite3.Connection, rows: Sequence[ReceiptRow]) -> None:
@@ -308,7 +320,8 @@ class JudgeLadder:
                 threshold = _route_threshold(question, tier, answer.verdict)
                 sure = answer.confidence >= threshold
                 row = _row(question, items[index], tier.name, answer, threshold=threshold,
-                           accepted=sure, ctx=ctx, batch=meta, position=pos)
+                           accepted=sure, ctx=ctx, batch=meta, position=pos,
+                           scored=is_model_tier(tier))
                 receipts[index].append(row)
                 if sure:
                     decided[index] = Decision(answer.verdict, answer.confidence, tier.name,

@@ -18,8 +18,18 @@ ALPHA_CLOSE = 0.01
 DELTA = 0.05
 
 
+#: The chance each judged receipt is sent for a blind audit label (M-04). One
+#: constant across every score in a certificate cell, so audited counts are
+#: exactly binomial. It sets how fast certificates can be earned (about 73 clean
+#: audits per cell at alpha 0.05) against how much reviewing a person does.
+#: PROPOSED, not decided: blueprint D-31 awaits the owner.
+AUDIT_PROBABILITY = 0.10
+AUDIT_DECIDED = False
+
+
 def alpha_for(verdict: str) -> float:
     return ALPHA_RETIRE if verdict == "replaces" else ALPHA_CLOSE
 
 
-__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "DECIDED", "DELTA", "alpha_for"]
+__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "AUDIT_DECIDED", "AUDIT_PROBABILITY", "DECIDED", "DELTA",
+           "alpha_for"]

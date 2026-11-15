@@ -17,8 +17,10 @@ flag state at decision time, the action taken and its reference (so a decision
 made in shadow is acted on later instead of stranded), and audit selection with
 its probability (only blind audit labels feed certificates). A tier that was
 asked and failed as a whole writes ``tier_failed`` with ``failure_kind`` (R-35);
-the CHECK keeps the two in step. A hosted ask's receipts carry ``consent_ref``,
-the consent record it relied on (I-15, R-42); that one is checked by
+the CHECK keeps the two in step. A deterministic tier (rules) has no score:
+its ``confidence`` and ``raw_score`` are NULL rather than a made-up 1.0 (R-36).
+A hosted ask's receipts carry ``consent_ref``, the consent record it relied on
+(I-15, R-42); that one is checked by
 ``slm doctor --truth``, not a CHECK, so one bad row never voids a batch. ``inputs_hash`` is
 an HMAC under a local key (``core/receipt_key.py``), so it identifies what was
 judged without confirming a guess of erased text. Labels: many per receipt
@@ -49,7 +51,7 @@ CREATE TABLE IF NOT EXISTS judge_receipts (
     tier_index        INTEGER NOT NULL DEFAULT 0,
     model             TEXT NOT NULL,
     verdict           TEXT NOT NULL,
-    confidence        REAL NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0),
+    confidence        REAL CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
     raw_score         REAL,
     threshold         REAL NOT NULL,
     accepted          INTEGER NOT NULL CHECK (accepted IN (0, 1)),

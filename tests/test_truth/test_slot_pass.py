@@ -77,12 +77,12 @@ def test_resumes_from_its_cursor_and_picks_up_new_saves(store) -> None:
     assert SlotPass(db, flags, state_dir=tmp).run()["dispute"] == 1
 
 
-def _resolve_explicit(db, fact_id, value, when):
+def _resolve_explicit(db, fact_id, value, when, auto_apply=True):
     from superlocalmemory.truth.slot_resolver import resolve_fact
 
     with db.raw_connection() as conn:
         return resolve_fact(conn, fact_id=fact_id, profile_id="default", scope="personal",
-                            content=value, valid_from=when, auto_apply=True,
+                            content=value, valid_from=when, auto_apply=auto_apply,
                             explicit_key="SLM/release cadence")
 
 
@@ -140,3 +140,159 @@ def test_vanished_revisions_restart_the_pass(store) -> None:
     db.execute("DELETE FROM slot_revisions")  # what a profile fold does to the source
     again = SlotPass(db, flags, state_dir=tmp).run()
     assert again["keyed"] == first["keyed"] and again["head"] == 1
+
+
+# -- B2 / R-19: the queue: rebinds after a head is erased, retries after a failure ------------
+
+def _erase(db, fact_id: str) -> None:
+    with db.raw_connection() as conn:
+        conn.execute("DELETE FROM fact_temporal_validity WHERE fact_id = ?", (fact_id,))
+        conn.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (fact_id,))
+
+
+def _slot_state(db) -> list:
+    return [(r["state"], r["n"]) for r in db.execute(
+        "SELECT s.state, COUNT(r.revision_id) AS n FROM memory_slots s "
+        "LEFT JOIN slot_revisions r ON r.slot_id = s.slot_id GROUP BY s.slot_id")]
+
+
+def test_erasing_the_head_leaves_the_slot_as_if_it_was_never_saved(store) -> None:
+    db, old, new, tmp = store
+    flags = _flags(**{"truth.slots": "shadow"})
+    SlotPass(db, flags, state_dir=tmp).run()
+    assert _slot_state(db) == [("disputed", 2)]
+    _erase(db, old)  # the head: the challenger is queued, the slot emptied and removed
+    SlotPass(db, flags, state_dir=tmp).run()
+    assert _slot_state(db) == [("current", 1)]
+    head = db.execute("SELECT r.fact_id FROM memory_slots s JOIN slot_revisions r "
+                      "ON r.revision_id = s.head_revision_id")
+    assert [r["fact_id"] for r in head] == [new]
+    assert db.execute("SELECT COUNT(*) AS n FROM slot_disputes")[0]["n"] == 0
+    assert db.execute("SELECT COUNT(*) AS n FROM slot_pass_queue")[0]["n"] == 0
+
+
+def test_erasing_the_challenger_leaves_the_head_current(store) -> None:
+    db, old, new, tmp = store
+    flags = _flags(**{"truth.slots": "shadow"})
+    SlotPass(db, flags, state_dir=tmp).run()
+    _erase(db, new)
+    assert _slot_state(db) == [("current", 1)]
+
+
+def _queue(db) -> list:
+    return [tuple(r) for r in db.execute(
+        "SELECT fact_id, reason, attempts, last_error FROM slot_pass_queue")]
+
+
+def test_a_failed_bind_is_queued_with_backoff_and_retried_when_due(store, monkeypatch) -> None:
+    import sqlite3
+
+    from superlocalmemory.truth import slot_pass
+
+    db, old, _new, tmp = store
+    real = slot_pass.resolve_fact
+    calls = []
+
+    def flaky(conn, **kw):
+        calls.append(kw["fact_id"])
+        if kw["fact_id"] == old:
+            raise sqlite3.OperationalError("database is locked")
+        return real(conn, **kw)
+
+    monkeypatch.setattr(slot_pass, "resolve_fact", flaky)
+    flags = _flags(**{"truth.slots": "shadow"})
+    counts = SlotPass(db, flags, state_dir=tmp).run()
+    assert counts["error"] == 1 and counts["queued_retry"] == 1
+    assert _queue(db) == [(old, "retry", 1, "OperationalError")]  # the class, never a message
+    calls.clear()
+    SlotPass(db, flags, state_dir=tmp).run()
+    assert old not in calls  # not due yet: backoff holds
+    monkeypatch.setattr(slot_pass, "resolve_fact", real)
+    db.execute("UPDATE slot_pass_queue SET next_at = '2000-01-01T00:00:00+00:00'")
+    counts = SlotPass(db, flags, state_dir=tmp).run()
+    assert counts["queue_bound"] == 1 and _queue(db) == []
+    assert db.execute("SELECT COUNT(*) AS n FROM slot_revisions WHERE fact_id = ?",
+                      (old,))[0]["n"] == 1
+
+
+def test_backoff_doubles_and_is_capped() -> None:
+    from datetime import UTC, datetime
+
+    from superlocalmemory.truth.slot_pass import RETRY_MAX_S, _retry_at
+
+    t0 = datetime(2026, 11, 15, tzinfo=UTC)
+    gaps = [(datetime.fromisoformat(_retry_at(n, t0)) - t0).total_seconds() for n in (1, 2, 3, 30)]
+    assert gaps[:3] == [60.0, 120.0, 240.0] and gaps[3] == RETRY_MAX_S
+
+
+def test_a_queued_fact_that_is_no_longer_live_leaves_the_queue(store) -> None:
+    db, old, _new, tmp = store
+    flags = _flags(**{"truth.slots": "shadow"})
+    SlotPass(db, flags, state_dir=tmp).run()
+    db.execute("UPDATE atomic_facts SET lifecycle = 'archived' WHERE fact_id = ?", (old,))
+    db.execute("INSERT INTO slot_pass_queue (fact_id, reason, next_at, queued_at) "
+               "VALUES (?, 'retry', '2000-01-01T00:00:00+00:00', '2000-01-01T00:00:00+00:00')",
+               (old,))
+    counts = SlotPass(db, flags, state_dir=tmp).run()
+    assert counts["queue_dropped"] == 1 and _queue(db) == []
+
+
+
+# -- R-07 / B5: a supersede decided while retiring was not allowed reaches the ledger later ---
+
+def _cases(db) -> list:
+    return [(r["status"], r["predecessor_fact_id"], r["successor_fact_id"]) for r in db.execute(
+        "SELECT status, predecessor_fact_id, successor_fact_id FROM correction_cases "
+        "ORDER BY created_at")]
+
+
+def _link(db, fact_id):
+    return db.execute("SELECT case_id FROM slot_revisions WHERE fact_id = ? "
+                      "AND state != 'superseded'", (fact_id,))[0]["case_id"]
+
+
+def _pending_supersede(store):
+    db, old, new, _tmp = store
+    assert _resolve_explicit(db, old, "weekly", "2026-03-01", auto_apply=False).outcome == "head"
+    r = _resolve_explicit(db, new, "one big release", "2026-11-14T00:00:00+00:00",
+                          auto_apply=False)
+    assert (r.outcome, r.ledger) == ("supersede", "pending")
+    return db, old, new
+
+
+def test_a_stranded_supersede_is_proposed_then_applied_as_flags_allow(store) -> None:
+    db, old, new = _pending_supersede(store)
+    tmp = store[3]
+    SlotPass(db, _flags(**{"truth.slots": "shadow"}), state_dir=tmp).run()
+    assert _cases(db) == []  # shadow never writes the ledger (I-15)
+    counts = SlotPass(db, _flags(**{"truth.slots": "on"}), state_dir=tmp).run()
+    assert counts["ledger_proposed"] == 1
+    assert _cases(db) == [("proposed", old, new)] and _retired(db, old) == (None, None, None)
+    case = _link(db, new)
+    assert case is not None
+    counts = SlotPass(db, _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"}),
+                      state_dir=tmp).run()
+    assert counts["ledger_applied"] == 1 and _cases(db) == [("applied", old, new)]
+    assert _retired(db, old)[2] == new and _link(db, new) == case
+    again = SlotPass(db, _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"}),
+                     state_dir=tmp).run()
+    assert not any(k.startswith("ledger_") for k in again)  # settled: not read again
+
+
+def test_a_decision_made_in_shadow_is_applied_directly_once_allowed(store) -> None:
+    db, old, new = _pending_supersede(store)
+    counts = SlotPass(db, _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"}),
+                      state_dir=store[3]).run()
+    assert counts["ledger_applied"] == 1 and _cases(db) == [("applied", old, new)]
+
+
+def test_a_rival_proposal_is_left_for_a_person_and_not_read_again(store) -> None:
+    db, old, new = _pending_supersede(store)
+    other = _fact(db, "The release cadence of SLM is quarterly", "2026-11-15T00:00:00+00:00")
+    _consolidator_proposal(db, "rival", old, other)
+    flags = _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"})
+    counts = SlotPass(db, flags, state_dir=store[3]).run()
+    assert counts["ledger_deferred_to_review"] == 1
+    assert _link(db, new) == "rival" and _retired(db, old) == (None, None, None)
+    again = SlotPass(db, flags, state_dir=store[3]).run()
+    assert "ledger_deferred_to_review" not in again

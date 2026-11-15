@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 
@@ -172,10 +172,21 @@ class Certificate:
     certified_at: int | None   # labels needed before E_n first reached 1/delta
     revoked: bool
     tested: tuple[tuple[float, int, int, bool], ...]  # (threshold, n, errors, certified)
+    #: Closing verdicts only (M-02): U(false keep | closed) and L(replacement rate
+    #: of the tier's inbox), each at delta/2; None where not computed.
+    false_keep_upper: float | None = None
+    base_rate_lower: float | None = None
+
+    @property
+    def beats_base_rate(self) -> bool:
+        if self.false_keep_upper is None and self.base_rate_lower is None:
+            return True  # a retiring verdict: the condition does not apply
+        return (self.false_keep_upper is not None and self.base_rate_lower is not None
+                and self.false_keep_upper < self.base_rate_lower)
 
     @property
     def acts(self) -> bool:
-        return self.threshold is not None
+        return self.threshold is not None and self.beats_base_rate
 
 
 def _crossing(errors: Sequence[bool], log_error: float, log_clean: float,
@@ -232,14 +243,30 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
     return Certificate(chosen, alpha, delta, at, revoked, tuple(tested))
 
 
+#: The tier's inbox: every drawn, blindly audited pair that reached this tier
+#: (a receipt at its index or above), once per pair hash. Used for the base rate.
+_INBOX = """
+SELECT r.inputs_hash, l.label FROM judge_receipts r
+  JOIN judge_labels l ON l.receipt_id = r.receipt_id
+ WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ? AND r.population = ?
+   AND r.tier_index >= (SELECT COALESCE(MIN(t.tier_index), 0) FROM judge_receipts t
+                         WHERE t.profile_id = r.profile_id AND t.tier = ? AND t.model = ?)
+   AND r.audit_selected = 1 AND l.source = 'audit' AND l.blind = 1
+"""
+
 _AUDITED = """
 SELECT r.receipt_id, r.confidence, l.label, l.labelled_at FROM judge_receipts r
   JOIN judge_labels l ON l.receipt_id = r.receipt_id
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
    AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
-   AND l.source = 'audit' AND l.blind = 1
+   AND r.audit_selected = 1 AND l.source = 'audit' AND l.blind = 1
  ORDER BY l.labelled_at, r.receipt_id
 """
+
+
+def _score(confidence: float | None) -> float:
+    """A deterministic tier's decisions (no score) sit at the upper bound."""
+    return 1.0 if confidence is None else float(confidence)
 
 
 class ActingGate:
@@ -271,19 +298,47 @@ class ActingGate:
                                                  tier, model, verdict, population)).fetchall()
             per: dict[str, tuple[float, set[str], str]] = {}
             for rid, conf, label, at in rows:
-                score, labels, first = per.get(rid, (float(conf), set(), at))
+                # A rule has no score (NULL, R-36): all its decisions are one class,
+                # certified together at the top of the grid.
+                score, labels, first = per.get(rid, (_score(conf), set(), at))
                 per[rid] = (score, labels | {label}, min(first, at))
             ordered = sorted(per.values(), key=lambda v: v[2])
             scores = [v[0] for v in ordered]
             wrong = [len(v[1]) > 1 or is_wrong(verdict, next(iter(v[1]))) for v in ordered]
-            self._cache[key] = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
-                                                    delta=self._delta)
+            if verdict == RETIRING:
+                cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
+                                            delta=self._delta)
+            else:
+                cert = self._closing(scores, wrong, verdict, tier, model, population)
+            self._cache[key] = cert
         return self._cache[key]
 
-    def allows(self, tier: str, model: str, verdict: str, confidence: float, *,
+    def _closing(self, scores: list[float], wrong: list[bool], verdict: str, tier: str,
+                 model: str, population: str) -> Certificate:
+        """M-02: a closing verdict must also keep fewer replacements than closing
+        everything would. The e-process and the two bounds each get delta/2."""
+        half = self._delta / 2
+        cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict), delta=half)
+        if cert.threshold is None:
+            return cert
+        picked = [w for s, w in zip(scores, wrong) if s >= cert.threshold]
+        upper = clopper_pearson_upper(sum(picked), len(picked), half)
+        return replace(cert, false_keep_upper=upper,
+                       base_rate_lower=self._base_rate_lower(tier, model, population, half))
+
+    def _base_rate_lower(self, tier: str, model: str, population: str, delta: float) -> float:
+        labels: dict[str, set[str]] = {}
+        for h, label in self._conn.execute(_INBOX, (self._profile, self._question,
+                                                    self._version, population, tier, model)):
+            labels.setdefault(h, set()).add(label)
+        # Only a unanimous "replaces" counts: the lower bound stays conservative.
+        replaced = sum(1 for got in labels.values() if got == {RETIRING})
+        return clopper_pearson_lower(replaced, len(labels), delta)
+
+    def allows(self, tier: str, model: str, verdict: str, confidence: float | None, *,
                population: str) -> bool:
         cert = self.certificate(tier, model, verdict, population)
-        return cert.acts and confidence >= cert.threshold
+        return cert.acts and _score(confidence) >= cert.threshold
 
 
 __all__ = ["ActingGate", "Certificate", "GRID", "RETIRING", "Selection", "ThresholdTest", "binom_cdf",

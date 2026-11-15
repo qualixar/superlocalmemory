@@ -67,7 +67,8 @@ DELETE  activation_cache, backup_destinations, behavioral_assertions,
         core_memory_blocks, cross_platform_sync_log, entity_communities,
         entity_link_repair_undo, graph_generation, memory_kind_runs,
         memory_slots, mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state,
-        pending_outcomes, persona_summary, rbac_memberships, slot_disputes, slot_revisions,
+        pending_outcomes, persona_summary, rbac_memberships, slot_disputes, slot_key_alias,
+        slot_revisions,
         soft_prompt_templates
 KEEP    erasure_receipts, fact_search_changes, profiles, write_commits
 
@@ -101,6 +102,7 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "memory_leases": (MOVE, "source fingerprints of the moved facts"),
     "memory_slots": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "slot_revisions": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
+    "slot_key_alias": (DELETE, "aliases of the source profile's slots, which are deleted"),
     "slot_disputes": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "judge_receipts": (MOVE, "ids-only receipts of judge decisions on the moved memories"),
     # search indexes and vectors

@@ -141,9 +141,9 @@ def test_a_concurrent_change_is_detected(conn, monkeypatch) -> None:
     real = ss._ensure_slot
 
     def stale(*args, **kwargs):
-        head_id, version = real(*args, **kwargs)
+        slot_id, head_id, version = real(*args, **kwargs)
         conn.execute("UPDATE memory_slots SET version = version + 1")  # another writer
-        return head_id, version
+        return slot_id, head_id, version
 
     monkeypatch.setattr(ss, "_ensure_slot", stale)
     with pytest.raises(ss.SlotConflictError):
@@ -197,3 +197,51 @@ def test_a_same_day_date_against_a_timestamp_opens_a_dispute_not_history(conn) -
     assert _slot(conn, head.slot_id)[0] == head.revision_id
     assert conn.execute("SELECT valid_from FROM slot_revisions WHERE fact_id='f2'").fetchone() == (
         "2026-11-15",)  # kept as a date
+
+
+
+# -- R-12: opaque ids; re-keying a slot orphans nothing ----------------------------------------
+
+def test_ids_are_opaque_and_rebinding_the_same_fact_is_still_a_no_op(conn) -> None:
+    a = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    again = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    assert again.slot_id == a.slot_id and again.revision_id == a.revision_id
+    assert a.slot_id.startswith("slot_") and len(a.slot_id) == 37  # uuid4 hex, not a key digest
+    assert conn.execute("SELECT COUNT(*) FROM slot_revisions").fetchone()[0] == 1
+
+
+def test_rekeying_keeps_every_id_and_the_old_key_still_finds_the_slot(conn) -> None:
+    from dataclasses import replace
+
+    old = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    new_rev = _bind(conn, "f2", "The release cadence of SLM is weekly", "2026-02-01")
+    old_key = extract("The release cadence of SLM is monthly")
+    entity_key = replace(old_key, subject_key="entity:e-123")
+    ss.rekey_slot(conn, old.slot_id, entity_key, by="test", reason_code="entity_resolved")
+    assert ss.find_slot(conn, "p", "personal", entity_key) == old.slot_id
+    assert ss.find_slot(conn, "p", "personal", old_key) == old.slot_id  # via the alias
+    # A fact still keyed the old way lands in the same slot, next to its history.
+    later = _bind(conn, "f3", "The release cadence of SLM is daily", "2026-03-01")
+    assert later.slot_id == old.slot_id
+    disputes = conn.execute("SELECT slot_id FROM slot_disputes").fetchall()
+    assert {d[0] for d in disputes} == {old.slot_id}
+    assert new_rev.slot_id == old.slot_id
+
+
+def test_rekeying_onto_another_slots_key_is_refused(conn) -> None:
+    a = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    _bind(conn, "f2", "The owner of SLM is Alex", "2026-01-01")
+    with pytest.raises(ss.SlotKeyTakenError):
+        ss.rekey_slot(conn, a.slot_id, extract("The owner of SLM is Alex"), by="t",
+                      reason_code="x")
+
+
+def test_erasing_a_slot_erases_its_aliases(conn) -> None:
+    from dataclasses import replace
+
+    a = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    key = extract("The release cadence of SLM is monthly")
+    ss.rekey_slot(conn, a.slot_id, replace(key, subject_key="entity:e"), by="t", reason_code="x")
+    assert conn.execute("SELECT COUNT(*) FROM slot_key_alias").fetchone()[0] == 1
+    conn.execute("DELETE FROM atomic_facts WHERE fact_id = 'f1'")
+    assert conn.execute("SELECT COUNT(*) FROM slot_key_alias").fetchone()[0] == 0

@@ -19,12 +19,20 @@
 
 Every function takes the caller's connection and never commits: the caller's
 transaction owns the write. Ids and hashes only, never memory text.
+
+Slot and revision ids are opaque surrogates (R-12), never derived from a key: a
+slot is found by its natural key ``(profile, scope, subject, relation,
+qualifier)`` or by an alias of it (``slot_key_alias``). ``rekey_slot`` moves a
+slot to a new key -- the move from ``name:`` to ``entity:<id>`` subjects --
+and keeps the old key as an alias, so nothing that names the slot, its
+revisions or its disputes is orphaned, and a fact still keyed the old way
+lands in the same slot.
 """
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -37,6 +45,10 @@ HEAD, DUPLICATE, COMPATIBLE, HISTORICAL, SUPERSEDE, DISPUTE = (
 
 class SlotConflictError(RuntimeError):
     """The slot changed between read and write; the caller retries."""
+
+
+class SlotKeyTakenError(ValueError):
+    """The new key already names another slot: that is a merge, not a re-key."""
 
 
 class StaleDisputeError(LookupError):
@@ -58,29 +70,71 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _digest(*parts: str) -> str:
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:32]
+def _new_id(prefix: str) -> str:
+    return prefix + uuid.uuid4().hex
 
 
-def slot_id_for(profile_id: str, scope: str, key: SlotKey) -> str:
-    return "slot_" + _digest(profile_id, scope, key.subject_key, key.relation_key, key.qualifier)
+_NATURAL = "profile_id = ? AND scope = ? AND subject_key = ? AND relation_key = ? AND qualifier = ?"
 
 
-def revision_id_for(slot_id: str, fact_id: str) -> str:
-    return "rev_" + _digest(slot_id, fact_id)
+def _natural(profile_id: str, scope: str, key: SlotKey) -> tuple[str, ...]:
+    return (profile_id, scope, key.subject_key, key.relation_key, key.qualifier)
 
 
-def _ensure_slot(conn: sqlite3.Connection, slot_id: str, profile_id: str, scope: str,
-                 key: SlotKey, now: str) -> tuple[str | None, int]:
-    conn.execute(
-        "INSERT OR IGNORE INTO memory_slots (slot_id, profile_id, scope, subject_key, "
-        "relation_key, qualifier, cardinality, key_source, state, version, created_at, "
-        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'empty', 0, ?, ?)",
-        (slot_id, profile_id, scope, key.subject_key, key.relation_key, key.qualifier,
-         key.cardinality, key.key_source, now, now))
+def find_slot(conn: sqlite3.Connection, profile_id: str, scope: str, key: SlotKey) -> str | None:
+    """The slot this key names, directly or through an alias; None if there is none."""
+    args = _natural(profile_id, scope, key)
+    row = conn.execute(f"SELECT slot_id FROM memory_slots WHERE {_NATURAL}", args).fetchone()  # noqa: S608
+    if row is None:
+        row = conn.execute(f"SELECT slot_id FROM slot_key_alias WHERE {_NATURAL}",  # noqa: S608
+                           args).fetchone()
+    return str(row[0]) if row else None
+
+
+def _ensure_slot(conn: sqlite3.Connection, profile_id: str, scope: str, key: SlotKey,
+                 now: str) -> tuple[str, str | None, int]:
+    slot_id = find_slot(conn, profile_id, scope, key)
+    if slot_id is None:
+        slot_id = _new_id("slot_")
+        conn.execute(
+            "INSERT INTO memory_slots (slot_id, profile_id, scope, subject_key, "
+            "relation_key, qualifier, cardinality, key_source, state, version, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'empty', 0, ?, ?)",
+            (slot_id, profile_id, scope, key.subject_key, key.relation_key, key.qualifier,
+             key.cardinality, key.key_source, now, now))
     row = conn.execute("SELECT head_revision_id, version FROM memory_slots WHERE slot_id = ?",
                        (slot_id,)).fetchone()
-    return row[0], int(row[1])
+    return slot_id, row[0], int(row[1])
+
+
+def rekey_slot(conn: sqlite3.Connection, slot_id: str, new_key: SlotKey, *, by: str,
+               reason_code: str) -> None:
+    """Give ``slot_id`` a new natural key; its old key stays an alias of it.
+
+    Ids do not change, so revisions, disputes and receipts keep pointing at the
+    slot. Raises ``SlotKeyTakenError`` when the new key already names a
+    different slot (two slots being the same is a merge, decided separately).
+    """
+    row = conn.execute("SELECT profile_id, scope, subject_key, relation_key, qualifier "
+                       "FROM memory_slots WHERE slot_id = ?", (slot_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"no slot {slot_id}")
+    profile_id, scope = str(row[0]), str(row[1])
+    holder = find_slot(conn, profile_id, scope, new_key)
+    if holder is not None and holder != slot_id:
+        raise SlotKeyTakenError(f"key already names slot {holder}")
+    now = _now()
+    conn.execute(f"DELETE FROM slot_key_alias WHERE {_NATURAL}",  # noqa: S608
+                 _natural(profile_id, scope, new_key))  # the new key is no longer an alias
+    if tuple(row[2:]) != (new_key.subject_key, new_key.relation_key, new_key.qualifier):
+        conn.execute(
+            "INSERT OR REPLACE INTO slot_key_alias (profile_id, scope, subject_key, relation_key, "
+            "qualifier, slot_id, reason_code, aliased_by, aliased_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (*row, slot_id, reason_code, by, now))
+    conn.execute(
+        "UPDATE memory_slots SET subject_key = ?, relation_key = ?, qualifier = ?, "
+        "version = version + 1, updated_at = ? WHERE slot_id = ?",
+        (new_key.subject_key, new_key.relation_key, new_key.qualifier, now, slot_id))
 
 
 def _head(conn: sqlite3.Connection, revision_id: str | None) -> tuple | None:
@@ -133,13 +187,12 @@ def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str,
          valid_from: str | None = None, decided_by: str = "deterministic") -> Binding:
     """Record ``fact_id`` as a revision of its slot and decide what it does."""
     now = _now()
-    slot_id = slot_id_for(profile_id, scope, key)
-    revision_id = revision_id_for(slot_id, fact_id)
-    existing = conn.execute("SELECT state FROM slot_revisions WHERE revision_id = ?",
-                            (revision_id,)).fetchone()
+    slot_id, head_id, version = _ensure_slot(conn, profile_id, scope, key, now)
+    existing = conn.execute("SELECT revision_id, state FROM slot_revisions "
+                            "WHERE slot_id = ? AND fact_id = ?", (slot_id, fact_id)).fetchone()
     if existing is not None:  # the same fact bound twice: the first decision stands
-        return Binding(outcome=str(existing[0]), slot_id=slot_id, revision_id=revision_id)
-    head_id, version = _ensure_slot(conn, slot_id, profile_id, scope, key, now)
+        return Binding(outcome=str(existing[1]), slot_id=slot_id, revision_id=str(existing[0]))
+    revision_id = _new_id("rev_")
     head = _head(conn, head_id)
     # Kept as written: a bare date must stay a date (an interval), not become midnight UTC.
     when = valid_from.strip() if isinstance(valid_from, str) and valid_from.strip() else None
@@ -176,7 +229,7 @@ def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str,
 
 def open_dispute(conn: sqlite3.Connection, *, slot_id: str, profile_id: str, revision_a: str,
                  revision_b: str, reason_code: str, opened_by: str) -> str:
-    dispute_id = "dsp_" + _digest(slot_id, revision_a, revision_b, _now())
+    dispute_id = _new_id("dsp_")
     conn.execute(
         "INSERT INTO slot_disputes (dispute_id, slot_id, profile_id, revision_a, revision_b, "
         "reason_code, opened_by, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -283,6 +336,7 @@ def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) ->
     conn.execute("UPDATE memory_slots SET state = ? WHERE slot_id = ?", (state, slot_id))
 
 
-__all__ = ["Binding", "RESOLUTIONS", "resolve_dispute", "COMPATIBLE", "DISPUTE", "DUPLICATE", "HEAD", "HISTORICAL",
-           "SUPERSEDE", "SlotConflictError", "StaleDisputeError", "dismiss_dispute", "bind", "open_dispute",
-           "record_case", "revision_id_for", "slot_id_for"]
+__all__ = ["Binding", "COMPATIBLE", "DISPUTE", "DUPLICATE", "HEAD", "HISTORICAL", "RESOLUTIONS",
+           "SUPERSEDE", "SlotConflictError", "SlotKeyTakenError", "StaleDisputeError", "bind",
+           "dismiss_dispute", "find_slot", "open_dispute", "record_case", "rekey_slot",
+           "resolve_dispute"]

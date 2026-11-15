@@ -16,8 +16,9 @@ do to the older one? The answer, once a tier is sure enough for its label:
 it acts -- but only where the store's own labels support it
 (``core/judge_calibration.ActingGate``: an e-process certificate from blind
 audit labels, so the error rate among acted-on decisions is <= alpha with
-probability >= 1 - delta). Tier 0 rules never retire anything and act on their
-non-retiring answers without a gate. Measured 15 Nov 2026 on the maintainer's
+probability >= 1 - delta). Tier 0 rules never retire anything, and even their
+closing answers act only on an audit of the rules' own decisions (I-10, M-18):
+closing a dispute is a memory change. Measured 15 Nov 2026 on the maintainer's
 backlog, Jev's "replaces" had 20-40% precision and no threshold passed, so
 retirement by a model stays off until labels say otherwise.
 
@@ -36,7 +37,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from superlocalmemory.core import recall_gate
+from superlocalmemory.core import recall_gate, risk_policy
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_calibration import ActingGate
 from superlocalmemory.core.judge_ladder import Context, Decision, Item, JudgeLadder, inputs_hash, write_receipts
@@ -105,7 +106,7 @@ class DisputePass:
         if not reused and not ask:
             return {}
         ctx = Context(population=SUBJECT_KIND, flag_state=self._flags.state("judge.ladder").value,
-                      hash_key=self._key)
+                      hash_key=self._key, audit_probability=risk_policy.AUDIT_PROBABILITY)
         with recall_gate.background_work():  # 2. judge with no lock held: saves never wait
             fresh, receipts = self._ladder.decide(SLOT_RELATION, [items[i] for i in ask], ctx)
         decided = {**reused, **dict(zip(ask, fresh))}
@@ -128,7 +129,8 @@ class DisputePass:
                 if isinstance(seen, Decision):
                     continue
                 if accepted:
-                    out[h] = Decision(verdict, float(conf), tier, (rid,), model=model)
+                    out[h] = Decision(verdict, 1.0 if conf is None else float(conf), tier,
+                                      (rid,), model=model)
                 else:
                     out[h] = seen | ({tier} if failure is None else set())
         return out
@@ -145,9 +147,10 @@ class DisputePass:
             gate = gates.setdefault(row[1], ActingGate(
                 conn, profile_id=row[1], question_id=SLOT_RELATION.question_id,
                 version=SLOT_RELATION.version))
-            if decision.tier != "rules" and not gate.allows(
-                    decision.tier, decision.model, decision.verdict, decision.confidence,
-                    population=SUBJECT_KIND):
+            # Rules too: closing a dispute is a memory change, and a rule acts only
+            # on an audit of its own decisions (I-10, M-18), like any judge.
+            if not gate.allows(decision.tier, decision.model, decision.verdict,
+                               decision.confidence, population=SUBJECT_KIND):
                 self.counts["held_uncalibrated"] += 1
                 continue
             self._act(conn, row, decision, auto_apply)

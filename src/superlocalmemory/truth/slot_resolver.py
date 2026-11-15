@@ -13,6 +13,15 @@ same successor applies that proposal; a different successor leaves it for
 review, because two machine opinions disagreeing is exactly what a person
 should see.
 
+A supersede decided while retirement was not allowed (``truth.slots`` in
+shadow, or ``auto_apply`` off) is not lost (R-07). The revision itself records
+it (state ``superseded``, no ``case_id``), and ``reconcile_ledger`` -- run by the
+slot pass only while ``truth.slots`` is on, since shadow never writes the
+ledger -- turns it into a ledger case: proposed (the review queue) while
+``auto_apply`` is off, applied once it is on; proposals it made earlier are
+applied then too. A predecessor that already has a proposal with a different
+successor is linked to that proposal and left for a person.
+
 Callers own the transaction. Nothing here commits, and nothing reads text
 beyond the one fact being keyed.
 """
@@ -21,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable
 
@@ -39,6 +49,7 @@ ACTOR = CorrectionActor(actor_id="slm-truth-layer", actor_kind="system",
                         trust_tier="canonical_writer")
 
 APPLIED, PENDING, DEFERRED_TO_REVIEW = "applied", "pending", "deferred_to_review"
+PROPOSED = "proposed"
 
 
 @dataclass(frozen=True)
@@ -70,8 +81,12 @@ def _apply(conn: sqlite3.Connection, case_id: str, version: int, profile_id: str
 
 
 def retire_superseded(conn: sqlite3.Connection, *, profile_id: str, scope: str,
-                      predecessor: str, successor: str) -> tuple[str, str | None]:
-    """Retire ``predecessor`` in favour of ``successor`` through the ledger."""
+                      predecessor: str, successor: str,
+                      apply: bool = True) -> tuple[str, str | None]:
+    """Retire ``predecessor`` in favour of ``successor`` through the ledger.
+
+    ``apply`` False only proposes (the review queue); nothing is retired.
+    """
     open_id = open_case_id(conn, profile_id, predecessor)
     if open_id is not None:
         row = conn.execute("SELECT successor_fact_id, status, version FROM correction_cases "
@@ -80,6 +95,8 @@ def retire_superseded(conn: sqlite3.Connection, *, profile_id: str, scope: str,
             return APPLIED, open_id
         if row[0] != successor:
             return DEFERRED_TO_REVIEW, open_id
+        if not apply:
+            return PROPOSED, open_id
         _apply(conn, open_id, int(row[2]), profile_id)
         return APPLIED, open_id
     case_id = _case_id(profile_id, predecessor, successor)
@@ -89,8 +106,55 @@ def retire_superseded(conn: sqlite3.Connection, *, profile_id: str, scope: str,
         actor=ACTOR, idempotency_key=f"{REASON}:{case_id}",
         is_profile_active=lambda candidate: candidate == profile_id,
         is_actor_trusted=_trusted)
+    if not apply:
+        return PROPOSED, case_id
     _apply(conn, case_id, 0, profile_id)
     return APPLIED, case_id
+
+
+#: Supersede decisions whose retirement is not settled. ``r`` is the superseded
+#: revision, ``n`` the one that superseded it; the case lives on ``n`` (as in
+#: ``resolve_fact``). Unsettled: no case yet, or its own proposal not yet applied,
+#: and the predecessor fact still live. A link to a rival proposal (another
+#: successor) waits for a person and is not read again.
+_UNSETTLED = """
+SELECT n.revision_id, r.profile_id, s.scope, r.fact_id, n.fact_id, n.case_id
+  FROM slot_revisions r
+  JOIN memory_slots s ON s.slot_id = r.slot_id
+  JOIN slot_revisions n ON n.revision_id = r.superseded_by
+  LEFT JOIN correction_cases c ON c.case_id = n.case_id
+  LEFT JOIN fact_temporal_validity v ON v.fact_id = r.fact_id
+ WHERE r.state = 'superseded' AND v.system_expired_at IS NULL
+   AND (n.case_id IS NULL OR (c.status = 'proposed' AND c.successor_fact_id = n.fact_id))
+ ORDER BY r.recorded_at, r.revision_id
+ LIMIT ?
+"""
+
+
+def reconcile_ledger(conn: sqlite3.Connection, *, auto_apply: bool,
+                     limit: int = 200) -> Counter[str]:
+    """Bring unsettled supersede decisions into the ledger (call only with slots on).
+
+    Each revision in its own savepoint; a ledger refusal leaves it as it was.
+    """
+    counts: Counter[str] = Counter()
+    for rev, profile, scope, predecessor, successor, linked in conn.execute(
+            _UNSETTLED, (limit,)).fetchall():
+        conn.execute("SAVEPOINT slot_reconcile")
+        try:
+            status, case_id = retire_superseded(
+                conn, profile_id=profile, scope=scope, predecessor=predecessor,
+                successor=successor, apply=auto_apply)
+        except (CorrectionCaseError, ValueError):
+            conn.execute("ROLLBACK TO slot_reconcile")
+            conn.execute("RELEASE slot_reconcile")
+            counts["ledger_refused"] += 1
+            continue
+        if case_id is not None and case_id != linked:
+            slot_store.record_case(conn, rev, case_id)
+        conn.execute("RELEASE slot_reconcile")
+        counts[f"ledger_{status}"] += 1
+    return counts
 
 
 def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, scope: str,
@@ -120,5 +184,5 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
     return Resolution(fact_id, True, binding.outcome, binding.slot_id, ledger, case_id)
 
 
-__all__ = ["ACTOR", "APPLIED", "DEFERRED_TO_REVIEW", "PENDING", "REASON", "Resolution",
-           "resolve_fact", "retire_superseded"]
+__all__ = ["ACTOR", "APPLIED", "DEFERRED_TO_REVIEW", "PENDING", "PROPOSED", "REASON",
+           "Resolution", "reconcile_ledger", "resolve_fact", "retire_superseded"]
