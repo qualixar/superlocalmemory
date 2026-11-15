@@ -218,3 +218,16 @@ def test_a_bad_coverage_setting_keeps_the_default(tmp_path):
     loaded = SLMConfig.load(path)
     assert loaded.encoding.coverage_backfill_per_memory == 0
     assert loaded.encoding.coverage_facts_per_memory == 40
+
+
+def test_a_memory_whose_whole_fact_was_replaced_is_left_alone(tmp_path):
+    """4.2.30: retirement lives in fact_temporal_validity, not the atomic_facts mirror."""
+    db = _db(tmp_path / "memory.db")
+    record = _memory(db)
+    whole = db.execute("SELECT fact_id FROM atomic_facts WHERE memory_id=? AND content=?",
+                       (record.memory_id, NOTE))[0]["fact_id"]
+    db.execute("INSERT OR REPLACE INTO fact_temporal_validity (fact_id, profile_id, "
+               "system_created_at, system_expired_at) VALUES (?, 'default', "
+               "'2026-10-13T00:00:00+00:00', '2026-10-14T00:00:00+00:00')", (whole,))
+    assert _run(db, tmp_path)[1] == []
+    assert pending(db.execute)[0] == 0

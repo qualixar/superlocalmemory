@@ -573,12 +573,22 @@ def _apply_predecessor_temporal(
             "WHERE case_id=?",
             (*tuple(prior), case.case_id),
         )
+    # 4.2.30: a retired memory also stops being true in the world, not only in
+    # SLM's knowledge. A reviewer's time wins, then a close already recorded,
+    # then the best evidence of when the successor took over (truth/validity).
+    from superlocalmemory.truth.validity import successor_takeover
+
+    derived_until = successor_takeover(
+        conn, case.successor_fact_id,
+        predecessor_valid_from=prior[0] if prior is not None else None,
+        occurred_at=occurred_at)
     cursor = conn.execute(
         "UPDATE fact_temporal_validity SET "
-        "valid_until=COALESCE(?, valid_until), system_expired_at=?, "
+        "valid_until=COALESCE(?, valid_until, ?), system_expired_at=?, "
         "invalidated_by=?, invalidation_reason=? WHERE fact_id=? AND profile_id=?",
         (
             case.event_valid_until,
+            derived_until,
             occurred_at,
             case.successor_fact_id,
             case.reason_code,

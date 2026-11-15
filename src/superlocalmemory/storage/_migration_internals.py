@@ -230,6 +230,9 @@ from superlocalmemory.storage.migrations import (
 )
 from superlocalmemory.storage.migrations import (
     M068_newer_bookkeeping_shapes_are_flagged as _M068,
+    M069_memory_slots as _M069,
+    M070_memory_leases as _M070,
+    M071_superseded_validity_is_closed as _M071,
 )
 
 # Emit under the runner's logger name so operational log filters that key on
@@ -307,6 +310,9 @@ _MODULES = {
     _M066.NAME: _M066,
     _M067.NAME: _M067,
     _M068.NAME: _M068,
+    _M069.NAME: _M069,
+    _M070.NAME: _M070,
+    _M071.NAME: _M071,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

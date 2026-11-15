@@ -211,6 +211,15 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M068_newer_bookkeeping_shapes_are_flagged as _M068,
 )
+from superlocalmemory.storage.migrations import (
+    M069_memory_slots as _M069,
+)
+from superlocalmemory.storage.migrations import (
+    M070_memory_leases as _M070,
+)
+from superlocalmemory.storage.migrations import (
+    M071_superseded_validity_is_closed as _M071,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -454,4 +463,13 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # git-only Stop summaries). Deferred: it reads atomic_facts.non_answer.
     Migration(name=_M068.NAME, db_target="memory", ddl=_M068.DDL,
               dependencies=(_M060.NAME, _M062.NAME)),
+    # 4.2.30 reserves M069-M084 (truth layer, judges, outcomes, trust, compiler).
+    # M069 adds slots, revisions and disputes. Deferred: its erase trigger
+    # watches atomic_facts, which engine init creates.
+    Migration(name=_M069.NAME, db_target="memory", ddl=_M069.DDL),
+    # M070 adds memory leases (source fingerprints). Deferred for the same trigger.
+    Migration(name=_M070.NAME, db_target="memory", ddl=_M070.DDL),
+    # M071 closes the valid time of memories applied corrections retired, with an
+    # undo record. Deferred: it reads correction_cases and fact_temporal_validity.
+    Migration(name=_M071.NAME, db_target="memory", ddl=_M071.DDL),
 ]

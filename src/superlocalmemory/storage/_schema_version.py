@@ -73,7 +73,9 @@ from pathlib import Path
 #: M066 restores wrongly archived memories (data, same undo table), floor 51.
 #: M067 adds one trigger that queues fact changes for the projections, floor 51.
 #: M068 runs M062's stub pass again for the newer shapes (data only), floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 68
+#: M069 (slots), M070 (memory leases) and M071 (closing the valid time of
+#: retired memories, data + undo) are additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 71
 
 
 class SchemaVersionError(RuntimeError):

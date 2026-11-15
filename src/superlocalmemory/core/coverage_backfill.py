@@ -54,7 +54,7 @@ WHERE m.rowid < ? AND length(m.content) BETWEEN 40 AND ?
               WHERE s.memory_id = m.memory_id AND s.content = m.content
                 AND s.quarantined = 0 AND s.non_answer = 0
                 AND s.lifecycle != 'archived' AND s.merged_into IS NULL
-                AND s.valid_until IS NULL)
+                AND s.valid_until IS NULL {retired})
   {erased}
 ORDER BY m.rowid DESC
 LIMIT ?
@@ -62,11 +62,22 @@ LIMIT ?
 _ERASED = "AND NOT EXISTS (SELECT 1 FROM projection_tombstones t WHERE t.memory_id = m.memory_id)"
 
 
+#: A memory whose matching fact was replaced must not be re-extracted: that
+#: would bring the replaced value back. ``atomic_facts.valid_until`` above is a
+#: mirror that nothing fills; retirement lives in ``fact_temporal_validity``.
+_RETIRED = ("AND NOT EXISTS (SELECT 1 FROM fact_temporal_validity v "
+            "WHERE v.fact_id = s.fact_id AND v.system_expired_at IS NOT NULL)")
+
+
+def _has_table(execute: Callable, name: str) -> bool:
+    return bool(execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)))
+
+
 def _candidates_sql(execute: Callable) -> str:
     # M035 creates the tombstone table; a store without it has no erasures.
-    has = execute("SELECT 1 FROM sqlite_master WHERE type='table' "
-                  "AND name='projection_tombstones'", ())
-    return _CANDIDATES.format(erased=_ERASED if has else "")
+    erased = _ERASED if _has_table(execute, "projection_tombstones") else ""
+    retired = _RETIRED if _has_table(execute, "fact_temporal_validity") else ""
+    return _CANDIDATES.format(erased=erased, retired=retired)
 _HELD = "SELECT content FROM atomic_facts WHERE memory_id = ? AND content != ?"
 
 

@@ -53,7 +53,7 @@ MOVE    action_outcomes, association_edges, atomic_facts, bm25_tokens,
         entity_aliases,
         fact_access_log, fact_consolidations, fact_context, fact_hub_baseline,
         fact_importance, fact_outcome_score, fact_retention, fact_temporal_validity,
-        feedback_records, memories, memory_archive,
+        feedback_records, memories, memory_archive, memory_leases,
         memory_kind_history, memory_merge_log, memory_scenes, pinned_facts,
         polar_embeddings, projection_obligations, projection_outbox,
         projection_tombstones, provenance, reembed_next_map, reembed_prev_map,
@@ -66,8 +66,9 @@ DELETE  activation_cache, backup_destinations, behavioral_assertions,
         behavioral_patterns, community_summaries, compliance_audit,
         core_memory_blocks, cross_platform_sync_log, entity_communities,
         entity_link_repair_undo, graph_generation, memory_kind_runs,
-        mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state, pending_outcomes,
-        persona_summary, rbac_memberships, soft_prompt_templates
+        memory_slots, mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state,
+        pending_outcomes, persona_summary, rbac_memberships, slot_disputes, slot_revisions,
+        soft_prompt_templates
 KEEP    erasure_receipts, fact_search_changes, profiles, write_commits
 
 Canonical entities first MERGE by name (case-insensitive, the resolver's own
@@ -94,6 +95,13 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "data_repair_undo": (MOVE, "undo record of an automatic data repair; it names the "
                                "moved facts by id, so it still applies after the move"),
     "dead_letter_operations": (MOVE, "writes that failed and can still be retried"),
+    # 4.2.30 truth layer. Leases are per fact and move with it. Slot ids are
+    # derived from the profile, so slots cannot move; they are derived state the
+    # slot pass rebuilds for the target (it restarts when revisions vanish).
+    "memory_leases": (MOVE, "source fingerprints of the moved facts"),
+    "memory_slots": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
+    "slot_revisions": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
+    "slot_disputes": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     # search indexes and vectors
     "bm25_tokens": (MOVE, "keyword index"),
     "fact_embeddings": (VEC, "vectors (partition per profile)"),

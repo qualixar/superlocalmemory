@@ -258,6 +258,25 @@ class MaintenanceScheduler:
         except Exception as exc:  # noqa: BLE001
             self._record_step("coverage backfill", False, str(exc))
 
+    def _slot_pass(self) -> None:
+        """4.2.30 truth layer: bind facts to slots, oldest first, behind the
+        ``truth.slots`` flag (off by default; truth/slot_pass.py)."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.core.feature_flags import FeatureFlags
+            from superlocalmemory.infra.data_root import canonical_data_root, state_path
+            from superlocalmemory.truth.slot_pass import SlotPass
+
+            flags = FeatureFlags(canonical_data_root())
+            if not flags.observing("truth.slots"):
+                return
+            self._slot_job = SlotPass(self._db, flags, state_dir=state_path("backfill"))
+            self._slot_job.run()
+            self._record_step("slot pass", True)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("slot pass", False, str(exc))
+
     def _project_backfill(self) -> None:
         """Tag a bounded batch of session-end summaries with their project
         (storage/project_backfill.py). Idempotent; a no-op once converged."""
@@ -391,6 +410,9 @@ class MaintenanceScheduler:
         _hub_pass = getattr(self, "_hub_pass", None)
         if _hub_pass is not None:  # stops between batches
             _hub_pass.stop(timeout=0)
+        _slot_job = getattr(self, "_slot_job", None)
+        if _slot_job is not None:  # stops between batches
+            _slot_job.stop()
         logger.info("Maintenance scheduler stopped")
 
     def _schedule_next(self) -> None:
@@ -645,6 +667,7 @@ class MaintenanceScheduler:
         # its own profile); batched, so the write lock is held per batch.
         self._project_backfill()
         self._coverage_pass()
+        self._slot_pass()
 
         # Anything that has failed on several cycles running is not a blip.
         # Every step here logs and continues, which is right -- one broken step
