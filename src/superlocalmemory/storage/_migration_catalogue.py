@@ -223,6 +223,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M072_judge_receipts as _M072,
 )
+from superlocalmemory.storage.migrations import (
+    M073_valid_until_source as _M073,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -478,4 +481,7 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M072 adds judge receipts and labels (core/judge_ladder.py). Deferred with
     # the rest of the 4.2.30 truth layer it records decisions for.
     Migration(name=_M072.NAME, db_target="memory", ddl=_M072.DDL),
+    # M073 records where each valid_until came from and backfills it (R-11).
+    # Deferred: it reads correction_cases and atomic_facts.
+    Migration(name=_M073.NAME, db_target="memory", ddl=_M073.DDL),
 ]

@@ -15,6 +15,13 @@ upper case) overrides the file, for tests and one-off runs.
 
 Unknown flag ids and unreadable values fall back to the flag's default, and a
 missing or corrupt file means "all defaults": a flag lookup never raises.
+
+The kill switch (blueprint D-23) turns every 4.2.30 subsystem off at once,
+whatever each flag says: ``"kill_switch": true`` at the top of
+``features.json`` (``set_kill_switch``) or ``SLM_4230_OFF=1`` in the
+environment. Reads then behave as before 4.2.30, with no downgrade. It does
+not undo retirements already applied; that is a separate, explicit ledger
+command (``truth.slot_resolver.rollback_slot_cases``).
 """
 
 from __future__ import annotations
@@ -30,6 +37,8 @@ from typing import Mapping
 logger = logging.getLogger(__name__)
 
 FEATURES_FILE = "features.json"
+KILL_ENV = "SLM_4230_OFF"
+KILL_KEY = "kill_switch"
 
 
 class FlagState(str, Enum):
@@ -107,8 +116,7 @@ def _parse(value: object) -> FlagState | None:
         return None
 
 
-def read_features_file(slm_home: Path) -> dict[str, object]:
-    """The ``features`` map from ``features.json``; empty when absent or unreadable."""
+def _read_file(slm_home: Path) -> dict[str, object]:
     path = Path(slm_home) / FEATURES_FILE
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -117,8 +125,38 @@ def read_features_file(slm_home: Path) -> dict[str, object]:
     except (OSError, ValueError) as exc:
         logger.warning("features.json unreadable (%s); using flag defaults", exc)
         return {}
-    features = data.get("features") if isinstance(data, dict) else None
+    return dict(data) if isinstance(data, dict) else {}
+
+
+def read_features_file(slm_home: Path) -> dict[str, object]:
+    """The ``features`` map from ``features.json``; empty when absent or unreadable."""
+    features = _read_file(slm_home).get("features")
     return dict(features) if isinstance(features, dict) else {}
+
+
+def kill_switch_on(slm_home: Path | None, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the D-23 kill switch is set (environment or file); never raises."""
+    env = os.environ if environ is None else environ
+    if _parse(env.get(KILL_ENV, "")) is FlagState.ON:
+        return True
+    return slm_home is not None and _read_file(slm_home).get(KILL_KEY) is True
+
+
+def _write_file(slm_home: Path, data: dict[str, object]) -> None:
+    path = Path(slm_home) / FEATURES_FILE
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def set_kill_switch(slm_home: Path, on: bool) -> None:
+    """Set or clear the kill switch, keeping every flag as it is."""
+    data = _read_file(slm_home)
+    if on:
+        data[KILL_KEY] = True
+    else:
+        data.pop(KILL_KEY, None)
+    _write_file(slm_home, data)
 
 
 def resolve(
@@ -145,11 +183,14 @@ class FeatureFlags:
 
     def __init__(self, slm_home: Path | None = None, *,
                  environ: Mapping[str, str] | None = None,
-                 file_values: Mapping[str, object] | None = None) -> None:
+                 file_values: Mapping[str, object] | None = None,
+                 killed: bool | None = None) -> None:
         if file_values is None:
             file_values = read_features_file(slm_home) if slm_home is not None else {}
+        self.killed = kill_switch_on(slm_home, environ) if killed is None else killed
         self._states = {
-            fid: resolve(fid, file_values=file_values, environ=environ) for fid in FLAGS}
+            fid: FlagState.OFF if self.killed else resolve(
+                fid, file_values=file_values, environ=environ) for fid in FLAGS}
 
     def state(self, flag_id: str) -> FlagState:
         if flag_id not in self._states:
@@ -172,14 +213,13 @@ def write_flag(slm_home: Path, flag_id: str, state: FlagState) -> None:
     """Persist one flag atomically, keeping the others as they are."""
     if flag_id not in FLAGS:
         raise KeyError(f"unknown feature flag: {flag_id}")
-    path = Path(slm_home) / FEATURES_FILE
+    data = _read_file(slm_home)  # keep the kill switch and anything else at the top
     values = read_features_file(slm_home)
     values[flag_id] = FlagState(state).value
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"features": values}, indent=2, sort_keys=True) + "\n",
-                   encoding="utf-8")
-    os.replace(tmp, path)
+    data["features"] = values
+    _write_file(slm_home, data)
 
 
-__all__ = ["FEATURES_FILE", "FLAGS", "FeatureFlags", "Flag", "FlagState", "env_name",
-           "read_features_file", "resolve", "write_flag"]
+__all__ = ["FEATURES_FILE", "FLAGS", "FeatureFlags", "Flag", "FlagState", "KILL_ENV", "KILL_KEY",
+           "env_name", "kill_switch_on", "read_features_file", "resolve", "set_kill_switch",
+           "write_flag"]

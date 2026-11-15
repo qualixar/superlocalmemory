@@ -76,7 +76,8 @@ from pathlib import Path
 #: M069 (slots), M070 (memory leases) and M071 (closing the valid time of
 #: retired memories, data + undo) are additive, floor 51.
 #: M072 (judge receipts and labels) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 72
+#: M073 (valid_until_source, R-11) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 73
 
 
 class SchemaVersionError(RuntimeError):

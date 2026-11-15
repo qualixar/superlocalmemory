@@ -15,6 +15,19 @@ from typing import Callable, Literal, Mapping
 from uuid import uuid4
 
 from superlocalmemory.storage.correction_dismissals import dismissed_in_bulk
+from superlocalmemory.storage.correction_errors import (  # noqa: F401 - re-exported
+    CorrectionAuthorizationError,
+    CorrectionCaseError,
+    CorrectionCompareAndSetError,
+    CorrectionDismissedError,
+    CorrectionFactErasingError,
+    CorrectionIdempotencyError,
+    CorrectionNotFoundError,
+)
+from superlocalmemory.storage.correction_temporal import (
+    _apply_predecessor_temporal,
+    _restore_predecessor_temporal,
+)
 from superlocalmemory.storage.write_lock import get_write_lock
 
 _SCOPES = frozenset({"personal", "project", "shared", "global"})
@@ -44,34 +57,6 @@ SAVED_SUCCESSOR_SQL = (
 SAVED_SUCCESSOR_PARAMS = (CALLER_REPLACEMENT_REASON, TEMPORAL_CANDIDATE_REASON,
                           len(CONSOLIDATION_CANDIDATE_PREFIX),
                           CONSOLIDATION_CANDIDATE_PREFIX)
-
-
-class CorrectionCaseError(RuntimeError):
-    """Base exception for correction-case lifecycle failures."""
-
-
-class CorrectionAuthorizationError(CorrectionCaseError):
-    """The host/server did not attest the acting identity as trusted."""
-
-
-class CorrectionCompareAndSetError(CorrectionCaseError):
-    """The caller attempted a state transition against a stale case version."""
-
-
-class CorrectionFactErasingError(CorrectionCompareAndSetError):
-    """A fact the case names is being deleted (its erasure tombstone exists)."""
-
-
-class CorrectionIdempotencyError(CorrectionCaseError):
-    """A replay key names a different correction proposal."""
-
-
-class CorrectionDismissedError(CorrectionCaseError):
-    """The user dismissed this machine proposal in bulk; it is not filed again."""
-
-
-class CorrectionNotFoundError(CorrectionCaseError):
-    """No correction case exists for the requested identifier."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -526,120 +511,6 @@ def _get_case(conn: sqlite3.Connection, case_id: str) -> CorrectionCase:
     if row is None:
         raise CorrectionNotFoundError("correction case does not exist")
     return _case_from_row(row)
-
-
-def _apply_predecessor_temporal(
-    conn: sqlite3.Connection, case: CorrectionCase, *, occurred_at: str
-) -> None:
-    """Snapshot and supersede exactly one profile-and-scope-owned predecessor."""
-    rows = conn.execute(
-        "SELECT fact_id, profile_id, scope FROM atomic_facts "
-        "WHERE fact_id IN (?, ?)",
-        (case.predecessor_fact_id, case.successor_fact_id),
-    ).fetchall()
-    facts = {str(row["fact_id"]): row for row in rows}
-    if set(facts) != {case.predecessor_fact_id, case.successor_fact_id}:
-        raise CorrectionNotFoundError("correction facts are no longer available")
-    for row in facts.values():
-        if row["profile_id"] != case.profile_id or row["scope"] != case.scope:
-            raise CorrectionAuthorizationError("correction facts are outside the approved scope")
-
-    prior = conn.execute(
-        "SELECT valid_from, valid_until, system_created_at, system_expired_at, "
-        "invalidated_by, invalidation_reason FROM fact_temporal_validity "
-        "WHERE fact_id=? AND profile_id=?",
-        (case.predecessor_fact_id, case.profile_id),
-    ).fetchone()
-    if prior is None:
-        conn.execute(
-            "UPDATE correction_cases SET predecessor_temporal_existed=0, "
-            "predecessor_valid_from=NULL, predecessor_valid_until=NULL, "
-            "predecessor_system_created_at=NULL, predecessor_system_expired_at=NULL, "
-            "predecessor_invalidated_by=NULL, predecessor_invalidation_reason=NULL "
-            "WHERE case_id=?",
-            (case.case_id,),
-        )
-        conn.execute(
-            "INSERT INTO fact_temporal_validity "
-            "(fact_id, profile_id, system_created_at) VALUES (?, ?, ?)",
-            (case.predecessor_fact_id, case.profile_id, occurred_at),
-        )
-    else:
-        conn.execute(
-            "UPDATE correction_cases SET predecessor_temporal_existed=1, "
-            "predecessor_valid_from=?, predecessor_valid_until=?, "
-            "predecessor_system_created_at=?, predecessor_system_expired_at=?, "
-            "predecessor_invalidated_by=?, predecessor_invalidation_reason=? "
-            "WHERE case_id=?",
-            (*tuple(prior), case.case_id),
-        )
-    # 4.2.30: a retired memory also stops being true in the world, not only in
-    # SLM's knowledge. A reviewer's time wins, then a close already recorded,
-    # then the best evidence of when the successor took over (truth/validity).
-    from superlocalmemory.truth.validity import retire_until, successor_takeover
-
-    start = prior[0] if prior is not None else None
-    derived_until = successor_takeover(conn, case.successor_fact_id,
-                                       predecessor_valid_from=start, occurred_at=occurred_at)
-    try:
-        until = retire_until(reviewer=case.event_valid_until,
-                             existing=prior[1] if prior is not None else None,
-                             derived=derived_until, predecessor_valid_from=start)
-    except ValueError as exc:
-        raise CorrectionCaseError(str(exc)) from exc
-    cursor = conn.execute(
-        "UPDATE fact_temporal_validity SET "
-        "valid_until=?, system_expired_at=?, "
-        "invalidated_by=?, invalidation_reason=? WHERE fact_id=? AND profile_id=?",
-        (
-            until,
-            occurred_at,
-            case.successor_fact_id,
-            case.reason_code,
-            case.predecessor_fact_id,
-            case.profile_id,
-        ),
-    )
-    if cursor.rowcount != 1:
-        # Defence in depth, not a known live failure: the read above and the
-        # insert-if-missing use this same (fact_id, profile_id), inside one
-        # serialized transaction, so a zero-row update should be unreachable.
-        # It is asserted because the alternative is review_correction returning
-        # "applied" having retired nothing -- and supersession is the ONE
-        # signal every read path now resolves its answer from. Its sibling
-        # _restore_predecessor_temporal has always checked; this one did not.
-        raise CorrectionNotFoundError(
-            "predecessor temporal record was not superseded"
-        )
-
-
-def _restore_predecessor_temporal(conn: sqlite3.Connection, case: CorrectionCase) -> None:
-    """Restore the snapshot captured at apply; history rows themselves remain."""
-    if case.predecessor_temporal_existed is None:
-        raise CorrectionCaseError("approved case has no predecessor temporal snapshot")
-    if not case.predecessor_temporal_existed:
-        conn.execute(
-            "DELETE FROM fact_temporal_validity WHERE fact_id=? AND profile_id=?",
-            (case.predecessor_fact_id, case.profile_id),
-        )
-        return
-    cursor = conn.execute(
-        "UPDATE fact_temporal_validity SET valid_from=?, valid_until=?, system_created_at=?, "
-        "system_expired_at=?, invalidated_by=?, invalidation_reason=? "
-        "WHERE fact_id=? AND profile_id=?",
-        (
-            case.predecessor_valid_from,
-            case.predecessor_valid_until,
-            case.predecessor_system_created_at,
-            case.predecessor_system_expired_at,
-            case.predecessor_invalidated_by,
-            case.predecessor_invalidation_reason,
-            case.predecessor_fact_id,
-            case.profile_id,
-        ),
-    )
-    if cursor.rowcount != 1:
-        raise CorrectionNotFoundError("predecessor temporal record is no longer available")
 
 
 class _CorrectionTransaction:

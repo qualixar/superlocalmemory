@@ -104,3 +104,63 @@ def test_an_earlier_takeover_beats_a_later_recorded_expiry(tmp_path) -> None:
     assert _until(store) == "2026-03-01T00:00:00+00:00"
     store.rollback("c1", expected_version=1, actor=_ACTOR, operation_id="r1")
     assert _until(store) == "2027-01-01T00:00:00+00:00"  # exact restore
+
+
+# -- R-11: the end records its evidence, and a rollback restores it ---------------------------
+
+def _sourced(store: CorrectionCaseStore) -> None:
+    from superlocalmemory.storage.migrations import M073_valid_until_source as m073
+
+    with sqlite3.connect(store.path) as conn:
+        m073.apply(conn)
+
+
+def _source(store: CorrectionCaseStore) -> str | None:
+    with sqlite3.connect(store.path) as conn:
+        return conn.execute("SELECT valid_until_source FROM fact_temporal_validity "
+                            "WHERE fact_id='old'").fetchone()[0]
+
+
+@pytest.mark.parametrize("tv_from,created,source", [
+    ("2026-03-01", "2026-04-01T00:00:00+00:00", "successor_validity"),
+    (None, "2026-04-01T00:00:00+00:00", "successor_saved"),  # system time: an upper bound
+])
+def test_apply_records_where_the_end_came_from(tmp_path, tv_from, created, source) -> None:
+    store = _store(tmp_path, successor_tv_from=tv_from, successor_created=created)
+    _sourced(store)
+    store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1")
+    assert _source(store) == source
+
+
+def test_rollback_restores_the_source_with_the_time(tmp_path) -> None:
+    store = _store(tmp_path, successor_tv_from="2026-03-01", successor_created=None)
+    _sourced(store)
+    with sqlite3.connect(store.path) as conn:  # an end the memory itself stated earlier
+        conn.execute("UPDATE fact_temporal_validity SET valid_until = '2026-12-31', "
+                     "valid_until_source = 'stated' WHERE fact_id = 'old'")
+    store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1")
+    assert _source(store) == "successor_validity"  # the earlier of the two ends
+    store.rollback("c1", expected_version=1, actor=_ACTOR, operation_id="r1")
+    assert (_until(store), _source(store)) == ("2026-12-31", "stated")
+
+
+def test_without_m073_apply_still_works(tmp_path) -> None:
+    store = _store(tmp_path, successor_tv_from="2026-03-01", successor_created=None)
+    store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1")
+    assert _until(store) is not None
+
+
+def test_the_store_records_stated_and_reviewer_ends(tmp_path) -> None:
+    from tests.test_core.test_coverage_backfill import _db
+    from tests.test_truth.test_slot_pass import _fact
+
+    db = _db(tmp_path / "memory.db")
+    fact = _fact(db, "The lease on the office runs until the end of 2026", "2026-01-01T00:00:00Z")
+    db.store_temporal_validity(fact, "default", valid_until="2026-12-31")
+    rows = db.execute("SELECT valid_until_source FROM fact_temporal_validity WHERE fact_id = ?",
+                      (fact,))
+    assert rows[0]["valid_until_source"] == "stated"
+    db.invalidate_fact_temporal(fact, "someone", "reviewed", event_valid_until="2026-06-30")
+    rows = db.execute("SELECT valid_until, valid_until_source FROM fact_temporal_validity "
+                      "WHERE fact_id = ?", (fact,))
+    assert (rows[0]["valid_until"], rows[0]["valid_until_source"]) == ("2026-06-30", "reviewer")

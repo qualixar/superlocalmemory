@@ -73,3 +73,35 @@ def test_file_round_trip_and_corrupt_file(tmp_path) -> None:
     assert read_features_file(tmp_path) == {}
     with pytest.raises(KeyError):
         write_flag(tmp_path, "no.such.flag", FlagState.ON)
+
+
+# -- D-23: the kill switch --------------------------------------------------------------------
+
+def test_the_kill_switch_turns_every_flag_off(tmp_path) -> None:
+    from superlocalmemory.core.feature_flags import FLAGS, FeatureFlags, FlagState, set_kill_switch, write_flag
+
+    for fid in FLAGS:
+        write_flag(tmp_path, fid, FlagState.ON)
+    on = FeatureFlags(tmp_path, environ={})
+    assert not on.killed and on.enabled("judge.ladder")
+    set_kill_switch(tmp_path, True)
+    off = FeatureFlags(tmp_path, environ={"SLM_FEATURE_JUDGE_LADDER": "on"})
+    assert off.killed and not any(off.observing(fid) for fid in FLAGS)
+    set_kill_switch(tmp_path, False)
+    assert FeatureFlags(tmp_path, environ={}).enabled("judge.ladder")  # flags kept
+
+
+def test_the_environment_can_pull_the_kill_switch(tmp_path) -> None:
+    from superlocalmemory.core.feature_flags import FeatureFlags, FlagState, write_flag
+
+    write_flag(tmp_path, "truth.slots", FlagState.ON)
+    assert FeatureFlags(tmp_path, environ={"SLM_4230_OFF": "1"}).killed
+    assert not FeatureFlags(tmp_path, environ={"SLM_4230_OFF": "1"}).observing("truth.slots")
+
+
+def test_writing_a_flag_keeps_the_kill_switch(tmp_path) -> None:
+    from superlocalmemory.core.feature_flags import FeatureFlags, FlagState, set_kill_switch, write_flag
+
+    set_kill_switch(tmp_path, True)
+    write_flag(tmp_path, "truth.slots", FlagState.ON)
+    assert FeatureFlags(tmp_path, environ={}).killed

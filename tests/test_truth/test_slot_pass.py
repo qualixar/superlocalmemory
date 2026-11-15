@@ -296,3 +296,25 @@ def test_a_rival_proposal_is_left_for_a_person_and_not_read_again(store) -> None
     assert _link(db, new) == "rival" and _retired(db, old) == (None, None, None)
     again = SlotPass(db, flags, state_dir=store[3]).run()
     assert "ledger_deferred_to_review" not in again
+
+
+# -- D-23: rolling back everything the truth layer retired ------------------------------------
+
+def test_rollback_slot_cases_restores_only_the_truth_layers_retirements(store) -> None:
+    from superlocalmemory.truth.slot_resolver import rollback_slot_cases
+
+    db, old, new, _tmp = store
+    _resolve_explicit(db, old, "weekly", "2026-03-01")
+    _resolve_explicit(db, new, "one big release", "2026-11-14T00:00:00+00:00")
+    assert _retired(db, old)[2] == new
+    other = _fact(db, "Some unrelated memory about a plant", "2026-05-01T00:00:00+00:00")
+    third = _fact(db, "Another memory about the plant", "2026-06-01T00:00:00+00:00")
+    _consolidator_proposal(db, "keep-me", other, third)
+    with db.raw_connection() as conn:
+        counts = rollback_slot_cases(conn)
+    assert counts == {"rolled_back": 1}
+    assert _retired(db, old) == (None, None, None)
+    statuses = {r["case_id"]: r["status"] for r in db.execute(
+        "SELECT case_id, status FROM correction_cases")}
+    assert statuses["keep-me"] == "proposed"
+    assert sorted(statuses.values()) == ["proposed", "rolled_back"]

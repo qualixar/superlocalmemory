@@ -184,5 +184,43 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
     return Resolution(fact_id, True, binding.outcome, binding.slot_id, ledger, case_id)
 
 
+def rollback_slot_cases(conn: sqlite3.Connection, *, profile_id: str | None = None
+                        ) -> Counter[str]:
+    """Roll back every applied case the truth layer filed (D-23).
+
+    The kill switch stops 4.2.30 from acting and reading slots, but leaves
+    retirements in place; this is the separate, explicit way to undo them. Only
+    cases with this module's reason code are touched: never a person's or the
+    consolidator's. Each case in its own savepoint, so a refusal skips only that
+    case. Restores each predecessor exactly (the ledger's snapshot); the slots
+    themselves are ignored while the kill switch is on and are re-derived later
+    (R-09).
+    """
+    sql = ("SELECT case_id, version, profile_id FROM correction_cases "
+           "WHERE status = 'applied' AND reason_code = ?")
+    args: tuple = (REASON,)
+    if profile_id is not None:
+        sql, args = sql + " AND profile_id = ?", (*args, profile_id)
+    counts: Counter[str] = Counter()
+    for case_id, version, profile in conn.execute(sql, args).fetchall():
+        conn.execute("SAVEPOINT slot_rollback")
+        try:
+            transition_on_connection(
+                conn, case_id=case_id, expected_version=int(version), actor=ACTOR,
+                operation_id=f"{REASON}:rollback:{case_id}", from_status="applied",
+                to_status="rolled_back", mutate_temporal=True,
+                is_profile_active=lambda candidate, p=profile: candidate == p,
+                is_actor_trusted=_trusted)
+        except (CorrectionCaseError, ValueError):
+            conn.execute("ROLLBACK TO slot_rollback")
+            counts["refused"] += 1
+        else:
+            counts["rolled_back"] += 1
+        finally:
+            conn.execute("RELEASE slot_rollback")
+    return counts
+
+
 __all__ = ["ACTOR", "APPLIED", "DEFERRED_TO_REVIEW", "PENDING", "PROPOSED", "REASON",
-           "Resolution", "reconcile_ledger", "resolve_fact", "retire_superseded"]
+           "Resolution", "reconcile_ledger", "resolve_fact", "retire_superseded",
+           "rollback_slot_cases"]

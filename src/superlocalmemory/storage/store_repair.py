@@ -278,10 +278,14 @@ def apply_repair(conn: sqlite3.Connection, plan: RepairPlan) -> RepairResult:
                 "AND COALESCE(fact_count, 0) = 0", (entity_id,))
             removed += cur.rowcount
         clauses = " OR ".join("invalidation_reason LIKE ?" for _ in _MACHINE_REASONS)
+        # An end that is removed takes its source with it (M073, I-12).
+        clear_source = ("valid_until_source=NULL, " if any(
+            c[1] == "valid_until_source"
+            for c in conn.execute("PRAGMA table_info(fact_temporal_validity)")) else "")
         for fact_id in plan.wrong_replacements:
             cur = conn.execute(
                 "UPDATE fact_temporal_validity SET valid_until=NULL, system_expired_at=NULL, "
-                "invalidation_reason=? || invalidation_reason WHERE fact_id=? "
+                f"{clear_source}invalidation_reason=? || invalidation_reason WHERE fact_id=? "
                 "AND system_expired_at IS NOT NULL "
                 f"AND ({clauses})",
                 (_REVERTED, fact_id, *(f"{r}%" for r in _MACHINE_REASONS)))

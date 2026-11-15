@@ -184,7 +184,9 @@ import pytest
 #: +M071_superseded_validity_is_closed (deferred, memory.db; additive tables and
 #: data plus the data_repair_undo table), downgrade floor 51.
 #: 72 as of 4.2.30: +M072_judge_receipts (deferred, memory.db; additive), floor 51.
-_EXPECTED_SCHEMA_VERSION: int = 72
+#: 73 as of 4.2.30: +M073_valid_until_source (deferred, memory.db; additive column
+#: and side table, backfill of a new column only), floor 51.
+_EXPECTED_SCHEMA_VERSION: int = 73
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -213,7 +215,7 @@ _EXPECTED_SCHEMA_VERSION: int = 72
 # 63 as of 4.2.8: +M064_orphan_index_rows_are_removed (deferred, memory.db).
 # 65 as of 4.2.8: +M065_fabricated_dates_are_removed,
 #                 +M066_wrongly_archived_memories_are_restored (deferred, memory.db).
-_EXPECTED_MIGRATION_COUNT: int = 71  # +M068 (4.2.16), +M069-M072 (4.2.30)
+_EXPECTED_MIGRATION_COUNT: int = 72  # +M068 (4.2.16), +M069-M073 (4.2.30)
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:

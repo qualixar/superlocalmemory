@@ -2811,6 +2811,8 @@ class DatabaseManager:
                 "WHERE fact_id = ? AND profile_id = ?",
                 (valid_from, valid_until, fact_id, profile_id),
             )
+        if valid_until is not None:
+            self._source_until(fact_id, "stated", profile_id=profile_id)
 
         from superlocalmemory.storage.event_time import mirror
 
@@ -2875,6 +2877,28 @@ class DatabaseManager:
             "WHERE fact_id = ? AND system_expired_at IS NULL",
             (event_valid_until, now, invalidated_by, invalidation_reason, fact_id),
         )
+        if event_valid_until is not None:
+            self._source_until(fact_id, "reviewer", expired_at=now)
+
+    def _source_until(self, fact_id: str, source: str, *, profile_id: str | None = None,
+                      expired_at: str | None = None) -> None:
+        """Record where a ``valid_until`` just written came from (M073, I-12).
+
+        Skipped until the deferred M073 has added the column; only a positive
+        answer is cached, since the migration can land while the daemon runs.
+        """
+        if not getattr(self, "_until_source_ready", False):
+            cols = self.execute("PRAGMA table_info(fact_temporal_validity)", ())
+            if not any(c["name"] == "valid_until_source" for c in cols):
+                return
+            self._until_source_ready = True
+        where, args = "fact_id = ? AND valid_until IS NOT NULL", [fact_id]
+        if profile_id is not None:
+            where, args = where + " AND profile_id = ?", [*args, profile_id]
+        if expired_at is not None:
+            where, args = where + " AND system_expired_at = ?", [*args, expired_at]
+        self.execute(f"UPDATE fact_temporal_validity SET valid_until_source = ? WHERE {where}",  # noqa: S608
+                     (source, *args))
 
     def get_valid_facts(self, profile_id: str) -> list[str]:
         """Get fact_ids that are currently valid (not expired).
