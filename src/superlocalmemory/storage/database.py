@@ -1141,6 +1141,10 @@ class DatabaseManager:
             record_fact_entities(
                 self, fact.fact_id, fact.profile_id, fact.canonical_entities,
             )
+            # Where the fact came from, recorded once at admission (D-21).
+            from superlocalmemory.storage import fact_origin
+
+            fact_origin.record(self, fact)
             # The graph and the vectors live in other storage engines, so the
             # intent to project this fact is queued here, in this transaction.
             # Enqueueing in the storage layer rather than at each pipeline call
@@ -1278,6 +1282,9 @@ class DatabaseManager:
         record_fact_entities(
             self, fact.fact_id, fact.profile_id, fact.canonical_entities,
         )
+        from superlocalmemory.storage import fact_origin
+
+        fact_origin.record(self, fact)  # D-21
         projection_outbox.enqueue(self, fact.fact_id, fact.profile_id)
         return fact.fact_id
 

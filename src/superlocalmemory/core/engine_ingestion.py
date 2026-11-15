@@ -348,7 +348,11 @@ def build_immediate_admission_handler(
                 db.execute('UPDATE memories SET metadata_json=? WHERE memory_id=? AND profile_id=?',
                            (json.dumps({**existing_metadata, **additions}),
                             fact.memory_id, request.profile_id))
-        stored = store_fact_keeping_kind(db, fact, metadata=metadata, request=request)
+        from superlocalmemory.storage import fact_origin
+
+        with fact_origin.declare(fact_origin.for_request(request, metadata,
+                                                         excerpt=gate.truncated)):
+            stored = store_fact_keeping_kind(db, fact, metadata=metadata, request=request)
         # Flagged by the save that writes it, in the same transaction. Waiting
         # for background enrichment left 261 of 291 bare "session ended" rows
         # unflagged on one real store, and recall can only drop what it was

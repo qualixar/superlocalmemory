@@ -226,6 +226,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M073_valid_until_source as _M073,
 )
+from superlocalmemory.storage.migrations import (
+    M074_fact_origin as _M074,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -484,4 +487,7 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M073 records where each valid_until came from and backfills it (R-11).
     # Deferred: it reads correction_cases and atomic_facts.
     Migration(name=_M073.NAME, db_target="memory", ddl=_M073.DDL),
+    # M074 records each fact's origin at admission (D-21). Deferred: its erase
+    # trigger watches atomic_facts.
+    Migration(name=_M074.NAME, db_target="memory", ddl=_M074.DDL),
 ]

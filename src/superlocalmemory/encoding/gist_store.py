@@ -61,7 +61,11 @@ def store_block(db, embedder, cluster, gist, profile_id, new_id, current_confide
             session_id="ccq",
             embedding=embedding,
         )
-        store_source_fact(db, record, fact)
+        from superlocalmemory.storage import fact_origin
+
+        with fact_origin.declare(fact_origin.Origin(
+                "derived", "model_rewritten", source_type="ccq-gist")):
+            store_source_fact(db, record, fact)
         db.store_ccq_block(
             block_id=block_id,
             profile_id=profile_id,

@@ -23,7 +23,7 @@ from superlocalmemory.storage import migration_runner as mr
 from tests.test_core.test_source_fidelity_guard import _db as _base_db
 
 TRUTH = ("M069_memory_slots", "M070_memory_leases", "M071_superseded_validity_is_closed",
-         "M072_judge_receipts", "M073_valid_until_source")
+         "M072_judge_receipts", "M073_valid_until_source", "M074_fact_origin")
 CEILING_4219 = 68
 
 

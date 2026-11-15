@@ -630,7 +630,14 @@ class MemoryEngine:
         memory deletes it too.
         """
         from superlocalmemory.core.store_pipeline import run_store_fact_direct
+        from superlocalmemory.storage import fact_origin
 
+        with fact_origin.declare(fact_origin.Origin(
+                "derived", "split", source_type="coverage-backfill",
+                parent_memory_id=fact.memory_id)):
+            return self._store_coverage_fact_now(fact, run_store_fact_direct)
+
+    def _store_coverage_fact_now(self, fact: AtomicFact, run_store_fact_direct: Any) -> str:
         return run_store_fact_direct(
             fact, fact.profile_id, db=self._db, embedder=self._embedder,
             entity_resolver=self._entity_resolver, ann_index=self._ann_index,

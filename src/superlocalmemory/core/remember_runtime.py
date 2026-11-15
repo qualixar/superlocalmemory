@@ -1420,7 +1420,13 @@ def _propose_correction_successor(
         # confirmed say-so, and ``_transition_correction`` copies the
         # predecessor's current kind onto this successor only when applied.
     )
-    persisted_id = db.insert_fact_immutable(successor)
+    from superlocalmemory.storage import fact_origin
+
+    with fact_origin.declare(fact_origin.Origin(
+            "correction", "verbatim", source_type="correction",
+            actor_id=str(payload.get("trusted_actor_id") or "") or None,
+            parent_fact_id=str(source.get("fact_id") or "") or None)):
+        persisted_id = db.insert_fact_immutable(successor)
     # A proposal is no one's say-so: the stub flag stays as it was until the
     # edit is applied (``_transition_correction``; WP-19 NEW-4).
     from superlocalmemory.storage.correction_cases import (

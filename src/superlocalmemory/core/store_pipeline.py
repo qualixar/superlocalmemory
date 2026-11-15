@@ -502,7 +502,24 @@ def _drop_resurrected_facts(
 # run_store  (was MemoryEngine.store)
 # ---------------------------------------------------------------------------
 
-def run_store(
+def run_store(content: str, profile_id: str, *args: Any, **kwargs: Any) -> list[str]:
+    """Store content and extract structured facts. Returns fact_ids.
+
+    Every fact this stores is recorded with its origin (D-21): the channel the
+    memory came by, with ``derived`` facts' transform decided per fact
+    (``storage/fact_origin.derived_from``).
+    """
+    from superlocalmemory.storage import fact_origin
+
+    origin = fact_origin.derived_from(
+        content, source_type=kwargs.get("ingestion_source_type", "store"),
+        metadata=kwargs.get("metadata") or {}, actor_id=kwargs.get("trusted_actor_id") or None,
+        model_mode=str(getattr(getattr(kwargs.get("config"), "mode", None), "value", "") or ""))
+    with fact_origin.declare(origin):
+        return _run_store(content, profile_id, *args, **kwargs)
+
+
+def _run_store(
     content: str,
     profile_id: str,
     session_id: str = "",

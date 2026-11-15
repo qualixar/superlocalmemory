@@ -77,7 +77,8 @@ from pathlib import Path
 #: retired memories, data + undo) are additive, floor 51.
 #: M072 (judge receipts and labels) is additive, floor 51.
 #: M073 (valid_until_source, R-11) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 73
+#: M074 (fact_origin, D-21) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 74
 
 
 class SchemaVersionError(RuntimeError):
