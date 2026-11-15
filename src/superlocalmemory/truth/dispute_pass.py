@@ -14,16 +14,20 @@ do to the older one? The answer, once a tier is sure enough for its label:
 
 ``judge.ladder`` in shadow asks and records receipts but changes nothing; on,
 it acts -- but only where the store's own labels support it
-(``core/judge_calibration.ActingGate``: a threshold chosen by fixed-sequence
-testing so the error rate among acted-on decisions is <= alpha with
+(``core/judge_calibration.ActingGate``: an e-process certificate from blind
+audit labels, so the error rate among acted-on decisions is <= alpha with
 probability >= 1 - delta). Tier 0 rules never retire anything and act on their
 non-retiring answers without a gate. Measured 15 Nov 2026 on the maintainer's
 backlog, Jev's "replaces" had 20-40% precision and no threshold passed, so
 retirement by a model stays off until labels say otherwise.
 
-A dispute the ladder already asked about under this question version is not
-asked again: an abstention is final until a person looks, so a store
-never pays twice for the same unanswerable pair.
+A dispute is not asked again once every model tier that could answer it here
+has abstained on it under this question version (keyed pair hash): it waits
+for a person, so a store never pays twice for the same unanswerable pair. It
+is asked again when a tier failed (a failed ask judged nothing, R-35) or when a
+tier is newly available, e.g. the ladder went from shadow (rules and Laya) to
+on (with Jev, D-27). With no model tier at all only the free rules run, over
+every open dispute, so nothing waits behind a page limit.
 """
 
 from __future__ import annotations
@@ -57,9 +61,9 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
  ORDER BY d.opened_at
 """
 
-#: The latest receipt per judged pair under this question version.
+#: Every receipt per judged pair under this question version.
 _EARLIER = """
-SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted
+SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted, failure_kind
   FROM judge_receipts WHERE question_version = ? AND inputs_hash IN ({marks})
  ORDER BY decided_at
 """
@@ -84,14 +88,19 @@ class DisputePass:
                           fact_ids=(r[2], r[4])) for r in rows]
             hashes = [inputs_hash(SLOT_RELATION, it, self._key) for it in items]
             earlier = self._earlier(conn, hashes)
+        # Which model tiers could answer here now (nothing is asked to find out).
+        # Without one, only the free deterministic rules run, so no limit applies.
+        available = self._ladder.available_model_tiers(SLOT_RELATION)
+        limit = self._limit if available else len(items)
         reused: dict[int, Decision] = {}
         ask: list[int] = []
         for i, h in enumerate(hashes):
-            if h in earlier:
-                decision = earlier[h]
-                if decision is not None:  # an accepted answer: act on it, never re-ask
-                    reused[i] = decision
-            elif len(ask) < self._limit:  # an abstention is final; page past it
+            seen = earlier.get(h, frozenset())
+            if isinstance(seen, Decision):  # an accepted answer: act on it, never re-ask
+                reused[i] = seen
+            elif h in earlier and available <= seen:
+                continue  # every tier that could answer here has abstained: page past it
+            elif len(ask) < limit:  # never judged, a tier failed, or a tier is newly here
                 ask.append(i)
         if not reused and not ask:
             return {}
@@ -106,18 +115,22 @@ class DisputePass:
         logger.info("Dispute pass: %s", dict(self.counts))
         return dict(self.counts)
 
-    def _earlier(self, conn: Any, hashes: list[str]) -> dict[str, Decision | None]:
-        """Per pair hash: the accepted decision, or None for a pair already abstained on."""
-        out: dict[str, Decision | None] = {}
+    def _earlier(self, conn: Any, hashes: list[str]) -> dict[str, Decision | frozenset[str]]:
+        """Per pair hash: the accepted decision, or the tiers that gave it a
+        real answer (an abstention, never a failure: a failed ask judged nothing)."""
+        out: dict[str, Decision | frozenset[str]] = {}
         for start in range(0, len(hashes), 500):
             part = hashes[start:start + 500]
             sql = _EARLIER.format(marks=",".join("?" * len(part)))
-            for h, rid, tier, model, verdict, conf, accepted in conn.execute(
+            for h, rid, tier, model, verdict, conf, accepted, failure in conn.execute(
                     sql, (SLOT_RELATION.version, *part)):
+                seen = out.get(h, frozenset())
+                if isinstance(seen, Decision):
+                    continue
                 if accepted:
                     out[h] = Decision(verdict, float(conf), tier, (rid,), model=model)
                 else:
-                    out.setdefault(h, None)
+                    out[h] = seen | ({tier} if failure is None else set())
         return out
 
     def _apply(self, conn: Any, pairs: list) -> None:

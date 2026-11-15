@@ -15,6 +15,13 @@ decision auditable and are what personal calibration learns from.
 
 Items go in batches (a tier sees up to ``MAX_BATCH`` at once); a tier answers
 the whole batch or nothing, so an answer can never pair with the wrong item.
+
+A tier that cannot be asked here (not installed, a question it was never
+measured on, shadow, no consent) declines by returning None: nothing was asked,
+so nothing is receipted. A tier that was asked and failed as a whole (a timeout,
+an HTTP error, a malformed reply, a crash) is receipted for every item of the
+batch as ``tier_failed`` with its ``failure_kind`` (I-09), so availability has
+a denominator and a failed ask is never mistaken for a judged one.
 """
 
 from __future__ import annotations
@@ -59,9 +66,24 @@ class TierAnswer:
     probabilities: Mapping[str, float] = field(default_factory=dict)
     model: str = ""
     calibration_id: str = "uncalibrated"
+    #: The consent record a hosted answer relied on (``consent_store.reference``).
+    consent_ref: str | None = None
 
 
 NO_ANSWER = "no_answer"
+TIER_FAILED = "tier_failed"
+#: How a tier failed as a whole. Closed: anything else is recorded as "error".
+FAILURE_KINDS = frozenset({"timeout", "transport", "http", "malformed", "shutdown",
+                           "preempted", "worker", "error"})
+
+
+class TierFailure(Exception):
+    """Raised by a tier that was asked and could not answer the batch."""
+
+    def __init__(self, kind: str, *, consent_ref: str | None = None) -> None:
+        self.kind = kind if kind in FAILURE_KINDS else "error"
+        self.consent_ref = consent_ref
+        super().__init__(self.kind)
 
 
 @dataclass(frozen=True)
@@ -104,6 +126,8 @@ class ReceiptRow:
     peers_hash: str
     flag_state: str
     decided_at: str
+    failure_kind: str | None = None
+    consent_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +145,24 @@ class Tier(Protocol):
 
     def answer(self, question: Question,
                items: Sequence[Item]) -> list[TierAnswer | None] | None: ...
+
+
+def is_model_tier(tier: object) -> bool:
+    """Rules are deterministic and never receipt a miss; every other tier is a model."""
+    return getattr(tier, "is_model", True) is not False
+
+
+def tier_available(tier: object, question: Question) -> bool:
+    """Whether ``tier`` could be asked ``question`` here, now, without asking it."""
+    probe = getattr(tier, "available", None)
+    if not callable(probe):
+        return True
+    try:
+        return probe(question) is True
+    except Exception as exc:  # noqa: BLE001 - a probe that fails means not available
+        logger.info("judge ladder: availability of %s unknown (%s)", getattr(tier, "name", "?"),
+                    type(exc).__name__)
+        return False
 
 
 def inputs_hash(question: Question, item: Item, key: bytes | None = None) -> str:
@@ -143,10 +185,13 @@ class _Batch:
     size: int
     tier_index: int
     peers_hash: str
+    consent_ref: str | None = None
 
 
 def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, threshold: float,
-         accepted: bool, ctx: Context, batch: _Batch, position: int) -> ReceiptRow:
+         accepted: bool, ctx: Context, batch: _Batch, position: int,
+         failure_kind: str | None = None) -> ReceiptRow:
+    # A hosted ask's consent applies to every row of its batch, misses included.
     return ReceiptRow(
         receipt_id="jr_" + uuid.uuid4().hex, profile_id=item.profile_id,
         question_id=question.question_id, question_version=question.version,
@@ -158,14 +203,16 @@ def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, thres
         calibration_id=answer.calibration_id,
         inputs_hash=inputs_hash(question, item, ctx.hash_key), batch_id=batch.batch_id,
         batch_size=batch.size, batch_position=position, peers_hash=batch.peers_hash,
-        flag_state=ctx.flag_state, decided_at=_now())
+        flag_state=ctx.flag_state, decided_at=_now(), failure_kind=failure_kind,
+        consent_ref=answer.consent_ref or batch.consent_ref)
 
 
 _RECEIPT_COLUMNS = (
     "receipt_id", "profile_id", "question_id", "question_version", "subject_kind", "subject_id",
     "population", "fact_ids_json", "tier", "tier_index", "model", "verdict", "confidence",
     "raw_score", "threshold", "accepted", "probabilities_json", "calibration_id", "inputs_hash",
-    "batch_id", "batch_size", "batch_position", "peers_hash", "flag_state", "decided_at")
+    "batch_id", "batch_size", "batch_position", "peers_hash", "flag_state", "decided_at",
+    "failure_kind", "consent_ref")
 
 
 def write_receipts(conn: sqlite3.Connection, rows: Sequence[ReceiptRow]) -> None:
@@ -203,6 +250,11 @@ class JudgeLadder:
     def tier_names(self) -> tuple[str, ...]:
         return tuple(t.name for t in self._tiers)
 
+    def available_model_tiers(self, question: Question) -> frozenset[str]:
+        """The model tiers that could be asked ``question`` here now (nothing is asked)."""
+        return frozenset(t.name for t in self._tiers
+                         if is_model_tier(t) and tier_available(t, question))
+
     def decide(self, question: Question, items: Sequence[Item],
                ctx: Context = Context()) -> tuple[list[Decision], list[ReceiptRow]]:
         pending = list(range(len(items)))
@@ -232,10 +284,18 @@ class JudgeLadder:
             batch = pending[start:start + MAX_BATCH]
             peers = hashlib.sha256("\0".join(sorted(items[i].subject_id for i in batch))
                                    .encode()).hexdigest()[:32]
-            meta = _Batch("jb_" + uuid.uuid4().hex, len(batch), tier_index, peers)
-            answers = self._answers(tier, question, [items[i] for i in batch])
+            answers, failure, ref = self._answers(tier, question, [items[i] for i in batch])
+            meta = _Batch("jb_" + uuid.uuid4().hex, len(batch), tier_index, peers, ref)
             asked = answers is not None
             for pos, index in enumerate(batch):
+                if failure is not None:  # asked and failed as a whole: receipted (I-09)
+                    receipts[index].append(_row(
+                        question, items[index], tier.name,
+                        TierAnswer(TIER_FAILED, 0.0, model=tier.name), threshold=1.0,
+                        accepted=False, ctx=ctx, batch=meta, position=pos,
+                        failure_kind=failure))
+                    still.append(index)
+                    continue
                 answer = answers[pos] if asked else None
                 if answer is None:
                     if asked and log_misses:  # censoring would bias any later calibration
@@ -259,17 +319,28 @@ class JudgeLadder:
         return still
 
     @staticmethod
-    def _answers(tier: Tier, question: Question,
-                 items: list[Item]) -> list[TierAnswer | None] | None:
-        """Per-item answers, or None when the tier could not be asked at all."""
+    def _answers(tier: Tier, question: Question, items: list[Item]
+                 ) -> tuple[list[TierAnswer | None] | None, str | None, str | None]:
+        """(answers, failure kind, consent ref). Answers None and no failure: the
+        tier declined, so nothing was asked. Answers None with a failure: it was
+        asked and failed. The consent ref is taken before answers are validated,
+        so a hosted batch keeps it even when every answer is unusable."""
         try:
             raw = tier.answer(question, items)
-        except Exception as exc:  # noqa: BLE001 - a tier failure is a skipped tier
-            logger.info("judge ladder: tier %s failed (%s)", tier.name, type(exc).__name__)
-            return None
+        except TierFailure as exc:
+            logger.info("judge ladder: tier %s failed (%s)", tier.name, exc.kind)
+            return None, exc.kind, exc.consent_ref
+        except Exception as exc:  # noqa: BLE001 - a crashing tier is a failed ask, receipted
+            logger.warning("judge ladder: tier %s crashed (%s)", tier.name, type(exc).__name__)
+            return None, "error", None
+        if raw is None:
+            return None, None, None
+        ref = next((a.consent_ref for a in raw if isinstance(a, TierAnswer) and a.consent_ref),
+                   None) if isinstance(raw, list) else None
         if not isinstance(raw, list) or len(raw) != len(items):
-            return None
-        return [_valid(question, a) for a in raw]
+            logger.warning("judge ladder: tier %s returned a malformed batch", tier.name)
+            return None, "malformed", ref
+        return [_valid(question, a) for a in raw], None, ref
 
 
 #: Words and single symbols: "-5" vs "5", ">" vs "<", "$" vs "€" differ.
@@ -299,6 +370,7 @@ class RulesTier:
 
     name = "rules"
     log_abstentions = False
+    is_model = False
 
     def answer(self, question: Question, items: Sequence[Item]) -> list[TierAnswer | None]:
         if question.question_id != "SLOT_RELATION":
@@ -319,6 +391,7 @@ class RulesTier:
         return None
 
 
-__all__ = ["ABSTAIN", "Context", "Decision", "Item", "JudgeLadder", "MAX_BATCH", "MAX_TEXT_CHARS",
-           "NO_ANSWER", "ReceiptRow", "RulesTier", "Tier", "TierAnswer", "inputs_hash",
+__all__ = ["ABSTAIN", "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH",
+           "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
+           "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",
            "write_receipts"]

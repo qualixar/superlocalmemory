@@ -58,6 +58,18 @@ def given(slm_home: Path, purpose: str) -> bool:
     return isinstance(entry, dict) and entry.get("consent") is True
 
 
+def reference(slm_home: Path, purpose: str) -> str | None:
+    """``"<purpose>@<when given>"`` for a consent on file, else None.
+
+    Stamped on every receipt of a hosted ask (I-15), so a receipt names the
+    record it relied on even after that consent is withdrawn.
+    """
+    if not given(slm_home, purpose):
+        return None
+    at = _read(slm_home).get(purpose, {}).get("at")
+    return f"{purpose}@{at if isinstance(at, str) and at else 'unknown'}"
+
+
 def record(slm_home: Path, purpose: str, consent: bool, *, via: str) -> None:
     """Give or withdraw one consent; ``via`` names the path (CLI, dashboard, setup)."""
     if purpose not in PURPOSES:
@@ -72,4 +84,4 @@ def record(slm_home: Path, purpose: str, consent: bool, *, via: str) -> None:
     os.replace(tmp, path)
 
 
-__all__ = ["CONSENTS_FILE", "PURPOSES", "given", "record"]
+__all__ = ["CONSENTS_FILE", "PURPOSES", "given", "record", "reference"]

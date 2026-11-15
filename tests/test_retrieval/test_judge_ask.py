@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from superlocalmemory.core.judge_ladder import Item
 from superlocalmemory.core.judge_questions import SLOT_RELATION
 from superlocalmemory.retrieval import judge_ask
@@ -67,3 +69,26 @@ def test_laya_is_never_asked_outside_background_work() -> None:
 
     assert judge_ask.ask_laya(Judge(), SLOT_RELATION, [_PAIR], model="m",
                               calibration_id="c") is None
+
+
+def test_a_laya_worker_that_gives_no_reply_is_a_failed_ask(monkeypatch) -> None:
+    """R-35: asked and failed raises (receipted by the ladder); not ready declines."""
+    from superlocalmemory.core import recall_gate
+    from superlocalmemory.core.judge_ladder import Item, TierFailure
+    from superlocalmemory.retrieval import judge_ask, laya_background
+
+    class Laya:
+        ready = True
+
+    item = Item("x", "1", "p", {"older": "a", "newer": "b"})
+    with recall_gate.background_work():
+        monkeypatch.setattr(laya_background, "exchange", lambda *a, **k: None)
+        with pytest.raises(TierFailure) as failed:
+            judge_ask.ask_laya_statement(Laya(), "s", ("older", "newer"), [item])
+        assert failed.value.kind == "worker"
+        monkeypatch.setattr(laya_background, "exchange", lambda *a, **k: {"ok": True, "answers": []})
+        with pytest.raises(TierFailure) as failed:
+            judge_ask.ask_laya_statement(Laya(), "s", ("older", "newer"), [item])
+        assert failed.value.kind == "malformed"
+        Laya.ready = False
+        assert judge_ask.ask_laya_statement(Laya(), "s", ("older", "newer"), [item]) is None

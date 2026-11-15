@@ -154,8 +154,89 @@ def test_jev_tier_needs_consent(monkeypatch) -> None:
             seen["consent"] = consent
             return None
 
-    judge_tiers.JevTier(lambda: Jev(), consent=lambda: False).answer(SLOT_RELATION, _items())
-    assert seen["consent"] is False
+    judge_tiers.JevTier(lambda: Jev(), consent_ref=lambda: None, live=lambda: True).answer(
+        SLOT_RELATION, _items())
+    assert seen == {}  # without consent the judge is never asked
+    judge_tiers.JevTier(lambda: Jev(), consent_ref=lambda: "judge_ladder_hosted@t", live=lambda: True).answer(
+        SLOT_RELATION, _items())
+    assert seen == {"consent": True}
+
+
+class _CountingJev:
+    """A hosted judge that records every time anything could have been sent."""
+
+    def __init__(self):
+        self.supplied = 0
+        self.asked = 0
+
+    def supplier(self):
+        self.supplied += 1
+        return self
+
+    def ask_ladder(self, question, items, *, consent):
+        self.asked += 1
+        return [TierAnswer("replaces", 0.99, model="jev")] * len(items)
+
+
+def test_a_ladder_in_shadow_never_reaches_the_hosted_judge() -> None:
+    """D-27 / R-41: shadow sends nothing off the machine, even with consent."""
+    from superlocalmemory.core import judge_tiers
+
+    jev = _CountingJev()
+    ladder = judge_tiers.build_ladder(jev.supplier, hosted_consent_ref=lambda: "judge_ladder_hosted@t",
+                                      hosted_live=lambda: False)
+    assert "jev" not in ladder.tier_names
+    decisions, rows = ladder.decide(SLOT_RELATION, _items(3))
+    assert jev.asked == 0 and all(r.tier != "jev" for r in rows)
+    assert all(d.tier != "jev" for d in decisions)
+
+
+def test_a_ladder_that_is_on_with_consent_asks_the_hosted_judge() -> None:
+    from superlocalmemory.core import judge_tiers
+
+    jev = _CountingJev()
+    ladder = judge_tiers.build_ladder(jev.supplier, hosted_consent_ref=lambda: "judge_ladder_hosted@t",
+                                      hosted_live=lambda: True)
+    assert ladder.tier_names == ("rules", "laya", "jev")
+    decisions, _ = ladder.decide(SLOT_RELATION, _items(2))
+    assert jev.asked == 1 and [d.tier for d in decisions] == ["jev", "jev"]
+
+
+def test_switching_to_shadow_mid_pass_stops_hosted_calls_before_the_next_ask() -> None:
+    """The flag is read at every ask, not only when the ladder is built."""
+    from superlocalmemory.core import judge_tiers
+
+    jev = _CountingJev()
+    live = {"on": True}
+    tier = judge_tiers.JevTier(jev.supplier, consent_ref=lambda: "judge_ladder_hosted@t", live=lambda: live["on"])
+    assert tier.answer(SLOT_RELATION, _items()) is not None
+    live["on"] = False
+    assert tier.answer(SLOT_RELATION, _items()) is None
+    assert jev.asked == 1 and jev.supplied == 1  # not even the judge object was fetched
+
+
+@pytest.mark.parametrize("live,consent", [(False, "ref"), (True, None), (None, "ref"), (1, "ref"),
+                                          (True, ""), (True, True)])
+def test_the_hosted_tier_needs_a_live_flag_and_a_consent_record(live, consent) -> None:
+    from superlocalmemory.core import judge_tiers
+
+    jev = _CountingJev()
+    tier = judge_tiers.JevTier(jev.supplier, consent_ref=lambda: consent, live=lambda: live)
+    assert tier.answer(SLOT_RELATION, _items()) is None and jev.asked == 0
+
+
+def test_a_failing_flag_read_counts_as_shadow() -> None:
+    from superlocalmemory.core import judge_tiers
+
+    def broken():
+        raise OSError("features.json unreadable")
+
+    jev = _CountingJev()
+    tier = judge_tiers.JevTier(jev.supplier, consent_ref=lambda: "judge_ladder_hosted@t", live=broken)
+    assert tier.answer(SLOT_RELATION, _items()) is None and jev.asked == 0
+    ladder = judge_tiers.build_ladder(jev.supplier, hosted_consent_ref=lambda: "ref",
+                                      hosted_live=broken)
+    assert "jev" not in ladder.tier_names
 
 
 @pytest.mark.parametrize("older,newer", [
@@ -222,3 +303,118 @@ def test_a_tier_floor_routes_but_never_lowers_the_question_threshold(conn) -> No
     tier = Floored("laya", [TierAnswer("same", 0.75)])
     [d] = JudgeLadder([tier]).decide_and_record(conn, SLOT_RELATION, _items())
     assert d.abstained
+
+
+# -- R-35 / I-09: a tier that was asked and failed as a whole is receipted --------------------
+
+class Failing:
+    def __init__(self, name, exc):
+        self.name, self._exc, self.calls = name, exc, 0
+
+    def answer(self, question, items):
+        self.calls += 1
+        raise self._exc
+
+
+@pytest.mark.parametrize("exc,kind", [
+    (None, "timeout"), (RuntimeError("boom"), "error"), (None, "made-up-kind")])
+def test_a_tier_that_fails_as_a_whole_is_receipted_for_every_item(conn, exc, kind) -> None:
+    from superlocalmemory.core.judge_ladder import TIER_FAILED, TierFailure
+
+    err = exc if exc is not None else TierFailure(kind)
+    expected = kind if kind in {"timeout"} else "error"
+    decisions, rows = JudgeLadder([Failing("jev", err)]).decide(SLOT_RELATION, _items(3))
+    assert all(d.abstained for d in decisions)
+    assert [(r.tier, r.verdict, r.accepted, r.failure_kind) for r in rows] == [
+        ("jev", TIER_FAILED, False, expected)] * 3
+    assert all(d.receipts == (r.receipt_id,) for d, r in zip(decisions, rows))
+    from superlocalmemory.core.judge_ladder import write_receipts
+    write_receipts(conn, rows)  # the schema accepts them (CHECK keeps verdict and kind in step)
+    assert conn.execute("SELECT COUNT(*) FROM judge_receipts WHERE failure_kind IS NOT NULL"
+                        ).fetchone()[0] == 3
+
+
+def test_a_malformed_batch_is_a_receipted_failure_not_a_silent_skip() -> None:
+    decisions, rows = JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9)])]).decide(
+        SLOT_RELATION, _items(2))  # one answer for two items
+    assert [(r.verdict, r.failure_kind) for r in rows] == [("tier_failed", "malformed")] * 2
+
+
+def test_a_declining_tier_writes_nothing_and_the_next_tier_is_asked() -> None:
+    nxt = Scripted("jev", [TierAnswer("same", 0.95, model="m")])
+    decisions, rows = JudgeLadder([Scripted("laya", None), nxt]).decide(SLOT_RELATION, _items())
+    assert [r.tier for r in rows] == ["jev"] and decisions[0].tier == "jev"
+
+
+def test_after_a_failed_tier_the_next_tier_is_still_asked() -> None:
+    from superlocalmemory.core.judge_ladder import TierFailure
+
+    nxt = Scripted("jev", [TierAnswer("same", 0.95, model="m")])
+    decisions, rows = JudgeLadder([Failing("laya", TierFailure("worker")), nxt]).decide(
+        SLOT_RELATION, _items())
+    assert [(r.tier, r.verdict) for r in rows] == [("laya", "tier_failed"), ("jev", "same")]
+    assert decisions[0].receipts == tuple(r.receipt_id for r in rows)
+
+
+def test_the_schema_refuses_a_failure_kind_without_a_failed_verdict(conn) -> None:
+    from dataclasses import replace
+
+    from superlocalmemory.core.judge_ladder import write_receipts
+
+    _, rows = JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9)])]).decide(
+        SLOT_RELATION, _items())
+    with pytest.raises(sqlite3.IntegrityError):
+        write_receipts(conn, [replace(rows[0], failure_kind="timeout")])
+    with pytest.raises(sqlite3.IntegrityError):
+        write_receipts(conn, [replace(rows[0], verdict="tier_failed")])
+
+
+def test_rules_are_not_a_model_tier_and_availability_never_asks() -> None:
+    from superlocalmemory.core.judge_ladder import is_model_tier
+
+    probe = Scripted("laya", [TierAnswer("same", 0.9)])
+    probe.available = lambda q: True
+    broken = Scripted("jev", None)
+    broken.available = lambda q: (_ for _ in ()).throw(OSError("x"))
+    ladder = JudgeLadder([RulesTier(), probe, broken])
+    assert not is_model_tier(RulesTier())
+    assert ladder.available_model_tiers(SLOT_RELATION) == frozenset({"laya"})
+    assert probe.calls == [] and broken.calls == []
+
+
+# -- R-42 / I-15: a hosted receipt names the consent record it relied on ----------------------
+
+def _hosted(answers_or_exc):
+    from superlocalmemory.core import judge_tiers
+
+    class Jev:
+        def ask_ladder(self, question, items, *, consent):
+            if isinstance(answers_or_exc, BaseException):
+                raise answers_or_exc
+            return answers_or_exc(items)
+
+    return judge_tiers.JevTier(lambda: Jev(), consent_ref=lambda: "judge_ladder_hosted@2026-11-15",
+                               live=lambda: True)
+
+
+@pytest.mark.parametrize("make", [
+    lambda: _hosted(lambda items: [TierAnswer("replaces", 0.99, model="jev")] * len(items)),
+    lambda: _hosted(lambda items: [TierAnswer("not-a-label", 0.99)] * len(items)),  # misses
+    lambda: _hosted(__import__("superlocalmemory.core.judge_ladder",
+                               fromlist=["TierFailure"]).TierFailure("timeout")),
+    lambda: _hosted(RuntimeError("crashed after sending")),
+])
+def test_every_receipt_of_a_hosted_ask_carries_its_consent_record(conn, make) -> None:
+    from superlocalmemory.core.judge_ladder import write_receipts
+
+    _, rows = JudgeLadder([RulesTier(), make()]).decide(SLOT_RELATION, _items(2))
+    assert rows and {r.consent_ref for r in rows} == {"judge_ladder_hosted@2026-11-15"}
+    write_receipts(conn, rows)
+    assert conn.execute("SELECT COUNT(*) FROM judge_receipts WHERE consent_ref IS NULL"
+                        ).fetchone()[0] == 0
+
+
+def test_local_receipts_carry_no_consent_record() -> None:
+    _, rows = JudgeLadder([Scripted("laya", [TierAnswer("same", 0.9)])]).decide(
+        SLOT_RELATION, _items())
+    assert [r.consent_ref for r in rows] == [None]

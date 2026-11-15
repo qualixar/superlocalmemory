@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from superlocalmemory.core import recall_gate
-from superlocalmemory.core.judge_ladder import Item, TierAnswer
+from superlocalmemory.core.judge_ladder import Item, TierAnswer, TierFailure
 from superlocalmemory.core.judge_questions import Question
 from superlocalmemory.retrieval.hosted_redaction import redact_or_none
 
@@ -119,9 +119,23 @@ SAME_STATEMENT = ("Read `older` and `newer`. Is this statement true: `newer` and
                   "the same thing.")
 
 
+def _exchange_failure(judge: Any) -> TierFailure:
+    """Why the worker gave no usable reply (the batch is receipted as failed)."""
+    if recall_gate.background_preempt_requested():
+        return TierFailure("preempted")
+    shutdown = getattr(judge, "_shutdown", None)
+    if shutdown is not None and shutdown.is_set():
+        return TierFailure("shutdown")
+    return TierFailure("worker")
+
+
 def ask_laya_statement(judge: Any, statement: str, fields: Sequence[str],
                        items: Sequence[Item]) -> list[float] | None:
-    """One true/false score per item from the running worker, or None."""
+    """One true/false score per item from the running worker.
+
+    None: not asked (not a background thread, or the worker is not ready).
+    Raises ``TierFailure`` when asked and the batch could not be answered.
+    """
     from superlocalmemory.retrieval.laya_background import exchange
 
     if not recall_gate.is_background_work() or getattr(judge, "ready", False) is not True:
@@ -131,19 +145,21 @@ def ask_laya_statement(judge: Any, statement: str, fields: Sequence[str],
     for start in range(0, len(items), CHUNK_ITEMS):
         part = items[start:start + CHUNK_ITEMS]
         if recall_gate.background_preempt_requested():
-            return None
+            raise TierFailure("preempted")
         req = {"cmd": "ask", "items": [
             {"state": {f: it.texts.get(f, "")[:MAX_TEXT_CHARS] for f in fields},
              "questions": {QID: spec}} for it in part]}
         reply = exchange(judge, req, min(3.0, 0.25 + 0.15 * len(part)))
+        if reply is None:
+            raise _exchange_failure(judge)
         answers = reply.get("answers") if isinstance(reply, Mapping) and reply.get("ok") else None
         if not isinstance(answers, list) or len(answers) != len(part):
-            return None
+            raise TierFailure("malformed")
         for raw in answers:
             q = raw.get(QID) if isinstance(raw, Mapping) else None
             score = _probability(q.get("noul")) if isinstance(q, Mapping) else None
             if score is None:
-                return None
+                raise TierFailure("malformed")
             out.append(score)
         time.sleep(_YIELD_S)
     return out

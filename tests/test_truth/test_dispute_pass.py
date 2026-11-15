@@ -174,3 +174,67 @@ def test_a_decision_made_in_shadow_is_acted_on_later_without_re_asking(disputed)
                         **{"judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"})
     assert tier.calls == 0 and counts["resolved_replaces"] == 1
     assert _retired(db, old)[2] == new
+
+
+# -- R-35 / R-41: which earlier receipts make a pair "already judged" --------------------------
+
+class FailingTier:
+    name = "laya"
+
+    def __init__(self):
+        self.calls = 0
+
+    def answer(self, question, items):
+        from superlocalmemory.core.judge_ladder import TierFailure
+
+        self.calls += 1
+        raise TierFailure("timeout")
+
+
+def _pass(db, *tiers, limit=32, **flags):
+    flags = flags or {"judge.ladder": "shadow"}
+    return DisputePass(db, FeatureFlags(file_values=flags, environ={}), JudgeLadder(list(tiers)),
+                       limit=limit).run()
+
+
+def test_a_failed_ask_is_receipted_and_the_pair_is_asked_again(disputed) -> None:
+    db, _old, _new = disputed
+    failing = FailingTier()
+    _pass(db, failing)
+    rows = db.execute("SELECT verdict, failure_kind FROM judge_receipts")
+    assert [(r["verdict"], r["failure_kind"]) for r in rows] == [("tier_failed", "timeout")]
+    retry = Fixed("both_true", confidence=0.5)
+    _pass(db, retry)
+    assert retry.calls == 1  # a failed ask judged nothing, so it did not park the pair
+
+
+def test_a_pair_abstained_on_in_shadow_reaches_a_tier_that_is_newly_available(disputed) -> None:
+    db, _old, _new = disputed
+    laya = Fixed("both_true", confidence=0.5)
+    _pass(db, laya)
+    _pass(db, laya)
+    assert laya.calls == 1  # abstained by every available tier: paged past
+
+    class Jev(Fixed):
+        name = "jev"
+
+    jev = Jev("both_true", confidence=0.5)
+    _pass(db, laya, jev)
+    assert jev.calls == 1  # the ladder grew (shadow -> on): the pair is judged again
+
+
+def test_with_no_model_tier_the_page_limit_does_not_block_the_rules(disputed) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, _old, _new = disputed
+
+    class CountingRules(RulesTier):
+        calls = 0
+
+        def answer(self, question, items):
+            CountingRules.calls += len(items)
+            return super().answer(question, items)
+
+    _pass(db, CountingRules(), limit=0)
+    assert CountingRules.calls == 1
+    assert _pass(db, CountingRules(), Fixed("same"), limit=0) == {}  # a model tier: limit holds

@@ -40,6 +40,7 @@ import httpx
 from superlocalmemory import __version__ as _SLM_VERSION
 from superlocalmemory.core import recall_gate
 from superlocalmemory.core.judge_keys import JudgeKeyStore
+from superlocalmemory.core.judge_ladder import TierFailure
 from superlocalmemory.core.outbound_http import GatedClient
 from superlocalmemory.encoding.memory_kind_recipe import KindAnswer, KindRecipe
 from superlocalmemory.retrieval import answer_question_forms as question_forms
@@ -53,7 +54,12 @@ from superlocalmemory.retrieval.answer_check_status import (
     effective_deadline,
 )
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge, redact_or_none
-from superlocalmemory.retrieval.jev_transport import HostedTransport
+from superlocalmemory.retrieval.jev_transport import (
+    FAILED_SHUT_DOWN,
+    FAILED_TIMEOUT,
+    FAILED_TOO_LARGE,
+    HostedTransport,
+)
 from superlocalmemory.retrieval.judge_recipe import (
     ACTIVE_RECIPE,
     JudgeDocument,
@@ -175,6 +181,21 @@ def _check_questions(redacted_question: str, keys: Sequence[str],
 
 
 _SNAPSHOT_SUFFIX = re.compile(r"-\d{8}")
+
+
+def _failure_kind(failure: str) -> str:
+    """The transport's failure string as a ``judge_ladder.FAILURE_KINDS`` entry."""
+    if failure == FAILED_TIMEOUT:
+        return "timeout"
+    if failure.startswith("transport:"):
+        return "transport"
+    if failure.startswith("http_"):
+        return "http"
+    if failure == FAILED_TOO_LARGE:
+        return "malformed"
+    if failure == FAILED_SHUT_DOWN:
+        return "shutdown"
+    return "error"
 
 
 def _is_requested_model(returned: Any, requested: str) -> bool:
@@ -376,6 +397,11 @@ class JevSufficiencyJudge:
         """One POST, never retried, inside one total deadline. The reply bytes,
         or None. Logs name the kind of failure only — never the key, the
         question or a memory."""
+        return self._send_reporting(key, deadline, **payload)[0]
+
+    def _send_reporting(self, key: str, deadline: float | None,
+                        **payload: Any) -> tuple[bytes | None, str]:
+        """``_send`` that also returns the transport's failure string ("" on success)."""
         body, failure = self._post(key, deadline, **payload)
         if failure == "timeout":
             logger.warning("jev_judge: request to %s timed out", self._provider)
@@ -386,7 +412,7 @@ class JevSufficiencyJudge:
             logger.warning("jev_judge: HTTP %s from %s", failure[5:], self._provider)
         elif failure:
             logger.info("jev_judge: not sent to %s (%s)", self._provider, failure)
-        return body
+        return body, failure
 
     def _post(self, key: str, deadline: float | None,
               **payload: Any) -> tuple[bytes | None, str]:
@@ -463,14 +489,16 @@ class JevSufficiencyJudge:
         if body is None:
             return None
         recall_gate.wait_for_foreground_idle()
-        raw = self._send(key, None, json=body)
+        raw, failure = self._send_reporting(key, None, json=body)
         if raw is None:
-            return None
+            # Asked and failed: the ladder receipts the batch as failed (I-09, R-35).
+            raise TierFailure(_failure_kind(failure))
         answers = judge_ask.read_jev(
             raw, body, question, self._model, f"jev:{self._model}:uncalibrated",
             lambda returned: _is_requested_model(returned, self._model))
         if answers is None:
             logger.warning("jev ladder: malformed response from %s; ignoring it", self._provider)
+            raise TierFailure("malformed")
         return answers
 
     # -- the optional reordering -------------------------------------------

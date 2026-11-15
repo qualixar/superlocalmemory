@@ -283,8 +283,12 @@ class MaintenanceScheduler:
                 from superlocalmemory.truth.dispute_pass import DisputePass
 
                 home = canonical_data_root()
-                ladder = build_ladder(self._judge_supplier, hosted_consent=lambda: consent_store.given(
-                    home, "judge_ladder_hosted"))
+                # Hosted Jev only while judge.ladder is on (re-read at every ask);
+                # in shadow the ladder is rules and Laya only (D-27, R-41).
+                ladder = build_ladder(
+                    self._judge_supplier,
+                    hosted_consent_ref=lambda: consent_store.reference(home, "judge_ladder_hosted"),
+                    hosted_live=lambda: FeatureFlags(home).enabled("judge.ladder"))
                 from superlocalmemory.core.receipt_key import load_or_create
 
                 DisputePass(self._db, flags, ladder, hash_key=load_or_create(home)).run()

@@ -45,3 +45,15 @@ def test_unknown_purposes_are_refused(tmp_path) -> None:
         consent_store.record(tmp_path, "anything_else", True, via="cli")
     with pytest.raises(ValueError):
         consent_store.record(tmp_path, "judge_ladder_hosted", True, via="")
+
+
+def test_reference_names_the_record_and_disappears_when_withdrawn(tmp_path) -> None:
+    from superlocalmemory.core import consent_store
+
+    assert consent_store.reference(tmp_path, "judge_ladder_hosted") is None
+    consent_store.record(tmp_path, "judge_ladder_hosted", True, via="test")
+    ref = consent_store.reference(tmp_path, "judge_ladder_hosted")
+    assert ref is not None and ref.startswith("judge_ladder_hosted@20")
+    consent_store.record(tmp_path, "judge_ladder_hosted", False, via="test")
+    assert consent_store.reference(tmp_path, "judge_ladder_hosted") is None
+    assert consent_store.reference(tmp_path, "unknown_purpose") is None

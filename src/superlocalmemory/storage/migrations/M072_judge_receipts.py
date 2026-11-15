@@ -15,7 +15,11 @@ population, the judged fact ids, tier index, raw score, batch id / size /
 position / peers hash (batch dependence is measured, not assumed away), the
 flag state at decision time, the action taken and its reference (so a decision
 made in shadow is acted on later instead of stranded), and audit selection with
-its probability (only blind audit labels feed certificates). ``inputs_hash`` is
+its probability (only blind audit labels feed certificates). A tier that was
+asked and failed as a whole writes ``tier_failed`` with ``failure_kind`` (R-35);
+the CHECK keeps the two in step. A hosted ask's receipts carry ``consent_ref``,
+the consent record it relied on (I-15, R-42); that one is checked by
+``slm doctor --truth``, not a CHECK, so one bad row never voids a batch. ``inputs_hash`` is
 an HMAC under a local key (``core/receipt_key.py``), so it identifies what was
 judged without confirming a guess of erased text. Labels: many per receipt
 (one per source and labeller), with ``blind``. Amended in place before any
@@ -61,7 +65,10 @@ CREATE TABLE IF NOT EXISTS judge_receipts (
     action_ref        TEXT,
     audit_selected    INTEGER NOT NULL DEFAULT 0 CHECK (audit_selected IN (0, 1)),
     audit_probability REAL,
-    decided_at        TEXT NOT NULL
+    decided_at        TEXT NOT NULL,
+    failure_kind      TEXT,
+    consent_ref       TEXT,
+    CHECK ((verdict = 'tier_failed') = (failure_kind IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_judge_receipts_subject
     ON judge_receipts (subject_kind, subject_id);
