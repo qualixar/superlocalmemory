@@ -87,7 +87,8 @@ def test_inputs_are_validated() -> None:
     assert math.isfinite(binom_cdf(500, 1000, 0.5))
 
 
-def _gate_store(n, verdict="same", label=None, model="m", conf=0.9):
+def _gate_store(n, verdict="same", label=None, model="m", conf=0.9, population="slot_dispute",
+                source="audit", blind=1):
     import sqlite3
 
     from superlocalmemory.storage.migrations import M072_judge_receipts as M072
@@ -95,38 +96,95 @@ def _gate_store(n, verdict="same", label=None, model="m", conf=0.9):
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
     for i in range(n):
-        conn.execute("INSERT INTO judge_receipts VALUES (?, 'p', 'Q', '2', 's', ?, 'jev', ?, "
-                     "?, ?, 0.7, 1, '{}', 'c', 'h', 't')", (f"r{i}", f"s{i}", model, verdict, conf))
-        conn.execute("INSERT INTO judge_labels VALUES (?, ?, 'review', ?)",
-                     (f"r{i}", label or verdict, f"2026-11-15T{i // 3600:02d}:{i // 60 % 60:02d}:{i % 60:02d}"))
+        conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
+                     "question_version, subject_kind, subject_id, population, tier, model, verdict, "
+                     "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at) "
+                     "VALUES (?, 'p', 'Q', '2', 's', ?, ?, 'jev', ?, ?, ?, 0.7, 1, 'c', ?, 't')",
+                     (f"r{i}", f"s{i}", population, model, verdict, conf, f"h{i}"))
+        conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
+                     "labelled_at) VALUES (?, ?, ?, 'a', ?, ?)",
+                     (f"r{i}", label or verdict, source, blind, f"2026-11-15T00:{i // 60:02d}:"
+                      f"{i % 60:02d}"))
     return conn
 
 
-def test_acting_gate_reads_the_stores_labels() -> None:
+def _gate(conn, alpha=0.05):
     from superlocalmemory.core.judge_calibration import ActingGate
 
-    conn = _gate_store(200)  # checkpoint t=6 at n=182, delta_t = 0.05*6/(pi^2*36): needs 138
-    gate = ActingGate(conn, profile_id="p", question_id="Q", version="2")
-    assert gate.allows("jev", "m", "same", 0.95) and not gate.allows("jev", "m", "same", 0.5)
-    assert not gate.allows("jev", "m", "replaces", 0.99)       # no labels for this verdict
-    assert not gate.allows("jev", "other-model", "same", 0.99)  # certificates are per model
-    assert not ActingGate(conn, profile_id="other", question_id="Q",
-                          version="2").allows("jev", "m", "same", 0.99)  # and per profile
+    return ActingGate(conn, profile_id="p", question_id="Q", version="2",
+                      alpha_for=lambda verdict: alpha, delta=0.05)
 
 
-def test_the_first_checkpoint_needs_more_than_59_once_delta_is_split() -> None:
-    from superlocalmemory.core.judge_calibration import ActingGate
+def test_acting_gate_certifies_from_blind_audit_labels_only() -> None:
+    gate = _gate(_gate_store(80))
+    assert gate.allows("jev", "m", "same", 0.95, population="slot_dispute")
+    assert not gate.allows("jev", "m", "same", 0.45, population="slot_dispute")  # below the grid
+    assert not gate.allows("jev", "m", "replaces", 0.99, population="slot_dispute")
+    assert not gate.allows("jev", "other", "same", 0.99, population="slot_dispute")
+    assert not gate.allows("jev", "m", "same", 0.99, population="backlog")  # per population
+    assert not _gate(_gate_store(80, source="review")).allows(
+        "jev", "m", "same", 0.95, population="slot_dispute")
+    assert not _gate(_gate_store(80, blind=0)).allows(
+        "jev", "m", "same", 0.95, population="slot_dispute")
 
-    gate = ActingGate(_gate_store(59), profile_id="p", question_id="Q", version="2")
-    assert not gate.allows("jev", "m", "same", 0.95)  # 59 clean at delta*6/pi^2 is not enough
+
+def test_72_clean_audits_are_one_short() -> None:
+    assert not _gate(_gate_store(72)).allows("jev", "m", "same", 0.95, population="slot_dispute")
+    assert _gate(_gate_store(73)).allows("jev", "m", "same", 0.95, population="slot_dispute")
 
 
 def test_a_closing_verdict_is_held_when_its_errors_are_hidden_replacements() -> None:
-    from superlocalmemory.core.judge_calibration import ActingGate
+    conn = _gate_store(400, verdict="same", label="replaces")
+    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute")
 
-    gate = ActingGate(_gate_store(120, verdict="same", label="replaces"), profile_id="p",
-                      question_id="Q", version="2")
-    assert not gate.allows("jev", "m", "same", 0.95)
+
+def test_disagreeing_audits_count_as_an_error() -> None:
+    conn = _gate_store(73)
+    conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
+                 "labelled_at) VALUES ('r0', 'replaces', 'audit', 'b', 1, '2026-11-15T01:00:00')")
+    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute")
+
+
+def test_eprocess_boundaries() -> None:
+    from superlocalmemory.core.judge_calibration import eprocess_certificate as e
+
+    assert e([0.99] * 73, [False] * 73, alpha=0.05, delta=0.05).acts
+    assert not e([0.99] * 72, [False] * 72, alpha=0.05, delta=0.05).acts
+    assert e([0.99] * 113, [True] + [False] * 112, alpha=0.05, delta=0.05).acts
+    assert not e([0.99] * 112, [True] + [False] * 111, alpha=0.05, delta=0.05).acts
+    assert e([0.99] * 151 + [0.99] * 2, [True, True] + [False] * 151, alpha=0.05, delta=0.05).acts
+
+
+def test_eprocess_revokes_on_later_errors() -> None:
+    from superlocalmemory.core.judge_calibration import eprocess_certificate as e
+
+    cert = e([0.99] * 133, [False] * 73 + [True] * 12 + [False] * 48, alpha=0.05, delta=0.05)
+    assert cert.revoked and not cert.acts
+
+
+def test_eprocess_skips_thresholds_too_sparse_to_certify() -> None:
+    from superlocalmemory.core.judge_calibration import eprocess_certificate as e
+
+    cert = e([0.9] * 80 + [0.6] * 80, [False] * 80 + [True] * 20 + [False] * 60,
+             alpha=0.05, delta=0.05)
+    assert cert.threshold == 0.65
+
+
+def test_eprocess_guarantee_in_simulation() -> None:
+    """At a true error rate exactly alpha, certification happens at most delta of the time
+    (Ville's inequality; checked within 3 Monte-Carlo standard errors)."""
+    rng = random.Random(11)
+    alpha, delta, trials, hits = 0.05, 0.1, 600, 0
+    for _ in range(trials):
+        wrong = [rng.random() < alpha for _ in range(400)]
+        hits += e_cert([0.99] * 400, wrong, alpha, delta)
+    assert hits / trials <= delta + 3 * math.sqrt(delta * (1 - delta) / trials)
+
+
+def e_cert(scores, wrong, alpha, delta):
+    from superlocalmemory.core.judge_calibration import eprocess_certificate
+
+    return eprocess_certificate(scores, wrong, alpha=alpha, delta=delta).acts
 
 
 def test_the_default_grid_starts_where_a_threshold_can_pass() -> None:
@@ -143,9 +201,3 @@ def test_two_risks() -> None:
     assert is_wrong("same", "replaces") and not is_wrong("same", "both_true")
 
 
-def test_checkpoints_and_split_delta() -> None:
-    from superlocalmemory.core.judge_calibration import checkpoints
-
-    assert checkpoints(0.05, 0.05, 58) == []
-    assert checkpoints(0.05, 0.05, 200)[:3] == [59, 74, 93]
-    assert sum(6 / (math.pi ** 2 * t * t) for t in range(1, 10_000)) < 1.0

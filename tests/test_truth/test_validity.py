@@ -25,3 +25,17 @@ def test_a_same_day_date_falls_through_to_the_precise_timestamp() -> None:
                         predecessor_valid_from="2026-10-06") == "2026-10-06T11:26:14+00:00"
     assert closing_time(event_valid_until="2025-01-01", applied_at="2026-10-07",
                         predecessor_valid_from="2026-10-06") == "2026-10-07T00:00:00+00:00"
+
+
+def test_a_bare_date_is_an_interval_not_midnight_utc() -> None:
+    from superlocalmemory.truth.validity import AFTER, BEFORE, INCOMPARABLE, SAME, earlier, order
+
+    assert order("2026-11-15", "2026-11-15T08:00:00+00:00") == INCOMPARABLE  # Fable B3
+    assert not earlier("2026-11-15", "2026-11-15T08:00:00+00:00")
+    assert order("2026-11-13", "2026-11-15T08:00:00+00:00") == BEFORE
+    assert order("2026-11-14", "2026-11-15") == INCOMPARABLE  # zones overlap across a day
+    assert order("2026-11-12", "2026-11-15") == BEFORE
+    assert order("2026-11-15T10:00:00Z", "2026-11-15T09:00:00+00:00") == AFTER
+    assert order("2026-11-15T10:00:00Z", "2026-11-15T10:00:00+00:00") == SAME
+    assert order("2026-11-15", "2026-11-15") == INCOMPARABLE
+    assert order("garbage", "2026-11-15") is None

@@ -117,7 +117,9 @@ class SlotPass:
         """Bind up to ``max_batches`` batches. Returns the outcome counts."""
         if not self._flags.observing("truth.slots"):
             return {}
-        auto_apply = self._flags.enabled("truth.slots.auto_apply")
+        # A child flag never acts beyond its parent: shadow slots retire nothing.
+        auto_apply = (self._flags.enabled("truth.slots.auto_apply")
+                      and self._flags.enabled("truth.slots"))
         after = self._cursor()
         batches = 0
         while not self._stop.is_set():

@@ -5,7 +5,7 @@
 The ladder never starts, warms or swaps a judge: it borrows the one recall
 already has (``memory_kind_wiring.live_judge``). On a Mac that runs Laya, the
 Laya tier answers; on Windows and Linux, where the answer check is Jev, the Jev
-tier answers, and only when the user switched ``judge.ladder.hosted`` on,
+tier answers, and only when the user gave the "judge_ladder_hosted" consent (``core/consent_store``),
 because the ladder sends pairs of memories that no earlier consent covered.
 A machine with neither still works: Tier 0 answers what rules can, the rest
 abstains, and nothing is retired.

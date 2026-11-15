@@ -112,7 +112,8 @@ def select_threshold(scores: Sequence[float], wrong: Sequence[bool], *, alpha: f
 
     ``scores`` are the judge's confidences on items it would act on at some
     threshold; ``wrong[i]`` says acting on item i would have been an error.
-    ``grid`` defaults to every distinct score, strictest first.
+    ``grid`` defaults to every distinct score, strictest first. This is the
+    fixed-n test, for evaluation studies; acting uses ``eprocess_certificate``.
     """
     if len(scores) != len(wrong):
         raise ValueError("scores and wrong must align")
@@ -145,26 +146,11 @@ def clean_decisions_needed(alpha: float, delta: float) -> int:
     return math.ceil(math.log(delta) / math.log1p(-alpha))
 
 
-_LABELLED = """
-SELECT r.confidence, l.label FROM judge_receipts r
-  JOIN judge_labels l ON l.receipt_id = r.receipt_id
- WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
-   AND r.tier = ? AND r.model = ? AND r.verdict = ?
- ORDER BY l.labelled_at, r.receipt_id
-"""
+#: Thresholds tested strictest first, fixed in advance (not chosen from labels).
+GRID = (0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50)
 
 #: The one verdict that retires a memory.
 RETIRING = "replaces"
-
-
-def checkpoints(alpha: float, delta: float, upto: int) -> list[int]:
-    """Label counts at which a gate may be re-evaluated (geometric from n_min)."""
-    first = clean_decisions_needed(alpha, delta)
-    out, n = [], float(first)
-    while math.ceil(n) <= upto:
-        out.append(math.ceil(n))
-        n *= 1.25
-    return out
 
 
 def is_wrong(verdict: str, label: str) -> bool:
@@ -173,53 +159,133 @@ def is_wrong(verdict: str, label: str) -> bool:
     Acting on ``replaces`` is wrong when the truth is anything else (a false
     retirement). Acting on any other verdict closes the question without
     retiring, so it is wrong only when the truth was a replacement (a false
-    keep: the stale memory stays). Confusing "same" with "both true" costs
-    nothing here and is not counted.
+    keep). Confusing "same" with "both true" costs nothing here.
     """
     return label != RETIRING if verdict == RETIRING else label == RETIRING
 
 
-class ActingGate:
-    """Which (tier, model, verdict, confidence) may change memory, from the store's labels.
+@dataclass(frozen=True)
+class Certificate:
+    threshold: float | None
+    alpha: float
+    delta: float
+    certified_at: int | None   # labels needed before E_n first reached 1/delta
+    revoked: bool
+    tested: tuple[tuple[float, int, int, bool], ...]  # (threshold, n, errors, certified)
 
-    For each verdict, the labelled receipts of that profile, question version,
-    tier and model are read in the order they were labelled. The gate is
-    evaluated only at scheduled label counts n_1 < n_2 < ... (``checkpoints``),
-    on the first n_t labels, at level delta_t = delta * 6 / (pi^2 t^2): the
-    deltas sum to at most delta, so re-checking as labels arrive stays valid
-    (optional stopping). A verdict acts when the threshold chosen at the latest
-    checkpoint exists and the confidence reaches it. No labels: nothing acts.
+    @property
+    def acts(self) -> bool:
+        return self.threshold is not None
+
+
+def _crossing(errors: Sequence[bool], log_error: float, log_clean: float,
+              goal: float) -> int | None:
+    log_e = 0.0
+    for i, wrong in enumerate(errors, 1):
+        log_e += log_error if wrong else log_clean
+        if log_e >= goal:
+            return i
+    return None
+
+
+def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alpha: float,
+                         delta: float, grid: Sequence[float] = GRID) -> Certificate:
+    """Anytime-valid certificate that the error rate at a threshold is below alpha.
+
+    ``scores``/``wrong`` must be in the order the labels arrived. For each grid
+    threshold (strictest first), over the items scoring >= it:
+
+        E_n = prod_i (p1/alpha)^X_i * ((1-p1)/(1-alpha))^(1-X_i),   p1 = alpha/5
+
+    is a non-negative supermartingale whenever the true error rate is >= alpha,
+    so by Ville's inequality P(sup_n E_n >= 1/delta) <= delta: certify the first
+    time E_n >= 1/delta, with no penalty for looking after every label. At
+    alpha = delta = 0.05 that is 73 clean labels, 112 with one error, 151 with
+    two. Fixed-sequence testing across the grid keeps the family-wise error at
+    delta. Revocation: on the labels after certification, a second e-process for
+    "error rate <= alpha" against 2*alpha; reaching 1/delta revokes it.
+    """
+    if len(scores) != len(wrong):
+        raise ValueError("scores and wrong must align")
+    if not (0.0 < alpha < 0.5 and 0.0 < delta < 1.0):
+        raise ValueError("need 0 < alpha < 0.5 and 0 < delta < 1")
+    p1 = alpha / 5.0
+    goal = math.log(1.0 / delta)
+    up = (math.log(p1 / alpha), math.log((1 - p1) / (1 - alpha)))
+    down = (math.log(2.0), math.log((1 - 2 * alpha) / (1 - alpha)))
+    # A threshold selecting fewer items than a clean run needs can never certify;
+    # testing it first would stop the sequence at once. Skipping it depends on the
+    # scores only, never the labels, so the test stays valid.
+    floor = math.ceil(goal / up[1])
+    chosen, at, revoked, tested = None, None, False, []
+    for t in sorted(set(grid), reverse=True):
+        seq = [bool(w) for s, w in zip(scores, wrong) if s >= t]
+        if len(seq) < floor and chosen is None:
+            continue
+        cross = _crossing(seq, up[0], up[1], goal)
+        if cross is not None and _crossing(seq[cross:], down[0], down[1], goal) is not None:
+            revoked, cross = True, None
+        tested.append((t, len(seq), sum(seq), cross is not None))
+        if cross is None:
+            break
+        chosen, at = t, cross
+    return Certificate(chosen, alpha, delta, at, revoked, tuple(tested))
+
+
+_AUDITED = """
+SELECT r.receipt_id, r.confidence, l.label, l.labelled_at FROM judge_receipts r
+  JOIN judge_labels l ON l.receipt_id = r.receipt_id
+ WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
+   AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
+   AND l.source = 'audit' AND l.blind = 1
+ ORDER BY l.labelled_at, r.receipt_id
+"""
+
+
+class ActingGate:
+    """Which decisions may change memory, from this store's blind audit labels.
+
+    Key: (profile, question version, tier, model, verdict, population). Only
+    labels with ``source = 'audit'`` and ``blind = 1`` count; rollbacks and
+    reviews raise alarms but never certify (they are not missing at random).
+    A receipt counts once, at its first label time; when its audit labels
+    disagree it counts as an error. A verdict acts only when
+    ``eprocess_certificate`` holds and the confidence reaches its threshold.
+    There is no shipped or pooled prior: every store starts from zero (D-09).
     """
 
     def __init__(self, conn: Any, *, profile_id: str, question_id: str, version: str,
-                 alpha: float = 0.05, delta: float = 0.05) -> None:
+                 alpha_for: Any = None, delta: float | None = None) -> None:
+        from superlocalmemory.core import risk_policy
+
         self._conn, self._profile = conn, profile_id
         self._question, self._version = question_id, version
-        self._alpha, self._delta = alpha, delta
-        self._cache: dict[tuple[str, str, str], Selection | None] = {}
+        self._alpha_for = alpha_for or risk_policy.alpha_for
+        self._delta = risk_policy.DELTA if delta is None else delta
+        self._cache: dict[tuple[str, str, str, str], Certificate] = {}
 
-    def selection(self, tier: str, model: str, verdict: str) -> Selection | None:
-        key = (tier, model, verdict)
+    def certificate(self, tier: str, model: str, verdict: str, population: str) -> Certificate:
+        key = (tier, model, verdict, population)
         if key not in self._cache:
-            rows = self._conn.execute(_LABELLED, (self._profile, self._question, self._version,
-                                                  tier, model, verdict)).fetchall()
-            marks = checkpoints(self._alpha, self._delta, len(rows))
-            if not marks:
-                self._cache[key] = None
-            else:
-                t, n = len(marks), marks[-1]
-                delta_t = self._delta * 6.0 / (math.pi ** 2 * t * t)
-                head = rows[:n]
-                self._cache[key] = select_threshold(
-                    [float(r[0]) for r in head], [is_wrong(verdict, r[1]) for r in head],
-                    alpha=self._alpha, delta=delta_t)
+            rows = self._conn.execute(_AUDITED, (self._profile, self._question, self._version,
+                                                 tier, model, verdict, population)).fetchall()
+            per: dict[str, tuple[float, set[str], str]] = {}
+            for rid, conf, label, at in rows:
+                score, labels, first = per.get(rid, (float(conf), set(), at))
+                per[rid] = (score, labels | {label}, min(first, at))
+            ordered = sorted(per.values(), key=lambda v: v[2])
+            scores = [v[0] for v in ordered]
+            wrong = [len(v[1]) > 1 or is_wrong(verdict, next(iter(v[1]))) for v in ordered]
+            self._cache[key] = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
+                                                    delta=self._delta)
         return self._cache[key]
 
-    def allows(self, tier: str, model: str, verdict: str, confidence: float) -> bool:
-        chosen = self.selection(tier, model, verdict)
-        return chosen is not None and chosen.threshold is not None and confidence >= chosen.threshold
+    def allows(self, tier: str, model: str, verdict: str, confidence: float, *,
+               population: str) -> bool:
+        cert = self.certificate(tier, model, verdict, population)
+        return cert.acts and confidence >= cert.threshold
 
 
-__all__ = ["ActingGate", "RETIRING", "Selection", "ThresholdTest", "binom_cdf", "checkpoints",
+__all__ = ["ActingGate", "Certificate", "GRID", "RETIRING", "Selection", "ThresholdTest", "binom_cdf",
            "clean_decisions_needed", "clopper_pearson_lower", "clopper_pearson_upper", "cohen_kappa",
-           "is_wrong", "select_threshold"]
+           "eprocess_certificate", "is_wrong", "select_threshold"]

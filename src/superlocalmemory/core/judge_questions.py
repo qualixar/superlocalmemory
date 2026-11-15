@@ -3,7 +3,9 @@
 """The typed questions the judge ladder asks, one definition each.
 
 A question fixes its wording, its labels, what may leave the machine, and how
-sure a judge must be before its answer is acted on. Wording and labels stay
+sure a tier must be before the ladder stops escalating (routing only). Whether
+an answer may change memory is never decided here: that is
+``core/judge_calibration.ActingGate`` (blueprint D-09, M-01). Wording and labels stay
 inside the Laya worker's limits (instructions <= 300 characters, 2-10 labels of
 <= 32 characters, descriptions <= 120), so the same question goes unchanged to
 Laya on a Mac and to Jev anywhere.
@@ -32,8 +34,9 @@ class Question:
     #: The named texts each item carries, in order.
     fields: tuple[str, ...]
     privacy: str
-    #: Per-label confidence an answer needs before anything acts on it. A label
-    #: without an entry uses ``default_threshold``.
+    #: ROUTING ONLY: per-label confidence at which the ladder stops asking higher
+    #: tiers. It never authorises a memory change. A label without an entry uses
+    #: ``default_threshold``.
     thresholds: Mapping[str, float] = field(default_factory=dict)
     default_threshold: float = 0.7
 
@@ -64,7 +67,8 @@ SLOT_RELATION = Question(
     }),
     fields=("older", "newer"),
     privacy=HOSTED_WITH_CONSENT,
-    # Retiring a memory is the one consequential answer: it must be surer.
+    # Routing only: escalate "replaces" further before stopping, since it is the
+    # one answer that could lead to a retirement (which still needs a certificate).
     thresholds=MappingProxyType({"replaces": 0.85}),
     default_threshold=0.7,
 )

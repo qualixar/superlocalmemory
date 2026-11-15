@@ -106,7 +106,7 @@ def test_receipts_hold_ids_numbers_and_a_hash_never_text(conn) -> None:
 def test_rules_tier_only_settles_near_identical_wording() -> None:
     rules = RulesTier()
     same = Item("x", "1", "p", {"older": "Set the flag to zero until the release.",
-                                "newer": "set the flag to zero until the release"})
+                                "newer": "set  the flag to ZERO until the release"})
     changed = Item("x", "2", "p", {"older": "The cadence is weekly", "newer": "The cadence is monthly"})
     a, b = rules.answer(SLOT_RELATION, [same, changed])
     assert a is not None and a.verdict == "same" and b is None
@@ -203,6 +203,12 @@ def test_rule_misses_are_not_receipted(conn) -> None:
     ("The cache is enabled", "The cache is not enabled"),
     ("Alex owns the repo", "Sam owns the repo"),
     ("The build runs on CI", "CI runs the build"),
+    # Fable's v2 probes:
+    ("The offset is -5", "The offset is 5"), ("Use a > b", "Use a < b"),
+    ("Check x != y", "Check x = y"), ("It costs $20", "It costs €20"),
+    ("The cache was enabled", "The cache is enabled"), ("Signed on Monday", "Signed by Monday"),
+    ("Use A and B", "Use A or B"), ("Größe ist 5", "Größe ist 6"),
+    ("The build runs on CI", "The build runs on the CI"),
 ])
 def test_rules_never_call_a_changed_statement_same(older, newer) -> None:
     assert RulesTier().answer(SLOT_RELATION, [Item("x", "1", "p", {"older": older,

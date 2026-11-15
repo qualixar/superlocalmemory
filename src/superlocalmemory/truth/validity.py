@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -70,10 +70,80 @@ def _instant(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+#: A date with no time zone is every instant that is that date somewhere on
+#: Earth: from 00:00 at UTC+14 to 24:00 at UTC-12.
+_EARLIEST_ZONE = timedelta(hours=14)
+_LATEST_ZONE = timedelta(hours=12)
+
+BEFORE, AFTER, SAME, INCOMPARABLE = "before", "after", "same", "incomparable"
+
+
+def span(value: object) -> tuple[datetime, datetime] | None:
+    """The instants ``value`` may denote: a point for a timestamp, ~2 days for a bare date."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if _DATE_ONLY.match(text):
+        try:
+            day = datetime.fromisoformat(text + "T00:00:00+00:00")
+        except ValueError:
+            return None
+        return day - _EARLIEST_ZONE, day + timedelta(days=1) + _LATEST_ZONE
+    point = normalise(text)
+    if point is None:
+        return None
+    instant = _instant(point)
+    return instant, instant
+
+
+def order(a: object, b: object) -> str | None:
+    """Interval order: ``a`` before ``b`` only if every instant of ``a`` precedes ``b``.
+
+    Overlapping spans (a bare date and a timestamp on that day, two different
+    rewordings of one day) are ``incomparable``: no conclusion about which came
+    first, so callers must not turn the pair into history or a supersession.
+    None when either side is unreadable.
+    """
+    sa, sb = span(a), span(b)
+    if sa is None or sb is None:
+        return None
+    if sa == sb:
+        return SAME if sa[0] == sa[1] else INCOMPARABLE
+    if sa[1] <= sb[0]:
+        return BEFORE
+    if sb[1] <= sa[0]:
+        return AFTER
+    return INCOMPARABLE
+
+
 def earlier(a: str | None, b: str | None) -> bool:
-    """True when both are readable and ``a`` is strictly before ``b``."""
-    first, second = normalise(a), normalise(b)
-    return first is not None and second is not None and _instant(first) < _instant(second)
+    """True when ``a`` is certainly before ``b`` (interval order)."""
+    return order(a, b) == BEFORE
+
+
+def retire_until(*, reviewer: object, existing: object, derived: object,
+                 predecessor_valid_from: object) -> str | None:
+    """The ``valid_until`` to store when a memory is retired.
+
+    A reviewer's time wins, and is refused (``ValueError``) when it is not after
+    the memory began: a person's input is never silently replaced. Otherwise
+    the earlier of an end already recorded and the successor's takeover: a
+    future expiry set before must not outlive the supersession that ended it
+    sooner. When the two cannot be ordered, the recorded one is kept.
+    """
+    if reviewer is not None:
+        when = normalise(reviewer)
+        if when is None:
+            raise ValueError("event_valid_until is not a readable time")
+        if predecessor_valid_from is not None and order(when, predecessor_valid_from) in (
+                BEFORE, SAME):
+            raise ValueError("event_valid_until is not after the memory began")
+        return when
+    if existing is None:
+        return derived if isinstance(derived, str) else None
+    if derived is None:
+        return str(existing)
+    return str(derived) if order(derived, existing) == BEFORE else str(existing)
 
 
 def successor_takeover(
@@ -97,4 +167,6 @@ def successor_takeover(
     )
 
 
-__all__ = ["closing_time", "earlier", "normalise", "successor_takeover"]
+__all__ = ["AFTER", "BEFORE", "INCOMPARABLE", "SAME", "closing_time", "earlier", "normalise", "order",
+           "retire_until",
+           "span", "successor_takeover"]

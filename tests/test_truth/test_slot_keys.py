@@ -88,8 +88,21 @@ def test_a_leading_participle_is_part_of_the_relation(text, relation) -> None:
     assert key is not None and key.relation_key == relation
 
 
-def test_pattern_keys_cannot_supersede_on_their_own() -> None:
-    from superlocalmemory.truth.slot_store import SUPERSEDE_CONFIDENCE
+def test_only_explicit_keys_supersede_on_their_own() -> None:
+    import sqlite3
 
-    assert extract("The owner of SLM is Alex").confidence < SUPERSEDE_CONFIDENCE
-    assert extract("Alex", explicit="slm/owner").confidence >= SUPERSEDE_CONFIDENCE
+    from superlocalmemory.storage.migrations import M069_memory_slots as M069
+    from superlocalmemory.truth import slot_store as ss
+
+    conn = sqlite3.connect(":memory:")
+    M069.apply(conn)
+    pattern = [extract("The owner of SLM is Alex"), extract("The owner of SLM is Sam")]
+    explicit = [extract("Alex", explicit="slm/maintainer"), extract("Sam", explicit="slm/maintainer")]
+    for key in pattern + explicit:
+        assert key is not None
+    ss.bind(conn, profile_id="p", scope="s", fact_id="f1", key=pattern[0], valid_from="2026-01-01")
+    assert ss.bind(conn, profile_id="p", scope="s", fact_id="f2", key=pattern[1],
+                   valid_from="2026-02-01").outcome == ss.DISPUTE
+    ss.bind(conn, profile_id="p", scope="s", fact_id="f3", key=explicit[0], valid_from="2026-01-01")
+    assert ss.bind(conn, profile_id="p", scope="s", fact_id="f4", key=explicit[1],
+                   valid_from="2026-02-01").outcome == ss.SUPERSEDE

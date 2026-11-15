@@ -83,3 +83,24 @@ def test_rollback_restores_the_open_interval_exactly(tmp_path) -> None:
     store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1")
     store.rollback("c1", expected_version=1, actor=_ACTOR, operation_id="r1")
     assert _until(store) is None
+
+
+def test_an_inverted_reviewer_time_is_refused_loudly(tmp_path) -> None:
+    from superlocalmemory.storage.correction_cases import CorrectionCaseError
+
+    store = _store(tmp_path, successor_tv_from=None, successor_created=None)
+    with pytest.raises(CorrectionCaseError, match="not after the memory began"):
+        store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1",
+                    event_valid_until="2025-12-01T00:00:00+00:00")
+    assert _until(store) is None
+
+
+def test_an_earlier_takeover_beats_a_later_recorded_expiry(tmp_path) -> None:
+    store = _store(tmp_path, successor_tv_from="2026-03-01T00:00:00+00:00", successor_created=None)
+    with sqlite3.connect(store.path) as conn:
+        conn.execute("UPDATE fact_temporal_validity SET valid_until='2027-01-01T00:00:00+00:00' "
+                     "WHERE fact_id='old'")
+    store.apply("c1", expected_version=0, actor=_ACTOR, operation_id="a1")
+    assert _until(store) == "2026-03-01T00:00:00+00:00"
+    store.rollback("c1", expected_version=1, actor=_ACTOR, operation_id="r1")
+    assert _until(store) == "2027-01-01T00:00:00+00:00"  # exact restore

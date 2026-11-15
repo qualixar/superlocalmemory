@@ -40,22 +40,25 @@ def _open(db) -> int:
     return db.execute("SELECT COUNT(*) AS n FROM slot_disputes WHERE state='open'")[0]["n"]
 
 
-def _calibrate(db, verdict, *, n=200, wrong=0, tier="laya"):
+def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="audit"):
     """Seed labelled receipts, as a person's reviews would, so the gate can decide."""
+    n = n if n is not None else (80 if verdict == "replaces" else 400)
     with db.raw_connection() as conn:
         for i in range(n):
             rid = f"seed-{verdict}-{i}"
             conn.execute(
                 "INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
-                "question_version, subject_kind, subject_id, tier, model, verdict, confidence, "
-                "threshold, accepted, calibration_id, inputs_hash, decided_at) VALUES "
-                "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, ?, 'fake', ?, 0.95, 0.7, 1, 'c', "
-                "'h', '2026-11-15T00:00:00+00:00')",
-                (rid, SLOT_RELATION.version, rid, tier, verdict))
+                "question_version, subject_kind, subject_id, population, tier, model, verdict, "
+                "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at) VALUES "
+                "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, 'slot_dispute', ?, 'fake', ?, 0.95, "
+                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00')",
+                (rid, SLOT_RELATION.version, rid, tier, verdict, "seed-" + rid))
             truth = ("replaces" if verdict != "replaces" else "unrelated") if i < wrong \
                 else verdict
-            conn.execute("INSERT INTO judge_labels VALUES (?, ?, 'review', ?)",
-                         (rid, truth, f"2026-11-15T00:{i // 60:02d}:{i % 60:02d}+00:00"))
+            conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
+                         "labelled_at) VALUES (?, ?, ?, 'auditor', ?, ?)",
+                         (rid, truth, source, blind,
+                          f"2026-11-15T{i // 3600:02d}:{i // 60 % 60:02d}:{i % 60:02d}+00:00"))
 
 
 def _run(db, verdict, *, confidence=0.95, calibrated=True, **flags):
@@ -136,7 +139,7 @@ def test_without_labels_nothing_acts(disputed) -> None:
 
 def test_labels_with_too_many_errors_keep_it_held(disputed) -> None:
     db, old, _new = disputed
-    _calibrate(db, "replaces", n=200, wrong=20)
+    _calibrate(db, "replaces", n=200, wrong=20)  # an error rate near 10%
     counts, _ = _run(db, "replaces", calibrated=False,
                      **{"judge.ladder": "on", "truth.slots.auto_apply": "on"})
     assert counts["held_uncalibrated"] == 1 and _retired(db, old) == (None, None, None)
@@ -144,7 +147,7 @@ def test_labels_with_too_many_errors_keep_it_held(disputed) -> None:
 
 def test_too_few_clean_labels_are_not_enough(disputed) -> None:
     db, _old, _new = disputed
-    _calibrate(db, "same", n=90)
+    _calibrate(db, "same", n=300)  # alpha_close 0.01 needs ~373 clean
     counts, _ = _run(db, "same", calibrated=False, **{"judge.ladder": "on"})
     assert counts["held_uncalibrated"] == 1
 
@@ -154,3 +157,20 @@ def test_auto_apply_needs_slots_on_not_shadow(disputed) -> None:
     counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "shadow",
                                         "truth.slots.auto_apply": "on"})
     assert counts["held_for_review"] == 1 and _retired(db, old) == (None, None, None)
+
+
+def test_review_labels_never_certify(disputed) -> None:
+    db, old, _new = disputed
+    _calibrate(db, "replaces", n=200, source="review")
+    counts, _ = _run(db, "replaces", calibrated=False,
+                     **{"judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"})
+    assert counts["held_uncalibrated"] == 1 and _retired(db, old) == (None, None, None)
+
+
+def test_a_decision_made_in_shadow_is_acted_on_later_without_re_asking(disputed) -> None:
+    db, old, new = disputed
+    _run(db, "replaces", calibrated=False, **{"judge.ladder": "shadow"})
+    counts, tier = _run(db, "replaces",
+                        **{"judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"})
+    assert tier.calls == 0 and counts["resolved_replaces"] == 1
+    assert _retired(db, old)[2] == new

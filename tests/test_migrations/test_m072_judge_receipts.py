@@ -17,7 +17,25 @@ def test_registered_additive_idempotent_repairable() -> None:
     M072.apply(conn)
     M072.apply(conn)
     assert M072.verify(conn)
-    conn.execute("DROP INDEX idx_judge_receipts_subject")
+    conn.execute("DROP INDEX idx_judge_receipts_inputs")
     assert not M072.verify(conn)
     M072.repair(conn)
     assert M072.verify(conn)
+
+
+def test_erasing_a_fact_erases_the_receipts_that_judged_it() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE atomic_facts (fact_id TEXT PRIMARY KEY)")
+    M072.apply(conn)
+    conn.executemany("INSERT INTO atomic_facts VALUES (?)", [("f1",), ("f2",), ("f3",)])
+    for rid, facts in (("r1", '["f1", "f2"]'), ("r2", '["f3"]')):
+        conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
+                     "question_version, subject_kind, subject_id, fact_ids_json, tier, model, "
+                     "verdict, confidence, threshold, accepted, calibration_id, inputs_hash, "
+                     "decided_at) VALUES (?, 'p', 'Q', '2', 's', 'x', ?, 'jev', 'm', 'same', 0.9, "
+                     "0.7, 1, 'c', 'h', 't')", (rid, facts))
+        conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labelled_at) "
+                     "VALUES (?, 'same', 'audit', 't')", (rid,))
+    conn.execute("DELETE FROM atomic_facts WHERE fact_id = 'f2'")
+    assert [r[0] for r in conn.execute("SELECT receipt_id FROM judge_receipts")] == ["r2"]
+    assert [r[0] for r in conn.execute("SELECT receipt_id FROM judge_labels")] == ["r2"]

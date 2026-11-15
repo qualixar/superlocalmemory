@@ -29,10 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from superlocalmemory.truth.slot_keys import SlotKey
-from superlocalmemory.truth.validity import earlier, normalise
-
-#: A key below this confidence opens a dispute instead of superseding.
-SUPERSEDE_CONFIDENCE = 0.75
+from superlocalmemory.truth.validity import BEFORE, INCOMPARABLE, order
 
 HEAD, DUPLICATE, COMPATIBLE, HISTORICAL, SUPERSEDE, DISPUTE = (
     "head", "duplicate", "compatible", "historical", "supersede", "dispute")
@@ -122,9 +119,14 @@ def _decide(key: SlotKey, head: tuple | None, valid_from: str | None) -> str:
         return DUPLICATE
     if key.cardinality == "plural":
         return COMPATIBLE
-    if earlier(valid_from, head[3] or head[4]):
+    when = order(valid_from, head[3] or head[4])
+    if when == BEFORE:
         return HISTORICAL
-    return SUPERSEDE if key.confidence >= SUPERSEDE_CONFIDENCE else DISPUTE
+    if when == INCOMPARABLE:
+        return DISPUTE  # cannot tell which value is newer: a person or a judge decides
+    # Only a key the writer named explicitly supersedes on its own (D-10, R-18);
+    # every other new value is a question for a person or a certified judge.
+    return SUPERSEDE if key.key_source == "explicit" else DISPUTE
 
 
 def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str, key: SlotKey,
@@ -139,7 +141,8 @@ def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str,
         return Binding(outcome=str(existing[0]), slot_id=slot_id, revision_id=revision_id)
     head_id, version = _ensure_slot(conn, slot_id, profile_id, scope, key, now)
     head = _head(conn, head_id)
-    when = normalise(valid_from)
+    # Kept as written: a bare date must stay a date (an interval), not become midnight UTC.
+    when = valid_from.strip() if isinstance(valid_from, str) and valid_from.strip() else None
     outcome = _decide(key, head, when)
     common = {"revision_id": revision_id, "slot_id": slot_id, "profile_id": profile_id,
               "fact_id": fact_id, "key": key, "decided_by": decided_by, "valid_from": when,
@@ -161,10 +164,12 @@ def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str,
         conn.execute("UPDATE slot_revisions SET state = 'superseded', superseded_by = ? "
                      "WHERE revision_id = ?", (revision_id, head[0]))
         return Binding(SUPERSEDE, slot_id, revision_id, head[1], head[0])
-    _insert_revision(conn, state="disputed", reason="uncertain_key", **common)
+    reason = ("incomparable_time" if order(when, head[3] or head[4]) == INCOMPARABLE
+              else "pattern_key")
+    _insert_revision(conn, state="disputed", reason=reason, **common)
     dispute_id = open_dispute(conn, slot_id=slot_id, profile_id=profile_id,
                               revision_a=head[0], revision_b=revision_id,
-                              reason_code="uncertain_key", opened_by=decided_by)
+                              reason_code=reason, opened_by=decided_by)
     _move_head(conn, slot_id, version, head[0], "disputed", now)
     return Binding(DISPUTE, slot_id, revision_id, head[1], head[0], dispute_id)
 
@@ -211,10 +216,9 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     head, version = conn.execute("SELECT head_revision_id, version FROM memory_slots "
                                  "WHERE slot_id = ?", (slot_id,)).fetchone()
     if head != rev_a:
-        # The slot moved on since this dispute opened (another dispute was settled
-        # first): deciding it now would act on a value that is no longer current.
-        conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = ?, "
-                     "resolved_at = ? WHERE dispute_id = ?", (resolved_by, now, dispute_id))
+        # The slot moved on since this dispute opened: deciding it now would act on
+        # a value that is no longer current. Nothing is written here, so the caller
+        # can roll back anything it did first and then ``dismiss_dispute``.
         raise StaleDisputeError(f"dispute {dispute_id} no longer names the current value")
     version = int(version)
     winner, loser = {"a": (rev_a, rev_b), "b": (rev_b, rev_a)}.get(resolution, (None, None))
@@ -246,26 +250,33 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     return retire
 
 
-def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) -> None:
-    """Point the slot's other open disputes at its head (or dismiss them).
+def dismiss_dispute(conn: sqlite3.Connection, dispute_id: str, *, by: str) -> None:
+    conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = ?, resolved_at = ? "
+                 "WHERE dispute_id = ? AND state = 'open'", (by, _now(), dispute_id))
 
-    Without this, a dispute opened against an old head could later be settled
-    as "same" and move the head back onto a value already superseded.
+
+def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) -> None:
+    """Re-open the slot's other open disputes against its head, as NEW disputes.
+
+    A dispute is a question about one pair. When the head moves, (old head, C)
+    is no longer the question; (new head, C) is. Keeping the id would let a
+    verdict already given for the old pair stand for the new one, so the old
+    dispute is dismissed and a new one opened (judged afresh: its pair, and so
+    its keyed inputs hash, differs).
     """
     head = conn.execute("SELECT head_revision_id FROM memory_slots WHERE slot_id = ?",
                         (slot_id,)).fetchone()[0]
-    others = conn.execute("SELECT dispute_id, revision_a, revision_b FROM slot_disputes "
-                          "WHERE slot_id = ? AND state = 'open' AND dispute_id != ?",
-                          (slot_id, settled)).fetchall()
-    for dispute_id, rev_a, rev_b in others:
+    others = conn.execute("SELECT dispute_id, profile_id, revision_a, revision_b, reason_code "
+                          "FROM slot_disputes WHERE slot_id = ? AND state = 'open' "
+                          "AND dispute_id != ?", (slot_id, settled)).fetchall()
+    for dispute_id, profile_id, rev_a, rev_b, reason in others:
         if rev_a == head:
             continue
-        if head is None or rev_b == head:
-            conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = "
-                         "'reanchor', resolved_at = ? WHERE dispute_id = ?", (now, dispute_id))
-        else:
-            conn.execute("UPDATE slot_disputes SET revision_a = ? WHERE dispute_id = ?",
-                         (head, dispute_id))
+        conn.execute("UPDATE slot_disputes SET state = 'dismissed', resolved_by = 'reanchor', "
+                     "resolved_at = ? WHERE dispute_id = ?", (now, dispute_id))
+        if head is not None and rev_b != head:
+            open_dispute(conn, slot_id=slot_id, profile_id=profile_id, revision_a=head,
+                         revision_b=rev_b, reason_code=reason, opened_by="reanchor")
     state = "disputed" if conn.execute(
         "SELECT 1 FROM slot_disputes WHERE slot_id = ? AND state = 'open'", (slot_id,)
     ).fetchone() else ("current" if head is not None else "empty")
@@ -273,5 +284,5 @@ def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) ->
 
 
 __all__ = ["Binding", "RESOLUTIONS", "resolve_dispute", "COMPATIBLE", "DISPUTE", "DUPLICATE", "HEAD", "HISTORICAL",
-           "SUPERSEDE", "SUPERSEDE_CONFIDENCE", "SlotConflictError", "StaleDisputeError", "bind", "open_dispute",
+           "SUPERSEDE", "SlotConflictError", "StaleDisputeError", "dismiss_dispute", "bind", "open_dispute",
            "record_case", "revision_id_for", "slot_id_for"]

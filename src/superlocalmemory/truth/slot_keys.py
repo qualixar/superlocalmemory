@@ -30,12 +30,10 @@ from typing import Callable
 #: Above this a memory is a narrative, not a value statement.
 MAX_CHARS = 240
 EXPLICIT_CONFIDENCE = 1.0
-#: Below ``slot_store.SUPERSEDE_CONFIDENCE`` on purpose. The 15 Nov shadow
-#: reading of a 43k-fact store found pattern keys right about the *slot* but
-#: unable to tell a changed value from a paraphrase ("advice is to set X" in
-#: two spellings) -- that is the judge's DUPLICATE / SUPERSEDES question. A
-#: pattern key therefore opens a dispute for the ladder; only an explicit key
-#: supersedes on its own.
+#: Descriptive only: what decides supersession is ``key_source`` (an explicit
+#: key may supersede; a pattern key opens a dispute), never this number. The
+#: 15 Nov shadow reading found pattern keys right about the slot but unable to
+#: tell a changed value from a paraphrase (blueprint D-10, F-10..F-12).
 PATTERN_CONFIDENCE = 0.6
 
 _DETERMINERS = re.compile(r"^(?:the|a|an|my|our|its|their|his|her|your)\s+", re.IGNORECASE)

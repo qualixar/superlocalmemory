@@ -88,7 +88,7 @@ def test_an_older_value_joins_history_without_replacing(conn) -> None:
 
 def test_an_unconfident_key_opens_a_dispute_and_keeps_the_head(conn) -> None:
     head = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
-    weak = replace(extract("The release cadence of SLM is weekly"), confidence=0.5)
+    weak = extract("The release cadence of SLM is weekly")  # a pattern key
     d = _bind(conn, "f2", "", "2026-02-01", key=weak)
     assert d.outcome == ss.DISPUTE and d.dispute_id
     assert _slot(conn, head.slot_id)[0:2] == (head.revision_id, "disputed")
@@ -100,7 +100,7 @@ def test_an_unconfident_key_opens_a_dispute_and_keeps_the_head(conn) -> None:
     ("both", (), False, "current"), ("neither", ("f1", "f2"), None, "empty")])
 def test_dispute_resolution(conn, resolution, retire, head_is_b, state) -> None:
     head = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
-    weak = replace(extract("The release cadence of SLM is weekly"), confidence=0.5)
+    weak = extract("The release cadence of SLM is weekly")  # a pattern key
     d = _bind(conn, "f2", "", "2026-02-01", key=weak)
     assert ss.resolve_dispute(conn, d.dispute_id, resolution, resolved_by="user") == retire
     slot_head, slot_state, _ = _slot(conn, head.slot_id)
@@ -160,24 +160,40 @@ def test_record_case_links_the_ledger(conn) -> None:
 
 
 def test_a_dispute_against_a_superseded_head_cannot_move_the_head_back(conn) -> None:
-    """Fable's reproduction: A head; B and C both dispute A; settle (A,B) as b, then (A,C) as same."""
-    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), confidence=0.5))
-    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), confidence=0.5))
-    c = _bind(conn, "f3", "", "2026-03-01", key=replace(_explicit("daily"), confidence=0.5))
+    """Fable's reproduction: A head; B and C both dispute A; settle (A,B) as b, then (A,C) as same.
+
+    Re-anchoring opens a NEW dispute for (B, C): a verdict on (A, C) must not stand for it."""
+    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), key_source="pattern"))
+    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), key_source="pattern"))
+    c = _bind(conn, "f3", "", "2026-03-01", key=replace(_explicit("daily"), key_source="pattern"))
     assert (b.outcome, c.outcome) == (ss.DISPUTE, ss.DISPUTE)
     assert ss.resolve_dispute(conn, b.dispute_id, "b", resolved_by="user") == ("f1",)
-    anchored = conn.execute("SELECT revision_a FROM slot_disputes WHERE dispute_id = ?",
-                            (c.dispute_id,)).fetchone()[0]
-    assert anchored == b.revision_id  # re-anchored on the new head
-    ss.resolve_dispute(conn, c.dispute_id, "same", resolved_by="user")
+    assert conn.execute("SELECT state FROM slot_disputes WHERE dispute_id = ?",
+                        (c.dispute_id,)).fetchone() == ("dismissed",)
+    new_id, anchored = conn.execute("SELECT dispute_id, revision_a FROM slot_disputes "
+                                    "WHERE state = 'open'").fetchone()
+    assert anchored == b.revision_id and new_id != c.dispute_id
+    ss.resolve_dispute(conn, new_id, "same", resolved_by="user")
     assert _slot(conn, a.slot_id)[0] == b.revision_id  # never back on superseded A
 
 
 def test_a_stale_dispute_is_dismissed_not_applied(conn) -> None:
-    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), confidence=0.5))
-    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), confidence=0.5))
+    a = _bind(conn, "f1", "", "2026-01-01", key=replace(_explicit("monthly"), key_source="pattern"))
+    b = _bind(conn, "f2", "", "2026-02-01", key=replace(_explicit("weekly"), key_source="pattern"))
     conn.execute("UPDATE memory_slots SET head_revision_id = ?", (b.revision_id,))
     with pytest.raises(ss.StaleDisputeError):
         ss.resolve_dispute(conn, b.dispute_id, "a", resolved_by="user")
+    assert conn.execute("SELECT state FROM slot_disputes").fetchone() == ("open",)  # nothing written
+    ss.dismiss_dispute(conn, b.dispute_id, by="user")
     assert conn.execute("SELECT state FROM slot_disputes").fetchone() == ("dismissed",)
     assert _slot(conn, a.slot_id)[0] == b.revision_id
+
+
+def test_a_same_day_date_against_a_timestamp_opens_a_dispute_not_history(conn) -> None:
+    head = _bind(conn, "f1", "", "2026-11-15T08:00:00+00:00", key=_explicit("monthly"))
+    same_day = _bind(conn, "f2", "", "2026-11-15", key=_explicit("weekly"))
+    assert same_day.outcome == ss.DISPUTE
+    assert conn.execute("SELECT reason_code FROM slot_disputes").fetchone() == ("incomparable_time",)
+    assert _slot(conn, head.slot_id)[0] == head.revision_id
+    assert conn.execute("SELECT valid_from FROM slot_revisions WHERE fact_id='f2'").fetchone() == (
+        "2026-11-15",)  # kept as a date

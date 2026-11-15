@@ -278,12 +278,16 @@ class MaintenanceScheduler:
             self._slot_job.run()
             self._record_step("slot pass", True)
             if flags.observing("judge.ladder"):
+                from superlocalmemory.core import consent_store
                 from superlocalmemory.core.judge_tiers import build_ladder
                 from superlocalmemory.truth.dispute_pass import DisputePass
 
-                ladder = build_ladder(self._judge_supplier,
-                                      hosted_consent=lambda: flags.enabled("judge.ladder.hosted"))
-                DisputePass(self._db, flags, ladder).run()
+                home = canonical_data_root()
+                ladder = build_ladder(self._judge_supplier, hosted_consent=lambda: consent_store.given(
+                    home, "judge_ladder_hosted"))
+                from superlocalmemory.core.receipt_key import load_or_create
+
+                DisputePass(self._db, flags, ladder, hash_key=load_or_create(home)).run()
                 self._record_step("dispute pass", True)
         except Exception as exc:  # noqa: BLE001
             self._record_step("slot pass", False, str(exc))

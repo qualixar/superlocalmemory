@@ -447,7 +447,7 @@ class JevSufficiencyJudge:
                    consent: bool) -> list[Any] | None:
         """Judge-ladder answers for ``items`` from ONE request, or None. Never retried.
 
-        ``consent`` is the ladder's own opt-in (the ``judge.ladder.hosted`` flag):
+        ``consent`` is the ladder's own opt-in (``consent_store`` "judge_ladder_hosted"):
         it sends pairs of memories, which neither the answer check nor typing
         consent covered. Only the literal ``True`` counts. Background threads
         only, and only while the answer check itself is still Jev with consent.
