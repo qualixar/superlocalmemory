@@ -490,10 +490,17 @@ class MemoryEngine:
                 self._db, self._config, self._profile_id,
                 embedder=self._embedder,  # v3.8.2: periodic NULL-embedding self-heal
                 fact_writer=self._store_coverage_fact,  # 4.2.5: coverage backfill
+                judge_supplier=self._live_judge,  # 4.2.30: the judge ladder
             )
             self._maintenance_scheduler.start()
         except Exception as exc:
             logger.debug("Maintenance scheduler init failed: %s", exc)
+
+    def _live_judge(self) -> Any:
+        """The answer check's running judge, or None (borrowed, never started)."""
+        from superlocalmemory.core.memory_kind_wiring import live_judge
+
+        return live_judge(self)
 
     def _process_pending_memories(self) -> None:
         """Process pending memories from store-first async pattern.

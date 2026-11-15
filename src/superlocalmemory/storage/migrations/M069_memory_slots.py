@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS slot_disputes (
     revision_b   TEXT NOT NULL,
     state        TEXT NOT NULL DEFAULT 'open'
                  CHECK (state IN ('open', 'resolved', 'dismissed')),
-    resolution   TEXT CHECK (resolution IS NULL OR resolution IN ('a', 'b', 'both', 'neither')),
+    resolution   TEXT CHECK (resolution IS NULL OR resolution IN
+                 ('a', 'b', 'both', 'neither', 'same', 'unrelated')),
     reason_code  TEXT NOT NULL,
     opened_by    TEXT NOT NULL,
     opened_at    TEXT NOT NULL,

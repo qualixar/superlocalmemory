@@ -182,7 +182,7 @@ def record_case(conn: sqlite3.Connection, revision_id: str, case_id: str) -> Non
                  (case_id, revision_id))
 
 
-RESOLUTIONS = ("a", "b", "both", "neither")
+RESOLUTIONS = ("a", "b", "both", "neither", "same", "unrelated")
 
 
 def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, *,
@@ -190,9 +190,11 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     """Settle an open dispute. Returns the fact ids the caller must retire.
 
     ``a`` keeps the earlier value, ``b`` takes the newer one, ``both`` keeps
-    both as compatible values, ``neither`` says neither is true now: both stay
-    on record as history and the slot has no current value until a new memory
-    arrives. Retiring facts goes through the correction ledger, by the caller.
+    both as compatible values, ``same`` marks the newer one a duplicate of the
+    head, ``unrelated`` says the key was wrong and both stay current, and
+    ``neither`` says neither is true now: both stay on record as history and
+    the slot has no current value until a new memory arrives. Retiring facts
+    goes through the correction ledger, by the caller.
     """
     if resolution not in RESOLUTIONS:
         raise ValueError(f"resolution must be one of {RESOLUTIONS}")
@@ -214,9 +216,10 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
         _move_head(conn, slot_id, version, winner, "current", now)
         retire = (conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
                                (loser,)).fetchone()[0],)
-    elif resolution == "both":
-        conn.execute("UPDATE slot_revisions SET state = 'compatible' WHERE revision_id = ?",
-                     (rev_b,))
+    elif resolution in ("both", "same", "unrelated"):
+        state = "duplicate" if resolution == "same" else "compatible"
+        conn.execute("UPDATE slot_revisions SET state = ? WHERE revision_id = ?",
+                     (state, rev_b))
         _move_head(conn, slot_id, version, rev_a, "current", now)
     else:
         conn.execute("UPDATE slot_revisions SET state = 'historical', superseded_by = NULL "

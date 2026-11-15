@@ -75,7 +75,8 @@ from pathlib import Path
 #: M068 runs M062's stub pass again for the newer shapes (data only), floor 51.
 #: M069 (slots), M070 (memory leases) and M071 (closing the valid time of
 #: retired memories, data + undo) are additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 71
+#: M072 (judge receipts and labels) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 72
 
 
 class SchemaVersionError(RuntimeError):

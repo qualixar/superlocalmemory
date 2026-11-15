@@ -220,6 +220,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M071_superseded_validity_is_closed as _M071,
 )
+from superlocalmemory.storage.migrations import (
+    M072_judge_receipts as _M072,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -472,4 +475,7 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M071 closes the valid time of memories applied corrections retired, with an
     # undo record. Deferred: it reads correction_cases and fact_temporal_validity.
     Migration(name=_M071.NAME, db_target="memory", ddl=_M071.DDL),
+    # M072 adds judge receipts and labels (core/judge_ladder.py). Deferred with
+    # the rest of the 4.2.30 truth layer it records decisions for.
+    Migration(name=_M072.NAME, db_target="memory", ddl=_M072.DDL),
 ]

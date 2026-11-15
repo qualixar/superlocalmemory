@@ -92,6 +92,25 @@ def is_stub(text: str) -> bool:
                            or _RECEIPT.fullmatch(value) or _hook_line(value)))
 
 
+#: The extraction model's rewordings of a session's end ("The conversation ended
+#: at 2026-09-04 13:32", "2026-08-16 is the end date of X's session", "The
+#: session ended at 18:47 on October 8, 2026"). ``is_stub`` does not yet include
+#: them: folding them in changes what session start shows and needs a data
+#: migration of its own. The judge ladder uses this now, so two such records are
+#: never judged as one replacing the other.
+_SESSION_END_REWORDED = re.compile(
+    r"^(?:the\s+)?(?:\[[^\]]+\]\s*)?(?:session|conversation|chat)\s+(?:ended|closed|finished)"
+    r"(?:\s+(?:at|on))?\s+[\w ,:.+-]{4,60}$"
+    r"|^[\w ,:.+-]{4,40}\s+is\s+the\s+(?:end\s+date|date\s+when)\b.{0,60}\bsession(?:\s+ended)?\.?$",
+    re.IGNORECASE)
+
+
+def is_event_record(text: str) -> bool:
+    """Bookkeeping of a moment (``is_stub``) or a reworded session end."""
+    value = (text or "").strip()
+    return bool(value) and (is_stub(value) or bool(_SESSION_END_REWORDED.match(value)))
+
+
 def _hook_line(value: str) -> bool:
     return bool(_HOOK_SESSION.fullmatch(value) or _AGENT_CHECKPOINT.fullmatch(value)
                 or _FILE_CHANGED.fullmatch(value) or _FILE_LIST.fullmatch(value)

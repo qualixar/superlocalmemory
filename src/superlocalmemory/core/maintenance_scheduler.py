@@ -106,8 +106,11 @@ class MaintenanceScheduler:
         profile_id: str = "default",
         embedder: object | None = None,
         fact_writer: Callable[[Any], object] | None = None,
+        judge_supplier: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
+        # 4.2.30: the answer check's live judge, borrowed by the judge ladder.
+        self._judge_supplier = judge_supplier
         # 4.2.5: stores one prebuilt fact with full enrichment; the coverage
         # backfill needs it (core/coverage_backfill.py).
         self._fact_writer = fact_writer
@@ -274,6 +277,14 @@ class MaintenanceScheduler:
             self._slot_job = SlotPass(self._db, flags, state_dir=state_path("backfill"))
             self._slot_job.run()
             self._record_step("slot pass", True)
+            if flags.observing("judge.ladder"):
+                from superlocalmemory.core.judge_tiers import build_ladder
+                from superlocalmemory.truth.dispute_pass import DisputePass
+
+                ladder = build_ladder(self._judge_supplier,
+                                      hosted_consent=lambda: flags.enabled("judge.ladder.hosted"))
+                DisputePass(self._db, flags, ladder).run()
+                self._record_step("dispute pass", True)
         except Exception as exc:  # noqa: BLE001
             self._record_step("slot pass", False, str(exc))
 

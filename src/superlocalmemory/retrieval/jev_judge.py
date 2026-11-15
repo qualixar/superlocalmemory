@@ -443,6 +443,36 @@ class JevSufficiencyJudge:
                            self._provider)
         return answers
 
+    def ask_ladder(self, question: Any, items: Sequence[Any], *,
+                   consent: bool) -> list[Any] | None:
+        """Judge-ladder answers for ``items`` from ONE request, or None. Never retried.
+
+        ``consent`` is the ladder's own opt-in (the ``judge.ladder.hosted`` flag):
+        it sends pairs of memories, which neither the answer check nor typing
+        consent covered. Only the literal ``True`` counts. Background threads
+        only, and only while the answer check itself is still Jev with consent.
+        """
+        from superlocalmemory.retrieval import judge_ask
+
+        if consent is not True or not recall_gate.is_background_work():
+            return None
+        if self._hosted.closed or not self._still_chosen(rerank=False):
+            return None
+        key = self._usable_key()
+        body = judge_ask.jev_body(self._model, question, items) if key else None
+        if body is None:
+            return None
+        recall_gate.wait_for_foreground_idle()
+        raw = self._send(key, None, json=body)
+        if raw is None:
+            return None
+        answers = judge_ask.read_jev(
+            raw, body, question, self._model, f"jev:{self._model}:uncalibrated",
+            lambda returned: _is_requested_model(returned, self._model))
+        if answers is None:
+            logger.warning("jev ladder: malformed response from %s; ignoring it", self._provider)
+        return answers
+
     # -- the optional reordering -------------------------------------------
 
     def rerank_and_judge(self, query: str, documents: Sequence[JudgeDocument], *,
