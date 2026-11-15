@@ -57,13 +57,10 @@ CREATE TABLE IF NOT EXISTS memory_slots (
     subject_key      TEXT NOT NULL,
     relation_key     TEXT NOT NULL,
     qualifier        TEXT NOT NULL DEFAULT '',
-    cardinality      TEXT NOT NULL DEFAULT 'single'
-                     CHECK (cardinality IN ('single', 'plural')),
-    key_source       TEXT NOT NULL
-                     CHECK (key_source IN ('explicit', 'pattern', 'pair', 'judge')),
+    cardinality      TEXT NOT NULL DEFAULT 'single',
+    key_source       TEXT NOT NULL,
     head_revision_id TEXT,
-    state            TEXT NOT NULL DEFAULT 'empty'
-                     CHECK (state IN ('current', 'disputed', 'empty')),
+    state            TEXT NOT NULL DEFAULT 'empty',
     version          INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
@@ -75,9 +72,7 @@ CREATE TABLE IF NOT EXISTS slot_revisions (
     profile_id   TEXT NOT NULL,
     fact_id      TEXT NOT NULL,
     value_hash   TEXT NOT NULL,
-    state        TEXT NOT NULL
-                 CHECK (state IN ('head', 'superseded', 'compatible', 'duplicate',
-                                  'disputed', 'historical')),
+    state        TEXT NOT NULL,
     superseded_by TEXT,
     decided_by   TEXT NOT NULL,
     reason_code  TEXT NOT NULL,
@@ -95,10 +90,8 @@ CREATE TABLE IF NOT EXISTS slot_disputes (
     profile_id   TEXT NOT NULL,
     revision_a   TEXT NOT NULL,
     revision_b   TEXT NOT NULL,
-    state        TEXT NOT NULL DEFAULT 'open'
-                 CHECK (state IN ('open', 'resolved', 'dismissed')),
-    resolution   TEXT CHECK (resolution IS NULL OR resolution IN
-                 ('a', 'b', 'both', 'neither', 'same', 'unrelated')),
+    state        TEXT NOT NULL DEFAULT 'open',
+    resolution   TEXT,
     reason_code  TEXT NOT NULL,
     opened_by    TEXT NOT NULL,
     opened_at    TEXT NOT NULL,
@@ -125,7 +118,7 @@ CREATE TABLE IF NOT EXISTS slot_key_alias (
 CREATE INDEX IF NOT EXISTS idx_slot_key_alias_slot ON slot_key_alias (slot_id);
 CREATE TABLE IF NOT EXISTS slot_pass_queue (
     fact_id    TEXT PRIMARY KEY,
-    reason     TEXT NOT NULL CHECK (reason IN ('rebind', 'retry')),
+    reason     TEXT NOT NULL,
     attempts   INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     next_at    TEXT NOT NULL,
     last_error TEXT,
@@ -151,9 +144,13 @@ BEGIN
     UPDATE memory_slots SET head_revision_id = NULL WHERE head_revision_id = OLD.revision_id;
     INSERT OR REPLACE INTO slot_pass_queue (fact_id, reason, attempts, next_at, queued_at)
         SELECT r.fact_id, 'rebind', 0, {_NOW_SQL}, {_NOW_SQL} FROM slot_revisions r
-         WHERE OLD.state = 'head' AND r.slot_id = OLD.slot_id AND r.state != 'superseded';
+         WHERE OLD.state = 'head' AND r.slot_id = OLD.slot_id
+           AND r.state NOT IN ('superseded', 'unbound');
+    -- An unbound revision is a keying error on record (R-22): rebinding it would
+    -- put the fact back under the key a judge said was wrong, so it stays.
     DELETE FROM slot_revisions
-     WHERE OLD.state = 'head' AND slot_id = OLD.slot_id AND state != 'superseded';
+     WHERE OLD.state = 'head' AND slot_id = OLD.slot_id
+       AND state NOT IN ('superseded', 'unbound');
     -- Rows deleted just above do not fire this trigger (recursive_triggers is off),
     -- so clean up whatever now dangles in the slot, not only what named OLD.
     DELETE FROM slot_disputes
@@ -199,7 +196,7 @@ _OBJECTS = ("memory_slots", "slot_revisions", "slot_disputes", "uq_slot_disputes
             "slot_key_alias", "slot_pass_queue", "trg_slot_revision_removed")
 #: A phrase only the current trigger body has: a store copy that ran an earlier
 #: draft of this migration (D-29) fails ``verify`` and is repaired.
-_TRIGGER_MARK = "DELETE FROM slot_key_alias"
+_TRIGGER_MARK = "NOT IN ('superseded', 'unbound')"
 
 
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:

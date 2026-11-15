@@ -27,11 +27,8 @@ import sqlite3
 
 NAME = "M073_valid_until_source"
 DB_TARGET = "memory"
-#: Additive: two new nullable columns an older build never reads.
+#: Additive: one nullable column and a side table an older build never reads.
 DOWNGRADE_FLOOR = 51
-
-_SOURCES = ("stated", "reviewer", "successor_validity", "successor_fact", "successor_saved",
-            "applied", "recorded")
 
 DDL = """
 -- apply() adds valid_until_source and backfills it (see the module docstring).
@@ -77,9 +74,10 @@ def _has_table(conn: sqlite3.Connection, table: str) -> bool:
 
 def _add_columns(conn: sqlite3.Connection) -> None:
     if "valid_until_source" not in _columns(conn, "fact_temporal_validity"):
-        allowed = ", ".join(f"'{s}'" for s in _SOURCES)
-        conn.execute("ALTER TABLE fact_temporal_validity ADD COLUMN valid_until_source TEXT "
-                     f"CHECK (valid_until_source IS NULL OR valid_until_source IN ({allowed}))")
+        # No CHECK over the source names (W0-06): SQLite cannot alter one on a core
+        # table, and new sources (leases, external edits, importers) will come.
+        # Writers validate (truth/validity.check_source); slm doctor --truth audits.
+        conn.execute("ALTER TABLE fact_temporal_validity ADD COLUMN valid_until_source TEXT")
     conn.execute(_SIDE)
     if _has_table(conn, "correction_cases"):
         conn.execute(_SIDE_TRIGGER)

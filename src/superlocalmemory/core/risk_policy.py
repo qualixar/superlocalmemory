@@ -9,7 +9,6 @@ every certificate means. Decided by the owner on 15 Nov 2026 (blueprint D-25).
 
 from __future__ import annotations
 
-DECIDED = True
 #: False retirement: acting on "replaces" when the older memory is still true.
 ALPHA_RETIRE = 0.05
 #: False keep: closing a dispute that was a real replacement. Must sit below the
@@ -18,18 +17,26 @@ ALPHA_CLOSE = 0.01
 DELTA = 0.05
 
 
-#: The chance each judged receipt is sent for a blind audit label (M-04). One
-#: constant across every score in a certificate cell, so audited counts are
-#: exactly binomial. It sets how fast certificates can be earned (about 73 clean
-#: audits per cell at alpha 0.05) against how much reviewing a person does.
-#: PROPOSED, not decided: blueprint D-31 awaits the owner.
+#: The chance a judged receipt is drawn for a blind audit label (M-04): one
+#: constant across every score within a certificate cell, so audited counts are
+#: binomial there. D-35 (Varun, 16 Nov) sets it per cell: 1.0 for any verdict
+#: that retires (rare, costly, reviewed anyway); this default elsewhere until
+#: each cell's rate is derived from its measured volume (F-19 re-measure).
 AUDIT_PROBABILITY = 0.10
-AUDIT_DECIDED = False
+#: The same draw for the inbox sample (one per pair, W0-05).
+INBOX_PROBABILITY = AUDIT_PROBABILITY
 
 
 def alpha_for(verdict: str) -> float:
     return ALPHA_RETIRE if verdict == "replaces" else ALPHA_CLOSE
 
 
-__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "AUDIT_DECIDED", "AUDIT_PROBABILITY", "DECIDED", "DELTA",
-           "alpha_for"]
+def audit_probability_for(verdict: str, base: float | None) -> float | None:
+    """The cell's audit probability (D-35): 1.0 for a retiring verdict."""
+    if base is None:
+        return None
+    return 1.0 if verdict == "replaces" else base
+
+
+__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "AUDIT_PROBABILITY", "DELTA", "INBOX_PROBABILITY",
+           "alpha_for", "audit_probability_for"]

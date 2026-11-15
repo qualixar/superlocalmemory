@@ -44,10 +44,11 @@ def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="au
                regime="single"):
     """Seed labelled receipts, as a person's reviews would, so the gate can decide.
 
-    A closing verdict needs 459 clean audits (alpha_close at delta/2) and a tier
-    inbox with real replacements in it (M-02), seeded under another model.
+    A model's closing verdict needs 509 clean audits (alpha_close at delta/3, W0-07)
+    and a tier inbox with real replacements in it (M-02), seeded under another
+    model; a rule's needs 373 (alpha_close at delta, D-35).
     """
-    n = n if n is not None else (80 if verdict == "replaces" else 500)
+    n = n if n is not None else (80 if verdict == "replaces" else 560)
     if verdict != "replaces":
         _seed(db, "replaces", 300, tier=tier, model="inbox-model", label="replaces", tag="inbox",
               regime=regime)
@@ -65,10 +66,11 @@ def _seed(db, verdict, n, *, tier, model, wrong=0, blind=1, source="audit", labe
                 "INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                 "question_version, subject_kind, subject_id, population, tier, model, verdict, "
                 "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at, "
-                "audit_selected, audit_probability, batching_regime) VALUES "
+                "audit_selected, audit_probability, batching_regime, inbox_selected) VALUES "
                 "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, 'slot_dispute', ?, ?, ?, 0.95, "
-                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00', 1, 0.1, ?)",
-                (rid, SLOT_RELATION.version, rid, tier, model, verdict, "seed-" + rid, regime))
+                "0.7, 1, 'c', ?, ?, 1, 0.1, ?, 1)",
+                (rid, SLOT_RELATION.version, rid, tier, model, verdict, "seed-" + rid,
+                 f"2026-11-15T{i // 3600:02d}:{i // 60 % 60:02d}:{i % 60:02d}+00:00", regime))
             truth = label or (("replaces" if verdict != "replaces" else "unrelated") if i < wrong
                               else verdict)
             conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
@@ -114,6 +116,15 @@ def test_replaces_without_auto_apply_is_held_for_review(disputed) -> None:
     assert _retired(db, old) == (None, None, None)
 
 
+def test_the_auto_apply_flag_alone_retires_nothing_until_the_basis_lands(disputed) -> None:
+    db, old, _new = disputed  # W0-18: the flag can be set by an env var; the guard holds
+    counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "on",
+                                        "truth.slots.auto_apply": "on"})
+    assert counts["held_for_review"] == 1 and _open(db) == 1
+    assert _retired(db, old) == (None, None, None)
+
+
+@pytest.mark.usefixtures("auto_apply_basis")
 def test_replaces_with_auto_apply_retires_through_the_ledger(disputed) -> None:
     db, old, new = disputed
     counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "on",
@@ -127,7 +138,7 @@ def test_replaces_with_auto_apply_retires_through_the_ledger(disputed) -> None:
 
 
 @pytest.mark.parametrize("verdict,state", [("same", "duplicate"), ("both_true", "compatible"),
-                                           ("unrelated", "compatible")])
+                                           ("unrelated", "unbound")])
 def test_non_retiring_answers_settle_without_touching_facts(disputed, verdict, state) -> None:
     db, old, new = disputed
     counts, _ = _run(db, verdict, **{"judge.ladder": "on"})
@@ -135,6 +146,27 @@ def test_non_retiring_answers_settle_without_touching_facts(disputed, verdict, s
     assert _retired(db, old) == (None, None, None)
     assert db.execute("SELECT state FROM slot_revisions WHERE fact_id = ?",
                       (new,))[0]["state"] == state
+
+
+@pytest.mark.usefixtures("auto_apply_basis")
+def test_a_head_already_retired_for_another_dismisses_the_dispute_and_changes_nothing(
+        disputed) -> None:
+    from superlocalmemory.truth.slot_resolver import retire_superseded
+
+    db, old, new = disputed
+    other = _fact(db, "A different memory that already retired the old one", "2026-05-01T00:00:00Z")
+    with db.raw_connection() as conn:
+        retire_superseded(conn, profile_id="default", scope="personal", predecessor=old,
+                          successor=other)
+    counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "on",
+                                        "truth.slots.auto_apply": "on"})
+    assert counts["ledger_retired_for_another"] == 1 and _open(db) == 0
+    assert db.execute("SELECT state, resolved_by FROM slot_disputes")[0]["resolved_by"] == (
+        "judge_ladder:retired_for_another")
+    assert _retired(db, old)[2] == other  # the earlier retirement stands
+    head = db.execute("SELECT r.fact_id FROM memory_slots s JOIN slot_revisions r "
+                      "ON r.revision_id = s.head_revision_id")[0]["fact_id"]
+    assert head == old  # rolled back: the slot is not moved on a retirement that did not happen
 
 
 def test_an_unsure_judge_leaves_the_dispute_open(disputed) -> None:
@@ -183,6 +215,7 @@ def test_review_labels_never_certify(disputed) -> None:
     assert counts["held_uncalibrated"] == 1 and _retired(db, old) == (None, None, None)
 
 
+@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_decision_made_in_shadow_is_acted_on_later_without_re_asking(disputed) -> None:
     db, old, new = disputed
     _run(db, "replaces", calibrated=False, **{"judge.ladder": "shadow"})

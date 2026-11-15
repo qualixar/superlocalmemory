@@ -1,11 +1,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""Injection receipts and randomised withholding (4.2.30 D-14, D-22, D-28; M075)."""
+"""Injection receipts and randomised withholding (4.2.30 D-14, D-22, D-33, D-34; M075)."""
 
 from __future__ import annotations
 
 import math
 import sqlite3
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from superlocalmemory.storage.migrations import M075_injection_receipts as M075
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 
 KEY = b"k" * 32
+EPS = randomiser.EPSILON
 
 
 @pytest.fixture
@@ -76,18 +78,16 @@ def _schema() -> sqlite3.Connection:
 
 
 _RECEIPT = ("INSERT INTO injection_receipts (delivery_id, fact_id, profile_id, role, position,"
-            " score, eligible, exclusion, propensity, draw, included, delivered)"
-            " VALUES ('d', ?, 'p', 'recall', 1, 0.5, ?, ?, ?, ?, ?, ?)")
+            " score, eligible, exclusion, propensity, included, delivered)"
+            " VALUES ('d', ?, 'p', 'recall', 1, 0.5, ?, ?, ?, ?, ?)")
 
 
 @pytest.mark.parametrize("row", [
-    ("f1", 0, "pinned", 0.9, None, 1, 1),      # ineligible but p < 1
-    ("f2", 0, "pinned", 1.0, None, 0, 0),      # ineligible but withheld
-    ("f3", 1, None, 0.9, 0.95, 0, 1),          # withheld yet delivered
-    ("f4", 1, None, 0.9, None, 1, 1),          # eligible with no draw
-    ("f5", 1, "pinned", 0.9, 0.1, 1, 1),       # eligible with an exclusion
-    ("f6", 0, "pinned", 1.0, 0.3, 1, 1),       # ineligible with a draw
-    ("f7", 1, None, 0.0, 0.3, 0, 0),           # zero propensity: no IPW weight
+    ("f1", 0, "pinned", 0.9, 1, 1),     # ineligible but p < 1
+    ("f2", 0, "pinned", 1.0, 0, 0),     # ineligible but withheld
+    ("f3", 1, None, 0.9, 0, 1),         # withheld yet delivered
+    ("f4", 1, "pinned", 0.9, 1, 1),     # eligible with an exclusion
+    ("f5", 1, None, 0.0, 0, 0),         # zero propensity: no IPW weight
 ])
 def test_the_schema_refuses_a_receipt_that_breaks_the_design(row) -> None:
     conn = _schema()
@@ -95,77 +95,95 @@ def test_the_schema_refuses_a_receipt_that_breaks_the_design(row) -> None:
         conn.execute(_RECEIPT, row)
 
 
-def test_the_schema_refuses_a_withholding_probability_above_the_cap() -> None:
+_DELIVERY = ("INSERT INTO injection_deliveries (delivery_id, profile_id, path, design,"
+             " holdout_state, epsilon, eligible_count, withhold_draw, pick_draw, key_id,"
+             " candidates, delivered_at) VALUES (?, 'p', 'session_init', 'one-out-v1', 'on',"
+             " ?, 3, ?, ?, ?, 3, 'now')")
+
+
+@pytest.mark.parametrize("row", [
+    ("too-much", 0.11, 0.5, 0.5, "k"),   # above the D-28 cap
+    ("one-draw", 0.10, 0.5, None, "k"),  # the two draws come together
+    ("no-key", 0.10, 0.5, 0.5, None),    # a draw nobody can check
+    ("bad-draw", 0.10, 1.0, 0.5, "k"),   # a draw outside [0, 1)
+])
+def test_the_schema_refuses_a_delivery_that_breaks_the_design(row) -> None:
     conn = _schema()
-    sql = ("INSERT INTO injection_deliveries (delivery_id, profile_id, path, design,"
-           " holdout_state, epsilon, candidates, delivered_at)"
-           " VALUES (?, 'p', 'session_init', 'bernoulli-v1', 'on', ?, 0, 'now')")
-    conn.execute(sql, ("ok", 0.10))
+    conn.execute(_DELIVERY, ("ok", 0.10, 0.5, 0.5, "k"))
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(sql, ("too-much", 0.11))
+        conn.execute(_DELIVERY, row)
 
 
-# -- the randomiser -----------------------------------------------------------------------------
+# -- the randomiser (one-out-v1) ----------------------------------------------------------------
 
 def test_the_draw_is_reproducible_keyed_and_uniform_in_range() -> None:
-    assert randomiser.draw(KEY, "d", "f") == randomiser.draw(KEY, "d", "f")
-    assert randomiser.draw(KEY, "d", "f") != randomiser.draw(b"x" * 32, "d", "f")
-    assert randomiser.draw(KEY, "d", "f") != randomiser.draw(KEY, "d2", "f")
-    assert all(0.0 <= randomiser.draw(KEY, f"d{i}", "f") < 1.0 for i in range(200))
+    assert randomiser.draw(KEY, "d", "pick") == randomiser.draw(KEY, "d", "pick")
+    assert randomiser.draw(KEY, "d", "pick") != randomiser.draw(b"x" * 32, "d", "pick")
+    assert randomiser.draw(KEY, "d", "pick") != randomiser.draw(KEY, "d", "withhold")
+    assert all(0.0 <= randomiser.draw(KEY, f"d{i}", "pick") < 1.0 for i in range(200))
+
+
+def _cands(k: int, role="recall") -> list[Candidate]:
+    return [Candidate(f"f{i}", role, 0.5) for i in range(k)]
 
 
 def test_pinned_rules_and_the_core_block_are_never_withheld() -> None:
-    for i in range(500):
-        choices = randomiser.choose(KEY, f"d{i}", "session_init", [
-            Candidate("p", "pinned"), Candidate("s", "standing"), Candidate("c", "core")],
-            holdout_on=True)
-        assert all(c.included and c.propensity == 1.0 and not c.eligible and c.draw is None
-                   for c in choices)
-    assert [c.exclusion for c in choices] == ["pinned", "standing_rule", "core_block"]
+    for i in range(2000):
+        a = randomiser.choose(KEY, f"d{i}", "session_init", [
+            Candidate("p", "pinned"), Candidate("s", "standing"), Candidate("c", "core"),
+            Candidate("r", "recall")], holdout_on=True)
+        assert all(c.included and c.propensity == 1.0 and not c.eligible
+                   for c in a.choices[:3])
+    assert [c.exclusion for c in a.choices[:3]] == ["pinned", "standing_rule", "core_block"]
 
 
-def test_an_eligible_candidate_is_included_iff_its_draw_is_below_its_logged_probability() -> None:
-    for i in range(300):
-        (c,) = randomiser.choose(KEY, f"d{i}", "session_context",
-                                 [Candidate("f", "recent", 0.4)], holdout_on=True)
-        assert c.eligible and c.exclusion is None
-        assert c.propensity == pytest.approx(1 - randomiser.EPSILON)
-        assert c.included is (c.draw < c.propensity)
+def test_at_most_one_memory_leaves_a_delivery_with_its_exact_logged_probability() -> None:
+    for i in range(3000):
+        a = randomiser.choose(KEY, f"d{i}", "session_init", _cands(7), holdout_on=True)
+        withheld = [c for c in a.choices if not c.included]
+        assert len(withheld) == (1 if a.withhold_draw < EPS else 0)
+        assert a.eligible_count == 7
+        assert all(c.propensity == pytest.approx(1 - EPS / 7) for c in a.choices)
+        if withheld:
+            assert withheld[0].position - 1 == int(a.pick_draw * 7)
 
 
-def test_the_withheld_share_matches_epsilon_within_five_standard_errors() -> None:
-    n = 20_000
-    withheld = sum(
-        not randomiser.choose(KEY, f"d{i}", "session_init", [Candidate("f", "recall")],
-                              holdout_on=True)[0].included
-        for i in range(n))
-    eps = randomiser.EPSILON
-    assert abs(withheld - n * eps) < 5 * math.sqrt(n * eps * (1 - eps))
+def test_the_share_of_deliveries_and_of_each_candidate_matches_the_design() -> None:
+    n, k = 20_000, 10
+    lost, by_position = 0, Counter()
+    for i in range(n):
+        out = [c.position for c in randomiser.choose(
+            KEY, f"d{i}", "session_init", _cands(k), holdout_on=True).choices if not c.included]
+        lost += bool(out)
+        by_position.update(out)
+    assert abs(lost - n * EPS) < 5 * math.sqrt(n * EPS * (1 - EPS))  # D-28: <= 0.10 of deliveries
+    q = EPS / k
+    assert all(abs(by_position[p] - n * q) < 5 * math.sqrt(n * q * (1 - q))
+               for p in range(1, k + 1))  # uniform: each candidate's 1 - p_i is honest
 
 
 def test_the_draw_ignores_the_score_so_strong_memories_are_withheld_as_often() -> None:
-    for i in range(200):
+    for i in range(300):
         low = randomiser.choose(KEY, f"d{i}", "session_init", [Candidate("f", "recall", 0.01)],
-                                holdout_on=True)[0]
+                                holdout_on=True)
         high = randomiser.choose(KEY, f"d{i}", "session_init", [Candidate("f", "recall", 0.99)],
-                                 holdout_on=True)[0]
-        assert low.included is high.included and low.draw == high.draw
+                                 holdout_on=True)
+        assert low.choices[0].included is high.choices[0].included
 
 
-def test_holdout_off_logs_every_candidate_with_probability_one() -> None:
-    choices = randomiser.choose(KEY, "d", "session_init",
-                                [Candidate("a", "recall"), Candidate("b", "session_summary")],
-                                holdout_on=False, epsilon=0.0)
+def test_holdout_off_draws_nothing_and_logs_probability_one() -> None:
+    a = randomiser.choose(KEY, "d", "session_init", _cands(3), holdout_on=False, epsilon=0.0)
+    assert (a.eligible_count, a.withhold_draw, a.pick_draw) == (0, None, None)
     assert all(c.included and c.propensity == 1.0 and c.exclusion == randomiser.HOLDOUT_OFF
-               for c in choices)
+               for c in a.choices)
 
 
 def test_a_fact_listed_twice_gets_one_choice_and_its_first_role() -> None:
-    choices = randomiser.choose(KEY, "d", "session_init", [
+    a = randomiser.choose(KEY, "d", "session_init", [
         Candidate("a", "pinned"), Candidate("a", "recall"), Candidate("", "recall"),
         Candidate("b", "recall")], holdout_on=True)
-    assert [(c.fact_id, c.role, c.position) for c in choices] == [("a", "pinned", 1),
-                                                                   ("b", "recall", 2)]
+    assert [(c.fact_id, c.role, c.position) for c in a.choices] == [("a", "pinned", 1),
+                                                                     ("b", "recall", 2)]
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -179,10 +197,11 @@ def test_unknown_paths_roles_and_an_epsilon_above_the_cap_are_refused(kwargs) ->
                           epsilon=kwargs["epsilon"])
 
 
-# -- planning -----------------------------------------------------------------------------------
+# -- planning: defaults and protection from the store (D-34, W0-01) -----------------------------
 
-def _plan(home: Path, candidates, **kw):
-    return receipts.plan(slm_home=home, profile_id="default", session_id="s1",
+def _plan(home: Path, candidates, db_path=None, **kw):
+    return receipts.plan(slm_home=home, db_path=db_path, profile_id="default",
+                         session_id=kw.pop("session_id", "s1"),
                          path=kw.pop("path", "session_init"), query=kw.pop("query", "q"),
                          candidates=candidates, **kw)
 
@@ -196,27 +215,71 @@ def test_no_plan_when_receipts_are_off_or_the_kill_switch_is_set(tmp_path, monke
     assert _plan(fresh, [Candidate("a", "recall")]) is None
 
 
-def test_holdout_off_plans_receipts_without_withholding(tmp_path) -> None:
-    plan = _plan(tmp_path, [Candidate(f"f{i}", "recall") for i in range(50)])
-    assert plan is not None and plan.holdout_state == "off" and plan.epsilon == 0.0
-    assert plan.withheld == frozenset()
+def test_withholding_is_off_by_default_until_its_shipping_conditions_exist(
+        store, tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SLM_FEATURE_OUTCOMES_HOLDOUT", raising=False)  # the shipped default
+    ids = [_fact(store, f"default memory {i}") for i in range(10)]
+    for _ in range(50):
+        plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids], db_path=store.db_path)
+        assert plan.holdout_state == "off" and plan.withheld == frozenset()
 
 
-def test_the_query_is_kept_only_as_a_keyed_hash(tmp_path, holdout_on) -> None:
+def test_the_query_is_kept_only_as_a_keyed_digest(tmp_path, holdout_on) -> None:
     plan = _plan(tmp_path, [], query="my secret project")
     assert plan.query_digest and "secret" not in plan.query_digest
     assert _plan(tmp_path, [], query="").query_digest is None
 
 
+def _protect_in_store(db, fact_id: str, how: str) -> None:
+    if how == "pinned_table":
+        from superlocalmemory.storage import schema_v3411
+
+        with db.raw_connection() as conn:  # the store this test builds has no pin table yet
+            conn.executescript(schema_v3411._PINNED_FACTS_DDL)
+        db.execute("INSERT INTO pinned_facts (fact_id, profile_id, pinned_at) "
+                   "VALUES (?, 'default', 'now')", (fact_id,))
+    elif how == "pinned_column":
+        db.execute("UPDATE atomic_facts SET pinned = 1 WHERE fact_id = ?", (fact_id,))
+    else:  # a standing rule the user confirmed, whatever the session config says
+        db.execute("UPDATE atomic_facts SET memory_kind = 'rule', memory_kind_source = 'user' "
+                   "WHERE fact_id = ?", (fact_id,))
+
+
+@pytest.mark.parametrize("how,role", [("pinned_table", "pinned"), ("pinned_column", "pinned"),
+                                      ("standing", "standing")])
+def test_a_protected_fact_is_never_withheld_however_the_surface_labels_it(
+        store, tmp_path, holdout_on, how, role) -> None:
+    protected = _fact(store, "a rule the user pinned or confirmed")
+    _protect_in_store(store, protected, how)
+    others = [_fact(store, f"plain memory {i}") for i in range(2)]
+    withheld_any = False
+    for _ in range(300):  # with k = 2 eligible, a delivery loses one 10% of the time
+        plan = _plan(tmp_path, [Candidate(protected, "recent")] + [
+            Candidate(f, "recent") for f in others], db_path=store.db_path)
+        choice = plan.choices[0]
+        assert (choice.role, choice.eligible, choice.included) == (role, False, True)
+        withheld_any |= bool(plan.withheld)
+    assert withheld_any  # the others are still randomised
+
+
+def test_an_unreadable_store_means_nothing_is_withheld(tmp_path, holdout_on) -> None:
+    bare = tmp_path / "bare.db"
+    sqlite3.connect(str(bare)).close()
+    for _ in range(100):
+        plan = _plan(tmp_path, _cands(5), db_path=bare)
+        assert plan.holdout_state == "off" and plan.withheld == frozenset()
+
+
 # -- delivering and recording -------------------------------------------------------------------
 
-def _plan_withholding(home: Path, fact_ids: list[str], path="session_init"):
-    """A plan that withholds at least one fact (draws are random per delivery)."""
-    for _ in range(200):
-        plan = _plan(home, [Candidate(f, "recall", 0.5) for f in fact_ids], path=path)
+def _plan_withholding(home: Path, fact_ids: list[str], db_path, path="session_init", **kw):
+    """A plan that withholds one fact (one delivery in ten does)."""
+    for _ in range(400):
+        plan = _plan(home, [Candidate(f, "recall", 0.5) for f in fact_ids], db_path=db_path,
+                     path=path, **kw)
         if plan.withheld:
             return plan
-    raise AssertionError("no delivery withheld anything in 200 tries")
+    raise AssertionError("no delivery withheld anything in 400 tries")
 
 
 def _render(items):
@@ -226,34 +289,37 @@ def _render(items):
 def test_a_withheld_memory_is_not_delivered_and_every_candidate_has_a_receipt(
         store, tmp_path, holdout_on) -> None:
     ids = [_fact(store, f"memory number {i}") for i in range(6)]
-    plan = _plan_withholding(tmp_path, ids)
+    plan = _plan_withholding(tmp_path, ids, store.db_path, session_id="", client="claude-code")
     out = receipts.deliver(plan, store.db_path, ids, fact_id=lambda i: i, render=_render,
                            shown=receipts.shown_in_text)
-    assert not any(f"fact_id={f}" in out for f in plan.withheld)
+    (gone,) = plan.withheld
+    assert f"fact_id={gone}" not in out
     rows = _rows(store.db_path, "SELECT fact_id, eligible, propensity, included, delivered"
                                 " FROM injection_receipts ORDER BY position")
     assert [r[0] for r in rows] == ids
     for fact_id, eligible, propensity, included, delivered in rows:
-        assert eligible == 1 and propensity == pytest.approx(0.9)
-        assert included == int(fact_id not in plan.withheld) == delivered
-    ((path, state, eps, n),) = _rows(store.db_path, "SELECT path, holdout_state, epsilon,"
-                                                     " candidates FROM injection_deliveries")
-    assert (path, state, eps, n) == ("session_init", "on", pytest.approx(0.1), 6)
+        assert eligible == 1 and propensity == pytest.approx(1 - EPS / 6)
+        assert included == int(fact_id != gone) == delivered
+    ((row),) = _rows(store.db_path, "SELECT path, design, holdout_state, epsilon, "
+                                     "eligible_count, withhold_draw < epsilon, key_id IS NOT NULL,"
+                                     " session_id, client FROM injection_deliveries")
+    assert row == ("session_init", "one-out-v1", "on", pytest.approx(EPS), 6, 1, 1, None,
+                   "claude-code")
 
 
-def test_nothing_is_withheld_when_the_receipt_cannot_be_stored(tmp_path, holdout_on) -> None:
-    bare = tmp_path / "bare.db"
-    sqlite3.connect(str(bare)).close()  # no M075 tables: the write fails
-    ids = [f"f{i}" for i in range(6)]
-    plan = _plan_withholding(tmp_path, ids)
-    out = receipts.deliver(plan, bare, ids, fact_id=lambda i: i, render=_render,
+def test_nothing_is_withheld_when_the_receipt_cannot_be_stored(store, tmp_path,
+                                                               holdout_on) -> None:
+    ids = [_fact(store, f"unrecorded memory {i}") for i in range(6)]
+    plan = _plan_withholding(tmp_path, ids, store.db_path)
+    store.execute("DROP TABLE injection_receipts")  # the write will fail
+    out = receipts.deliver(plan, store.db_path, ids, fact_id=lambda i: i, render=_render,
                            shown=receipts.shown_in_text)
     assert receipts.shown_in_text(out) == frozenset(ids)
 
 
 def test_a_candidate_the_renderer_dropped_is_recorded_as_not_delivered(store, tmp_path) -> None:
     ids = [_fact(store, f"budgeted memory {i}") for i in range(3)]
-    plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids])
+    plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids], db_path=store.db_path)
     receipts.deliver(plan, store.db_path, ids, fact_id=lambda i: i,
                      render=lambda items: _render(items[:1]), shown=receipts.shown_in_text)
     assert _rows(store.db_path, "SELECT included, delivered FROM injection_receipts"
@@ -262,7 +328,7 @@ def test_a_candidate_the_renderer_dropped_is_recorded_as_not_delivered(store, tm
 
 def test_erasing_a_fact_erases_its_receipts_and_keeps_the_delivery(store, tmp_path) -> None:
     ids = [_fact(store, f"erasable memory {i}") for i in range(2)]
-    plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids])
+    plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids], db_path=store.db_path)
     receipts.deliver(plan, store.db_path, ids, fact_id=lambda i: i, render=_render,
                      shown=receipts.shown_in_text)
     store.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (ids[0],))
@@ -277,8 +343,8 @@ def test_a_busy_writer_skips_the_receipt_within_its_wait_budget(store, tmp_path,
 
     from superlocalmemory.storage.write_lock import get_write_lock
 
-    ids = [f"f{i}" for i in range(6)]
-    plan = _plan_withholding(tmp_path, ids)
+    ids = [_fact(store, f"busy memory {i}") for i in range(6)]
+    plan = _plan_withholding(tmp_path, ids, store.db_path)
     lock = get_write_lock(store.db_path)
     held, release = threading.Event(), threading.Event()
 
@@ -294,7 +360,7 @@ def test_a_busy_writer_skips_the_receipt_within_its_wait_budget(store, tmp_path,
         started = time.monotonic()
         out = receipts.deliver(plan, store.db_path, ids, fact_id=lambda i: i, render=_render,
                                shown=receipts.shown_in_text)
-        assert time.monotonic() - started < receipts.WRITE_WAIT_S + 0.5
+        assert time.monotonic() - started < receipts.WRITE_WAIT_S + 0.25
     finally:
         release.set()
         thread.join(5)
@@ -311,34 +377,31 @@ def _result(fact_id: str, score: float = 0.8):
     return SimpleNamespace(fact=fact, score=score, tier="")
 
 
-def test_session_init_withholds_recall_rows_on_record_but_never_pins(store, tmp_path,
-                                                                     holdout_on) -> None:
+def _engine(store, tmp_path):
+    return SimpleNamespace(config=SimpleNamespace(base_dir=tmp_path, injection=None),
+                           db=store, mode="B")
+
+
+def test_session_init_never_withholds_a_pin_that_arrives_through_recall(store, tmp_path,
+                                                                        holdout_on) -> None:
     from superlocalmemory.mcp import session_start
 
-    pin_id = _fact(store, "a pinned rule that is always delivered")
-    pin = SimpleNamespace(fact_id=pin_id, content="a pinned rule that is always delivered",
-                          importance=1.0, access_count=0, kind="rule")
-    engine = SimpleNamespace(config=SimpleNamespace(base_dir=tmp_path, injection=None),
-                             db=store, mode="B")
+    pinned = _fact(store, "pin number twenty-one, reached by recall")
+    _protect_in_store(store, pinned, "pinned_table")
+    relevant = [_result(pinned)] + [_result(_fact(store, f"recall candidate {i}"))
+                                    for i in range(7)]
     response = SimpleNamespace(results=[], calibration_status="uncalibrated")
-    relevant = [_result(_fact(store, f"recall candidate {i}")) for i in range(8)]
-    for attempt in range(100):
+    withheld = set()
+    for attempt in range(200):
         context, rows = session_start._deliver_session(
-            engine, "", "default", f"s{attempt}", "query", response, [pin], [], relevant, 10)
-        withheld = _rows(store.db_path, "SELECT fact_id FROM injection_receipts"
-                                        " WHERE included = 0")
-        if withheld:
-            break
-    else:
-        raise AssertionError("no session withheld a recall row in 100 sessions")
-    shown = {r["fact_id"] for r in rows}
-    assert pin_id in shown and f"fact_id={pin_id}" in context
-    assert not {w for (w,) in withheld} & shown
-    roles = dict(_rows(store.db_path, "SELECT role, MAX(propensity) FROM injection_receipts"
-                                      " GROUP BY role"))
-    assert roles["pinned"] == 1.0 and roles["recall"] == pytest.approx(0.9)
-    assert _rows(store.db_path, "SELECT DISTINCT path FROM injection_deliveries") == [
-        ("session_init",)]
+            _engine(store, tmp_path), "", "default", f"s{attempt}", "query", response, [], [],
+            relevant, 10, "codex-agent")
+        assert pinned in {r["fact_id"] for r in rows}
+        withheld |= {w for (w,) in _rows(store.db_path, "SELECT fact_id FROM "
+                                                        "injection_receipts WHERE included = 0")}
+    assert withheld and pinned not in withheld
+    assert _rows(store.db_path, "SELECT DISTINCT client FROM injection_deliveries") == [
+        ("codex-agent",)]
 
 
 def test_session_init_without_a_real_store_delivers_everything(tmp_path, holdout_on) -> None:
@@ -353,26 +416,41 @@ def test_session_init_without_a_real_store_delivers_everything(tmp_path, holdout
     assert {r["fact_id"] for r in rows} == {f"f{i}" for i in range(8)}
 
 
-def test_the_session_start_hook_context_goes_through_the_receipts(store, tmp_path,
-                                                                  monkeypatch) -> None:
+def _hook_context(store, tmp_path, ids):
     from superlocalmemory.cli import commands
     from superlocalmemory.core.injection import InjectableMemory, render_context
 
-    monkeypatch.setenv("CLAUDE_SESSION_ID", "claude-session-7")
-    ids = [_fact(store, f"recent important memory {i}") for i in range(3)]
-    mems = [("recent", InjectableMemory(content=f"recent important memory {i}", score=0.5,
-                                        fact_id=f)) for i, f in enumerate(ids)]
-    config = SimpleNamespace(base_dir=tmp_path)
-    out = commands._session_context_delivery(
-        config, store.db_path, "default", "", mems,
+    mems = [("recent", InjectableMemory(content=f"hook memory {f}", score=0.5, fact_id=f))
+            for f in ids]
+    return commands._session_context_delivery(
+        SimpleNamespace(base_dir=tmp_path), store.db_path, "default", "", mems,
         lambda kept: render_context([m for _, m in kept], mode="B", wrap=True))
-    assert receipts.shown_in_text(out) == frozenset(ids)
-    assert _rows(store.db_path, "SELECT path, session_id, holdout_state FROM"
+
+
+def test_the_session_start_hook_records_its_session_and_client(store, tmp_path,
+                                                               monkeypatch) -> None:
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "claude-session-7")
+    monkeypatch.setenv("SLM_CLIENT", "claude-code")
+    ids = [_fact(store, f"recent important memory {i}") for i in range(3)]
+    assert receipts.shown_in_text(_hook_context(store, tmp_path, ids)) == frozenset(ids)
+    assert _rows(store.db_path, "SELECT path, session_id, client, holdout_state FROM"
                                 " injection_deliveries") == [
-        ("session_context", "claude-session-7", "off")]
+        ("session_context", "claude-session-7", "claude-code", "off")]
     assert _rows(store.db_path, "SELECT role, delivered FROM injection_receipts") == [
         ("recent", 1)] * 3
 
+
+def test_the_hook_never_withholds_a_pinned_fact_among_its_recent_rows(store, tmp_path,
+                                                                     holdout_on) -> None:
+    pinned = _fact(store, "a pinned rule in the hook's top ten")
+    _protect_in_store(store, pinned, "pinned_column")
+    ids = [pinned] + [_fact(store, f"recent row {i}") for i in range(4)]
+    for _ in range(200):
+        assert f"fact_id={pinned}" in _hook_context(store, tmp_path, ids)
+    assert _rows(store.db_path, "SELECT DISTINCT role FROM injection_receipts "
+                                "WHERE fact_id = '" + pinned + "'") == [("pinned",)]
+    assert _rows(store.db_path, "SELECT COUNT(*) > 0 FROM injection_receipts "
+                                "WHERE included = 0") == [(1,)]
 
 
 def test_a_key_another_process_created_first_is_read_not_an_error(tmp_path, monkeypatch) -> None:

@@ -50,6 +50,22 @@ ACTOR = CorrectionActor(actor_id="slm-truth-layer", actor_kind="system",
 
 APPLIED, PENDING, DEFERRED_TO_REVIEW = "applied", "pending", "deferred_to_review"
 PROPOSED = "proposed"
+#: The predecessor is already retired in favour of a different successor: the
+#: ledger is left as it is and the slot waits for a person (R-22).
+RETIRED_FOR_ANOTHER = "retired_for_another"
+
+#: W0-18: ``truth.slots.auto_apply`` retires memories with no certificate and no
+#: approval, and R-34 (an explicit key hashes the whole content, so a reworded
+#: restatement supersedes) is still open. Until W1 lands the lawful basis the
+#: background passes treat the flag as off, whatever it says. W1 sets this True
+#: in the commit that closes R-34 and R-04's explicit-key basis.
+AUTO_APPLY_BASIS_READY = False
+
+
+def auto_apply_allowed(flags) -> bool:
+    """The effective ``truth.slots.auto_apply`` for a background pass."""
+    return (AUTO_APPLY_BASIS_READY and flags.enabled("truth.slots.auto_apply")
+            and flags.enabled("truth.slots"))
 
 
 @dataclass(frozen=True)
@@ -92,7 +108,7 @@ def retire_superseded(conn: sqlite3.Connection, *, profile_id: str, scope: str,
         row = conn.execute("SELECT successor_fact_id, status, version FROM correction_cases "
                            "WHERE case_id = ?", (open_id,)).fetchone()
         if row[1] == "applied":
-            return APPLIED, open_id
+            return (APPLIED if row[0] == successor else RETIRED_FOR_ANOTHER), open_id
         if row[0] != successor:
             return DEFERRED_TO_REVIEW, open_id
         if not apply:
@@ -221,6 +237,7 @@ def rollback_slot_cases(conn: sqlite3.Connection, *, profile_id: str | None = No
     return counts
 
 
-__all__ = ["ACTOR", "APPLIED", "DEFERRED_TO_REVIEW", "PENDING", "PROPOSED", "REASON",
+__all__ = ["ACTOR", "APPLIED", "AUTO_APPLY_BASIS_READY", "DEFERRED_TO_REVIEW", "PENDING",
+           "PROPOSED", "REASON", "RETIRED_FOR_ANOTHER", "auto_apply_allowed",
            "Resolution", "reconcile_ledger", "resolve_fact", "retire_superseded",
            "rollback_slot_cases"]

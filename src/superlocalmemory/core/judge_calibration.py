@@ -176,11 +176,15 @@ class Certificate:
     #: of the tier's inbox), each at delta/2; None where not computed.
     false_keep_upper: float | None = None
     base_rate_lower: float | None = None
+    #: True only for a model tier's closing verdict (M-02). A retiring verdict and a
+    #: deterministic rule's closing verdict (D-35) do not need it; a rule's miss
+    #: rate is still reported in false_keep_upper.
+    base_rate_required: bool = False
 
     @property
     def beats_base_rate(self) -> bool:
-        if self.false_keep_upper is None and self.base_rate_lower is None:
-            return True  # a retiring verdict: the condition does not apply
+        if not self.base_rate_required:
+            return True
         return (self.false_keep_upper is not None and self.base_rate_lower is not None
                 and self.false_keep_upper < self.base_rate_lower)
 
@@ -199,6 +203,15 @@ def _crossing(errors: Sequence[bool], log_error: float, log_clean: float,
     return None
 
 
+def _holds_now(errors: Sequence[bool], log_error: float, log_clean: float, goal: float) -> bool:
+    """Whether E_n is at or above 1/delta after the last label (W0-12).
+
+    {E_n >= 1/delta now} is inside {sup E_n >= 1/delta}, so acting only while it
+    holds keeps Ville's bound, and stops as soon as new errors pull E_n back.
+    """
+    return sum(log_error if w else log_clean for w in errors) >= goal
+
+
 def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alpha: float,
                          delta: float, grid: Sequence[float] = GRID) -> Certificate:
     """Anytime-valid certificate that the error rate at a threshold is below alpha.
@@ -209,12 +222,13 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
         E_n = prod_i (p1/alpha)^X_i * ((1-p1)/(1-alpha))^(1-X_i),   p1 = alpha/5
 
     is a non-negative supermartingale whenever the true error rate is >= alpha,
-    so by Ville's inequality P(sup_n E_n >= 1/delta) <= delta: certify the first
-    time E_n >= 1/delta, with no penalty for looking after every label. At
-    alpha = delta = 0.05 that is 73 clean labels, 112 with one error, 151 with
-    two. Fixed-sequence testing across the grid keeps the family-wise error at
-    delta. Revocation: on the labels after certification, a second e-process for
-    "error rate <= alpha" against 2*alpha; reaching 1/delta revokes it.
+    so by Ville's inequality P(sup_n E_n >= 1/delta) <= delta. A threshold is
+    certified while E_n stands at or above 1/delta after the latest label (not
+    "ever reached it", W0-12), with no penalty for looking after every label. At
+    alpha = delta = 0.05 a clean run needs 73 labels, 112 with one early error,
+    151 with two. Fixed-sequence testing across the grid. Revocation: on the
+    labels after the first crossing, a second e-process for "error rate <= alpha"
+    against 2*alpha; reaching 1/delta revokes it for good.
     """
     if len(scores) != len(wrong):
         raise ValueError("scores and wrong must align")
@@ -236,6 +250,8 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
         cross = _crossing(seq, up[0], up[1], goal)
         if cross is not None and _crossing(seq[cross:], down[0], down[1], goal) is not None:
             revoked, cross = True, None
+        if cross is not None and not _holds_now(seq, up[0], up[1], goal):
+            cross = None  # it crossed once, but the labels since have pulled it back
         tested.append((t, len(seq), sum(seq), cross is not None))
         if cross is None:
             break
@@ -243,26 +259,55 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
     return Certificate(chosen, alpha, delta, at, revoked, tuple(tested))
 
 
-#: The tier's inbox: every drawn, blindly audited pair that reached this tier
-#: (a receipt at its index or above), once per pair hash. Used for the base rate.
+#: The tier's inbox: every pair drawn for the inbox sample (one keyed draw per
+#: pair, W0-05: a per-receipt draw over-samples pairs several tiers answered)
+#: that reached this tier, once per pair hash, blindly audited. The base rate.
 _INBOX = """
 SELECT r.inputs_hash, l.label FROM judge_receipts r
   JOIN judge_labels l ON l.receipt_id = r.receipt_id
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ? AND r.population = ?
    AND r.tier_index >= (SELECT COALESCE(MIN(t.tier_index), 0) FROM judge_receipts t
                          WHERE t.profile_id = r.profile_id AND t.tier = ? AND t.model = ?)
-   AND r.audit_selected = 1 AND l.source = 'audit' AND l.blind = 1
+   AND r.inbox_selected = 1 AND l.source = 'audit' AND l.blind = 1
 """
 
-_AUDITED = """
-SELECT r.receipt_id, r.confidence, l.label, l.labelled_at FROM judge_receipts r
-  JOIN judge_labels l ON l.receipt_id = r.receipt_id
+#: Every drawn receipt of the cell, in the order it was decided, with its blind
+#: audit labels if any (W0-03). The labeller's order and choice never matter:
+#: the gate reads the drawn sequence and stops at the first unlabelled receipt.
+_DRAWN = """
+SELECT r.receipt_id, r.confidence, l.label FROM judge_receipts r
+  LEFT JOIN judge_labels l ON l.receipt_id = r.receipt_id
+       AND l.source = 'audit' AND l.blind = 1
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
    AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
-   AND r.batching_regime = ?
-   AND r.audit_selected = 1 AND l.source = 'audit' AND l.blind = 1
- ORDER BY l.labelled_at, r.receipt_id
+   AND r.batching_regime = ? AND r.audit_selected = 1
+ ORDER BY r.decided_at, r.receipt_id
 """
+
+#: A labeller who cannot decide says so; it counts as an error, never as a skip.
+CANNOT_TELL = "cannot_tell"
+#: Regimes whose labels are exchangeable within the cell (W0-04): a batch can be
+#: wrong as a whole, so its items are not independent trials.
+CERTIFIABLE_REGIMES = frozenset({"single", "unbatched"})
+
+
+def _drawn_prefix(rows: list[tuple]) -> list[tuple[float, frozenset[str]]]:
+    """(score, labels) per drawn receipt, in decision order, up to the first
+    receipt with no label yet."""
+    out: list[tuple[float, set[str]]] = []
+    index: dict[str, int] = {}
+    for rid, conf, label in rows:
+        if rid not in index:
+            index[rid] = len(out)
+            out.append((_score(conf), set()))
+        if label is not None:
+            out[index[rid]][1].add(label)
+    prefix = []
+    for score, labels in out:
+        if not labels:
+            break
+        prefix.append((score, frozenset(labels)))
+    return prefix
 
 
 def _score(confidence: float | None) -> float:
@@ -297,38 +342,48 @@ class ActingGate:
                     regime: str) -> Certificate:
         key = (tier, model, verdict, population, regime)
         if key not in self._cache:
-            rows = self._conn.execute(_AUDITED, (self._profile, self._question, self._version,
-                                                 tier, model, verdict, population,
-                                                 regime)).fetchall()
-            per: dict[str, tuple[float, set[str], str]] = {}
-            for rid, conf, label, at in rows:
-                # A rule has no score (NULL, R-36): all its decisions are one class,
-                # certified together at the top of the grid.
-                score, labels, first = per.get(rid, (_score(conf), set(), at))
-                per[rid] = (score, labels | {label}, min(first, at))
-            ordered = sorted(per.values(), key=lambda v: v[2])
-            scores = [v[0] for v in ordered]
-            wrong = [len(v[1]) > 1 or is_wrong(verdict, next(iter(v[1]))) for v in ordered]
+            rows = self._conn.execute(_DRAWN, (self._profile, self._question, self._version,
+                                               tier, model, verdict, population,
+                                               regime)).fetchall()
+            drawn = _drawn_prefix(rows)
+            scores = [score for score, _ in drawn]
+            # Disagreeing labellers or "cannot tell" count as an error (conservative).
+            wrong = [len(labels) > 1 or CANNOT_TELL in labels
+                     or is_wrong(verdict, next(iter(labels))) for _, labels in drawn]
             if verdict == RETIRING:
                 cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
                                             delta=self._delta)
+            elif regime == "unbatched":
+                cert = self._rule_closing(scores, wrong, verdict)
             else:
                 cert = self._closing(scores, wrong, verdict, tier, model, population)
             self._cache[key] = cert
         return self._cache[key]
 
+    def _rule_closing(self, scores: list[float], wrong: list[bool], verdict: str) -> Certificate:
+        """D-35: a deterministic rule closes on the e-process at alpha_close over its
+        own drawn decisions; its miss rate is reported beside it, not compared."""
+        cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
+                                    delta=self._delta)
+        upper = (clopper_pearson_upper(sum(wrong), len(wrong), self._delta)
+                 if wrong else None)
+        return replace(cert, false_keep_upper=upper)
+
     def _closing(self, scores: list[float], wrong: list[bool], verdict: str, tier: str,
                  model: str, population: str) -> Certificate:
-        """M-02: a closing verdict must also keep fewer replacements than closing
-        everything would. The e-process and the two bounds each get delta/2."""
-        half = self._delta / 2
-        cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict), delta=half)
+        """M-02 for a model tier: a closing verdict must also keep fewer replacements
+        than closing everything would. The e-process and the two bounds each get
+        delta/3, so the whole statement holds at 1 - delta (W0-07; U and L are
+        fixed-n bounds, so they are valid at a stated check, not under every look)."""
+        third = self._delta / 3
+        cert = replace(eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
+                                            delta=third), base_rate_required=True)
         if cert.threshold is None:
             return cert
         picked = [w for s, w in zip(scores, wrong) if s >= cert.threshold]
-        upper = clopper_pearson_upper(sum(picked), len(picked), half)
+        upper = clopper_pearson_upper(sum(picked), len(picked), third)
         return replace(cert, false_keep_upper=upper,
-                       base_rate_lower=self._base_rate_lower(tier, model, population, half))
+                       base_rate_lower=self._base_rate_lower(tier, model, population, third))
 
     def _base_rate_lower(self, tier: str, model: str, population: str, delta: float) -> float:
         labels: dict[str, set[str]] = {}
@@ -340,11 +395,20 @@ class ActingGate:
         return clopper_pearson_lower(replaced, len(labels), delta)
 
     def allows(self, tier: str, model: str, verdict: str, confidence: float | None, *,
-               population: str, regime: str) -> bool:
+               population: str, regime: str, routing_threshold: float | None = None) -> bool:
+        if regime not in CERTIFIABLE_REGIMES:
+            return False  # W0-04: batched labels are not independent trials
         cert = self.certificate(tier, model, verdict, population, regime)
-        return cert.acts and _score(confidence) >= cert.threshold
+        if not (cert.acts and _score(confidence) >= cert.threshold):
+            return False
+        # W0-10: the acted set is {score >= max(t*, r)}; it is bounded only when r
+        # is at or below t* or is itself a threshold the certified chain passed.
+        if routing_threshold is not None and routing_threshold > cert.threshold:
+            return routing_threshold in {t for t, _n, _e, ok in cert.tested if ok}
+        return True
 
 
-__all__ = ["ActingGate", "Certificate", "GRID", "RETIRING", "Selection", "ThresholdTest", "binom_cdf",
+__all__ = ["ActingGate", "CANNOT_TELL", "CERTIFIABLE_REGIMES", "Certificate", "GRID", "RETIRING",
+           "Selection", "ThresholdTest", "binom_cdf",
            "clean_decisions_needed", "clopper_pearson_lower", "clopper_pearson_upper", "cohen_kappa",
            "eprocess_certificate", "is_wrong", "select_threshold"]

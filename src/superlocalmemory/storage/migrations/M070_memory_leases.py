@@ -26,13 +26,12 @@ DDL = """
 CREATE TABLE IF NOT EXISTS memory_leases (
     fact_id      TEXT NOT NULL,
     profile_id   TEXT NOT NULL,
-    source_kind  TEXT NOT NULL CHECK (source_kind IN ('file', 'git_blob', 'url')),
+    source_kind  TEXT NOT NULL,
     locator      TEXT NOT NULL,
     fingerprint  TEXT NOT NULL,
     size_bytes   INTEGER,
     mtime_ns     INTEGER,
-    state        TEXT NOT NULL DEFAULT 'fresh'
-                 CHECK (state IN ('fresh', 'changed', 'missing', 'unknown')),
+    state        TEXT NOT NULL DEFAULT 'fresh',
     leased_at    TEXT NOT NULL,
     checked_at   TEXT NOT NULL,
     changed_at   TEXT,

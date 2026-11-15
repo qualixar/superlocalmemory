@@ -282,7 +282,7 @@ async def session_init(
         context, rows = await asyncio.to_thread(
             _deliver_session, engine, named, pid, sid,
             query or session_context_query(project_path), response, pins, standing,
-            relevant, max_results,
+            relevant, max_results, agent_id.strip() or shared._get_agent_id(),
         )
         await asyncio.to_thread(bind_local_project, project_path)
         return _envelope(
@@ -342,10 +342,11 @@ def _outcome_paths(engine):
     return None, None
 
 
-def _deliver_session(engine, named, pid, sid, query, response, pins, standing, relevant, limit):
-    """Render the session context through the injection receipts (D-22, D-28):
-    recall rows may be withheld at random and on record; pins and standing
-    rules never are."""
+def _deliver_session(engine, named, pid, sid, query, response, pins, standing, relevant, limit,
+                     client=None):
+    """Render the session context through the injection receipts (D-22, D-33):
+    a recall row may be withheld at random and on record; a pinned fact or a
+    standing rule never is, however it arrived (the store decides, W0-01)."""
     from superlocalmemory.outcomes import receipts
     from superlocalmemory.outcomes.randomiser import Candidate
 
@@ -354,8 +355,9 @@ def _deliver_session(engine, named, pid, sid, query, response, pins, standing, r
     plan = None
     if home is not None:
         plan = receipts.plan(
-            slm_home=home, profile_id=pid, session_id=sid, path="session_init", query=query,
-            candidates=[Candidate(f.fact_id, "pinned") for f in pins[:20]]
+            slm_home=home, db_path=db_path, profile_id=pid, session_id=sid,
+            path="session_init", query=query, client=client,
+            candidates=[Candidate(f.fact_id, "pinned") for f in pins]
             + [Candidate(f.fact_id, "standing") for f in standing]
             + [Candidate(r.fact.fact_id, "recall", float(r.score or 0.0)) for r in shown_rows],
         )

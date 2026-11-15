@@ -1,21 +1,21 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""M075: injection receipts with propensities (4.2.30, D-14, D-22, D-28).
+"""M075: injection receipts with propensities (4.2.30, D-14, D-22, D-28, D-33, D-34).
 
 One ``injection_deliveries`` row each time SLM pushes memories into an agent's
 context (session start today; every path by W3), and one ``injection_receipts``
 row per candidate fact of that delivery: its role, rank, score, whether it was
-eligible for randomised withholding, the logged inclusion probability, the
-keyed-hash draw, whether it was included, and whether it reached the text the
-agent got. No memory text and no query text (the query is kept as a keyed
-hash). The causal estimates of WS-3 (M-12) read only these rows.
+eligible for randomised withholding (and why not), its logged inclusion
+probability, whether it was included, and whether it reached the text the agent
+got. The design is ``one-out-v1`` (D-33): in a share epsilon of deliveries one
+eligible candidate, drawn uniformly, is left out; the two keyed draws that
+decided it are on the delivery row, with the id of the key that made them, so
+every decision can be checked later. No memory text and no query text (the
+query is a keyed digest). The causal estimates of WS-3 (M-12) read only these rows.
 
-The CHECKs hold the design's own rules, so a malformed row cannot be stored:
-an ineligible candidate is always included with probability 1, an eligible
-one has a draw, and a withheld candidate never reached the agent.
-
-Erasing a fact erases its receipts (I-11). A delivery row holds no fact id,
-so it stays as the record that a delivery happened.
+CHECKs hold invariants only (ranges, 0/1, cross-column rules), never lists of
+names, which SQLite could not extend after release (W0-29). Erasing a fact
+erases its receipts (I-11); a delivery row holds no fact id and stays.
 """
 
 from __future__ import annotations
@@ -29,16 +29,23 @@ DOWNGRADE_FLOOR = 51
 
 DDL = """
 CREATE TABLE IF NOT EXISTS injection_deliveries (
-    delivery_id   TEXT PRIMARY KEY,
-    profile_id    TEXT NOT NULL,
-    session_id    TEXT NOT NULL DEFAULT '',
-    path          TEXT NOT NULL,
-    design        TEXT NOT NULL,
-    holdout_state TEXT NOT NULL,
-    epsilon       REAL NOT NULL CHECK (epsilon >= 0 AND epsilon <= 0.10),
-    query_digest    TEXT,
-    candidates    INTEGER NOT NULL,
-    delivered_at  TEXT NOT NULL
+    delivery_id    TEXT PRIMARY KEY,
+    profile_id     TEXT NOT NULL,
+    session_id     TEXT,
+    client         TEXT,
+    path           TEXT NOT NULL,
+    design         TEXT NOT NULL,
+    holdout_state  TEXT NOT NULL,
+    epsilon        REAL NOT NULL CHECK (epsilon >= 0 AND epsilon <= 0.10),
+    eligible_count INTEGER NOT NULL CHECK (eligible_count >= 0),
+    withhold_draw  REAL CHECK (withhold_draw IS NULL OR (withhold_draw >= 0 AND withhold_draw < 1)),
+    pick_draw      REAL CHECK (pick_draw IS NULL OR (pick_draw >= 0 AND pick_draw < 1)),
+    key_id         TEXT,
+    query_digest   TEXT,
+    candidates     INTEGER NOT NULL,
+    delivered_at   TEXT NOT NULL,
+    CHECK ((withhold_draw IS NULL) = (pick_draw IS NULL)),
+    CHECK (withhold_draw IS NULL OR key_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_injection_deliveries_session
     ON injection_deliveries (profile_id, session_id, delivered_at);
@@ -52,12 +59,10 @@ CREATE TABLE IF NOT EXISTS injection_receipts (
     eligible    INTEGER NOT NULL CHECK (eligible IN (0, 1)),
     exclusion   TEXT,
     propensity  REAL NOT NULL CHECK (propensity > 0 AND propensity <= 1),
-    draw        REAL CHECK (draw IS NULL OR (draw >= 0 AND draw < 1)),
     included    INTEGER NOT NULL CHECK (included IN (0, 1)),
     delivered   INTEGER NOT NULL CHECK (delivered IN (0, 1)),
     PRIMARY KEY (delivery_id, fact_id),
     CHECK ((eligible = 1) = (exclusion IS NULL)),
-    CHECK ((eligible = 1) = (draw IS NOT NULL)),
     CHECK (eligible = 1 OR (propensity = 1 AND included = 1)),
     CHECK (included = 1 OR delivered = 0)
 );

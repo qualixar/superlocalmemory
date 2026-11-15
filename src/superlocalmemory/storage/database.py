@@ -2904,8 +2904,10 @@ class DatabaseManager:
             where, args = where + " AND profile_id = ?", [*args, profile_id]
         if expired_at is not None:
             where, args = where + " AND system_expired_at = ?", [*args, expired_at]
+        from superlocalmemory.truth.validity import check_source
+
         self.execute(f"UPDATE fact_temporal_validity SET valid_until_source = ? WHERE {where}",  # noqa: S608
-                     (source, *args))
+                     (check_source(source), *args))
 
     def get_valid_facts(self, profile_id: str) -> list[str]:
         """Get fact_ids that are currently valid (not expired).

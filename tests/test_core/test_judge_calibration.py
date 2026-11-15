@@ -103,10 +103,11 @@ def _gate_store(n, verdict="same", label=None, model="m", conf=0.9, population="
         conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                      "question_version, subject_kind, subject_id, population, tier, model, verdict, "
                      "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at, "
-                     "audit_selected, audit_probability, batching_regime) "
-                     "VALUES (?, 'p', 'Q', '2', 's', ?, ?, 'jev', ?, ?, ?, 0.7, 1, 'c', ?, 't', ?, 0.1, "
-                     "'batched')",
-                     (f"r{i}", f"s{i}", population, model, verdict, conf, f"h{i}", selected))
+                     "audit_selected, audit_probability, batching_regime, inbox_selected) "
+                     "VALUES (?, 'p', 'Q', '2', 's', ?, ?, 'jev', ?, ?, ?, 0.7, 1, 'c', ?, ?, ?, 0.1, "
+                     "'single', ?)",
+                     (f"r{i}", f"s{i}", population, model, verdict, conf, f"h{i}",
+                      f"2026-11-15T00:{i // 60:02d}:{i % 60:02d}", selected, selected))
         conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
                      "labelled_at) VALUES (?, ?, ?, 'a', ?, ?)",
                      (f"r{i}", label or verdict, source, blind, f"2026-11-15T00:{i // 60:02d}:"
@@ -116,8 +117,9 @@ def _gate_store(n, verdict="same", label=None, model="m", conf=0.9, population="
         conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                      "question_version, subject_kind, subject_id, population, tier, model, verdict, "
                      "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at, "
-                     "audit_selected, audit_probability, batching_regime) VALUES (?, 'p', 'Q', '2', 's', ?, ?, "
-                     "'jev', 'inbox-model', 'replaces', 0.9, 0.7, 1, 'c', ?, 't', 1, 0.1, 'batched')",
+                     "audit_selected, audit_probability, batching_regime, inbox_selected) VALUES (?, 'p', "
+                     "'Q', '2', 's', ?, ?, 'jev', 'inbox-model', 'replaces', 0.9, 0.7, 1, 'c', ?, 't', "
+                     "1, 0.1, 'single', 1)",
                      (rid, rid, population, f"hx{j}"))  # same inbox, not the cell under test
         conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
                      "labelled_at) VALUES (?, 'replaces', 'audit', 'a', 1, '2026-11-14T00:00:00')",
@@ -134,41 +136,44 @@ def _gate(conn, alpha=0.05):
 
 def test_acting_gate_certifies_from_blind_audit_labels_only() -> None:
     gate = _gate(_gate_store(100))
-    assert gate.allows("jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
-    assert not gate.allows("jev", "m", "same", 0.45, population="slot_dispute", regime="batched")  # below the grid
-    assert not gate.allows("jev", "m", "replaces", 0.99, population="slot_dispute", regime="batched")
-    assert not gate.allows("jev", "other", "same", 0.99, population="slot_dispute", regime="batched")
-    assert not gate.allows("jev", "m", "same", 0.99, population="backlog", regime="batched")  # per population
+    assert gate.allows("jev", "m", "same", 0.95, population="slot_dispute", regime="single")
+    assert not gate.allows("jev", "m", "same", 0.45, population="slot_dispute", regime="single")  # below the grid
+    assert not gate.allows("jev", "m", "replaces", 0.99, population="slot_dispute", regime="single")
+    assert not gate.allows("jev", "other", "same", 0.99, population="slot_dispute", regime="single")
+    assert not gate.allows("jev", "m", "same", 0.99, population="backlog", regime="single")  # per population
     assert not _gate(_gate_store(100, selected=0)).allows(  # labelled, but never drawn
-        "jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+        "jev", "m", "same", 0.95, population="slot_dispute", regime="single")
     assert not _gate(_gate_store(100, source="review")).allows(
-        "jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+        "jev", "m", "same", 0.95, population="slot_dispute", regime="single")
     assert not _gate(_gate_store(100, blind=0)).allows(
-        "jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+        "jev", "m", "same", 0.95, population="slot_dispute", regime="single")
 
 
 def test_72_clean_audits_are_one_short_for_a_retiring_verdict() -> None:
     kw = dict(verdict="replaces")
     assert not _gate(_gate_store(72, **kw)).allows("jev", "m", "replaces", 0.95,
-                                                   population="slot_dispute", regime="batched")
+                                                   population="slot_dispute", regime="single")
     assert _gate(_gate_store(73, **kw)).allows("jev", "m", "replaces", 0.95,
-                                               population="slot_dispute", regime="batched")
+                                               population="slot_dispute", regime="single")
 
 
-def test_a_closing_verdict_spends_delta_over_two_on_the_e_process() -> None:
-    """M-02: at alpha 0.05 the e-process runs at delta/2, so 90 clean audits, not 73."""
-    assert not _gate(_gate_store(89)).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
-    assert _gate(_gate_store(90)).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+def test_a_model_closing_verdict_spends_delta_over_three_on_the_e_process() -> None:
+    """M-02 (W0-07): the e-process, U and L each get delta/3, so at alpha 0.05 a
+    model's closing verdict needs 100 clean audits, not 73."""
+    assert not _gate(_gate_store(99)).allows("jev", "m", "same", 0.95, population="slot_dispute",
+                                             regime="single")
+    assert _gate(_gate_store(100)).allows("jev", "m", "same", 0.95, population="slot_dispute",
+                                          regime="single")
 
 
 def test_a_closing_certificate_must_beat_closing_everything() -> None:
     """M-02 base rate: with no replacements in the tier's inbox, never closing
     anything wrongly proves nothing; and a weak upper bound cannot clear a low base rate."""
-    none = _gate(_gate_store(400, inbox_replaced=0)).certificate("jev", "m", "same", "slot_dispute", "batched")
+    none = _gate(_gate_store(400, inbox_replaced=0)).certificate("jev", "m", "same", "slot_dispute", "single")
     assert none.threshold is not None and not none.acts and none.base_rate_lower == 0.0
-    rare = _gate(_gate_store(400, inbox_replaced=3)).certificate("jev", "m", "same", "slot_dispute", "batched")
+    rare = _gate(_gate_store(400, inbox_replaced=3)).certificate("jev", "m", "same", "slot_dispute", "single")
     assert not rare.acts and rare.false_keep_upper >= rare.base_rate_lower
-    plenty = _gate(_gate_store(400)).certificate("jev", "m", "same", "slot_dispute", "batched")
+    plenty = _gate(_gate_store(400)).certificate("jev", "m", "same", "slot_dispute", "single")
     assert plenty.acts and plenty.false_keep_upper < plenty.base_rate_lower
 
 
@@ -186,14 +191,14 @@ def test_closing_needs_459_clean_audits_at_alpha_close() -> None:
 
 def test_a_closing_verdict_is_held_when_its_errors_are_hidden_replacements() -> None:
     conn = _gate_store(400, verdict="same", label="replaces")
-    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="single")
 
 
 def test_disagreeing_audits_count_as_an_error() -> None:
     conn = _gate_store(73)
     conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
                  "labelled_at) VALUES ('r0', 'replaces', 'audit', 'b', 1, '2026-11-15T01:00:00')")
-    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="batched")
+    assert not _gate(conn).allows("jev", "m", "same", 0.95, population="slot_dispute", regime="single")
 
 
 def test_eprocess_boundaries() -> None:

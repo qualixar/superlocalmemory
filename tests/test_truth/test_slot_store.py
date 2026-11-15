@@ -97,7 +97,8 @@ def test_an_unconfident_key_opens_a_dispute_and_keeps_the_head(conn) -> None:
 
 @pytest.mark.parametrize("resolution,retire,head_is_b,state", [
     ("a", ("f2",), False, "current"), ("b", ("f1",), True, "current"),
-    ("both", (), False, "current"), ("neither", ("f1", "f2"), None, "empty")])
+    ("both", (), False, "current"), ("same", (), False, "current"),
+    ("unrelated", (), False, "current")])
 def test_dispute_resolution(conn, resolution, retire, head_is_b, state) -> None:
     head = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
     weak = extract("The release cadence of SLM is weekly")  # a pattern key
@@ -105,19 +106,42 @@ def test_dispute_resolution(conn, resolution, retire, head_is_b, state) -> None:
     assert ss.resolve_dispute(conn, d.dispute_id, resolution, resolved_by="user") == retire
     slot_head, slot_state, _ = _slot(conn, head.slot_id)
     assert slot_state == state
-    if head_is_b is None:
-        assert slot_head is None
-    else:
-        assert slot_head == (d.revision_id if head_is_b else head.revision_id)
+    assert slot_head == (d.revision_id if head_is_b else head.revision_id)
     assert conn.execute("SELECT state, resolution FROM slot_disputes").fetchone() == (
         "resolved", resolution)
     with pytest.raises(LookupError):
         ss.resolve_dispute(conn, d.dispute_id, resolution, resolved_by="user")
 
 
-def test_bad_resolution_is_refused(conn) -> None:
-    with pytest.raises(ValueError):
-        ss.resolve_dispute(conn, "nope", "maybe", resolved_by="user")
+@pytest.mark.parametrize("resolution", ["maybe", "neither"])
+def test_bad_resolution_is_refused(conn, resolution) -> None:
+    with pytest.raises(ValueError):  # R-22: "neither" had no retirement path; removed
+        ss.resolve_dispute(conn, "nope", resolution, resolved_by="user")
+
+
+def test_unrelated_unbinds_the_challenger_and_records_a_keying_error(conn) -> None:
+    head = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    weak = extract("The release cadence of SLM is weekly")
+    d = _bind(conn, "f2", "", "2026-02-01", key=weak)
+    ss.resolve_dispute(conn, d.dispute_id, "unrelated", resolved_by="judge")
+    assert conn.execute("SELECT state, reason_code, superseded_by FROM slot_revisions "
+                        "WHERE revision_id = ?", (d.revision_id,)).fetchone() == (
+        "unbound", "keying_error", None)
+    again = _bind(conn, "f2", "", "2026-02-01", key=weak)  # the slot pass meets it again
+    assert (again.outcome, again.revision_id) == ("unbound", d.revision_id)
+    assert _slot(conn, head.slot_id)[0:2] == (head.revision_id, "current")
+
+
+def test_erasing_the_head_never_rebinds_an_unbound_revision(conn) -> None:
+    head = _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-01-01")
+    weak = extract("The release cadence of SLM is weekly")
+    d = _bind(conn, "f2", "", "2026-02-01", key=weak)
+    ss.resolve_dispute(conn, d.dispute_id, "unrelated", resolved_by="judge")
+    conn.execute("DELETE FROM slot_revisions WHERE revision_id = ?", (head.revision_id,))
+    assert conn.execute("SELECT state FROM slot_revisions WHERE revision_id = ?",
+                        (d.revision_id,)).fetchone() == ("unbound",)
+    assert conn.execute("SELECT COUNT(*) FROM slot_pass_queue WHERE fact_id = 'f2'"
+                        ).fetchone() == (0,)
 
 
 def test_binding_the_same_fact_twice_keeps_the_first_decision(conn) -> None:

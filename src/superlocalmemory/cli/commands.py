@@ -679,6 +679,7 @@ def dispatch(args: Namespace) -> None:
         "trace": cmd_trace,
         "mcp": cmd_mcp,
         "tools": _cmd_tools,
+        "flags": _cmd_flags,
         "warmup": cmd_warmup,
         "dashboard": cmd_dashboard,
         "profile": cmd_profile,
@@ -3120,6 +3121,9 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("features", "See what is on: images & documents, bot mesh"),
         ("media", "Images & documents: enable | disable | status"),
     ]),
+    ("Learning switches", [
+        ("flags", "What SLM learns from: slm flags | set <flag> on|shadow|off | kill on|off"),
+    ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),
     ]),
@@ -4372,6 +4376,14 @@ def cmd_trace(args: Namespace) -> None:
 # -- Services (no --json — these start long-running processes) -------------
 
 
+def _cmd_flags(args: Namespace) -> None:
+    from superlocalmemory.cli.flags_cmd import cmd_flags
+
+    code = cmd_flags(args)
+    if code:
+        raise SystemExit(code)
+
+
 def _cmd_tools(args: Namespace) -> None:
     from superlocalmemory.cli.tools_cmd import cmd_tools
     cmd_tools(args)
@@ -5274,17 +5286,18 @@ def cmd_session_context(args: Namespace) -> None:
 
 def _session_context_delivery(config, db_path, pid, query, fact_mems, render) -> str:
     """The SessionStart context through the injection receipts (4.2.30 D-22,
-    D-28): recent memories and session summaries may be withheld at random and
-    on record; the core block never is (it is not a fact)."""
+    D-33): one recent memory or session summary may be withheld at random and
+    on record; a pinned fact or standing rule among them never is (the store
+    decides, W0-01), and the core block is not a fact."""
     import os
 
     from superlocalmemory.outcomes import receipts
     from superlocalmemory.outcomes.randomiser import Candidate
 
     plan = receipts.plan(
-        slm_home=config.base_dir, profile_id=pid,
-        session_id=os.environ.get("CLAUDE_SESSION_ID", ""), path="session_context",
-        query=query,
+        slm_home=config.base_dir, db_path=db_path, profile_id=pid,
+        session_id=os.environ.get("CLAUDE_SESSION_ID") or None, path="session_context",
+        query=query, client=os.environ.get("SLM_CLIENT") or None,
         candidates=[Candidate(m.fact_id, role, float(m.score or 0.0)) for role, m in fact_mems],
     )
     return receipts.deliver(plan, db_path, fact_mems, fact_id=lambda item: item[1].fact_id,

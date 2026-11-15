@@ -19,28 +19,67 @@ from superlocalmemory.core.feature_flags import (
     write_flag,
 )
 
-#: D-22 / D-28 (Varun, 15 Nov): injection receipts and randomised withholding
-#: are on by default for every user, with a switch to turn them off.
-DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout"})
+#: D-22: injection receipts (measurement only) are on by default; D-34 keeps
+#: withholding off until its shipping conditions exist.
+DEFAULT_ON = frozenset({"outcomes.receipts"})
 
 
-def test_every_flag_defaults_off_so_4230_ships_dark_except_the_outcome_ledger() -> None:
+def test_every_flag_defaults_off_so_4230_ships_dark_except_receipts() -> None:
     assert FLAGS
     assert {f.flag_id for f in FLAGS.values() if f.default is not FlagState.OFF} == DEFAULT_ON
     assert all(FLAGS[fid].default is FlagState.ON for fid in DEFAULT_ON)
     assert all(f.workstream.startswith("WS-") for f in FLAGS.values())
 
 
+#: D-28's shipping conditions, as the modules that must exist before withholding
+#: may default to on (D-34): the install/upgrade disclosure, the off switch the
+#: dashboard and plugin settings call, and usage detection (W3).
+_SHIPPING_CONDITIONS = ("superlocalmemory.outcomes.disclosure",
+                        "superlocalmemory.outcomes.switch",
+                        "superlocalmemory.outcomes.usage")
+
+
+def test_withholding_defaults_on_only_once_its_shipping_conditions_exist() -> None:
+    import importlib.util
+
+    if FLAGS["outcomes.holdout"].default is FlagState.ON:  # the RC gate (D-34)
+        missing = [m for m in _SHIPPING_CONDITIONS if importlib.util.find_spec(m) is None]
+        assert not missing, f"withholding is default-on without {missing}"
+
+
 def test_the_outcome_ledger_has_an_off_switch_and_the_kill_switch_stops_it(tmp_path) -> None:
-    for fid in DEFAULT_ON:
-        write_flag(tmp_path, fid, FlagState.OFF)
-    flags = FeatureFlags(tmp_path, environ={})
-    assert not any(flags.observing(fid) for fid in DEFAULT_ON)
+    write_flag(tmp_path, "outcomes.receipts", FlagState.OFF)
+    assert not FeatureFlags(tmp_path, environ={}).observing("outcomes.receipts")
     fresh = tmp_path / "fresh"
     fresh.mkdir()
-    assert all(FeatureFlags(fresh, environ={}).enabled(fid) for fid in DEFAULT_ON)
-    assert not any(FeatureFlags(fresh, environ={KILL_ENV: "1"}).observing(fid)
-                   for fid in DEFAULT_ON)
+    assert FeatureFlags(fresh, environ={}).enabled("outcomes.receipts")
+    assert not FeatureFlags(fresh, environ={}).enabled("outcomes.holdout")
+    write_flag(fresh, "outcomes.holdout", FlagState.ON)  # the maintainer's store
+    assert FeatureFlags(fresh, environ={}).enabled("outcomes.holdout")
+    assert not FeatureFlags(fresh, environ={KILL_ENV: "1"}).observing("outcomes.receipts")
+
+
+@pytest.mark.parametrize("value", [True, "on", "true", "1", 1, "yes"])
+def test_any_truthy_kill_value_in_the_file_turns_everything_off(tmp_path, value) -> None:
+    (tmp_path / "features.json").write_text(json.dumps({"kill_switch": value}))
+    assert FeatureFlags(tmp_path, environ={}).killed  # W0-19: never fails open
+
+
+def test_slm_flags_sets_a_flag_and_the_kill_switch(tmp_path, monkeypatch, capsys) -> None:
+    from argparse import Namespace
+
+    from superlocalmemory.cli import flags_cmd
+
+    monkeypatch.setattr(flags_cmd, "_home", lambda: tmp_path)
+    assert flags_cmd.cmd_flags(Namespace(action="set", flag="outcomes.holdout", value="on")) == 0
+    assert FeatureFlags(tmp_path, environ={}).enabled("outcomes.holdout")
+    assert flags_cmd.cmd_flags(Namespace(action="set", flag="no.such", value="on")) == 2
+    flags_cmd.cmd_flags(Namespace(action="kill", value="on"))
+    assert FeatureFlags(tmp_path, environ={}).killed
+    flags_cmd.cmd_flags(Namespace(action="kill", value="off"))
+    assert not FeatureFlags(tmp_path, environ={}).killed
+    flags_cmd.cmd_flags(Namespace(action=None, json=True))
+    assert '"kill_switch": false' in capsys.readouterr().out
 
 
 def test_environment_beats_file_beats_default() -> None:

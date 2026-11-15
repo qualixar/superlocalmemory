@@ -70,12 +70,16 @@ def test_the_backfill_names_the_evidence_or_says_recorded() -> None:
     assert _source(conn, "a2") == "applied"
 
 
-def test_the_column_refuses_an_unknown_source() -> None:
+def test_the_column_has_no_frozen_list_and_writers_refuse_an_unknown_source() -> None:
+    from superlocalmemory.truth.validity import SOURCES, check_source
+
     conn = _bare()
     M073.apply(conn)
     conn.execute("INSERT INTO fact_temporal_validity (fact_id, profile_id) VALUES ('x', 'p')")
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE fact_temporal_validity SET valid_until_source = 'guess'")
+    conn.execute("UPDATE fact_temporal_validity SET valid_until_source = 'lease'")  # W0-06
+    assert all(check_source(s) == s for s in SOURCES) and check_source(None) is None
+    with pytest.raises(ValueError):
+        check_source("guess")
 
 
 def test_a_deleted_case_takes_its_snapshot_with_it() -> None:

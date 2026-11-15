@@ -359,6 +359,22 @@ def _requeue_projection(conn: Any, tables: set[str], target: str) -> None:
         (target, OP_UPSERT, _now()))
 
 
+def _requeue_slots(conn: Any) -> None:
+    """The slot pass binds each moved fact again, under its new profile (R-38).
+
+    The source's slots are deleted (their ids name the profile) and the moved
+    facts sit behind the slot pass's cursor, so without this they would never
+    get a slot in the target profile.
+    """
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                        "AND name='slot_pass_queue'").fetchone():
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO slot_pass_queue (fact_id, reason, attempts, next_at, queued_at) "
+        "SELECT fact_id, 'rebind', 0, strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), "
+        "strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') FROM temp._fold_facts")
+
+
 def fold_profile(conn: Any, source: str, target: str = "default") -> dict[str, Any]:
     """Move ``source``'s memories to ``target`` in the caller's transaction.
 
@@ -388,6 +404,8 @@ def fold_profile(conn: Any, source: str, target: str = "default") -> dict[str, A
         if DECISIONS[table][0] == DELETE:
             counts[table] = _apply(conn, table, DELETE, source, target)
     _requeue_projection(conn, present, target)
+    if "atomic_facts" in present:
+        _requeue_slots(conn)
     conn.execute("DROP TABLE IF EXISTS temp._fold_facts")
     counts["merged_entities"] = merged
     return counts

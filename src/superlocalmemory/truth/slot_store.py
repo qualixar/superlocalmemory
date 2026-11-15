@@ -7,6 +7,8 @@
 * **head**: the slot had no current value; this fact is it.
 * **duplicate**: it states the head's value again.
 * **compatible**: a plural slot ("tools Alex uses"); both stay current.
+* **unbound**: a judge or person said the key was wrong; it stays on record so
+  the fact is never bound to this key again, and is no value of the slot.
 * **historical**: it is older than the head (a backfill of the past); it joins
   the history behind the head and replaces nothing.
 * **supersede**: a newer value for a single-valued slot with a confident key.
@@ -244,7 +246,7 @@ def record_case(conn: sqlite3.Connection, revision_id: str, case_id: str) -> Non
                  (case_id, revision_id))
 
 
-RESOLUTIONS = ("a", "b", "both", "neither", "same", "unrelated")
+RESOLUTIONS = ("a", "b", "both", "same", "unrelated")
 
 
 def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, *,
@@ -253,10 +255,12 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
 
     ``a`` keeps the earlier value, ``b`` takes the newer one, ``both`` keeps
     both as compatible values, ``same`` marks the newer one a duplicate of the
-    head, ``unrelated`` says the key was wrong and both stay current, and
-    ``neither`` says neither is true now: both stay on record as history and
-    the slot has no current value until a new memory arrives. Retiring facts
-    goes through the correction ledger, by the caller.
+    head, and ``unrelated`` says the key was wrong: the newer memory leaves the
+    slot (its revision stays, ``unbound``, reason ``keying_error``, so the slot
+    pass never binds it to this key again) and stays current. Retiring facts
+    goes through the correction ledger, by the caller. (R-22 removed a
+    ``neither`` resolution: no question produced it and no caller could retire
+    two facts without a successor.)
     """
     if resolution not in RESOLUTIONS:
         raise ValueError(f"resolution must be one of {RESOLUTIONS}")
@@ -284,18 +288,15 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
         _move_head(conn, slot_id, version, winner, "current", now)
         retire = (conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
                                (loser,)).fetchone()[0],)
-    elif resolution in ("both", "same", "unrelated"):
+    elif resolution in ("both", "same"):
         state = "duplicate" if resolution == "same" else "compatible"
         conn.execute("UPDATE slot_revisions SET state = ? WHERE revision_id = ?",
                      (state, rev_b))
         _move_head(conn, slot_id, version, rev_a, "current", now)
-    else:
-        conn.execute("UPDATE slot_revisions SET state = 'historical', superseded_by = NULL "
-                     "WHERE revision_id IN (?, ?)", (rev_a, rev_b))
-        _move_head(conn, slot_id, version, None, "empty", now)
-        retire = tuple(r[0] for r in conn.execute(
-            "SELECT fact_id FROM slot_revisions WHERE revision_id IN (?, ?) ORDER BY fact_id",
-            (rev_a, rev_b)))
+    else:  # unrelated: the key was wrong (R-22)
+        conn.execute("UPDATE slot_revisions SET state = 'unbound', superseded_by = NULL, "
+                     "reason_code = 'keying_error' WHERE revision_id = ?", (rev_b,))
+        _move_head(conn, slot_id, version, rev_a, "current", now)
     conn.execute("UPDATE slot_disputes SET state = 'resolved', resolution = ?, resolved_by = ?, "
                  "resolved_at = ? WHERE dispute_id = ?", (resolution, resolved_by, now,
                                                          dispute_id))

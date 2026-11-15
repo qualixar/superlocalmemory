@@ -69,14 +69,17 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Record source fingerprints and flag facts whose source changed"),
     Flag("judge.ladder", "WS-2", FlagState.OFF,
          "Route typed memory questions through the judge ladder"),
-    # D-22 / D-28 (Varun, 15 Nov): measurement starts at W0 and withholding is
-    # on by default for every user, with a clear switch to turn it off. These
-    # two are the only flags whose default is not "off".
+    # D-22: measurement starts at W0, on by default (ids only, local). The only
+    # flag whose default is not "off".
     Flag("outcomes.receipts", "WS-3", FlagState.ON,
          "Write an injection receipt for every delivery (ids only, local)"),
     Flag("outcomes.usage", "WS-3", FlagState.OFF,
          "Detect whether delivered memories were used (local, ids only)"),
-    Flag("outcomes.holdout", "WS-3", FlagState.ON,
+    # D-34 (Varun, 16 Nov): withholding stays off by default until D-28's
+    # shipping conditions exist (disclosure, the off switch in CLI, dashboard
+    # and plugin, usage detection; W3); the maintainer turns it on. The default
+    # flips to on in the commit that lands them (an RC gate test holds this).
+    Flag("outcomes.holdout", "WS-3", FlagState.OFF,
          "Withhold each eligible delivered memory with a small logged probability "
          "(never pinned rules, explicit recall, cues or lease warnings)",
          shadowable=False),
@@ -143,7 +146,13 @@ def kill_switch_on(slm_home: Path | None, environ: Mapping[str, str] | None = No
     env = os.environ if environ is None else environ
     if _parse(env.get(KILL_ENV, "")) is FlagState.ON:
         return True
-    return slm_home is not None and _read_file(slm_home).get(KILL_KEY) is True
+    # Any truthy spelling counts (W0-19): a hand-written "on" or 1 must never fail open.
+    if slm_home is None:
+        return False
+    value = _read_file(slm_home).get(KILL_KEY)
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)  # a hand-written 1
+    return _parse(value) is FlagState.ON
 
 
 def _write_file(slm_home: Path, data: dict[str, object]) -> None:

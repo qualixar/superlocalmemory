@@ -138,9 +138,11 @@ def _apply_predecessor_temporal(
         # signal every read path now resolves its answer from.
         raise CorrectionNotFoundError("predecessor temporal record was not superseded")
     if sourced:
+        from superlocalmemory.truth.validity import check_source
+
         conn.execute("UPDATE fact_temporal_validity SET valid_until_source = ? "
                      "WHERE fact_id = ? AND profile_id = ?",
-                     (source if until is not None else None, case.predecessor_fact_id,
+                     (check_source(source) if until is not None else None, case.predecessor_fact_id,
                       case.profile_id))
 
 

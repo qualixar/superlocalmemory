@@ -133,13 +133,23 @@ def test_a_rival_proposal_is_left_for_review(store) -> None:
     assert _retired(db, old) == (None, None, None)
 
 
-def test_vanished_revisions_restart_the_pass(store) -> None:
-    db, _old, _new, tmp = store
-    flags = _flags(**{"truth.slots": "shadow"})
-    first = SlotPass(db, flags, state_dir=tmp).run()
-    db.execute("DELETE FROM slot_revisions")  # what a profile fold does to the source
-    again = SlotPass(db, flags, state_dir=tmp).run()
-    assert again["keyed"] == first["keyed"] and again["head"] == 1
+def test_a_retirement_already_applied_for_another_successor_is_not_reported_applied(
+        store) -> None:
+    from superlocalmemory.truth.slot_resolver import RETIRED_FOR_ANOTHER, retire_superseded
+
+    db, old, new, _tmp = store
+    other = _fact(db, "A different memory that retired the old value.", "2026-05-01T00:00:00Z")
+    with db.raw_connection() as conn:
+        assert retire_superseded(conn, profile_id="default", scope="personal",
+                                 predecessor=old, successor=other)[0] == "applied"
+    _resolve_explicit(db, old, "weekly", "2026-03-01")
+    result = _resolve_explicit(db, new, "one big release", "2026-11-14")
+    assert result.ledger == RETIRED_FOR_ANOTHER  # R-22: was "applied"
+    assert _retired(db, old)[2] == other  # the earlier retirement stands untouched
+    linked = db.execute("SELECT case_id FROM slot_revisions WHERE fact_id = ?", (new,))[0]
+    assert linked["case_id"] is None
+
+
 
 
 # -- B2 / R-19: the queue: rebinds after a head is erased, retries after a failure ------------
@@ -260,6 +270,7 @@ def _pending_supersede(store):
     return db, old, new
 
 
+@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_stranded_supersede_is_proposed_then_applied_as_flags_allow(store) -> None:
     db, old, new = _pending_supersede(store)
     tmp = store[3]
@@ -279,6 +290,7 @@ def test_a_stranded_supersede_is_proposed_then_applied_as_flags_allow(store) -> 
     assert not any(k.startswith("ledger_") for k in again)  # settled: not read again
 
 
+@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_decision_made_in_shadow_is_applied_directly_once_allowed(store) -> None:
     db, old, new = _pending_supersede(store)
     counts = SlotPass(db, _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"}),
@@ -318,3 +330,35 @@ def test_rollback_slot_cases_restores_only_the_truth_layers_retirements(store) -
         "SELECT case_id, status FROM correction_cases")}
     assert statuses["keep-me"] == "proposed"
     assert sorted(statuses.values()) == ["proposed", "rolled_back"]
+
+
+def test_an_erasure_never_sends_the_pass_back_over_every_fact(store) -> None:
+    db, _old, new, tmp = store
+    flags = _flags(**{"truth.slots": "shadow"})
+    first = SlotPass(db, flags, state_dir=tmp).run()
+    assert first["keyed"] + first["unkeyed"] == 3
+    _erase(db, new)  # a revision vanishes: R-38 used to restart from fact zero
+    again = SlotPass(db, flags, state_dir=tmp).run()
+    assert again.get("keyed", 0) + again.get("unkeyed", 0) == 0
+
+
+def test_a_profile_fold_queues_its_facts_so_they_get_slots_in_the_target(store) -> None:
+    from superlocalmemory.storage.profile_fold import fold_profile
+
+    db, _old, _new, tmp = store
+    with db.raw_connection() as conn:
+        conn.execute("INSERT OR IGNORE INTO profiles (profile_id, name) VALUES ('work', 'work')")
+        for table in ("memories", "atomic_facts"):
+            conn.execute(f"UPDATE {table} SET profile_id = 'work'")  # noqa: S608
+    flags = _flags(**{"truth.slots": "shadow"})
+    SlotPass(db, flags, state_dir=tmp).run()
+    assert {r["profile_id"] for r in db.execute("SELECT profile_id FROM memory_slots")} == {
+        "work"}
+    with db.raw_connection() as conn:
+        fold_profile(conn, "work", "default")
+    assert db.execute("SELECT COUNT(*) AS n FROM memory_slots")[0]["n"] == 0
+    assert db.execute("SELECT COUNT(*) AS n FROM slot_pass_queue")[0]["n"] == 3
+    SlotPass(db, flags, state_dir=tmp).run()
+    assert {r["profile_id"] for r in db.execute("SELECT profile_id FROM memory_slots")} == {
+        "default"}
+    assert _slot_state(db) == [("disputed", 2)]

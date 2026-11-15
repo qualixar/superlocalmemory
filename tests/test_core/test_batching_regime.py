@@ -68,21 +68,47 @@ def _gate(conn) -> ActingGate:
                       version=SLOT_RELATION.version, alpha_for=lambda v: 0.05, delta=0.05)
 
 
-def test_labels_earned_in_batches_never_certify_a_single_ask() -> None:
+def _decide_alone(n, conn, model="m", verdict="same", conf=0.95):
+    """n decisions, each asked on its own (regime ``single``)."""
+    rows = []
+    for i in range(n):
+        tier = Fixed(lambda items: [TierAnswer(verdict, conf, model=model)] * len(items))
+        ctx = Context(population="slot_dispute", hash_key=KEY, audit_probability=1.0)
+        item = _items(n)[i]
+        rows += JudgeLadder([tier]).decide(SLOT_RELATION, [item], ctx)[1]
+    write_receipts(conn, rows)
+    return rows
+
+
+def _label_all(conn, rows, label):
+    for r in rows:
+        record_audit_label(conn, r.receipt_id, label, labeller="alex")
+
+
+def test_a_batched_cell_never_acts_and_never_certifies_a_single_ask() -> None:
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
     _, rows = _decide(Fixed, 112, conn)  # seven full batches of sixteen
     _, inbox = _decide(Fixed, 304, conn, model="m2", verdict="replaces", conf=0.6)
-    for r in inbox:  # real replacements in the tier's inbox (M-02 base rate)
-        record_audit_label(conn, r.receipt_id, "replaces", labeller="alex")
-    for r in rows:
-        record_audit_label(conn, r.receipt_id, "same", labeller="alex")
+    _label_all(conn, inbox, "replaces")  # real replacements in the tier's inbox (M-02)
+    _label_all(conn, rows, "same")
     gate = _gate(conn)
-    assert gate.allows("laya", "m", "same", 0.95, population="slot_dispute", regime="batched")
+    for regime in ("batched", "single", "unknown"):  # W0-04: labels in a batch are not
+        assert not gate.allows("laya", "m", "same", 0.95,  # independent trials
+                               population="slot_dispute", regime=regime)
+
+
+def test_a_single_ask_cell_certifies_on_its_own_labels() -> None:
+    conn = sqlite3.connect(":memory:")
+    M072.apply(conn)
+    rows = _decide_alone(112, conn)
+    inbox = _decide_alone(300, conn, model="m2", verdict="replaces", conf=0.6)
+    _label_all(conn, inbox, "replaces")
+    _label_all(conn, rows, "same")
+    gate = _gate(conn)
+    assert gate.allows("laya", "m", "same", 0.95, population="slot_dispute", regime="single")
     assert not gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
-                           regime="single")
-    assert not gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
-                           regime="unknown")
+                           regime="batched")
 
 
 def test_the_regime_is_a_required_part_of_the_gate_key() -> None:
@@ -90,24 +116,3 @@ def test_the_regime_is_a_required_part_of_the_gate_key() -> None:
     M072.apply(conn)
     with pytest.raises(TypeError):
         _gate(conn).allows("laya", "m", "same", 0.95, population="slot_dispute")
-
-
-def test_m072_repair_brings_an_earlier_store_up_to_date_as_unknown() -> None:
-    conn = sqlite3.connect(":memory:")
-    old = M072.DDL.replace(
-        "    batching_regime   TEXT NOT NULL DEFAULT 'unknown'\n"
-        "        CHECK (batching_regime IN ('single', 'batched', 'unbatched', 'unknown')),\n", "")
-    assert old != M072.DDL
-    for statement in old.split(";"):
-        if statement.strip():
-            conn.execute(statement)
-    conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
-                 "question_version, subject_kind, subject_id, tier, model, verdict, threshold, "
-                 "accepted, calibration_id, inputs_hash, decided_at) VALUES "
-                 "('r', 'p', 'Q', '2', 's', 's', 'jev', 'm', 'same', 0.7, 1, 'c', 'h', 't')")
-    assert not M072.verify(conn)
-    M072.repair(conn)
-    assert M072.verify(conn)
-    assert conn.execute("SELECT batching_regime FROM judge_receipts").fetchall() == [("unknown",)]
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE judge_receipts SET batching_regime = 'pooled'")

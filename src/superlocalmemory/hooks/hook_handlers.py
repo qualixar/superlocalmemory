@@ -356,7 +356,7 @@ def _hook_start() -> None:
     project_name = os.path.basename(project_dir)
     # The agent's session id reaches the context command so its injection
     # receipts can be grouped by session (4.2.30 D-14).
-    child_env = dict(os.environ)
+    child_env = dict(os.environ, SLM_CLIENT="claude-code")
     session_id = _payload_session_id()
     if session_id:
         child_env["CLAUDE_SESSION_ID"] = session_id

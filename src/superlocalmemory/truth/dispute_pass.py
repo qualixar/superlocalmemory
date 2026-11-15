@@ -10,7 +10,8 @@ do to the older one? The answer, once a tier is sure enough for its label:
   dispute stays open with its receipt, for review);
 * ``same``      -> the newer memory is a duplicate; nothing is retired;
 * ``both_true`` / ``separate_events`` -> both stay current;
-* ``unrelated`` -> the slot key was wrong; both stay current.
+* ``unrelated`` -> the slot key was wrong: the newer memory leaves the slot
+  (``unbound``, a keying error on record) and both stay current.
 
 ``judge.ladder`` in shadow asks and records receipts but changes nothing; on,
 it acts -- but only where the store's own labels support it
@@ -43,7 +44,11 @@ from superlocalmemory.core.judge_calibration import ActingGate
 from superlocalmemory.core.judge_ladder import Context, Decision, Item, JudgeLadder, inputs_hash, write_receipts
 from superlocalmemory.core.judge_questions import SLOT_RELATION
 from superlocalmemory.truth import slot_store
-from superlocalmemory.truth.slot_resolver import retire_superseded
+from superlocalmemory.truth.slot_resolver import (
+    RETIRED_FOR_ANOTHER,
+    auto_apply_allowed,
+    retire_superseded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +70,8 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
 #: Every receipt per judged pair under this question version.
 _EARLIER = """
 SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted, failure_kind,
-       batching_regime
-  FROM judge_receipts WHERE question_version = ? AND inputs_hash IN ({marks})
+       batching_regime, threshold
+  FROM judge_receipts WHERE question_version = ? AND profile_id = ? AND inputs_hash IN ({marks})
  ORDER BY decided_at
 """
 
@@ -88,7 +93,7 @@ class DisputePass:
             rows = conn.execute(_OPEN).fetchall()
             items = [Item(SUBJECT_KIND, r[0], r[1], {"older": r[3], "newer": r[5]},
                           fact_ids=(r[2], r[4])) for r in rows]
-            hashes = [inputs_hash(SLOT_RELATION, it, self._key) for it in items]
+            hashes = [(it.profile_id, inputs_hash(SLOT_RELATION, it, self._key)) for it in items]
             earlier = self._earlier(conn, hashes)
         # Which model tiers could answer here now (nothing is asked to find out).
         # Without one, only the free deterministic rules run, so no limit applies.
@@ -117,29 +122,41 @@ class DisputePass:
         logger.info("Dispute pass: %s", dict(self.counts))
         return dict(self.counts)
 
-    def _earlier(self, conn: Any, hashes: list[str]) -> dict[str, Decision | frozenset[str]]:
-        """Per pair hash: the accepted decision, or the tiers that gave it a
-        real answer (an abstention, never a failure: a failed ask judged nothing)."""
-        out: dict[str, Decision | frozenset[str]] = {}
-        for start in range(0, len(hashes), 500):
-            part = hashes[start:start + 500]
-            sql = _EARLIER.format(marks=",".join("?" * len(part)))
-            for h, rid, tier, model, verdict, conf, accepted, failure, regime in conn.execute(
-                    sql, (SLOT_RELATION.version, *part)):
-                seen = out.get(h, frozenset())
-                if isinstance(seen, Decision):
-                    continue
-                if accepted:
-                    out[h] = Decision(verdict, 1.0 if conf is None else float(conf), tier,
-                                      (rid,), model=model, regime=regime)
-                else:
-                    out[h] = seen | ({tier} if failure is None else set())
+    def _earlier(self, conn: Any, keys: list[tuple[str, str]]
+                 ) -> dict[tuple[str, str], Decision | frozenset[str]]:
+        """Per (profile, pair hash): the accepted decision, or the tiers that gave
+        it a real answer (an abstention, never a failure: a failed ask judged
+        nothing). Never across profiles (W0-15): the same two texts in another
+        profile are judged, receipted and erased on their own."""
+        out: dict[tuple[str, str], Decision | frozenset[str]] = {}
+        by_profile: dict[str, list[str]] = {}
+        for profile, h in keys:
+            by_profile.setdefault(profile, []).append(h)
+        for profile, hashes in by_profile.items():
+            for start in range(0, len(hashes), 500):
+                part = hashes[start:start + 500]
+                self._earlier_part(conn, profile, part, out)
         return out
+
+    @staticmethod
+    def _earlier_part(conn: Any, profile: str, part: list[str],
+                      out: dict[tuple[str, str], Decision | frozenset[str]]) -> None:
+        sql = _EARLIER.format(marks=",".join("?" * len(part)))
+        for h, rid, tier, model, verdict, conf, accepted, failure, regime, routed in conn.execute(
+                sql, (SLOT_RELATION.version, profile, *part)):
+            key = (profile, h)
+            seen = out.get(key, frozenset())
+            if isinstance(seen, Decision):
+                continue
+            if accepted:
+                out[key] = Decision(verdict, 1.0 if conf is None else float(conf), tier,
+                                    (rid,), model=model, regime=regime, routing_threshold=routed)
+            else:
+                out[key] = seen | ({tier} if failure is None else set())
 
     def _apply(self, conn: Any, pairs: list) -> None:
         acting = self._flags.enabled("judge.ladder")
-        auto_apply = (self._flags.enabled("truth.slots.auto_apply")
-                      and self._flags.enabled("truth.slots"))
+        auto_apply = auto_apply_allowed(self._flags)
         gates: dict[str, ActingGate] = {}
         for row, decision in pairs:
             self.counts[f"{decision.tier}:{decision.verdict}"] += 1
@@ -152,7 +169,8 @@ class DisputePass:
             # on an audit of its own decisions (I-10, M-18), like any judge.
             if not gate.allows(decision.tier, decision.model, decision.verdict,
                                decision.confidence, population=SUBJECT_KIND,
-                               regime=decision.regime):
+                               regime=decision.regime,
+                               routing_threshold=decision.routing_threshold):
                 self.counts["held_uncalibrated"] += 1
                 continue
             self._act(conn, row, decision, auto_apply)
@@ -181,6 +199,8 @@ class DisputePass:
         except _NotApplied as exc:
             conn.execute("ROLLBACK TO dispute")
             self.counts[f"ledger_{exc}"] += 1
+            if str(exc) == RETIRED_FOR_ANOTHER:  # the head's fact is already gone (R-22)
+                slot_store.dismiss_dispute(conn, dispute_id, by="judge_ladder:retired_for_another")
         except Exception as exc:  # noqa: BLE001 - one dispute must not stall the pass
             conn.execute("ROLLBACK TO dispute")
             self.counts["error"] += 1

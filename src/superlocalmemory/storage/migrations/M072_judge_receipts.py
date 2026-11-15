@@ -67,11 +67,11 @@ CREATE TABLE IF NOT EXISTS judge_receipts (
     action_ref        TEXT,
     audit_selected    INTEGER NOT NULL DEFAULT 0 CHECK (audit_selected IN (0, 1)),
     audit_probability REAL,
+    inbox_selected    INTEGER NOT NULL DEFAULT 0 CHECK (inbox_selected IN (0, 1)),
     decided_at        TEXT NOT NULL,
     failure_kind      TEXT,
     consent_ref       TEXT,
-    batching_regime   TEXT NOT NULL DEFAULT 'unknown'
-        CHECK (batching_regime IN ('single', 'batched', 'unbatched', 'unknown')),
+    batching_regime   TEXT NOT NULL DEFAULT 'unknown',
     CHECK ((verdict = 'tier_failed') = (failure_kind IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_judge_receipts_subject
@@ -83,23 +83,33 @@ CREATE INDEX IF NOT EXISTS idx_judge_receipts_inputs
 CREATE TABLE IF NOT EXISTS judge_labels (
     receipt_id  TEXT NOT NULL REFERENCES judge_receipts (receipt_id) ON DELETE CASCADE,
     label       TEXT NOT NULL,
-    source      TEXT NOT NULL CHECK (source IN ('audit', 'review', 'rollback', 'feedback')),
+    source      TEXT NOT NULL,
     labeller    TEXT NOT NULL DEFAULT '',
     blind       INTEGER NOT NULL DEFAULT 0 CHECK (blind IN (0, 1)),
     labelled_at TEXT NOT NULL,
     PRIMARY KEY (receipt_id, source, labeller)
-)
+);
+CREATE TABLE IF NOT EXISTS judge_receipt_facts (
+    receipt_id TEXT NOT NULL,
+    fact_id    TEXT NOT NULL,
+    PRIMARY KEY (receipt_id, fact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_judge_receipt_facts_fact ON judge_receipt_facts (fact_id)
 """
 
-#: Erasing a fact erases every receipt (and so every label) that judged it (I-11).
+#: Erasing a fact erases every receipt (and so every label) that judged it (I-11),
+#: through the indexed link table: one lookup per erased fact, not a scan of every
+#: receipt (W0-09; ``LIKE`` also read ``_`` in an id as a wildcard).
 _FACT_TRIGGER = """
-CREATE TRIGGER IF NOT EXISTS trg_judge_receipts_fact_erased
+CREATE TRIGGER trg_judge_receipts_fact_erased
 AFTER DELETE ON atomic_facts
 BEGIN
     DELETE FROM judge_labels WHERE receipt_id IN (
-        SELECT receipt_id FROM judge_receipts
-         WHERE fact_ids_json LIKE '%"' || OLD.fact_id || '"%');
-    DELETE FROM judge_receipts WHERE fact_ids_json LIKE '%"' || OLD.fact_id || '"%';
+        SELECT receipt_id FROM judge_receipt_facts WHERE fact_id = OLD.fact_id);
+    DELETE FROM judge_receipts WHERE receipt_id IN (
+        SELECT receipt_id FROM judge_receipt_facts WHERE fact_id = OLD.fact_id);
+    DELETE FROM judge_receipt_facts WHERE receipt_id IN (
+        SELECT receipt_id FROM judge_receipt_facts WHERE fact_id = OLD.fact_id);
 END
 """
 
@@ -113,28 +123,18 @@ def apply(conn: sqlite3.Connection) -> None:
     for statement in DDL.split(";"):
         if statement.strip():
             conn.execute(statement)
-    if _has_facts(conn):
+    if _has_facts(conn):  # triggers hold no data: always the current body
+        conn.execute("DROP TRIGGER IF EXISTS trg_judge_receipts_fact_erased")
         conn.execute(_FACT_TRIGGER)
-
-
-def _columns(conn: sqlite3.Connection) -> set[str]:
-    return {r[1] for r in conn.execute("PRAGMA table_info(judge_receipts)")}
 
 
 def verify(conn: sqlite3.Connection) -> bool:
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-    if not {"judge_receipts", "judge_labels", "idx_judge_receipts_inputs"} <= names:
-        return False
-    if "batching_regime" not in _columns(conn):
+    if not {"judge_receipts", "judge_labels", "idx_judge_receipts_inputs",
+            "judge_receipt_facts", "idx_judge_receipt_facts_fact"} <= names:
         return False
     return not _has_facts(conn) or "trg_judge_receipts_fact_erased" in names
 
 
 def repair(conn: sqlite3.Connection) -> None:
-    """Also brings a store made by an earlier unreleased M072 up to date: its
-    receipts get regime ``unknown``, which no certificate cell ever reads."""
     apply(conn)
-    if "batching_regime" not in _columns(conn):
-        conn.execute("ALTER TABLE judge_receipts ADD COLUMN batching_regime TEXT NOT NULL "
-                     "DEFAULT 'unknown' CHECK (batching_regime IN "
-                     "('single', 'batched', 'unbatched', 'unknown'))")

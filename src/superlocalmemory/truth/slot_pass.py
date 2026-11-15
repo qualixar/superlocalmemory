@@ -33,7 +33,7 @@ from typing import Any
 
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.truth.slot_keys import MAX_CHARS
-from superlocalmemory.truth.slot_resolver import resolve_fact
+from superlocalmemory.truth.slot_resolver import auto_apply_allowed, resolve_fact
 
 logger = logging.getLogger(__name__)
 
@@ -94,34 +94,24 @@ class SlotPass:
     def stop(self) -> None:
         self._stop.set()
 
-    def _revisions(self) -> int:
-        rows = self._db.execute("SELECT COUNT(*) AS n FROM slot_revisions", ())
-        return int(rows[0]["n"]) if rows else 0
-
     def _cursor(self) -> int:
-        """Where the last run stopped; 0 when revisions vanished since then.
+        """Where the last run stopped (0 on a first run or an unreadable state).
 
-        A profile fold deletes the source profile's slots (they cannot move,
-        their ids name the profile) and an erasure deletes a fact's revisions,
-        so fewer revisions than recorded means facts behind the cursor may have
-        lost theirs. Starting over is safe: binding a fact twice changes nothing.
+        Facts behind the cursor that lose their slot come back through the queue,
+        never through a restart (R-38: one erasure used to send the pass back over
+        every fact): erasing a head queues its slot's live revisions (the M069
+        trigger) and a profile fold queues every fact it moves
+        (``profile_fold._requeue_slots``).
         """
         try:
-            state = json.loads(self._state.read_text(encoding="utf-8"))
-            after, seen = int(state["after_rowid"]), int(state.get("revisions", 0))
+            return int(json.loads(self._state.read_text(encoding="utf-8"))["after_rowid"])
         except (OSError, ValueError, KeyError, TypeError):
             return 0
-        if self._revisions() >= seen:
-            return after
-        # Starting over binds every fact again, so queued rebinds would be done twice.
-        self._db.execute("DELETE FROM slot_pass_queue WHERE reason = 'rebind'", ())
-        return 0
 
     def _save(self, after_rowid: int) -> None:
         self._state.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._state.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"after_rowid": after_rowid, "revisions": self._revisions()}),
-                       encoding="utf-8")
+        tmp.write_text(json.dumps({"after_rowid": after_rowid}), encoding="utf-8")
         os.replace(tmp, self._state)
 
     def _one_batch(self, after: int, auto_apply: bool) -> int | None:
@@ -191,8 +181,7 @@ class SlotPass:
         if not self._flags.observing("truth.slots"):
             return {}
         # A child flag never acts beyond its parent: shadow slots retire nothing.
-        auto_apply = (self._flags.enabled("truth.slots.auto_apply")
-                      and self._flags.enabled("truth.slots"))
+        auto_apply = auto_apply_allowed(self._flags)  # W0-18 guard
         after = self._cursor()
         batches = 0
         while not self._stop.is_set():

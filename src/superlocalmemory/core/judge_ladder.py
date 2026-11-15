@@ -95,6 +95,9 @@ class Decision:
     model: str = ""
     #: The batching regime it was decided in (M-01); ``unknown`` certifies nothing.
     regime: str = "unknown"
+    #: The routing threshold the answer passed (W0-10: the gate checks it is
+    #: inside the certified chain); None where unknown.
+    routing_threshold: float | None = None
 
     @property
     def abstained(self) -> bool:
@@ -134,6 +137,7 @@ class ReceiptRow:
     audit_selected: bool = False
     audit_probability: float | None = None
     batching_regime: str = "unknown"
+    inbox_selected: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,11 +216,15 @@ class _Batch:
 def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, threshold: float,
          accepted: bool, ctx: Context, batch: _Batch, position: int,
          failure_kind: str | None = None, scored: bool = True) -> ReceiptRow:
-    from superlocalmemory.core.audit_sampler import select
+    from superlocalmemory.core.audit_sampler import NOT_ANSWERS, inbox_select, select
+    from superlocalmemory.core.risk_policy import audit_probability_for
 
     receipt_id = "jr_" + uuid.uuid4().hex
     selected, probability = select(ctx.hash_key, receipt_id, answer.verdict,
-                                   ctx.audit_probability)
+                                   audit_probability_for(answer.verdict, ctx.audit_probability))
+    pair = inputs_hash(question, item, ctx.hash_key)
+    in_inbox = (answer.verdict not in NOT_ANSWERS
+                and inbox_select(ctx.hash_key, pair, ctx.audit_probability))
     # A hosted ask's consent applies to every row of its batch, misses included.
     return ReceiptRow(
         receipt_id=receipt_id, profile_id=item.profile_id,
@@ -228,11 +236,11 @@ def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, thres
         raw_score=float(answer.confidence) if scored else None, threshold=threshold, accepted=accepted,
         probabilities_json=json.dumps(dict(answer.probabilities), sort_keys=True),
         calibration_id=answer.calibration_id,
-        inputs_hash=inputs_hash(question, item, ctx.hash_key), batch_id=batch.batch_id,
+        inputs_hash=pair, batch_id=batch.batch_id,
         batch_size=batch.size, batch_position=position, peers_hash=batch.peers_hash,
         flag_state=ctx.flag_state, decided_at=_now(), failure_kind=failure_kind,
         consent_ref=answer.consent_ref or batch.consent_ref, audit_selected=selected,
-        audit_probability=probability, batching_regime=batch.regime)
+        audit_probability=probability, batching_regime=batch.regime, inbox_selected=in_inbox)
 
 
 _RECEIPT_COLUMNS = (
@@ -240,7 +248,8 @@ _RECEIPT_COLUMNS = (
     "population", "fact_ids_json", "tier", "tier_index", "model", "verdict", "confidence",
     "raw_score", "threshold", "accepted", "probabilities_json", "calibration_id", "inputs_hash",
     "batch_id", "batch_size", "batch_position", "peers_hash", "flag_state", "decided_at",
-    "failure_kind", "consent_ref", "audit_selected", "audit_probability", "batching_regime")
+    "failure_kind", "consent_ref", "audit_selected", "audit_probability", "batching_regime",
+    "inbox_selected")
 
 
 def write_receipts(conn: sqlite3.Connection, rows: Sequence[ReceiptRow]) -> None:
@@ -249,6 +258,10 @@ def write_receipts(conn: sqlite3.Connection, rows: Sequence[ReceiptRow]) -> None
     conn.executemany(sql, [tuple(int(v) if isinstance(v, bool) else v
                                  for v in (getattr(r, c) for c in _RECEIPT_COLUMNS))
                            for r in rows])
+    # The erase trigger finds a fact's receipts through this index (I-11, W0-09).
+    conn.executemany("INSERT OR IGNORE INTO judge_receipt_facts (receipt_id, fact_id) "
+                     "VALUES (?, ?)", [(r.receipt_id, f) for r in rows
+                                       for f in json.loads(r.fact_ids_json)])
 
 
 def _valid(question: Question, answer: object) -> TierAnswer | None:
@@ -343,7 +356,8 @@ class JudgeLadder:
                 if sure:
                     decided[index] = Decision(answer.verdict, answer.confidence, tier.name,
                                               tuple(r.receipt_id for r in receipts[index]),
-                                              model=row.model, regime=row.batching_regime)
+                                              model=row.model, regime=row.batching_regime,
+                                              routing_threshold=threshold)
                 else:
                     still.append(index)
         return still

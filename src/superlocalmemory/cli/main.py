@@ -78,6 +78,7 @@ documentation:
 
 _NO_DAEMON_COMMANDS = {
     "setup", "mode", "provider", "connect", "upgrade-hosts", "migrate", "mcp", "tools", "warmup", "hooks", "codex",
+    "flags",
     "config", "evolve", "db",
     # v3.4.22 escape hatches — never auto-start the daemon on these.
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
@@ -787,6 +788,16 @@ def main() -> None:
     tools_p.add_argument("name", nargs="?", default=None,
                          help="core, code, full (default), power, mesh, whole, or default")
     tools_p.add_argument("--json", action="store_true", help="Output structured JSON")
+    flags_p = sub.add_parser(
+        "flags", help="Show or set the 4.2.30 subsystem flags and the kill switch")
+    flags_sub = flags_p.add_subparsers(dest="action")
+    flags_set = flags_sub.add_parser("set", help="Set one flag: on, shadow or off")
+    flags_set.add_argument("flag")
+    flags_set.add_argument("value", choices=["on", "shadow", "off"])
+    flags_kill = flags_sub.add_parser(
+        "kill", help="on: every 4.2.30 subsystem off at once; off: back to the flags")
+    flags_kill.add_argument("value", choices=["on", "off"])
+    flags_p.add_argument("--json", action="store_true", help="Output structured JSON")
     warmup_p = sub.add_parser(
         "warmup",
         help="Load the embedding model (~500MB download the first time) and "

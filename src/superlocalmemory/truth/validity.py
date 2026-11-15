@@ -54,6 +54,17 @@ SOURCES = ("stated", "reviewer", "successor_validity", "successor_fact", "succes
 UPPER_BOUND_SOURCES = frozenset({"successor_saved", "applied"})
 
 
+def check_source(source: str | None) -> str | None:
+    """``source`` if it is a known end source (or None); refuses anything else.
+
+    The column has no CHECK (W0-06: a fixed list on a core table could never
+    grow after release), so every writer validates here.
+    """
+    if source is not None and source not in SOURCES:
+        raise ValueError(f"unknown valid_until source: {source!r}")
+    return source
+
+
 def closing_time_sourced(
     *,
     event_valid_until: object = None,

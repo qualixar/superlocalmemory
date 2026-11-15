@@ -84,6 +84,17 @@ def _receipts(conn, n, p=1.0, verdict="same", conf=0.95, model="m"):
     return rows
 
 
+def _receipts_alone(conn, n, verdict="same", conf=0.95, model="m"):
+    """n receipts, each asked on its own (regime ``single``: certifiable)."""
+    rows = []
+    for item in _items(n):
+        tier = Fixed(lambda items: [TierAnswer(verdict, conf, model=model)] * len(items))
+        ctx = Context(population="slot_dispute", hash_key=KEY, audit_probability=1.0)
+        rows += JudgeLadder([tier]).decide(SLOT_RELATION, [item], ctx)[1]
+    write_receipts(conn, rows)
+    return rows
+
+
 def test_the_queue_is_selected_and_unlabelled_and_hides_the_verdict(conn) -> None:
     rows = _receipts(conn, 3)
     audit.record_audit_label(conn, rows[0].receipt_id, "same", labeller="alex")
@@ -112,18 +123,18 @@ def test_the_writer_checks_the_label_and_the_labeller(conn) -> None:
 def test_labels_written_through_the_sampler_earn_a_certificate(conn) -> None:
     from superlocalmemory.core.judge_calibration import ActingGate
 
-    rows = _receipts(conn, 100)  # a closing cell at alpha 0.05 needs 90 (delta/2, M-02)
-    inbox = [r for r in _receipts(conn, 300, verdict="replaces", conf=0.6, model="m2")
+    rows = _receipts_alone(conn, 110)  # a closing cell at alpha 0.05 needs 100 (delta/3)
+    inbox = [r for r in _receipts_alone(conn, 300, verdict="replaces", conf=0.6, model="m2")
              if r.verdict == "replaces"]
     for r in inbox:  # real replacements in the tier's inbox (M-02 base rate)
         audit.record_audit_label(conn, r.receipt_id, "replaces", labeller="alex")
     gate = ActingGate(conn, profile_id="p", question_id=SLOT_RELATION.question_id,
                       version=SLOT_RELATION.version, alpha_for=lambda v: 0.05, delta=0.05)
     assert not gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
-                           regime="batched")
+                           regime="single")
     for r in rows:
         audit.record_audit_label(conn, r.receipt_id, "same", labeller="alex")
     gate = ActingGate(conn, profile_id="p", question_id=SLOT_RELATION.question_id,
                       version=SLOT_RELATION.version, alpha_for=lambda v: 0.05, delta=0.05)
     assert gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
-                           regime="batched")
+                           regime="single")

@@ -142,6 +142,7 @@ def _codex_mcp_session_init(
 
 def _session_context(project_name: str, deadline: HookDeadline,
                      registry: ChildRegistry | None = None) -> str:
+    os.environ["SLM_CLIENT"] = "codex"  # names the host on the injection receipt (W0-14)
     result = run_bounded(
         ["slm", "session-context", project_name or "general"],
         deadline=deadline, registry=registry,
