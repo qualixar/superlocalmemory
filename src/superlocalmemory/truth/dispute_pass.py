@@ -64,7 +64,8 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
 
 #: Every receipt per judged pair under this question version.
 _EARLIER = """
-SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted, failure_kind
+SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted, failure_kind,
+       batching_regime
   FROM judge_receipts WHERE question_version = ? AND inputs_hash IN ({marks})
  ORDER BY decided_at
 """
@@ -123,14 +124,14 @@ class DisputePass:
         for start in range(0, len(hashes), 500):
             part = hashes[start:start + 500]
             sql = _EARLIER.format(marks=",".join("?" * len(part)))
-            for h, rid, tier, model, verdict, conf, accepted, failure in conn.execute(
+            for h, rid, tier, model, verdict, conf, accepted, failure, regime in conn.execute(
                     sql, (SLOT_RELATION.version, *part)):
                 seen = out.get(h, frozenset())
                 if isinstance(seen, Decision):
                     continue
                 if accepted:
                     out[h] = Decision(verdict, 1.0 if conf is None else float(conf), tier,
-                                      (rid,), model=model)
+                                      (rid,), model=model, regime=regime)
                 else:
                     out[h] = seen | ({tier} if failure is None else set())
         return out
@@ -150,7 +151,8 @@ class DisputePass:
             # Rules too: closing a dispute is a memory change, and a rule acts only
             # on an audit of its own decisions (I-10, M-18), like any judge.
             if not gate.allows(decision.tier, decision.model, decision.verdict,
-                               decision.confidence, population=SUBJECT_KIND):
+                               decision.confidence, population=SUBJECT_KIND,
+                               regime=decision.regime):
                 self.counts["held_uncalibrated"] += 1
                 continue
             self._act(conn, row, decision, auto_apply)

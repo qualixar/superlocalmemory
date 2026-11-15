@@ -10,6 +10,7 @@ import pytest
 
 from superlocalmemory.core.feature_flags import (
     FLAGS,
+    KILL_ENV,
     FeatureFlags,
     FlagState,
     env_name,
@@ -18,10 +19,28 @@ from superlocalmemory.core.feature_flags import (
     write_flag,
 )
 
+#: D-22 / D-28 (Varun, 15 Nov): injection receipts and randomised withholding
+#: are on by default for every user, with a switch to turn them off.
+DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout"})
 
-def test_every_flag_defaults_off_so_4230_ships_dark() -> None:
-    assert FLAGS and all(f.default is FlagState.OFF for f in FLAGS.values())
+
+def test_every_flag_defaults_off_so_4230_ships_dark_except_the_outcome_ledger() -> None:
+    assert FLAGS
+    assert {f.flag_id for f in FLAGS.values() if f.default is not FlagState.OFF} == DEFAULT_ON
+    assert all(FLAGS[fid].default is FlagState.ON for fid in DEFAULT_ON)
     assert all(f.workstream.startswith("WS-") for f in FLAGS.values())
+
+
+def test_the_outcome_ledger_has_an_off_switch_and_the_kill_switch_stops_it(tmp_path) -> None:
+    for fid in DEFAULT_ON:
+        write_flag(tmp_path, fid, FlagState.OFF)
+    flags = FeatureFlags(tmp_path, environ={})
+    assert not any(flags.observing(fid) for fid in DEFAULT_ON)
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    assert all(FeatureFlags(fresh, environ={}).enabled(fid) for fid in DEFAULT_ON)
+    assert not any(FeatureFlags(fresh, environ={KILL_ENV: "1"}).observing(fid)
+                   for fid in DEFAULT_ON)
 
 
 def test_environment_beats_file_beats_default() -> None:

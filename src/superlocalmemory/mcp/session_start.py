@@ -278,15 +278,18 @@ async def session_init(
         relevant = await asyncio.to_thread(
             _jev_ordered, engine, query or session_context_query(project_path), relevant)
         pins, standing, upcoming = _priority_facts(engine, pid, project_path, response)
-        context, rows = _render_session(
-            engine, named, response, pins, standing, relevant, max_results
+        sid = session_id.strip() or f"slm-{datetime.now(UTC):%Y%m%d}-{uuid.uuid4().hex[:8]}"
+        context, rows = await asyncio.to_thread(
+            _deliver_session, engine, named, pid, sid,
+            query or session_context_query(project_path), response, pins, standing,
+            relevant, max_results,
         )
         await asyncio.to_thread(bind_local_project, project_path)
         return _envelope(
             engine,
             pid,
             named,
-            session_id,
+            sid,
             agent_id,
             context,
             rows,
@@ -326,3 +329,46 @@ def _render_session(engine, named, response, pins, standing, relevant, limit):
     return _context(engine, named, response, memories, cfg), _memory_rows(
         memories, relevant, limit, cfg
     )
+
+
+def _outcome_paths(engine):
+    """(SLM home, memory.db) of a real engine, or (None, None)."""
+    from pathlib import Path
+
+    home = getattr(getattr(engine, "config", None), "base_dir", None)
+    db_path = getattr(getattr(engine, "db", None), "db_path", None)
+    if isinstance(home, Path) and isinstance(db_path, Path):
+        return home, db_path
+    return None, None
+
+
+def _deliver_session(engine, named, pid, sid, query, response, pins, standing, relevant, limit):
+    """Render the session context through the injection receipts (D-22, D-28):
+    recall rows may be withheld at random and on record; pins and standing
+    rules never are."""
+    from superlocalmemory.outcomes import receipts
+    from superlocalmemory.outcomes.randomiser import Candidate
+
+    shown_rows = relevant[:limit]
+    home, db_path = _outcome_paths(engine)
+    plan = None
+    if home is not None:
+        plan = receipts.plan(
+            slm_home=home, profile_id=pid, session_id=sid, path="session_init", query=query,
+            candidates=[Candidate(f.fact_id, "pinned") for f in pins[:20]]
+            + [Candidate(f.fact_id, "standing") for f in standing]
+            + [Candidate(r.fact.fact_id, "recall", float(r.score or 0.0)) for r in shown_rows],
+        )
+    return receipts.deliver(
+        plan, db_path, shown_rows,
+        fact_id=lambda r: r.fact.fact_id,
+        render=lambda kept: _render_session(engine, named, response, pins, standing, kept, limit),
+        shown=_shown_ids,
+    )
+
+
+def _shown_ids(rendered):
+    from superlocalmemory.outcomes.receipts import shown_in_text
+
+    context, rows = rendered
+    return shown_in_text(context) | {row["fact_id"] for row in rows if row.get("fact_id")}

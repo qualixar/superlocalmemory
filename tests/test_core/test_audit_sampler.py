@@ -119,9 +119,11 @@ def test_labels_written_through_the_sampler_earn_a_certificate(conn) -> None:
         audit.record_audit_label(conn, r.receipt_id, "replaces", labeller="alex")
     gate = ActingGate(conn, profile_id="p", question_id=SLOT_RELATION.question_id,
                       version=SLOT_RELATION.version, alpha_for=lambda v: 0.05, delta=0.05)
-    assert not gate.allows("laya", "m", "same", 0.95, population="slot_dispute")
+    assert not gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
+                           regime="batched")
     for r in rows:
         audit.record_audit_label(conn, r.receipt_id, "same", labeller="alex")
     gate = ActingGate(conn, profile_id="p", question_id=SLOT_RELATION.question_id,
                       version=SLOT_RELATION.version, alpha_for=lambda v: 0.05, delta=0.05)
-    assert gate.allows("laya", "m", "same", 0.95, population="slot_dispute")
+    assert gate.allows("laya", "m", "same", 0.95, population="slot_dispute",
+                           regime="batched")

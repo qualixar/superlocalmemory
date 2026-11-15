@@ -78,7 +78,8 @@ from pathlib import Path
 #: M072 (judge receipts and labels) is additive, floor 51.
 #: M073 (valid_until_source, R-11) is additive, floor 51.
 #: M074 (fact_origin, D-21) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 74
+#: M075 (injection receipts, D-22) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 75
 
 
 class SchemaVersionError(RuntimeError):

@@ -229,6 +229,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M074_fact_origin as _M074,
 )
+from superlocalmemory.storage.migrations import (
+    M075_injection_receipts as _M075,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -490,4 +493,7 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M074 records each fact's origin at admission (D-21). Deferred: its erase
     # trigger watches atomic_facts.
     Migration(name=_M074.NAME, db_target="memory", ddl=_M074.DDL),
+    # M075 adds injection receipts with propensities (D-14, D-22). Deferred: its
+    # erase trigger watches atomic_facts.
+    Migration(name=_M075.NAME, db_target="memory", ddl=_M075.DDL),
 ]

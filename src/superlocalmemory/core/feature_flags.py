@@ -69,12 +69,16 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Record source fingerprints and flag facts whose source changed"),
     Flag("judge.ladder", "WS-2", FlagState.OFF,
          "Route typed memory questions through the judge ladder"),
-    Flag("outcomes.receipts", "WS-3", FlagState.OFF,
-         "Write an injection receipt for every delivery"),
+    # D-22 / D-28 (Varun, 15 Nov): measurement starts at W0 and withholding is
+    # on by default for every user, with a clear switch to turn it off. These
+    # two are the only flags whose default is not "off".
+    Flag("outcomes.receipts", "WS-3", FlagState.ON,
+         "Write an injection receipt for every delivery (ids only, local)"),
     Flag("outcomes.usage", "WS-3", FlagState.OFF,
          "Detect whether delivered memories were used (local, ids only)"),
-    Flag("outcomes.holdout", "WS-3", FlagState.OFF,
-         "Hold out a deterministic share of sessions from injection",
+    Flag("outcomes.holdout", "WS-3", FlagState.ON,
+         "Withhold each eligible delivered memory with a small logged probability "
+         "(never pinned rules, explicit recall, cues or lease warnings)",
          shadowable=False),
     Flag("delivery.need_gate", "WS-4", FlagState.OFF,
          "Decide per prompt whether memory is needed before recalling"),

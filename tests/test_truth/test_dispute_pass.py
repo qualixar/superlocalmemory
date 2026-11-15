@@ -40,7 +40,8 @@ def _open(db) -> int:
     return db.execute("SELECT COUNT(*) AS n FROM slot_disputes WHERE state='open'")[0]["n"]
 
 
-def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="audit"):
+def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="audit",
+               regime="single"):
     """Seed labelled receipts, as a person's reviews would, so the gate can decide.
 
     A closing verdict needs 459 clean audits (alpha_close at delta/2) and a tier
@@ -48,11 +49,14 @@ def _calibrate(db, verdict, *, n=None, wrong=0, tier="laya", blind=1, source="au
     """
     n = n if n is not None else (80 if verdict == "replaces" else 500)
     if verdict != "replaces":
-        _seed(db, "replaces", 300, tier=tier, model="inbox-model", label="replaces", tag="inbox")
-    _seed(db, verdict, n, tier=tier, model="fake", wrong=wrong, blind=blind, source=source)
+        _seed(db, "replaces", 300, tier=tier, model="inbox-model", label="replaces", tag="inbox",
+              regime=regime)
+    _seed(db, verdict, n, tier=tier, model="fake", wrong=wrong, blind=blind, source=source,
+          regime=regime)
 
 
-def _seed(db, verdict, n, *, tier, model, wrong=0, blind=1, source="audit", label=None, tag=None):
+def _seed(db, verdict, n, *, tier, model, wrong=0, blind=1, source="audit", label=None, tag=None,
+          regime="single"):
     tag = tag or verdict
     with db.raw_connection() as conn:
         for i in range(n):
@@ -61,10 +65,10 @@ def _seed(db, verdict, n, *, tier, model, wrong=0, blind=1, source="audit", labe
                 "INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                 "question_version, subject_kind, subject_id, population, tier, model, verdict, "
                 "confidence, threshold, accepted, calibration_id, inputs_hash, decided_at, "
-                "audit_selected, audit_probability) VALUES "
+                "audit_selected, audit_probability, batching_regime) VALUES "
                 "(?, 'default', 'SLOT_RELATION', ?, 'seed', ?, 'slot_dispute', ?, ?, ?, 0.95, "
-                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00', 1, 0.1)",
-                (rid, SLOT_RELATION.version, rid, tier, model, verdict, "seed-" + rid))
+                "0.7, 1, 'c', ?, '2026-11-15T00:00:00+00:00', 1, 0.1, ?)",
+                (rid, SLOT_RELATION.version, rid, tier, model, verdict, "seed-" + rid, regime))
             truth = label or (("replaces" if verdict != "replaces" else "unrelated") if i < wrong
                               else verdict)
             conn.execute("INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, "
@@ -281,7 +285,7 @@ def test_rules_do_not_close_a_dispute_without_an_audit_of_their_own(disputed) ->
 
 def test_audited_rules_close_a_dispute(disputed) -> None:
     db, _old, _new = disputed
-    _calibrate(db, "same", tier="rules")  # alpha_close at delta/2: 459 clean audits
+    _calibrate(db, "same", tier="rules", regime="unbatched")  # alpha_close at delta/2: 459 clean audits
     with db.raw_connection() as conn:
         conn.execute("UPDATE judge_receipts SET model = 'rules-v3', confidence = NULL "
                      "WHERE tier = 'rules'")

@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import time
 from pathlib import Path
 
 KEY_FILE = "judge-receipts.key"
@@ -35,10 +36,24 @@ def load_or_create(slm_home: Path) -> bytes:
     except OSError:  # Windows: inherits the profile folder's ACL
         pass
     key = secrets.token_bytes(32)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another process (the daemon, an MCP server, a hook) created it first.
+        return _read_existing(path)
     with os.fdopen(fd, "wb") as handle:
         handle.write(key)
     return key
+
+
+def _read_existing(path: Path) -> bytes:
+    """The key another process just wrote; it may still be mid-write."""
+    for _ in range(50):
+        key = path.read_bytes()
+        if len(key) >= 32:
+            return key
+        time.sleep(0.01)
+    raise OSError(f"receipt key at {path} is incomplete")
 
 
 def digest(key: bytes, payload: bytes) -> str:

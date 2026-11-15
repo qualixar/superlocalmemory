@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS judge_receipts (
     decided_at        TEXT NOT NULL,
     failure_kind      TEXT,
     consent_ref       TEXT,
+    batching_regime   TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (batching_regime IN ('single', 'batched', 'unbatched', 'unknown')),
     CHECK ((verdict = 'tier_failed') = (failure_kind IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_judge_receipts_subject
@@ -115,12 +117,24 @@ def apply(conn: sqlite3.Connection) -> None:
         conn.execute(_FACT_TRIGGER)
 
 
+def _columns(conn: sqlite3.Connection) -> set[str]:
+    return {r[1] for r in conn.execute("PRAGMA table_info(judge_receipts)")}
+
+
 def verify(conn: sqlite3.Connection) -> bool:
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     if not {"judge_receipts", "judge_labels", "idx_judge_receipts_inputs"} <= names:
+        return False
+    if "batching_regime" not in _columns(conn):
         return False
     return not _has_facts(conn) or "trg_judge_receipts_fact_erased" in names
 
 
 def repair(conn: sqlite3.Connection) -> None:
+    """Also brings a store made by an earlier unreleased M072 up to date: its
+    receipts get regime ``unknown``, which no certificate cell ever reads."""
     apply(conn)
+    if "batching_regime" not in _columns(conn):
+        conn.execute("ALTER TABLE judge_receipts ADD COLUMN batching_regime TEXT NOT NULL "
+                     "DEFAULT 'unknown' CHECK (batching_regime IN "
+                     "('single', 'batched', 'unbatched', 'unknown'))")

@@ -354,10 +354,16 @@ def _hook_start() -> None:
     # Print session context (SQL-fast path, <500ms)
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     project_name = os.path.basename(project_dir)
+    # The agent's session id reaches the context command so its injection
+    # receipts can be grouped by session (4.2.30 D-14).
+    child_env = dict(os.environ)
+    session_id = _payload_session_id()
+    if session_id:
+        child_env["CLAUDE_SESSION_ID"] = session_id
     try:
         result = subprocess.run(
             ["slm", "session-context", project_name],
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=child_env,
             timeout=max(0.5, deadline.remaining(reserve=0.5)),
         )
         if result.stdout.strip():

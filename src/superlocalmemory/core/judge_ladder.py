@@ -93,6 +93,8 @@ class Decision:
     tier: str
     receipts: tuple[str, ...]
     model: str = ""
+    #: The batching regime it was decided in (M-01); ``unknown`` certifies nothing.
+    regime: str = "unknown"
 
     @property
     def abstained(self) -> bool:
@@ -131,6 +133,7 @@ class ReceiptRow:
     consent_ref: str | None = None
     audit_selected: bool = False
     audit_probability: float | None = None
+    batching_regime: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,18 @@ class Tier(Protocol):
 def is_model_tier(tier: object) -> bool:
     """Rules are deterministic and never receipt a miss; every other tier is a model."""
     return getattr(tier, "is_model", True) is not False
+
+
+#: How a decision was asked (M-01): alone, among peers, or by a rule, which
+#: answers each item on its own whatever the batch. Errors measured in one
+#: regime say nothing about another (R-23), so each is its own certificate cell.
+BATCHING_REGIMES = ("single", "batched", "unbatched")
+
+
+def batching_regime(batch_size: int, *, model: bool) -> str:
+    if not model:
+        return "unbatched"
+    return "single" if batch_size == 1 else "batched"
 
 
 def tier_available(tier: object, question: Question) -> bool:
@@ -191,6 +206,7 @@ class _Batch:
     tier_index: int
     peers_hash: str
     consent_ref: str | None = None
+    regime: str = "unknown"
 
 
 def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, threshold: float,
@@ -216,7 +232,7 @@ def _row(question: Question, item: Item, tier: str, answer: TierAnswer, *, thres
         batch_size=batch.size, batch_position=position, peers_hash=batch.peers_hash,
         flag_state=ctx.flag_state, decided_at=_now(), failure_kind=failure_kind,
         consent_ref=answer.consent_ref or batch.consent_ref, audit_selected=selected,
-        audit_probability=probability)
+        audit_probability=probability, batching_regime=batch.regime)
 
 
 _RECEIPT_COLUMNS = (
@@ -224,7 +240,7 @@ _RECEIPT_COLUMNS = (
     "population", "fact_ids_json", "tier", "tier_index", "model", "verdict", "confidence",
     "raw_score", "threshold", "accepted", "probabilities_json", "calibration_id", "inputs_hash",
     "batch_id", "batch_size", "batch_position", "peers_hash", "flag_state", "decided_at",
-    "failure_kind", "consent_ref", "audit_selected", "audit_probability")
+    "failure_kind", "consent_ref", "audit_selected", "audit_probability", "batching_regime")
 
 
 def write_receipts(conn: sqlite3.Connection, rows: Sequence[ReceiptRow]) -> None:
@@ -297,7 +313,8 @@ class JudgeLadder:
             peers = hashlib.sha256("\0".join(sorted(items[i].subject_id for i in batch))
                                    .encode()).hexdigest()[:32]
             answers, failure, ref = self._answers(tier, question, [items[i] for i in batch])
-            meta = _Batch("jb_" + uuid.uuid4().hex, len(batch), tier_index, peers, ref)
+            meta = _Batch("jb_" + uuid.uuid4().hex, len(batch), tier_index, peers, ref,
+                          batching_regime(len(batch), model=is_model_tier(tier)))
             asked = answers is not None
             for pos, index in enumerate(batch):
                 if failure is not None:  # asked and failed as a whole: receipted (I-09)
@@ -326,7 +343,7 @@ class JudgeLadder:
                 if sure:
                     decided[index] = Decision(answer.verdict, answer.confidence, tier.name,
                                               tuple(r.receipt_id for r in receipts[index]),
-                                              model=row.model)
+                                              model=row.model, regime=row.batching_regime)
                 else:
                     still.append(index)
         return still
@@ -404,7 +421,8 @@ class RulesTier:
         return None
 
 
-__all__ = ["ABSTAIN", "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH",
+__all__ = ["ABSTAIN", "BATCHING_REGIMES", "batching_regime",
+           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH",
            "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
            "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",
            "write_receipts"]

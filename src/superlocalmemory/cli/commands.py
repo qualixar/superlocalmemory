@@ -5137,8 +5137,11 @@ def cmd_session_context(args: Namespace) -> None:
                 return conn.execute(query, params).fetchall()
 
         # Collect facts for injection — same queries as pre-v3.4.65 but
-        # mapped into InjectableMemory for the shared formatter.
-        inj_mems: list[InjectableMemory] = []
+        # mapped into InjectableMemory for the shared formatter. Core blocks
+        # and soft prompts are not facts; the facts go through the injection
+        # receipts (4.2.30 D-22, D-28) and may be withheld at random, on record.
+        core_mems: list[InjectableMemory] = []
+        fact_mems: list[tuple[str, InjectableMemory]] = []
 
         # Core Memory blocks (compiled high-value context)
         try:
@@ -5147,7 +5150,7 @@ def cmd_session_context(args: Namespace) -> None:
                 if r["block_type"] in _BLOCKS_NOT_FOR_SESSIONS:
                     continue
                 content = f"[{r['block_type']}] {r['content']}"
-                inj_mems.append(InjectableMemory(
+                core_mems.append(InjectableMemory(
                     content=content, score=1.0, fact_id="",
                     importance=1.0, access_count=10,
                     pinned=True,
@@ -5180,13 +5183,13 @@ def cmd_session_context(args: Namespace) -> None:
             # (core/session_jev: order only, 1.5 s budget, else unchanged).
             fact_rows = _jev_session_order(args, config, fact_rows)
             for r in fact_rows:
-                inj_mems.append(InjectableMemory(
+                fact_mems.append(("recent", InjectableMemory(
                     content=r["content"],
                     score=r["importance"] or 0.5,
                     fact_id=r["fact_id"],
                     importance=r["importance"] or 0.0,
                     access_count=r["access_count"] or 0,
-                ))
+                )))
         except sqlite3.OperationalError:
             pass
 
@@ -5206,20 +5209,21 @@ def cmd_session_context(args: Namespace) -> None:
                     (pid, *not_source_params, 3 * OVERSAMPLE),
                 ).fetchall(), 3)
             for r in sess_rows:
-                inj_mems.append(InjectableMemory(
+                fact_mems.append(("session_summary", InjectableMemory(
                     content=r["content"],
                     score=r["importance"] or 0.3,
                     fact_id=r["fact_id"],
                     importance=r["importance"] or 0.0,
                     access_count=r["access_count"] or 0,
-                ))
+                )))
         except sqlite3.OperationalError:
             pass
 
-        if not inj_mems:
+        if not core_mems and not fact_mems:
             return
 
         # V3.3 Soft prompts (auto-learned patterns) — append as high-importance
+        soft_mems: list[InjectableMemory] = []
         try:
             from superlocalmemory.parameterization.soft_prompt_generator import (
                 SESSION_EXCLUDED_CATEGORIES,
@@ -5234,7 +5238,7 @@ def cmd_session_context(args: Namespace) -> None:
                 (pid, *skip),
             )
             for r in sp_rows:
-                inj_mems.append(InjectableMemory(
+                soft_mems.append(InjectableMemory(
                     content=f"[{r['category']}] {r['content']}",
                     score=0.7, fact_id="",
                     importance=0.7, access_count=5,
@@ -5243,13 +5247,20 @@ def cmd_session_context(args: Namespace) -> None:
             pass
 
         cfg_inj = getattr(config, "injection", None)
-        context = render_context(inj_mems, mode=config.mode.value.upper(), cfg=cfg_inj, wrap=True)
+        mode = config.mode.value.upper()
+
+        def _render(kept: list[tuple[str, InjectableMemory]]) -> str:
+            mems = core_mems + [m for _, m in kept] + soft_mems
+            return render_context(mems, mode=mode, cfg=cfg_inj, wrap=True)
+
+        context = _session_context_delivery(
+            config, db_path, pid, getattr(args, "query", "") or "", fact_mems, _render)
         if context:
             if use_json:
                 from superlocalmemory.cli.json_output import json_print
                 json_print("session-context", data={
                     "context": context,
-                    "memory_count": len(inj_mems),
+                    "memory_count": len(core_mems) + len(fact_mems) + len(soft_mems),
                     "mode": config.mode.value,
                 }, next_actions=[
                     {"command": "slm recall --json <query>", "description": "Search memories"},
@@ -5260,6 +5271,24 @@ def cmd_session_context(args: Namespace) -> None:
     except Exception as exc:
         logger.debug("session-context (fast) failed: %s", exc)
 
+
+def _session_context_delivery(config, db_path, pid, query, fact_mems, render) -> str:
+    """The SessionStart context through the injection receipts (4.2.30 D-22,
+    D-28): recent memories and session summaries may be withheld at random and
+    on record; the core block never is (it is not a fact)."""
+    import os
+
+    from superlocalmemory.outcomes import receipts
+    from superlocalmemory.outcomes.randomiser import Candidate
+
+    plan = receipts.plan(
+        slm_home=config.base_dir, profile_id=pid,
+        session_id=os.environ.get("CLAUDE_SESSION_ID", ""), path="session_context",
+        query=query,
+        candidates=[Candidate(m.fact_id, role, float(m.score or 0.0)) for role, m in fact_mems],
+    )
+    return receipts.deliver(plan, db_path, fact_mems, fact_id=lambda item: item[1].fact_id,
+                            render=render, shown=receipts.shown_in_text)
 
 def cmd_brain(args: Namespace) -> None:
     """Read the portable, profile-scoped Living Brain truth snapshot.

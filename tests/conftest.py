@@ -185,6 +185,14 @@ def _prevent_heavy_model_loading():
 
 
 @pytest.fixture(autouse=True)
+def _withholding_off_unless_a_test_turns_it_on(monkeypatch):
+    """4.2.30 D-28 withholds delivered memories at random by design, so a test
+    that checks what a session start delivers would fail one run in ten. Tests
+    of the randomiser itself turn it on (``SLM_FEATURE_OUTCOMES_HOLDOUT=on``)."""
+    monkeypatch.setenv("SLM_FEATURE_OUTCOMES_HOLDOUT", "off")
+
+
+@pytest.fixture(autouse=True)
 def _stop_leaked_config_watchdogs():
     """Stop any config-store hot-reload watchdog left running by a test.
 

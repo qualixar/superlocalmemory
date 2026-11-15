@@ -259,6 +259,7 @@ SELECT r.receipt_id, r.confidence, l.label, l.labelled_at FROM judge_receipts r
   JOIN judge_labels l ON l.receipt_id = r.receipt_id
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
    AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
+   AND r.batching_regime = ?
    AND r.audit_selected = 1 AND l.source = 'audit' AND l.blind = 1
  ORDER BY l.labelled_at, r.receipt_id
 """
@@ -272,7 +273,8 @@ def _score(confidence: float | None) -> float:
 class ActingGate:
     """Which decisions may change memory, from this store's blind audit labels.
 
-    Key: (profile, question version, tier, model, verdict, population). Only
+    Key: (profile, question version, tier, model, verdict, population, batching
+    regime). Only
     labels with ``source = 'audit'`` and ``blind = 1`` count; rollbacks and
     reviews raise alarms but never certify (they are not missing at random).
     A receipt counts once, at its first label time; when its audit labels
@@ -289,13 +291,15 @@ class ActingGate:
         self._question, self._version = question_id, version
         self._alpha_for = alpha_for or risk_policy.alpha_for
         self._delta = risk_policy.DELTA if delta is None else delta
-        self._cache: dict[tuple[str, str, str, str], Certificate] = {}
+        self._cache: dict[tuple[str, str, str, str, str], Certificate] = {}
 
-    def certificate(self, tier: str, model: str, verdict: str, population: str) -> Certificate:
-        key = (tier, model, verdict, population)
+    def certificate(self, tier: str, model: str, verdict: str, population: str,
+                    regime: str) -> Certificate:
+        key = (tier, model, verdict, population, regime)
         if key not in self._cache:
             rows = self._conn.execute(_AUDITED, (self._profile, self._question, self._version,
-                                                 tier, model, verdict, population)).fetchall()
+                                                 tier, model, verdict, population,
+                                                 regime)).fetchall()
             per: dict[str, tuple[float, set[str], str]] = {}
             for rid, conf, label, at in rows:
                 # A rule has no score (NULL, R-36): all its decisions are one class,
@@ -336,8 +340,8 @@ class ActingGate:
         return clopper_pearson_lower(replaced, len(labels), delta)
 
     def allows(self, tier: str, model: str, verdict: str, confidence: float | None, *,
-               population: str) -> bool:
-        cert = self.certificate(tier, model, verdict, population)
+               population: str, regime: str) -> bool:
+        cert = self.certificate(tier, model, verdict, population, regime)
         return cert.acts and _score(confidence) >= cert.threshold
 
 
