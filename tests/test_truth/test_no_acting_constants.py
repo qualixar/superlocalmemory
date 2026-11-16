@@ -21,7 +21,8 @@ ROOT = pathlib.Path(superlocalmemory.__file__).parent
 MODULES = sorted((ROOT / "truth").glob("*.py")) + [
     ROOT / "core" / f"{name}.py" for name in (
         "judge_ladder", "judge_tiers", "judge_calibration", "judge_questions", "audit_sampler",
-        "risk_policy")]
+        "risk_policy", "judge_certificates", "shadow_escalation", "audit_value",
+        "relation_scorer", "consent_store")]
 
 #: Bounds of a probability or score: never thresholds on their own.
 BOUNDS = {0.0, 1.0}
@@ -45,6 +46,18 @@ ALLOWED = {
     ("judge_calibration.py", 2.0): "method: revocation tests alpha against 2 alpha, M-03",
     ("judge_questions.py", 0.7): "routing only: default stop-escalating confidence",
     ("judge_questions.py", 0.85): "routing only: escalate 'replaces' further",
+    ("judge_questions.py", 0.8): "routing only: INJECT_VALUE 'helps' (W2, shadow)",
+    ("judge_questions.py", 0.6): "routing only: INJECT_VALUE 'misleads' (W2, shadow)",
+    ("judge_questions.py", 0.5): "routing only: INSTRUCTION_RISK 'injection' (W2, shadow)",
+    ("audit_value.py", 3.0): "descriptive: queue order, harm of a wrong retirement vs 1",
+    ("audit_value.py", 0.5): "descriptive: queue order, doubt of a rule that has no score",
+    ("judge_certificates.py", 0.01): "policy: drift test level split over open certificates, M-07",
+    ("judge_certificates.py", 0.12): "method: KS small-sample correction (Stephens), M-07",
+    ("judge_certificates.py", 0.11): "method: KS small-sample correction (Stephens), M-07",
+    ("judge_certificates.py", 0.001): "method: KS series cut-off for a tiny statistic, M-07",
+    ("relation_scorer.py", 0.1): "method: Tier 0.5 L2 penalty (shadow only)",
+    ("relation_scorer.py", 0.5): "method: Tier 0.5 gradient step (shadow only)",
+    ("relation_scorer.py", 30.0): "method: logistic overflow clamp",
     ("judge_tiers.py", 0.8): "routing only: Laya 'same' floor",
     ("slot_keys.py", 0.6): "descriptive: PATTERN_CONFIDENCE, nothing branches on it (D-10)",
     ("slot_pass.py", 60.0): "routing only: retry backoff base (seconds)",

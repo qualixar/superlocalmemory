@@ -296,6 +296,7 @@ class MaintenanceScheduler:
 
                 ladder = build_ladder(
                     self._judge_supplier,
+                    scorer=self._relation_scorer(),
                     hosted_consent_ref=_consent_ref,
                     hosted_live=lambda: FeatureFlags(home).enabled("judge.ladder"))
                 from superlocalmemory.core.receipt_key import load_or_create
@@ -309,6 +310,17 @@ class MaintenanceScheduler:
                 self._record_step("backlog pass", True)
         except Exception as exc:  # noqa: BLE001
             self._record_step("slot pass", False, str(exc))
+
+    def _relation_scorer(self):
+        """Tier 0.5 fitted on this store's audit labels, or None (W2; shadow only)."""
+        try:
+            from superlocalmemory.core.relation_scorer import train
+
+            with self._db.raw_connection() as conn:
+                return train(conn)
+        except Exception as exc:  # noqa: BLE001 - a scorer that cannot train is absent
+            logger.info("Tier 0.5 scorer not trained (%s)", type(exc).__name__)
+            return None
 
     def _project_backfill(self) -> None:
         """Tag a bounded batch of session-end summaries with their project

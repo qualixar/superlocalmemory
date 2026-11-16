@@ -184,6 +184,11 @@ def is_model_tier(tier: object) -> bool:
 BATCHING_REGIMES = ("single", "batched", "unbatched")
 
 
+def _shadow_only(tier: object) -> bool:
+    """A tier still earning trust (Tier 0.5): its answers are receipted in shadow only."""
+    return getattr(tier, "shadow_only", False) is True
+
+
 def batching_regime(batch_size: int, *, model: bool, per_item: bool = False) -> str:
     if not model:
         return "unbatched"
@@ -324,25 +329,37 @@ class JudgeLadder:
         return tuple(t.name for t in self._tiers)
 
     def available_model_tiers(self, question: Question) -> frozenset[str]:
-        """The model tiers that could be asked ``question`` here now (nothing is asked)."""
+        """The model tiers that could settle ``question`` here now (nothing is asked).
+        A shadow-only tier never settles anything, so it never makes a pair worth re-asking."""
         return frozenset(t.name for t in self._tiers
-                         if is_model_tier(t) and tier_available(t, question))
+                         if is_model_tier(t) and not _shadow_only(t) and tier_available(t, question))
 
     def decide(self, question: Question, items: Sequence[Item],
                ctx: Context = Context()) -> tuple[list[Decision], list[ReceiptRow]]:
         pending = list(range(len(items)))
         receipts: dict[int, list[ReceiptRow]] = {i: [] for i in pending}
         decided: dict[int, Decision] = {}
+        shadow_rows: list[ReceiptRow] = []
         for index, tier in enumerate(self._tiers):
             if not pending:
                 break
+            if _shadow_only(tier):  # asked, receipted in shadow, never stops the ladder
+                shadow_rows += self._ask_shadow(tier, index, question, items, pending, ctx)
+                continue
             pending = self._ask_tier(tier, index, question, items, pending, receipts, decided,
                                      ctx)
         for i in pending:
             decided[i] = Decision(ABSTAIN, 0.0, "none", tuple(r.receipt_id for r in receipts[i]))
-        shadow = self._shadow_escalate(question, items, decided, ctx)
+        shadow = shadow_rows + self._shadow_escalate(question, items, decided, ctx)
         rows = [row for i in range(len(items)) for row in receipts[i]] + shadow
         return [decided[i] for i in range(len(items))], rows
+
+    def _ask_shadow(self, tier, index: int, question: Question, items: Sequence[Item],
+                    pending: list[int], ctx: Context) -> list[ReceiptRow]:
+        got: dict[int, list[ReceiptRow]] = {i: [] for i in pending}
+        self._ask_tier(tier, index, question, items, list(pending), got, {},
+                       replace(ctx, population=ctx.population + SHADOW_SUFFIX))
+        return [replace(row, accepted=False) for i in pending for row in got[i]]
 
     def _shadow_escalate(self, question: Question, items: Sequence[Item],
                          decided: dict[int, Decision], ctx: Context) -> list[ReceiptRow]:

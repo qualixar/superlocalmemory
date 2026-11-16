@@ -168,13 +168,18 @@ class JevTier:
 
 
 def build_ladder(supplier: JudgeSupplier | None, *, hosted_consent_ref: Callable[[], str | None],
-                 hosted_live: Callable[[], bool]) -> JudgeLadder:
+                 hosted_live: Callable[[], bool], scorer: Any = None) -> JudgeLadder:
     """Rules first, then whichever model judge this machine runs.
 
     ``hosted_live`` says whether ``judge.ladder`` is on (not merely observing).
     It has no default: every caller decides, and a shadow ladder has no hosted tier.
+    ``scorer`` is the Tier 0.5 model (``core/relation_scorer``), asked in shadow only.
     """
     tiers: list[Any] = [RulesTier()]
+    if scorer is not None:
+        from superlocalmemory.core.relation_scorer import RelationScorerTier
+
+        tiers.append(RelationScorerTier(scorer))
     if supplier is not None:
         tiers.append(LayaTier(supplier))
         if _literally_true(hosted_live):
