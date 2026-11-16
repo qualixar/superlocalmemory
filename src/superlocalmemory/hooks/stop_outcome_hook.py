@@ -52,12 +52,49 @@ def _inner_main(started: float | None = None) -> str:
     from superlocalmemory.hooks import event_delivery as ed
 
     profile_id = ed.active_profile()
-    delivered = ed.deliver(
-        [ed.session_finalize(session_id=session_id, profile_id=profile_id)],
-        profile=profile_id, started=started,
-    )
+    # The overlap goes first: the finalize is queued behind every signal of the turn.
+    events = overlap_events(payload, session_id, profile_id)
+    events.append(ed.session_finalize(session_id=session_id, profile_id=profile_id))
+    delivered = ed.deliver(events, profile=profile_id, started=started)
     _cleanup_session_state(session_id)
     return f"finalize_{delivered}"
+
+
+#: Longest the Stop hook waits on the store to read this session's deliveries
+#: (routing only: a latency budget; the overlap is skipped past it).
+READ_WAIT_S = 0.2
+
+
+def overlap_events(payload: dict, session_id: str, profile_id: str) -> list[dict]:
+    """W3-2b: one ``overlap_signal`` scoring this turn's reply against the memories
+    delivered in the session, when ``outcomes.usage`` is on and the host sent the
+    reply (``last_assistant_message``). Read-only; the reply stays in this
+    process, only fact ids and scores leave. Never raises."""
+    reply = payload.get("last_assistant_message")
+    if not isinstance(reply, str) or not reply.strip():
+        return []
+    try:
+        import sqlite3
+
+        from superlocalmemory.core.feature_flags import FeatureFlags
+        from superlocalmemory.hooks import event_delivery as ed
+        from superlocalmemory.hooks._outcome_common import memory_db_path, slm_home
+        from superlocalmemory.outcomes import usage
+
+        if not FeatureFlags(slm_home()).observing("outcomes.usage"):
+            return []
+        conn = sqlite3.connect(f"file:{memory_db_path()}?mode=ro", uri=True,
+                               timeout=READ_WAIT_S)
+        try:
+            conn.execute(f"PRAGMA busy_timeout={int(READ_WAIT_S * 1000)}")
+            scores = usage.overlap_scores(conn, profile_id, session_id, reply)
+        finally:
+            conn.close()
+    except Exception:
+        return []
+    if not scores:
+        return []
+    return [ed.overlap_signal(session_id=session_id, scores=scores, profile_id=profile_id)]
 
 
 def _cleanup_session_state(session_id: str) -> None:

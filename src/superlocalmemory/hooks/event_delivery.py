@@ -112,6 +112,16 @@ def fact_signal(*, session_id: str, fact_ids: Sequence[str], signal_name: str,
             "observed_ms": _now_ms()}
 
 
+def overlap_signal(*, session_id: str, scores: Sequence[tuple[str, float]],
+                   profile_id: str) -> dict:
+    """W3-2b: each delivered memory's overlap with the agent's reply; ids and
+    numbers only, never the reply."""
+    return {"kind": "overlap_signal", "event_id": _event_id(), "profile_id": profile_id,
+            "session_id": session_id,
+            "scores": [{"fact_id": f, "score": float(v)} for f, v in scores],
+            "observed_ms": _now_ms()}
+
+
 def outcome_signal(*, outcome_id: str, signal_name: str, signal_value: object,
                    profile_id: str) -> dict:
     return {"kind": "outcome_signal", "event_id": _event_id(), "profile_id": profile_id,
@@ -234,6 +244,7 @@ def _breadcrumb(message: str) -> None:
 __all__ = [
     "DEFAULT_DELIVERY_TIMEOUT_MS", "HOOK_BUDGET_MS", "HOOK_EVENTS_PATH", "MAX_BATCH",
     "MAX_SUMMARY_LEN",
-    "active_profile", "deliver", "fact_signal", "outcome_signal", "session_finalize",
+    "active_profile", "deliver", "fact_signal", "outcome_signal", "overlap_signal",
+    "session_finalize",
     "summary", "tool_event",
 ]

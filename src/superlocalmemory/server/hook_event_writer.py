@@ -12,7 +12,8 @@ memory.db through the canonical writer path:
   the shared busy timeout) in batches. Each batch commits together with the
   drain cursor for its file (a ``config`` row), so a crash part way through a
   file resumes after the last committed batch: no event twice, none lost.
-* reward events (``fact_signal``, ``outcome_signal``, ``session_finalize``)
+* reward events (``fact_signal``, ``outcome_signal``, ``session_finalize``) and
+  ``overlap_signal`` (usage evidence only, W3-2b; it settles no reward)
   run through ``EngagementRewardModel`` in strict mode under the same write
   lock. They are idempotent (a signal is a key set on a pending outcome, a
   settled outcome is not settled again), so a replay after a crash is safe.
@@ -110,6 +111,20 @@ class OutcomeSignalIn(_Event):
     observed_ms: Annotated[int, Field(ge=0)]
 
 
+class _Overlap(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    fact_id: Annotated[str, Field(min_length=1, max_length=128)]
+    score: Annotated[float, Field(ge=0.0, le=1.0)]
+
+
+class OverlapSignalIn(_Event):
+    """W3-2b: overlap of delivered memories with the agent's reply (ids, numbers)."""
+    kind: Literal["overlap_signal"]
+    session_id: _Text
+    scores: Annotated[list[_Overlap], Field(min_length=1, max_length=100)]
+    observed_ms: Annotated[int, Field(ge=0)]
+
+
 class SessionFinalizeIn(_Event):
     kind: Literal["session_finalize"]
     session_id: _Text
@@ -117,7 +132,7 @@ class SessionFinalizeIn(_Event):
 
 
 HookEvent = Annotated[
-    Union[ToolEventIn, FactSignalIn, OutcomeSignalIn, SessionFinalizeIn],
+    Union[ToolEventIn, FactSignalIn, OutcomeSignalIn, OverlapSignalIn, SessionFinalizeIn],
     Field(discriminator="kind"),
 ]
 
@@ -168,6 +183,8 @@ def _apply_reward(db: Path, event) -> None:
     from superlocalmemory.learning.reward import EngagementRewardModel
     from superlocalmemory.storage.memory_write import _busy_timeout_ms
 
+    if isinstance(event, OverlapSignalIn):
+        return  # usage evidence only (``_join_usage``); it settles no reward
     observed = int(event.observed_ms)
     model = EngagementRewardModel(db, clock_ms=lambda: observed,
                                   busy_timeout_ms=_busy_timeout_ms(),
@@ -208,6 +225,12 @@ def _join_usage(conn: sqlite3.Connection, events: list) -> int:
 
     joined = 0
     for event in events:
+        if isinstance(event, OverlapSignalIn):
+            joined += usage.join_overlap(
+                conn, profile_id=event.profile_id, session_id=event.session_id,
+                scores=[(s.fact_id, s.score) for s in event.scores],
+                observed_at=usage.from_ms(event.observed_ms))
+            continue
         signal = _USAGE_SIGNAL.get(getattr(event, "signal_name", ""))
         if signal is None:
             continue
