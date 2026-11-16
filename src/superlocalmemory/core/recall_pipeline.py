@@ -1401,7 +1401,10 @@ def run_recall(
     # The interactive path must retain the complete local retrieval contract.
     # Only agentic verification may call a language model during recall; the
     # entity channel resolves names read-only (EntityResolver.lookup).
-    extra_disabled = None
+    # W3-3 (D-44): a treated session start may switch one channel off for this
+    # fetch (``retrieval.channel_ablation``); every other recall passes None.
+    from superlocalmemory.retrieval import channel_ablation as _ablation
+    extra_disabled = set(_ablation.current()) or None
     # 4.1.25: extra terms for the keyword channel only (retrieval/query_rewrite);
     # passed only when the rewrite added something, so a stand-in engine that
     # predates the parameter is never asked for it.

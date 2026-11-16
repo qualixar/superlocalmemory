@@ -18,7 +18,7 @@ from superlocalmemory.core.injection import (
 from superlocalmemory.mcp import tools_active as shared
 
 
-async def _recall(query, project_path, named, pid, max_results, max_age_days):
+async def _recall(query, project_path, named, pid, max_results, max_age_days, drop_channel=None):
     from superlocalmemory.core.answer_check_scope import context_load
     from superlocalmemory.mcp._pool_adapter import pool_recall
 
@@ -26,6 +26,8 @@ async def _recall(query, project_path, named, pid, max_results, max_age_days):
     # session_init records its own delivery (path session_init, with what it
     # actually shows); the daemon must not record this fetch as a second one.
     kwargs["via"] = "internal"
+    if drop_channel:  # W3-3 (D-44): this delivery's channel arm, drawn before the fetch
+        kwargs["drop_channel"] = drop_channel
     if named:
         kwargs["profile_id"] = named
     try:
@@ -266,27 +268,33 @@ async def session_init(
         named, pid, rules, refused = _start_inputs(engine, profile_id)
         if refused:
             return refused
-        response, degraded = await _recall(
-            query or session_context_query(project_path),
-            project_path,
-            named,
-            pid,
-            max_results,
-            max_age_days,
-        )
-        threshold = rules.get_recall_config().get("relevance_threshold", 0.3)
-        relevant = _relevant(response, threshold, max_age_days)
-        # 4.2.17: Jev orders them when the person chose Jev reordering
-        # (core/session_jev: order only, 1.5 s budget, never hides anything).
-        relevant = await asyncio.to_thread(
-            _jev_ordered, engine, query or session_context_query(project_path), relevant)
-        pins, standing, upcoming = _priority_facts(engine, pid, project_path, response)
+        the_query = query or session_context_query(project_path)
         sid = session_id.strip() or f"slm-{datetime.now(UTC):%Y%m%d}-{uuid.uuid4().hex[:8]}"
-        context, rows = await asyncio.to_thread(
-            _deliver_session, engine, named, pid, sid,
-            query or session_context_query(project_path), response, pins, standing,
-            relevant, max_results, agent_id.strip() or shared._get_agent_id(),
-        )
+        client = agent_id.strip() or shared._get_agent_id()
+        begun = _begin(engine)
+        channel = begun.treatment.channel if begun is not None else None
+
+        async def fetch_and_deliver(drop, begun_):
+            response, degraded = await _recall(the_query, project_path, named, pid,
+                                               max_results, max_age_days, drop_channel=drop)
+            threshold = rules.get_recall_config().get("relevance_threshold", 0.3)
+            relevant = _relevant(response, threshold, max_age_days)
+            # 4.2.17: Jev orders them when the person chose Jev reordering
+            # (core/session_jev: order only, 1.5 s budget, never hides anything).
+            relevant = await asyncio.to_thread(_jev_ordered, engine, the_query, relevant)
+            pins, standing, upcoming = _priority_facts(engine, pid, project_path, response)
+            rendered, stored = await asyncio.to_thread(
+                _deliver_session, engine, named, pid, sid, the_query, response, pins,
+                standing, relevant, max_results, client, begun_)
+            return response, degraded, relevant, upcoming, rendered, stored
+
+        response, degraded, relevant, upcoming, (context, rows), stored = await fetch_and_deliver(
+            channel, begun)
+        if channel and not stored:
+            # No treatment without its receipt: the dropped channel changed this fetch
+            # and nothing recorded it, so fetch again with every channel, record nothing.
+            response, degraded, relevant, upcoming, (context, rows), _ = await fetch_and_deliver(
+                None, False)
         await asyncio.to_thread(bind_local_project, project_path)
         return _envelope(
             engine,
@@ -341,8 +349,16 @@ def _outcome_paths(engine):
     return engine_paths(engine)
 
 
+def _begin(engine):
+    """This delivery's treatment, drawn before its fetch (W3-3, D-44), or None."""
+    from superlocalmemory.outcomes import receipts
+
+    home, _db = _outcome_paths(engine)
+    return receipts.begin(slm_home=home, path="session_init") if home is not None else None
+
+
 def _deliver_session(engine, named, pid, sid, query, response, pins, standing, relevant, limit,
-                     client=None):
+                     client=None, begun=None):
     """Render the session context through the injection receipts (D-22, D-33):
     a recall row may be withheld at random and on record; a pinned fact or a
     standing rule never is, however it arrived (the store decides, W0-01)."""
@@ -352,15 +368,16 @@ def _deliver_session(engine, named, pid, sid, query, response, pins, standing, r
     shown_rows = relevant[:limit]
     home, db_path = _outcome_paths(engine)
     plan = None
-    if home is not None:
+    if home is not None and begun is not False:  # False: re-render, record nothing
         plan = receipts.plan(
             slm_home=home, db_path=db_path, profile_id=pid, session_id=sid,
             path="session_init", query=query, client=client,
             candidates=[Candidate(f.fact_id, "pinned") for f in pins]
             + [Candidate(f.fact_id, "standing") for f in standing]
             + [Candidate(r.fact.fact_id, "recall", float(r.score or 0.0)) for r in shown_rows],
+            begun=begun or None,
         )
-    return receipts.deliver(
+    return receipts.deliver_recorded(
         plan, db_path, shown_rows,
         fact_id=lambda r: r.fact.fact_id,
         render=lambda kept: _render_session(engine, named, response, pins, standing, kept, limit),

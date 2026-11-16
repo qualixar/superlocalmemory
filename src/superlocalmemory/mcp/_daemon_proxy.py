@@ -104,6 +104,7 @@ class DaemonPoolProxy:
         depth: int | None = None,
         max_tokens: int | None = None,
         via: str = "mcp",
+        drop_channel: str = "",
     ) -> dict[str, Any]:
         if self._unavailable:
             return self._unavailable_response()
@@ -113,6 +114,8 @@ class DaemonPoolProxy:
             "session_id": session_id or "",
             "via": via,  # W3-1: names the injection receipt's path
         }
+        if drop_channel:  # W3-3: a treated session start's channel arm
+            _params["drop_channel"] = drop_channel
         # Per-request profile routing (spec section 3/5): the anchor is only
         # serialized when the caller set it — an unset profile_id keeps the
         # legacy query string byte-identical, exactly like the scope flags

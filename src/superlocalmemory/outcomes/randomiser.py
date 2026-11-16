@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""Randomised withholding with logged propensities: design ``one-out-v1`` (D-14, D-33).
+"""Randomised withholding with logged propensities: design ``one-out-v2`` (D-14, D-33, D-44).
 
 To learn whether a delivered memory helps, SLM must sometimes not deliver it,
 at random and on record. In a share ``EPSILON`` of eligible deliveries exactly
@@ -26,6 +26,19 @@ The design, explicitly:
 ``EPSILON`` is a design constant of the experiment, not a threshold deciding a
 memory change from data (D-33, Varun 16 Nov). Withholding is off by default
 until D-28's shipping conditions exist (D-34).
+
+**Two arms share the one budget (D-44, Varun 16 Nov; ``one-out-v2``).** A
+treated delivery (withhold draw < EPSILON) gets exactly one change: either one
+eligible memory left out (the *memory* arm, as above) or one retrieval channel
+switched off for the fetch behind it (the *channel* arm, W3-3), never both, so
+at most EPSILON of eligible deliveries are touched (D-28). The arm comes from a
+third keyed draw (":arm"), uniform over the arms the path has: only a delivery
+that runs retrieval (``session_init``) has the channel arm; the hook's session
+start reads SQL, so its treated deliveries all take the memory arm. The channel
+is drawn uniformly from ``DROPPABLE_CHANNELS`` with the pick draw. Every
+probability is exact and logged: a memory's inclusion probability is
+``1 - EPSILON * memory_share / k`` and a channel's drop probability is
+``EPSILON * (1 - memory_share) / len(DROPPABLE_CHANNELS)``.
 """
 
 from __future__ import annotations
@@ -35,7 +48,17 @@ import hmac
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-DESIGN = "one-out-v1"
+DESIGN = "one-out-v2"
+
+MEMORY_ARM = "memory"
+CHANNEL_ARM = "channel"
+#: The arms each randomised path offers (a path without retrieval has no channel arm).
+ARMS = {"session_init": (MEMORY_ARM, CHANNEL_ARM), "session_context": (MEMORY_ARM,)}
+#: Channels the channel arm may switch off: the text retrieval channels. ``media``
+#: answers picture questions only, so dropping it at a session start would spend
+#: the budget on a change that almost never shows.
+DROPPABLE_CHANNELS = ("semantic", "bm25", "temporal", "hopfield", "spreading_activation",
+                      "entity_graph", "profile")
 #: The cap on the share of eligible deliveries withheld (D-28, Varun 15 Nov).
 EPSILON_MAX = 0.10
 #: This design's share of eligible deliveries that lose one memory (D-33).
@@ -81,12 +104,66 @@ class Choice:
 
 
 @dataclass(frozen=True)
+class Treatment:
+    """What one delivery's draws decided, before any candidate is known."""
+
+    #: The keyed draws; None when nothing on this delivery is randomised.
+    withhold_draw: float | None
+    arm_draw: float | None
+    pick_draw: float | None
+    #: ``memory`` or ``channel`` when treated, else None.
+    arm: str | None
+    #: The channel switched off (channel arm only).
+    channel: str | None
+    #: P(memory arm | treated) on this path; None when not randomised.
+    memory_share: float | None
+
+    @property
+    def randomised(self) -> bool:
+        return self.withhold_draw is not None
+
+
+UNTREATED = Treatment(None, None, None, None, None, None)
+
+
+def treat(key: bytes, delivery_id: str, path: str, *, holdout_on: bool,
+          epsilon: float = EPSILON, channel_arm: bool = True) -> Treatment:
+    """The delivery's arm (if any), from its keyed draws; nothing on a path that
+    is not randomised or with the holdout off. ``channel_arm=False`` when the
+    fetch has already run: a channel can no longer be dropped, so only the
+    memory arm is offered (and logged as such)."""
+    if path not in PATHS:
+        raise ValueError(f"unknown delivery path: {path!r}")
+    if not 0.0 <= epsilon <= EPSILON_MAX:
+        raise ValueError(f"withholding share {epsilon} outside [0, {EPSILON_MAX}]")
+    if path not in RANDOMISED_PATHS or not holdout_on:
+        return UNTREATED
+    arms = ARMS[path] if channel_arm else (MEMORY_ARM,)
+    u = draw(key, delivery_id, "withhold")
+    a = draw(key, delivery_id, "arm")
+    pick = draw(key, delivery_id, "pick")
+    arm = arms[int(a * len(arms))] if u < epsilon else None
+    channel = (DROPPABLE_CHANNELS[int(pick * len(DROPPABLE_CHANNELS))]
+               if arm == CHANNEL_ARM else None)
+    return Treatment(u, a, pick, arm, channel, arms.count(MEMORY_ARM) / len(arms))
+
+
+def channel_drop_probability(treatment: Treatment, epsilon: float = EPSILON) -> float:
+    """P(this delivery's fetch lost one given channel), exact."""
+    if treatment.memory_share is None:
+        return 0.0
+    return epsilon * (1.0 - treatment.memory_share) / len(DROPPABLE_CHANNELS)
+
+
+@dataclass(frozen=True)
 class Assignment:
     choices: tuple[Choice, ...]
     eligible_count: int
     #: The two keyed draws; None when nothing on this delivery was randomised.
     withhold_draw: float | None
     pick_draw: float | None
+    #: The delivery's treatment (arm, channel, shares), D-44.
+    treatment: Treatment = UNTREATED
 
 
 def draw(key: bytes, delivery_id: str, label: str) -> float:
@@ -121,30 +198,32 @@ def _distinct(candidates: Iterable[Candidate]) -> list[Candidate]:
 
 
 def choose(key: bytes, delivery_id: str, path: str, candidates: Iterable[Candidate], *,
-           holdout_on: bool, epsilon: float = EPSILON) -> Assignment:
-    if path not in PATHS:
+           holdout_on: bool, epsilon: float = EPSILON,
+           treatment: Treatment | None = None) -> Assignment:
+    """The delivery's candidates with their choices. ``treatment`` is the one
+    decided before the fetch (``session_init``); otherwise it is drawn here."""
+    if treatment is None:
+        treatment = treat(key, delivery_id, path, holdout_on=holdout_on, epsilon=epsilon)
+    elif path not in PATHS:
         raise ValueError(f"unknown delivery path: {path!r}")
-    if not 0.0 <= epsilon <= EPSILON_MAX:
-        raise ValueError(f"withholding share {epsilon} outside [0, {EPSILON_MAX}]")
     distinct = _distinct(candidates)
     exclusions = [_exclusion(c.role, path, holdout_on) for c in distinct]
     eligible = [i for i, e in enumerate(exclusions) if e is None]
     k = len(eligible)
-    withhold_draw = pick_draw = None
     withheld: int | None = None
-    if k:
-        withhold_draw = draw(key, delivery_id, "withhold")
-        pick_draw = draw(key, delivery_id, "pick")
-        if withhold_draw < epsilon:
-            withheld = eligible[int(pick_draw * k)]
-    p_eligible = 1.0 - epsilon / k if k else 1.0
+    if k and treatment.arm == MEMORY_ARM:
+        withheld = eligible[int(treatment.pick_draw * k)]
+    share = treatment.memory_share if treatment.memory_share is not None else 1.0
+    p_eligible = 1.0 - epsilon * share / k if k else 1.0
     choices = tuple(
         Choice(c.fact_id, c.role, i + 1, c.score, exclusions[i] is None, exclusions[i],
                p_eligible if exclusions[i] is None else 1.0, i != withheld)
         for i, c in enumerate(distinct))
-    return Assignment(choices, k, withhold_draw, pick_draw)
+    return Assignment(choices, k, treatment.withhold_draw, treatment.pick_draw, treatment)
 
 
-__all__ = ["DESIGN", "ELIGIBLE_ROLES", "EPSILON", "EPSILON_MAX", "HOLDOUT_OFF",
+__all__ = ["ARMS", "CHANNEL_ARM", "DROPPABLE_CHANNELS", "MEMORY_ARM", "UNTREATED", "Treatment",
+           "channel_drop_probability", "treat",
+           "DESIGN", "ELIGIBLE_ROLES", "EPSILON", "EPSILON_MAX", "HOLDOUT_OFF",
            "NEVER_WITHHELD", "NOT_RANDOMISED_PATH", "PATHS", "PULL_PATHS", "RANDOMISED_PATHS",
            "ROLES", "Assignment", "Candidate", "Choice", "choose", "draw"]

@@ -142,6 +142,9 @@ class RecallCall:
     #: W3-1: which client asked (``mcp``, ``cli``, ``hook``); names the
     #: injection receipt's path. Anything else is an HTTP caller.
     via: str = ""
+    #: W3-3 (D-44): one channel the caller's treatment switches off for this fetch;
+    #: honoured only on an internal fetch and only for a droppable channel.
+    drop_channel: str = ""
 
 
 def effective_budget_s(call: RecallCall) -> float:
@@ -173,6 +176,7 @@ def _engine_call(engine: Any, call: RecallCall) -> Any:
     """``engine.recall`` with the call's arguments, on the executor thread."""
     from superlocalmemory.core import answer_check_history as history
     from superlocalmemory.core.answer_check_scope import context_load, skip_answer_check
+    from superlocalmemory.retrieval import channel_ablation as _ablation
     from superlocalmemory.retrieval.answer_check_status import caller_deadline
 
     with (
@@ -181,6 +185,7 @@ def _engine_call(engine: Any, call: RecallCall) -> Any:
         history.origin(call.origin) if call.origin else nullcontext(),
         _visibility_for(engine, call),
         caller_deadline(call.answer_deadline),
+        _ablation.dropping(call.drop_channel if call.via == VIA_INTERNAL else None),
     ):
         return engine.recall(
             call.query,

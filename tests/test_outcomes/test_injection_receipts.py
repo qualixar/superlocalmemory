@@ -137,27 +137,35 @@ def test_pinned_rules_and_the_core_block_are_never_withheld() -> None:
     assert [c.exclusion for c in a.choices[:3]] == ["pinned", "standing_rule", "core_block"]
 
 
-def test_at_most_one_memory_leaves_a_delivery_with_its_exact_logged_probability() -> None:
+#: P(memory arm | treated) per path (D-44): session_init shares with the channel arm.
+SHARE = {"session_init": 0.5, "session_context": 1.0}
+
+
+@pytest.mark.parametrize("path", sorted(SHARE))
+def test_at_most_one_memory_leaves_a_delivery_with_its_exact_logged_probability(path) -> None:
     for i in range(3000):
-        a = randomiser.choose(KEY, f"d{i}", "session_init", _cands(7), holdout_on=True)
+        a = randomiser.choose(KEY, f"d{i}", path, _cands(7), holdout_on=True)
         withheld = [c for c in a.choices if not c.included]
-        assert len(withheld) == (1 if a.withhold_draw < EPS else 0)
+        memory_arm = a.withhold_draw < EPS and a.treatment.arm == randomiser.MEMORY_ARM
+        assert len(withheld) == (1 if memory_arm else 0)
         assert a.eligible_count == 7
-        assert all(c.propensity == pytest.approx(1 - EPS / 7) for c in a.choices)
+        assert all(c.propensity == pytest.approx(1 - EPS * SHARE[path] / 7) for c in a.choices)
         if withheld:
             assert withheld[0].position - 1 == int(a.pick_draw * 7)
 
 
-def test_the_share_of_deliveries_and_of_each_candidate_matches_the_design() -> None:
+@pytest.mark.parametrize("path", sorted(SHARE))
+def test_the_share_of_deliveries_and_of_each_candidate_matches_the_design(path) -> None:
     n, k = 20_000, 10
     lost, by_position = 0, Counter()
     for i in range(n):
         out = [c.position for c in randomiser.choose(
-            KEY, f"d{i}", "session_init", _cands(k), holdout_on=True).choices if not c.included]
+            KEY, f"d{i}", path, _cands(k), holdout_on=True).choices if not c.included]
         lost += bool(out)
         by_position.update(out)
-    assert abs(lost - n * EPS) < 5 * math.sqrt(n * EPS * (1 - EPS))  # D-28: <= 0.10 of deliveries
-    q = EPS / k
+    e = EPS * SHARE[path]
+    assert abs(lost - n * e) < 5 * math.sqrt(n * e * (1 - e))  # D-28: <= 0.10 of deliveries
+    q = e / k
     assert all(abs(by_position[p] - n * q) < 5 * math.sqrt(n * q * (1 - q))
                for p in range(1, k + 1))  # uniform: each candidate's 1 - p_i is honest
 
@@ -298,12 +306,12 @@ def test_a_withheld_memory_is_not_delivered_and_every_candidate_has_a_receipt(
                                 " FROM injection_receipts ORDER BY position")
     assert [r[0] for r in rows] == ids
     for fact_id, eligible, propensity, included, delivered in rows:
-        assert eligible == 1 and propensity == pytest.approx(1 - EPS / 6)
+        assert eligible == 1 and propensity == pytest.approx(1 - EPS / 6)  # planned after the fetch: memory arm only
         assert included == int(fact_id != gone) == delivered
     ((row),) = _rows(store.db_path, "SELECT path, design, holdout_state, epsilon, "
                                      "eligible_count, withhold_draw < epsilon, key_id IS NOT NULL,"
                                      " session_id, client FROM injection_deliveries")
-    assert row == ("session_init", "one-out-v1", "on", pytest.approx(EPS), 6, 1, 1, None,
+    assert row == ("session_init", "one-out-v2", "on", pytest.approx(EPS), 6, 1, 1, None,
                    "claude-code")
 
 
@@ -393,7 +401,7 @@ def test_session_init_never_withholds_a_pin_that_arrives_through_recall(store, t
     response = SimpleNamespace(results=[], calibration_status="uncalibrated")
     withheld = set()
     for attempt in range(200):
-        context, rows = session_start._deliver_session(
+        (context, rows), _stored = session_start._deliver_session(
             _engine(store, tmp_path), "", "default", f"s{attempt}", "query", response, [], [],
             relevant, 10, "codex-agent")
         assert pinned in {r["fact_id"] for r in rows}
@@ -411,8 +419,8 @@ def test_session_init_without_a_real_store_delivers_everything(tmp_path, holdout
                              db=object(), mode="B")
     response = SimpleNamespace(results=[], calibration_status="uncalibrated")
     relevant = [_result(f"f{i}") for i in range(8)]
-    _, rows = session_start._deliver_session(engine, "", "default", "s", "q", response,
-                                             [], [], relevant, 10)
+    (_, rows), _stored = session_start._deliver_session(engine, "", "default", "s", "q",
+                                                        response, [], [], relevant, 10)
     assert {r["fact_id"] for r in rows} == {f"f{i}" for i in range(8)}
 
 

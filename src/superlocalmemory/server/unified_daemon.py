@@ -5203,6 +5203,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # W3-1: the client names itself (mcp, cli, hook) so the injection
         # receipt records the delivery path; anything else is an HTTP caller.
         via: str = "",
+        # W3-3 (D-44): a session start's channel arm (internal fetches only).
+        drop_channel: str = "",
         # Per-request profile routing (spec section 3/5): a non-empty
         # profile_id serves this one recall against THAT profile — same
         # existence check and same 404 envelope as POST /remember — without
@@ -5443,6 +5445,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             budget_s=parse_budget_s(budget_s),
             caller_view=parse_view(caller_view),
             via=via if via in VIAS else "",
+            drop_channel=drop_channel if via == "internal" else "",
         )
         try:
             from superlocalmemory.server.recall_core import as_http

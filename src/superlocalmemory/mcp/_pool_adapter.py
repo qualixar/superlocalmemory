@@ -120,6 +120,8 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
     # W3-1: who asked, for the injection receipt (the proxy's default is "mcp").
     if kwargs.get("via"):
         _recall_kwargs["via"] = kwargs["via"]
+    if kwargs.get("drop_channel"):  # W3-3: forwarded only when a treatment set it
+        _recall_kwargs["drop_channel"] = kwargs["drop_channel"]
     # #150: a project filter / preference, forwarded only when set. A named
     # profile is per-request routing (the active profile is not moved).
     for _name in ("project", "prefer_project", "profile_id"):

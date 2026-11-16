@@ -151,10 +151,40 @@ def _protect(candidates: list[Candidate], db_path: Path | None) -> tuple[list[Ca
     return [Candidate(c.fact_id, roles.get(c.fact_id, c.role), c.score) for c in candidates], True
 
 
+@dataclass(frozen=True)
+class Begun:
+    """A delivery whose treatment was drawn before its fetch (W3-3, D-44): the
+    channel arm changes the fetch itself, so it must be known first."""
+
+    delivery_id: str
+    treatment: randomiser.Treatment
+
+
+def begin(*, slm_home: Path, path: str, flags=None) -> Begun | None:
+    """Draw a delivery's treatment before it fetches, or None when receipts are off."""
+    from superlocalmemory.core.receipt_key import load_or_create
+
+    try:
+        flags = flags if flags is not None else _flags(slm_home)
+        if not flags.observing("outcomes.receipts"):
+            return None
+        key = load_or_create(slm_home)
+        delivery_id = f"dlv_{uuid.uuid4().hex}"
+        return Begun(delivery_id, randomiser.treat(
+            key, delivery_id, path, holdout_on=flags.enabled("outcomes.holdout")))
+    except Exception as exc:  # a receipt is never worth a failed delivery
+        logger.warning("injection receipt draw skipped: %s", exc)
+        return None
+
+
 def plan(*, slm_home: Path, db_path: Path | None, profile_id: str, session_id: str | None,
          path: str, query: str, candidates: Iterable[Candidate], client: str | None = None,
-         flags=None) -> DeliveryPlan | None:
-    """The delivery's choices, or ``None`` when no receipt will be written."""
+         flags=None, begun: Begun | None = None) -> DeliveryPlan | None:
+    """The delivery's choices, or ``None`` when no receipt will be written.
+
+    ``begun`` carries a treatment drawn before the fetch; it is kept as drawn
+    (what the fetch did is what is recorded), and withholding still needs a
+    readable store."""
     from superlocalmemory.core.receipt_key import digest, load_or_create
 
     try:
@@ -162,19 +192,28 @@ def plan(*, slm_home: Path, db_path: Path | None, profile_id: str, session_id: s
         if not flags.observing("outcomes.receipts"):
             return None
         protected, readable = _protect(list(candidates), db_path)
-        holdout_on = flags.enabled("outcomes.holdout") and readable
         key = load_or_create(slm_home)
-        delivery_id = f"dlv_{uuid.uuid4().hex}"
-        epsilon = randomiser.EPSILON if holdout_on else 0.0
+        if begun is not None:
+            delivery_id, treatment = begun.delivery_id, begun.treatment
+            holdout_on = treatment.randomised and readable
+            randomised = treatment.randomised
+        else:  # drawn after the fetch: only the memory arm is possible now
+            delivery_id = f"dlv_{uuid.uuid4().hex}"
+            holdout_on = randomised = flags.enabled("outcomes.holdout") and readable
+            treatment = randomiser.treat(key, delivery_id, path, holdout_on=holdout_on,
+                                         epsilon=randomiser.EPSILON if holdout_on else 0.0,
+                                         channel_arm=False)
+        epsilon = randomiser.EPSILON if randomised else 0.0
         assignment = randomiser.choose(key, delivery_id, path, protected,
-                                       holdout_on=holdout_on, epsilon=epsilon)
+                                       holdout_on=holdout_on, epsilon=epsilon,
+                                       treatment=treatment)
     except Exception as exc:  # a receipt is never worth a failed delivery
         logger.warning("injection receipt plan skipped: %s", exc)
         return None
     return DeliveryPlan(
         delivery_id=delivery_id, profile_id=profile_id, session_id=session_id or None,
         client=client or None, path=path,
-        holdout_state=HOLDOUT_ON if holdout_on else HOLDOUT_OFF, epsilon=epsilon,
+        holdout_state=HOLDOUT_ON if randomised else HOLDOUT_OFF, epsilon=epsilon,
         key_id=hashlib.sha256(key).hexdigest()[:16],
         query_digest=digest(key, b"query:" + query.encode()) if query else None,
         assignment=assignment)
@@ -193,8 +232,18 @@ def deliver(plan_: DeliveryPlan | None, db_path: Path | None, items: Sequence[T]
     ``items`` are the randomisable candidates; ``render`` adds whatever else
     the surface shows. If the receipts cannot be stored, everything is shown.
     """
+    return deliver_recorded(plan_, db_path, items, fact_id=fact_id, render=render,
+                            shown=shown)[0]
+
+
+def deliver_recorded(plan_: DeliveryPlan | None, db_path: Path | None, items: Sequence[T], *,
+                     fact_id: Callable[[T], str], render: Callable[[list[T]], R],
+                     shown: Callable[[R], Iterable[str]]) -> tuple[R, bool]:
+    """``deliver``, and whether the receipt was stored. A surface whose fetch was
+    changed by the channel arm must undo that change when it was not (no
+    treatment without its receipt)."""
     if plan_ is None or db_path is None:
-        return render(list(items))
+        return render(list(items)), False
     withheld = plan_.withheld
     out = render([i for i in items if fact_id(i) not in withheld])
     try:
@@ -203,8 +252,8 @@ def deliver(plan_: DeliveryPlan | None, db_path: Path | None, items: Sequence[T]
         logger.warning("injection receipt: delivered set unreadable: %s", exc)
         delivered = frozenset()
     if record(db_path, plan_, delivered):
-        return out
-    return render(list(items)) if withheld else out
+        return out, True
+    return (render(list(items)) if withheld else out), False
 
 
 def record(db_path: Path, plan_: DeliveryPlan, delivered: frozenset[str],
@@ -237,14 +286,16 @@ def record(db_path: Path, plan_: DeliveryPlan, delivered: frozenset[str],
 def _insert(conn: sqlite3.Connection, p: DeliveryPlan, delivered: frozenset[str],
             at: datetime) -> None:
     a = p.assignment
+    t = a.treatment
     conn.execute(
         "INSERT INTO injection_deliveries (delivery_id, profile_id, session_id, client, path,"
         " design, holdout_state, epsilon, eligible_count, withhold_draw, pick_draw, key_id,"
-        " query_digest, candidates, delivered_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " query_digest, candidates, delivered_at, arm, arm_draw, dropped_channel, memory_share)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (p.delivery_id, p.profile_id, p.session_id, p.client, p.path, randomiser.DESIGN,
          p.holdout_state, p.epsilon, a.eligible_count, a.withhold_draw, a.pick_draw, p.key_id,
-         p.query_digest, len(a.choices), usage.stamp(at)))
+         p.query_digest, len(a.choices), usage.stamp(at), t.arm, t.arm_draw, t.channel,
+         t.memory_share))
     conn.executemany(
         "INSERT INTO injection_receipts (delivery_id, fact_id, profile_id, role, position,"
         " score, eligible, exclusion, propensity, included, delivered)"
@@ -393,5 +444,6 @@ def pull_from_results(engine, *, path: str, profile_id: str, session_id: str | N
 
 
 __all__ = ["HOLDOUT_OFF", "HOLDOUT_ON", "PULL_IDLE_S", "PULL_QUEUE_MAX", "PULL_WRITER", "WRITE_WAIT_S",
-           "DeliveryPlan", "Pull", "deliver", "engine_paths", "plan", "protected_roles",
+           "Begun", "DeliveryPlan", "Pull", "begin", "deliver", "deliver_recorded",
+           "engine_paths", "plan", "protected_roles",
            "pull_from_results", "record", "record_pull", "shown_in_text", "submit_pull"]
