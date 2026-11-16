@@ -37,11 +37,13 @@ def cmd_doctor_truth(args: Namespace) -> None:
             print(message, file=sys.stderr)
         sys.exit(2)
     from superlocalmemory.core import judge_certificates as certs
+    from superlocalmemory.core import shadow_escalation as shadow
 
     conn = inv.open_read_only(str(path))
     try:
         results = inv.check(conn)
         certificates = certs.records(conn, None)
+        second = [s.as_dict() for s in shadow.disagreements(conn, None)]
     finally:
         conn.close()
     violated = [r for r in results if r.status == inv.VIOLATED]
@@ -49,7 +51,8 @@ def cmd_doctor_truth(args: Namespace) -> None:
         from superlocalmemory.cli.json_output import json_print
         json_print("doctor", data={"store": str(path), "truth": [
             {"invariant": r.invariant, "title": r.title, "status": r.status, "count": r.count,
-             "sample": list(r.sample)} for r in results], "certificates": certificates})
+             "sample": list(r.sample)} for r in results], "certificates": certificates,
+            "second_opinions": second})
     else:
         print(f"Truth invariants on {path} (read-only)")
         for r in results:
@@ -65,6 +68,12 @@ def cmd_doctor_truth(args: Namespace) -> None:
                      else f"open since {c['issued_at'][:10]}")
             print(f"  {c['tier']}/{c['model']} {c['verdict']} [{c['population']}, {c['regime']}]: "
                   f"{state}; {c['n']} audited, {c['errors']} wrong, threshold {c['threshold']:.2f}")
+        print("Second opinions (M-06: a stronger judge asked in shadow):"
+              + ("" if second else " none yet"))
+        for s in second:
+            print(f"  {s['lower_tier']}/{s['lower_model']} -> {s['upper_tier']}/{s['upper_model']}: "
+                  f"sure of something else on {s['disagreed']} of {s['pairs']} pairs "
+                  f"(95% bounds {s['rate_lower']:.2f}-{s['rate_upper']:.2f})")
     if violated:
         sys.exit(1)
 

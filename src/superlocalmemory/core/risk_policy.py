@@ -25,6 +25,11 @@ DELTA = 0.05
 AUDIT_PROBABILITY = 0.10
 #: The same draw for the inbox sample (one per pair, W0-05).
 INBOX_PROBABILITY = AUDIT_PROBABILITY
+#: M-06: the chance a pair a tier was sure about is also asked, in shadow, of the
+#: next tier up (Fable review 15 Nov: "say 5%"). At ε = 0.05 a lower tier's
+#: disagreement rate is bounded after n escalations by Clopper-Pearson; 0 of 59
+#: puts it below 5% at 95%. The cost is ε extra asks of the next tier per pass.
+SHADOW_ESCALATION = 0.05
 
 
 def alpha_for(verdict: str) -> float:
@@ -38,5 +43,5 @@ def audit_probability_for(verdict: str, base: float | None) -> float | None:
     return 1.0 if verdict == "replaces" else base
 
 
-__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "AUDIT_PROBABILITY", "DELTA", "INBOX_PROBABILITY",
+__all__ = ["ALPHA_CLOSE", "ALPHA_RETIRE", "AUDIT_PROBABILITY", "DELTA", "INBOX_PROBABILITY", "SHADOW_ESCALATION",
            "alpha_for", "audit_probability_for"]

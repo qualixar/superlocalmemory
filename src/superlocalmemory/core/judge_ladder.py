@@ -35,7 +35,7 @@ import re
 import sqlite3
 import unicodedata
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Mapping, Protocol, Sequence
 
@@ -154,6 +154,14 @@ class Context:
     hash_key: bytes | None = None
     #: The audit draw probability (``core/audit_sampler``, M-04); None: no sampling.
     audit_probability: float | None = None
+    #: M-06 shadow escalation: the chance a pair a tier was sure about is also
+    #: asked of the next tier up, in shadow. None: off.
+    escalation_probability: float | None = None
+
+
+#: Shadow asks are receipted under ``<population>:shadow``: their own cells, so
+#: they never enter a certificate, a base rate or a drift test of real decisions.
+SHADOW_SUFFIX = ":shadow"
 
 
 class Tier(Protocol):
@@ -332,8 +340,42 @@ class JudgeLadder:
                                      ctx)
         for i in pending:
             decided[i] = Decision(ABSTAIN, 0.0, "none", tuple(r.receipt_id for r in receipts[i]))
-        rows = [row for i in range(len(items)) for row in receipts[i]]
+        shadow = self._shadow_escalate(question, items, decided, ctx)
+        rows = [row for i in range(len(items)) for row in receipts[i]] + shadow
         return [decided[i] for i in range(len(items))], rows
+
+    def _shadow_escalate(self, question: Question, items: Sequence[Item],
+                         decided: dict[int, Decision], ctx: Context) -> list[ReceiptRow]:
+        """M-06: a confident answer is never seen by a stronger judge, so a lower
+        tier's confident errors stay invisible. With the logged chance ε, one keyed
+        draw per pair, a decided pair is also asked of the next tier up. Its answer
+        is receipted in shadow (never accepted, never a decision); how often it
+        disagrees is a label-free warning on the lower tier, and the audit draw
+        gives people an unbiased sample of those pairs to label."""
+        from superlocalmemory.core.audit_sampler import draw
+
+        eps = ctx.escalation_probability
+        if eps is None or eps <= 0.0:
+            return []
+        if eps > 1.0:
+            raise ValueError(f"escalation probability out of range: {eps}")
+        names = self.tier_names
+        up: dict[int, list[int]] = {}
+        for i, decision in decided.items():
+            if decision.tier not in names:  # an abstention is tier "none"
+                continue
+            nxt = names.index(decision.tier) + 1
+            pair = inputs_hash(question, items[i], ctx.hash_key)
+            if nxt < len(names) and draw(ctx.hash_key, pair, domain="escalate") < eps:
+                up.setdefault(nxt, []).append(i)
+        shadow_ctx = replace(ctx, population=ctx.population + SHADOW_SUFFIX)
+        out: list[ReceiptRow] = []
+        for nxt, chosen in sorted(up.items()):
+            got: dict[int, list[ReceiptRow]] = {i: [] for i in chosen}
+            self._ask_tier(self._tiers[nxt], nxt, question, items, sorted(chosen), got, {},
+                           shadow_ctx)
+            out += [replace(row, accepted=False) for i in sorted(chosen) for row in got[i]]
+        return out
 
     def decide_and_record(self, conn: sqlite3.Connection, question: Question,
                           items: Sequence[Item], ctx: Context = Context()) -> list[Decision]:
@@ -484,7 +526,7 @@ class RulesTier:
 
 __all__ = ["ABSTAIN", "BATCHING_REGIMES", "EXPLICIT_OLDER_VALUE", "EXPLICIT_RULE", "EXPLICIT_VALUE_CHANGED",
            "batching_regime",
-           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH", "batch_limit",
+           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH", "SHADOW_SUFFIX", "batch_limit",
            "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
            "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",
            "write_receipts"]

@@ -129,7 +129,8 @@ class DisputePass:
         if not reused and not ask:
             return {}
         ctx = Context(population=SUBJECT_KIND, flag_state=self._flags.state("judge.ladder").value,
-                      hash_key=self._key, audit_probability=risk_policy.AUDIT_PROBABILITY)
+                      hash_key=self._key, audit_probability=risk_policy.AUDIT_PROBABILITY,
+                      escalation_probability=risk_policy.SHADOW_ESCALATION)
         with recall_gate.background_work():  # 2. judge with no lock held: saves never wait
             fresh, receipts = self._ladder.decide(SLOT_RELATION, [items[i] for i in ask], ctx)
         decided = {**reused, **dict(zip(ask, fresh))}

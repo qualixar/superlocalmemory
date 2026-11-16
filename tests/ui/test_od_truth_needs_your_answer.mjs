@@ -175,7 +175,9 @@ describe('Health page: Truth checks', () => {
         { invariant: 'I-05', title: 't', status: 'violated', count: 3 },
         { invariant: 'I-09', title: 'Raw title for I-09', status: 'not_checked', count: 0 } ],
         certificates: [{ tier: 'laya', verdict: 'separate_events', n: 412, errors: 0, issued_at: '2026-11-16T00:00:00Z', voided_at: null },
-                       { tier: 'jev', verdict: 'replaces', n: 80, errors: 3, issued_at: '2026-11-10T00:00:00Z', voided_at: '2026-11-15T00:00:00Z', void_reason: 'drift' }] });
+                       { tier: 'jev', verdict: 'replaces', n: 80, errors: 3, issued_at: '2026-11-10T00:00:00Z', voided_at: '2026-11-15T00:00:00Z', void_reason: 'drift' }],
+        second_opinions: [{ lower_tier: 'rules', upper_tier: 'laya', pairs: 40, disagreed: 0 },
+                          { lower_tier: 'laya', upper_tier: 'jev', pairs: 12, disagreed: 2 }] });
     };
     const host = d.window.document.getElementById('health');
     d.window.odMountTruthChecks(host);
@@ -190,6 +192,9 @@ describe('Health page: Truth checks', () => {
     assert.match(text, /Raw title for I-09.*Not checked yet/);
     assert.match(text, /laya may answer "separate events" \(412 audited, 0 wrong\)Since/);
     assert.match(text, /jev may answer "replaces".*Stopped: its recent answers changed/);
+    assert.match(text, /Second opinions/);
+    assert.match(text, /A stronger judge rechecked 40 of rules's answersAgreed/);
+    assert.match(text, /A stronger judge rechecked 12 of laya's answersDisagreed on 2/);
   });
 });
 

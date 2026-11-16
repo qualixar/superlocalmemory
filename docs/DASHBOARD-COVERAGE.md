@@ -36,7 +36,7 @@ The sidebar groups the panes as follows.
 
 | Workspace | Product surface | What to verify separately |
 |---|---|---|
-| Health | the **Memory health** card (background improvement progress, repairs that wait for **Fix**, **Undo**; the post-upgrade store check and **Repair now** live in it), math-layer health, trust signals, connected agents and component health; a **Truth checks** card that runs `slm doctor --truth` read-only on request and says each result in plain words | `slm health`, `slm db integrity`, deployment resource limits |
+| Health | the **Memory health** card (background improvement progress, repairs that wait for **Fix**, **Undo**; the post-upgrade store check and **Repair now** live in it), math-layer health, trust signals, connected agents and component health; a **Truth checks** card that runs `slm doctor --truth` read-only on request and says each result in plain words, which judges may act on their own (certificates) and how often a stronger judge, rechecking in the background, disagreed (second opinions) | `slm health`, `slm db integrity`, deployment resource limits |
 | Governance | tabs for **Lifecycle** (memory ages, compaction preview, transitions), **Access & Users**, **Trust**, **Compliance** (retention policies, GDPR export and erasure, audit trail) and **Ingestion** | effective RBAC role on each API call; erasure completeness |
 | Optimize | cache and compression controls, cache state and savings telemetry | actual proxy and MCP routing and invalidation behavior |
 

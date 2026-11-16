@@ -133,6 +133,7 @@ def test_the_truth_checks_report_every_invariant_in_order(disputed) -> None:
     assert ids[:2] == ["I-01", "I-02"] and "I-16" in ids
     assert all(r["status"] != "violated" for r in body["results"])
     assert all(set(r) == {"invariant", "title", "status", "count"} for r in body["results"])
+    assert body["second_opinions"] == []
 
 
 def test_a_remote_app_cannot_open_the_truth_view_of_a_memory_it_may_not_see(disputed) -> None:

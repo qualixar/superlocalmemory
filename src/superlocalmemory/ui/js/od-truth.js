@@ -265,6 +265,18 @@
                     : 'Since ' + day(c.issued_at)));
       list.appendChild(row);
     });
+    var second = data.second_opinions || [];
+    if (second.length) {
+      list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'Second opinions'));
+      second.forEach(function (s) {
+        var row = el('div', 'list-row');
+        row.appendChild(el('span', 'truth-check-text', 'A stronger judge rechecked ' + s.pairs +
+          ' of ' + s.lower_tier + "'s answers"));
+        row.appendChild(el('span', 'truth-check-status ' + (s.disagreed ? 'tone-warn' : 'tone-ok'),
+          s.disagreed ? 'Disagreed on ' + s.disagreed : 'Agreed'));
+        list.appendChild(row);
+      });
+    }
     var lead = el('p', 'dash-card-lead ' + (bad ? 'tone-warn' : 'tone-ok'),
       bad ? bad + (bad === 1 ? ' check found a problem.' : ' checks found a problem.') +
             ' Run slm doctor --truth in a terminal for the details.'

@@ -227,11 +227,13 @@ def truth_checks(request: Request, profile_id: str = ""):
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
         from superlocalmemory.core import judge_certificates as certs
+        from superlocalmemory.core import shadow_escalation as shadow
 
         conn = _read(engine)
         try:
             results = invariants.check(conn)
             certificates = certs.records(conn, target)
+            second = [s.as_dict() for s in shadow.disagreements(conn, target)]
         finally:
             conn.close()
         return {"success": True, "profile_id": target,
@@ -241,7 +243,8 @@ def truth_checks(request: Request, profile_id: str = ""):
                 "certificates": [{k: c[k] for k in ("tier", "model", "verdict", "population",
                                                    "regime", "n", "errors", "issued_at",
                                                    "voided_at", "void_reason")}
-                                 for c in certificates]}
+                                 for c in certificates],
+                "second_opinions": second}
     except HTTPException:
         raise
     except m._UnknownRoutedProfile as exc:

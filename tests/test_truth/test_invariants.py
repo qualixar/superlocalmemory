@@ -125,7 +125,8 @@ def test_slm_doctor_truth_exits_one_on_a_violation(slotted, capsys) -> None:
     db, old, _new = slotted
     path = db.db_path if hasattr(db, "db_path") else db._db_path
     cmd_doctor(Namespace(truth=True, db=str(path), json=False))
-    assert "No violations" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "No violations" in out and "Second opinions" in out and "none yet" in out
     db.execute("UPDATE memory_slots SET state = 'current'")
     with pytest.raises(SystemExit) as stopped:
         cmd_doctor(Namespace(truth=True, db=str(path), json=False))
