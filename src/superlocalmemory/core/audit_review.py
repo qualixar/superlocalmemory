@@ -86,14 +86,24 @@ def _texts(conn: sqlite3.Connection, fact_ids: Sequence[str]) -> list[dict]:
              "content": (c or "")[:TEXT_CHARS], "said_at": w} for i, (f, c, w) in enumerate(rows)]
 
 
+#: How many waiting pairs are ranked by value before the first ``limit`` are shown.
+POOL = 500
+
+
 def pending(conn: sqlite3.Connection, profile_id: str, limit: int = 10) -> list[dict]:
-    """Pairs drawn for audit and not yet answered, oldest first, without any verdict."""
+    """Pairs drawn for audit and not yet answered, without any verdict, the most
+    valuable first (``core/audit_value``: answers that move a certificate, then risk)."""
+    from superlocalmemory.core import audit_value
+
+    limit = max(1, min(int(limit), MAX_ITEMS))
     try:
-        rows = conn.execute(_PENDING, (profile_id, max(1, min(int(limit), MAX_ITEMS)))).fetchall()
+        rows = conn.execute(_PENDING, (profile_id, POOL)).fetchall()
     except sqlite3.OperationalError:  # a store before M072
         return []
     out = []
-    for inputs_hash, question_id, fact_ids_json, _when in rows:
+    for inputs_hash, question_id, fact_ids_json, _when in audit_value.order(conn, profile_id, rows):
+        if len(out) >= limit:
+            break
         plain = PLAIN.get(question_id)
         if plain is None or question_id not in QUESTIONS:
             continue  # no wording a person can answer yet
