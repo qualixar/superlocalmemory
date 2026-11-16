@@ -1451,3 +1451,9 @@ slm db scale adopt                 # Adopt a detected earlier projection
 SQLite with sqlite-vec stays canonical. Projections are parity-gated; a failed
 verify leaves recall on SQLite and keeps the rejected manifest for inspection.
 See [Scale engine](scale-engine.md).
+
+## `slm disputes` and `slm audit` (4.2.30)
+
+`slm disputes` lists what needs your answer: two memories that state different values of the same thing, and memories whose source file changed. `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated` answers one; `slm disputes still-true FACT_ID` says a changed file still supports its memory.
+
+`slm audit` asks you, at a terminal, the questions SuperLocalMemory's judges were asked, without their answers, so a judge can earn permission to act on its own. It refuses to run without a terminal, so a script or an agent cannot answer for you; `slm audit --count` says how many are waiting and works anywhere.

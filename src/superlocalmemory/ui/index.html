@@ -30,7 +30,7 @@
     <!-- Connected apps pane + MCP & Tools pointer card (4.1.23) -->
     <link rel="stylesheet" href="static/css/od-apps.css?v=7600a0ed">
     <!-- Website palette, responsive fixes, dashboard home, help UI (loaded last) -->
-    <link rel="stylesheet" href="static/css/theme-slm.css?v=c6890616">
+    <link rel="stylesheet" href="static/css/theme-slm.css?v=43b37666">
     <link rel="stylesheet" href="static/css/od-star-ask.css?v=da9c16a1">
 </head>
 <body>
@@ -274,6 +274,16 @@
                       <div class="spacer"></div>
                     </div>
                     <div class="card-pad" id="dash-attention-body"></div>
+                  </div>
+
+                  <!-- 4.2.30 W2: blind audit questions, filled by od-truth.js; hidden when none -->
+                  <div class="card" id="dash-audit-card" hidden>
+                    <div class="card-head">
+                      <h3>Help it get things right</h3>
+                      <span class="chip-pill violet" id="dash-audit-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-audit-body"></div>
                   </div>
 
                   <div class="card" id="dash-health-card">
@@ -1702,7 +1712,7 @@
     <script src="static/js/od-media-find.js?v=10cc0e63"></script>
     <script src="static/js/od-media.js?v=4171a7af"></script>
     <script src="static/js/od-dash-home.js?v=aa602e3d"></script>
-    <script src="static/js/od-truth.js?v=6cd2f9b8"></script>
+    <script src="static/js/od-truth.js?v=d83936fb"></script>
     <script src="static/js/od-help.js?v=e06df0d4"></script>
     <script src="static/js/od-polish.js?v=0ca34b74"></script>
     <script src="static/js/od-startup.js?v=e8035f95"></script>

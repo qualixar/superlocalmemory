@@ -241,3 +241,69 @@ def truth_checks(request: Request, profile_id: str = ""):
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Truth check error")
+
+
+class AuditAnswer(BaseModel):
+    label: str = Field(min_length=1, max_length=32)
+    channel: str = Field(default="dashboard", max_length=16)
+    profile_id: str | None = None
+
+
+def _local_only(caller_view: str) -> None:
+    """Audits are a person on this machine (core/audit_review.py): never a remote app."""
+    if (caller_view or "").strip():
+        raise HTTPException(403, detail="Audits are answered on this computer only")
+
+
+@router.get("/api/audit/pending")
+def audit_pending(request: Request, limit: int = 10, profile_id: str = "", caller_view: str = ""):
+    """Pairs drawn for a blind audit, without any judge's verdict (W2, R-16)."""
+    from superlocalmemory.core import audit_review
+    from superlocalmemory.server.routes import memories as m
+
+    _local_only(caller_view)
+    try:
+        profile = m._routed_profile(profile_id)
+        engine, target = m._authorize_review_read(request, profile)
+        conn = _read(engine)
+        try:
+            items = audit_review.pending(conn, target, limit)
+            count = audit_review.pending_count(conn, target)
+        finally:
+            conn.close()
+        return {"success": True, "profile_id": target, "count": count, "items": items}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Audit queue error")
+
+
+@router.post("/api/audit/{item_id}/answer")
+def audit_answer(request: Request, item_id: str, body: AuditAnswer, caller_view: str = ""):
+    """A person's blind answer for one pair; written to every drawn receipt of it."""
+    from superlocalmemory.core import audit_review
+    from superlocalmemory.server.routes import memories as m
+
+    _local_only(caller_view)
+    try:
+        profile = m._routed_profile(body.profile_id)
+        engine, target, ctx = m._authorize_memory_mutation(
+            request, "update", item_id, run_pre_hook=False, profile=profile)
+        try:
+            with engine._db.raw_connection() as conn:
+                written = audit_review.answer(conn, profile_id=target, item_id=item_id,
+                                              label=body.label, channel=body.channel,
+                                              actor=str(ctx.get("agent_id") or ""))
+        except LookupError:
+            raise HTTPException(404, detail="Nothing waiting for that item") from None
+        except ValueError as exc:
+            raise HTTPException(422, detail=f"{exc}. Nothing was written.") from None
+        return {"success": True, "profile_id": target, "item_id": item_id, "labelled": written}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Audit answer error")

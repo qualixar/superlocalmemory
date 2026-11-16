@@ -1291,6 +1291,8 @@ def main() -> None:
     register_corrections_parsers(sub)  # 4.1.22: corrections your own actions overtook
     from superlocalmemory.cli.disputes_cmd import register_disputes_parsers
     register_disputes_parsers(sub)  # 4.2.30: what needs your answer (D-37..D-39)
+    from superlocalmemory.cli.audit_cmd import register_audit_parsers
+    register_audit_parsers(sub)  # 4.2.30 W2: blind audit answers from a person (R-16)
     from superlocalmemory.cli.outcome_cmd import register_outcome_parser
     register_outcome_parser(sub)  # 4.1.25: report whether recalled memories helped
     from superlocalmemory.cli.hide_cmd import register_hide_parser

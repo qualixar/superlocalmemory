@@ -67,7 +67,7 @@ def test_all_cli_commands_have_router_and_generated_slash_aliases() -> None:
     inventory = json.loads((PLUGIN / "command-inventory.json").read_text(encoding="utf-8"))
     commands = inventory["primary_commands"]
     assert (
-        len(commands) == 79
+        len(commands) == 80
     )  # includes `slm flags`, outcome reporting, Memory health (enrich), `slm tools`, `slm repair-speaker` and `slm hide`
     assert len(set(commands)) == len(commands)
     runtime = _runtime()

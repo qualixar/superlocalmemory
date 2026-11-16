@@ -188,3 +188,67 @@ describe('Health page: Truth checks', () => {
     assert.match(text, /Raw title for I-09.*Not checked yet/);
   });
 });
+
+const AUDIT_CARD = `<div id="dash-audit-card" hidden><span id="dash-audit-count"></span><div id="dash-audit-body"></div></div>`;
+const AUDIT_ITEM = {
+  item_id: 'h1', question: 'Memory A was saved before memory B. What does B do to A?',
+  memories: [{ name: 'A', content: 'weekly <b>x</b>', said_at: '2026-03-01' }, { name: 'B', content: 'monthly', said_at: '2026-11-14' }],
+  options: [{ label: 'replaces', text: 'B gives a new value' }, { label: 'cannot_tell', text: "I can't tell" }],
+};
+
+function auditPage(pending, posts) {
+  const d = new JSDOM(`<!DOCTYPE html><html><body>${AUDIT_CARD}</body></html>`,
+                      { runScripts: 'outside-only', url: 'http://localhost:8765/' });
+  d.window.fetch = (url, init) => {
+    if (init && init.method === 'POST') { posts.push({ url, body: JSON.parse(init.body) }); return reply(200, { success: true, labelled: 2 }); }
+    return reply(200, url.startsWith('/api/audit/pending') ? { success: true, ...pending } : { success: true, disputes: [], changed_sources: [] });
+  };
+  d.window.eval(SRC);
+  return d;
+}
+
+describe('Audit questions card', () => {
+  it('stays hidden when nothing is waiting', async () => {
+    const d = auditPage({ count: 0, items: [] }, []);
+    await d.window.SLMTruth.audit(); await flush();
+    assert.equal(d.window.document.getElementById('dash-audit-card').hidden, true);
+  });
+
+  it('asks one question with both memories and never parses memory text as HTML', async () => {
+    const d = auditPage({ count: 1, items: [AUDIT_ITEM] }, []);
+    await d.window.SLMTruth.audit(); await flush();
+    const doc = d.window.document;
+    assert.equal(doc.getElementById('dash-audit-card').hidden, false);
+    assert.match(doc.body.textContent, /What does B do to A\?/);
+    assert.equal(doc.querySelector('#dash-audit-body b'), null);
+    assert.match(doc.body.textContent, /weekly <b>x<\/b>/);
+    assert.equal(buttons(d, 'B gives a new value').length, 1);
+  });
+
+  it('an answer is sent as the option label through the dashboard channel, then the card hides', async () => {
+    const posts = [];
+    const d = auditPage({ count: 1, items: [AUDIT_ITEM] }, posts);
+    await d.window.SLMTruth.audit(); await flush();
+    buttons(d, 'B gives a new value')[0].click(); await flush();
+    assert.deepEqual(posts, [{ url: '/api/audit/h1/answer', body: { label: 'replaces', channel: 'dashboard' } }]);
+    assert.equal(d.window.document.getElementById('dash-audit-card').hidden, true);
+  });
+
+  it('Skip moves on without writing anything', async () => {
+    const posts = [];
+    const d = auditPage({ count: 1, items: [AUDIT_ITEM] }, posts);
+    await d.window.SLMTruth.audit(); await flush();
+    buttons(d, 'Skip')[0].click(); await flush();
+    assert.equal(posts.length, 0);
+    assert.equal(d.window.document.getElementById('dash-audit-card').hidden, true);
+  });
+});
+
+describe('Audit options carry no hint', () => {
+  it('every answer button has the same style', async () => {
+    const d = auditPage({ count: 1, items: [AUDIT_ITEM] }, []);
+    await d.window.SLMTruth.audit(); await flush();
+    const classes = new Set([...d.window.document.querySelectorAll('.truth-audit-options button')].map((b) => b.className));
+    assert.equal(classes.size, 1);
+  });
+});

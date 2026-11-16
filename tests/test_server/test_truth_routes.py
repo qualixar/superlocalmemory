@@ -144,3 +144,37 @@ def test_a_remote_app_cannot_open_the_truth_view_of_a_memory_it_may_not_see(disp
                                      "version": "1"}}), old))
     assert client.get(f"/api/truth/facts/{old}", params={"caller_view": "remote"}).status_code == 404
     assert client.get(f"/api/truth/facts/{old}").status_code == 200
+
+
+@pytest.fixture
+def audited(disputed):
+    from superlocalmemory.core.feature_flags import FeatureFlags
+    from superlocalmemory.core.judge_ladder import JudgeLadder
+    from superlocalmemory.truth.dispute_pass import DisputePass
+    from tests.test_truth.test_dispute_pass import Fixed
+
+    client, app, old, new = disputed
+    db = app.state.engine._db
+    DisputePass(db, FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={}),
+                JudgeLadder([Fixed("same", 0.9)])).run()
+    db.execute("UPDATE judge_receipts SET audit_selected = 1")
+    return client, app, old, new
+
+
+def test_the_audit_queue_answers_on_this_computer_only(audited) -> None:
+    client, app, old, new = audited
+    body = client.get("/api/audit/pending").json()
+    assert body["count"] == 1
+    (item,) = body["items"]
+    assert [m_["fact_id"] for m_ in item["memories"]] == [old, new] and "verdict" not in repr(item)
+    remote = {"caller_view": "remote"}
+    assert client.get("/api/audit/pending", params=remote).status_code == 403
+    url = f"/api/audit/{item['item_id']}/answer"
+    assert client.post(url, params=remote, json={"label": "same"}).status_code == 403
+    assert client.post(url, json={"label": "maybe"}).status_code == 422
+    r = client.post(url, json={"label": "replaces"})
+    assert r.status_code == 200 and r.json()["labelled"] == 1
+    assert client.get("/api/audit/pending").json()["count"] == 0
+    assert client.post(url, json={"label": "replaces"}).status_code == 404
+    label = app.state.engine._db.execute("SELECT labeller, blind FROM judge_labels")[0]
+    assert label["labeller"].startswith("person:dashboard") and label["blind"] == 1

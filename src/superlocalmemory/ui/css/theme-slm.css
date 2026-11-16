@@ -282,6 +282,8 @@ pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: a
 .dash-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 /* 4.2.30: Needs your answer (od-truth.js) */
 #dash-attention-card[hidden] { display: none !important; }
+#dash-audit-card[hidden] { display: none !important; }
+.truth-audit-options .btn { white-space: normal; text-align: left; }
 .truth-item { padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
 .truth-item:first-child { padding-top: 0; }
 .truth-item:last-child { border-bottom: 0; padding-bottom: 0; }

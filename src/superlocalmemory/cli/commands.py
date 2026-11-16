@@ -572,6 +572,12 @@ def _cmd_corrections_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_audit_dispatch(args: Namespace) -> None:
+    """4.2.30 W2: blind audit answers from a person (cli/audit_cmd.py)."""
+    from superlocalmemory.cli.audit_cmd import run
+    run(args)
+
+
 def _cmd_disputes_dispatch(args: Namespace) -> None:
     """4.2.30: disputed values and changed source files (cli/disputes_cmd.py)."""
     from superlocalmemory.cli.disputes_cmd import run
@@ -755,6 +761,7 @@ def dispatch(args: Namespace) -> None:
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
         "disputes": _cmd_disputes_dispatch,
+        "audit": _cmd_audit_dispatch,
         "outcome": _cmd_outcome_dispatch,
         "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
@@ -3072,6 +3079,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
         ("disputes", "What needs your answer: disputed values, changed source files"),
+        ("audit", "Answer a few questions so SuperLocalMemory's judges can earn trust"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
         ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
     ]),

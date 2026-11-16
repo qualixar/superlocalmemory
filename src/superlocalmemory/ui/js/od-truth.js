@@ -281,7 +281,64 @@
     container.appendChild(card);
   }
 
+  // ----- Dashboard home: blind audit questions (W2, R-16) -----
+  // One pair at a time, never the judge's own answer, so the person's answer is
+  // independent. Hidden when nothing is waiting.
+  var audit = { items: [], count: 0 };
+
+  function auditCard() { return $('dash-audit-card'); }
+
+  function auditShow() {
+    var c = auditCard(), b = $('dash-audit-body');
+    if (!c || !b) return;
+    b.textContent = '';
+    var item = audit.items[0];
+    c.hidden = !item;
+    if (!item) return;
+    var badge = $('dash-audit-count');
+    if (badge) badge.textContent = String(audit.count);
+    b.appendChild(el('p', 'dash-card-meta', 'SuperLocalMemory checks its own judgement against yours. ' +
+      'Pick what is true; "I can\'t tell" is always fine. Your answers stay on this computer.'));
+    b.appendChild(el('p', 'dash-card-lead', item.question));
+    (item.memories || []).forEach(function (m) {
+      var box = el('div', 'truth-side');
+      box.appendChild(el('span', 'dash-card-meta', m.name + ' · said ' + day(m.said_at)));
+      box.appendChild(el('p', 'truth-text', m.content || ''));
+      b.appendChild(box);
+    });
+    var actions = el('div', 'truth-actions truth-audit-options');
+    (item.options || []).forEach(function (o) {
+      // Every option looks the same: no styling may hint at an answer (a blind label).
+      actions.appendChild(button(o.text, 'ghost', function () {
+        auditAnswer(item, o.label);
+      }));
+    });
+    actions.appendChild(button('Skip', 'ghost', function () { audit.items.shift(); audit.count = Math.max(0, audit.count - 1); auditShow(); }));
+    b.appendChild(actions);
+  }
+
+  function auditAnswer(item, label) {
+    var b = $('dash-audit-body');
+    if (b) busy(b, true);
+    post('/api/audit/' + encodeURIComponent(item.item_id) + '/answer', { label: label, channel: 'dashboard' })
+      .then(function () {
+        audit.items.shift();
+        audit.count = Math.max(0, audit.count - 1);
+        if (!audit.items.length && audit.count) return auditLoad();
+        auditShow();
+      }, function (e) { if (b) failed(b, e); });
+  }
+
+  function auditLoad() {
+    if (!auditCard()) return Promise.resolve();
+    return fetch('/api/audit/pending?limit=10', { credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) { audit = { items: d.items || [], count: d.count || 0 }; auditShow(); },
+            function () { var c = auditCard(); if (c) c.hidden = true; });
+  }
+
   window.odMountTruthChecks = mountChecks;
-  window.SLMTruth = { reload: load, detail: detail, _render: render };
-  document.addEventListener('DOMContentLoaded', function () { setTimeout(load, 300); });
+  function reloadAll() { return Promise.all([load(), auditLoad()]); }
+  window.SLMTruth = { reload: reloadAll, detail: detail, audit: auditLoad, _render: render };
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(reloadAll, 300); });
 }());
