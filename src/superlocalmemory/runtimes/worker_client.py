@@ -31,7 +31,10 @@ from superlocalmemory.runtimes.ports import MediaEmbedderPort
 logger = logging.getLogger(__name__)
 
 WORKER_PATH = Path(__file__).resolve().parent / "multimodal_worker.py"
-DEFAULT_IDLE_S = 1800.0
+#: A picture model is needed only when pictures or documents arrive, and it holds
+#: gigabytes: release it two minutes after the last request (routing only; a cold
+#: load costs seconds, a held model can hang a laptop). ``SLM_MEDIA_WORKER_IDLE_S``.
+DEFAULT_IDLE_S = 120.0
 DEFAULT_RSS_LIMIT_MB = media_models.DEFAULT_RSS_LIMIT_MB
 MAX_TEXTS, MAX_PATHS = 64, 16
 _QUIT_WAIT_S = 2.0

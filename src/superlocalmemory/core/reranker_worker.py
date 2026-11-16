@@ -44,9 +44,20 @@ os.environ["TORCH_DEVICE"] = "cpu"
 # plans that consume 3-5GB on ARM64 Mac. CPU EP is ~500MB and fast enough.
 os.environ["ORT_DISABLE_COREML"] = "1"
 
+def _exit_now(*_args) -> None:
+    """SIGTERM: leave at once. ``sys.exit`` would wait for every non-daemon thread
+    the model libraries started, so a stop could hang for as long as they run and
+    the model stayed in memory (seen: a 3.3 GB picture worker outliving SIGTERM)."""
+    try:
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001 - leaving anyway
+        pass
+    os._exit(0)
+
+
 # SIGTERM bridge for Docker/systemd
 if sys.platform != "win32":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, _exit_now)
 
 
 def _start_parent_watchdog() -> None:

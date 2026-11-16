@@ -185,6 +185,21 @@ def _prevent_heavy_model_loading():
 
 
 @pytest.fixture(autouse=True)
+def _machine_not_pressed_unless_a_test_says_so(request, monkeypatch):
+    """SLM releases models and refuses to load them while the machine is short of
+    memory (``infra.memory_pressure``). A test must not depend on how loaded the
+    machine running it is, so every test sees a calm machine; the tests of the
+    signal itself are marked ``real_memory_pressure``."""
+    if request.node.get_closest_marker("real_memory_pressure"):
+        return
+    from superlocalmemory.infra import memory_pressure
+
+    calm = memory_pressure.Reading(False, None, 0.0, None, "")
+    monkeypatch.setattr(memory_pressure, "reading", lambda: calm)
+    monkeypatch.setattr(memory_pressure, "pressed", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _withholding_off_unless_a_test_turns_it_on(monkeypatch):
     """4.2.30 D-28 withholds delivered memories at random by design, so a test
     that checks what a session start delivers would fail one run in ten. Tests

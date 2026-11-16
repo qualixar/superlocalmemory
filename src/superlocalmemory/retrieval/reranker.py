@@ -8,7 +8,9 @@ V3.3.3: All PyTorch/ONNX model work runs in a SEPARATE subprocess.
 The main process (dashboard, MCP, CLI) NEVER imports torch and stays
 at ~60 MB. Same isolation pattern as EmbeddingService.
 
-The worker subprocess auto-kills after 2 minutes idle.
+The worker subprocess stops after 30 minutes without use (``SLM_RERANKER_IDLE_TIMEOUT``),
+and is released at once, and not reloaded, while the machine is short of memory
+(``infra.memory_pressure``); recall then keeps its fusion order.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 License: AGPL-3.0-or-later
@@ -68,6 +70,13 @@ _IDLE_TIMEOUT_SECONDS = 1800  # V3.8.1: keep interactive sessions warm.
 # Low-RAM installations can retain aggressive recycling through the override.
 # Set ``SLM_RERANKER_IDLE_TIMEOUT=120`` + ``slm restart`` to revert.
 _IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_RERANKER_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
+
+
+def _memory_pressed() -> bool:
+    """True while the machine is short of memory (``infra.memory_pressure``)."""
+    from superlocalmemory.infra import memory_pressure
+
+    return memory_pressure.pressed()
 _SUBPROCESS_RESPONSE_TIMEOUT = 15  # v3.4.52: 15s (was 180s). Long timeout blocked the
 # entire FastAPI event loop — a dead reranker subprocess held ALL
 # endpoints hostage for 3 minutes. 15s is enough for ONNX inference
@@ -224,8 +233,11 @@ class CrossEncoderReranker:
         )
 
     def _warmup_gate_open(self) -> bool:
-        """True when the backoff allows a new automatic round now."""
+        """True when the backoff allows a new automatic round now, and the machine
+        has the memory for a model (a released reranker stays released under pressure)."""
         if getattr(self, "_warmup_stopped", False):
+            return False
+        if _memory_pressed():
             return False
         return time.monotonic() >= getattr(self, "_warmup_not_before", 0.0)
 
@@ -503,7 +515,8 @@ class CrossEncoderReranker:
             return None  # another request is using the subprocess
         try:
             if (self._request_count >= _WORKER_RECYCLE_AFTER
-                    and self._worker_proc is not None and self._model_loaded):
+                    and self._worker_proc is not None and self._model_loaded
+                    and not _memory_pressed()):  # a swap holds two models at once
                 # Blue/green: the replacement warms in the background while
                 # this worker keeps answering, and is swapped in only once it
                 # is ready. Killing first (4.1.18) left recall unranked for a
@@ -512,8 +525,12 @@ class CrossEncoderReranker:
                 # for the length of one load.
                 self._begin_replacement()
 
-            # Ensure worker is alive (re-spawn if crashed)
+            # Ensure worker is alive (re-spawn if crashed), never while the machine
+            # is short of memory: the recall keeps its fusion order instead.
             if self._worker_proc is None or self._worker_proc.poll() is not None:
+                if _memory_pressed():
+                    self._model_loaded = False
+                    return None
                 self._ensure_worker()
             if self._worker_proc is None:
                 return None
@@ -667,7 +684,7 @@ class CrossEncoderReranker:
             logger.debug("Reranker PID file not updated: %s", exc)
 
     def _reset_idle_timer(self) -> None:
-        """Reset idle timer — kills worker after 2 min inactivity."""
+        """Reset idle timer: stops the worker after ``_IDLE_TIMEOUT_SECONDS`` without use."""
         if self._shutdown_event.is_set():
             return
         if self._idle_timer is not None:

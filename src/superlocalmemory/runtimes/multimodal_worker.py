@@ -435,6 +435,17 @@ def handle(req: dict) -> dict:
 
 # -- process plumbing ----------------------------------------------------------
 
+def _exit_now(*_args) -> None:
+    """SIGTERM: leave at once. ``sys.exit`` would wait for every non-daemon thread
+    the model libraries started, so a stop could hang for as long as they run and
+    the model stayed in memory (seen: a 3.3 GB picture worker outliving SIGTERM)."""
+    try:
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001 - leaving anyway
+        pass
+    os._exit(0)
+
+
 def _watch_parent() -> None:
     parent = os.getppid()
     while True:
@@ -450,7 +461,7 @@ def main() -> int:
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     if sys.platform != "win32":
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.signal(signal.SIGTERM, _exit_now)
         threading.Thread(target=_watch_parent, daemon=True, name="parent-watchdog").start()
     _STATE["data_limit_mb"] = _apply_memory_limit(os.environ)
     out = sys.stdout
@@ -465,7 +476,7 @@ def main() -> int:
         if isinstance(req, dict) and req.get("cmd") == "quit":
             out.write(json.dumps({"ok": True, **({"id": req["id"]} if "id" in req else {})}) + "\n")
             out.flush()
-            return 0
+            _exit_now()  # the same immediate exit: library threads must not hold the model
         out.write(json.dumps(handle(req)) + "\n")
         out.flush()
     return 0

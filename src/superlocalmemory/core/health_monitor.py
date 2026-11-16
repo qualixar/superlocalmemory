@@ -33,6 +33,13 @@ logger = logging.getLogger("superlocalmemory.health_monitor")
 
 # Command-line marker of the picture worker, which has its own memory cap.
 _PICTURE_IDENTIFIER = "multimodal_worker.py"
+_RERANKER_IDENTIFIER = "superlocalmemory.core.reranker_worker"
+#: What memory pressure releases, least harm first: the picture worker serves only
+#: pictures and documents; without the reranker, recall keeps its fusion order.
+#: The embedder is never released here (it pauses itself, ``core.embedding_memory``).
+_PRESSURE_RELEASE_ORDER = (_PICTURE_IDENTIFIER, _RERANKER_IDENTIFIER)
+#: Seconds a released worker gets to exit before it is killed (routing only).
+_STOP_GRACE_S = 3.0
 
 # Try psutil — graceful fallback if not available
 try:
@@ -41,6 +48,24 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
     logger.info("psutil not available — health monitoring limited")
+
+
+def stop_process(pid: int, grace_s: float = _STOP_GRACE_S) -> bool:
+    """Ask a worker to exit, and kill it if it has not within ``grace_s``."""
+    try:
+        proc = psutil.Process(pid)
+        proc.terminate()
+        try:
+            proc.wait(timeout=grace_s)
+        except psutil.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=grace_s)
+        return True
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        return False
+    except psutil.AccessDenied:
+        logger.warning("could not stop worker PID %d: access denied", pid)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -278,10 +303,30 @@ class HealthMonitor:
             total_rss_mb=round(total_rss_mb, 1),
             spared_embedder=bool(non_embedder),
         )
-        try:
-            psutil.Process(candidate["pid"]).terminate()
-        except psutil.NoSuchProcess:
-            pass
+        stop_process(candidate["pid"])
+
+    def _relieve_pressure(self, slm_workers: list[dict], reading=None) -> dict | None:
+        """The machine is short of memory: release one loaded model per check, least
+        harm first, whatever SLM's own budget says (a laptop that hangs is the failure
+        this exists for). Returns the worker released, or None."""
+        from superlocalmemory.infra import memory_pressure
+
+        reading = reading if reading is not None else memory_pressure.reading()
+        if not reading.pressed:
+            return None
+        for ident in _PRESSURE_RELEASE_ORDER:
+            target = next((w for w in slm_workers if ident in w["cmdline"]), None)
+            if target is None:
+                continue
+            logger.warning("Memory pressure (%s): releasing worker PID %d (%.0f MB)",
+                           reading.reason, target["pid"], target["rss_mb"])
+            log_structured(level="warning", operation="memory_pressure_release",
+                           released_pid=target["pid"], released_mb=target["rss_mb"],
+                           reason=reading.reason, available_mb=reading.available_mb,
+                           kernel_level=reading.kernel_level)
+            stop_process(target["pid"])
+            return target
+        return None
 
     def _check_once(self) -> None:
         """Single health check cycle."""
@@ -304,6 +349,7 @@ class HealthMonitor:
         )
 
         self._enforce_budget(total_rss_mb, counted)
+        self._relieve_pressure(slm_workers)
 
         # Heartbeat checks delegated to WorkerPool (Phase B wiring)
         # WorkerPool tracks last_heartbeat per worker. HealthMonitor

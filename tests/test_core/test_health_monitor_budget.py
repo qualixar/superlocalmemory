@@ -61,6 +61,9 @@ class _Terminable:
     def terminate(self):
         self._killed.append(self.pid)
 
+    def wait(self, timeout=None):  # a fake worker exits on terminate
+        return 0
+
 
 def _monitor(budget_mb):
     return hm.HealthMonitor(global_rss_budget_mb=budget_mb, enable_structured_logging=False)

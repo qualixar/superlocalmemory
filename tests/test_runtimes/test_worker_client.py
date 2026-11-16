@@ -55,7 +55,7 @@ def test_idle_default_comes_from_env(stub_env, monkeypatch):
     c = worker_client.MediaWorkerClient(stub_env, model_id="fake:768", revision="")
     assert c.idle_s == 42
     monkeypatch.delenv("SLM_MEDIA_WORKER_IDLE_S")
-    assert worker_client.MediaWorkerClient(stub_env, model_id="fake:768", revision="").idle_s == 1800
+    assert worker_client.MediaWorkerClient(stub_env, model_id="fake:768", revision="").idle_s == 120
 
 
 def test_crash_between_requests_is_retried_once(client_factory):
