@@ -13,8 +13,9 @@ Every answer any tier gives is written as a receipt (``judge_receipts``, M072):
 ids, labels, numbers and a hash of the inputs, never the text. Receipts make a
 decision auditable and are what personal calibration learns from.
 
-Items go in batches (a tier sees up to ``MAX_BATCH`` at once); a tier answers
-the whole batch or nothing, so an answer can never pair with the wrong item.
+Items go in batches (a tier sees up to ``MAX_BATCH`` at once, or fewer when it
+says so through ``batch_limit``); a tier answers the whole batch or nothing, so
+an answer can never pair with the wrong item.
 
 A tier that cannot be asked here (not installed, a question it was never
 measured on, shadow, no consent) declines by returning None: nothing was asked,
@@ -168,15 +169,35 @@ def is_model_tier(tier: object) -> bool:
 
 
 #: How a decision was asked (M-01): alone, among peers, or by a rule, which
-#: answers each item on its own whatever the batch. Errors measured in one
+#: answers each item on its own whatever the batch. A model whose ``per_item``
+#: was measured with ``judge_permutation`` (Laya, F-43) answers each item as if
+#: alone, so its receipts are ``single`` at any batch size. Errors measured in one
 #: regime say nothing about another (R-23), so each is its own certificate cell.
 BATCHING_REGIMES = ("single", "batched", "unbatched")
 
 
-def batching_regime(batch_size: int, *, model: bool) -> str:
+def batching_regime(batch_size: int, *, model: bool, per_item: bool = False) -> str:
     if not model:
         return "unbatched"
-    return "single" if batch_size == 1 else "batched"
+    return "single" if batch_size == 1 or per_item else "batched"
+
+
+def batch_limit(tier: object, question: Question) -> int:
+    """How many items ``tier`` is asked about in one request (1..MAX_BATCH).
+
+    A tier whose batched answers move with their peers asks consequential
+    questions one item at a time (Jev, D-43). A limit that cannot be read
+    falls back to one item: slower, never wrong.
+    """
+    probe = getattr(tier, "batch_limit", None)
+    if not callable(probe):
+        return MAX_BATCH
+    try:
+        return max(1, min(int(probe(question)), MAX_BATCH))
+    except Exception as exc:  # noqa: BLE001 - fail toward one item per request
+        logger.info("judge ladder: batch limit of %s unknown (%s)", getattr(tier, "name", "?"),
+                    type(exc).__name__)
+        return 1
 
 
 def tier_available(tier: object, question: Question) -> bool:
@@ -324,13 +345,15 @@ class JudgeLadder:
                   ctx) -> list[int]:
         still: list[int] = []
         log_misses = getattr(tier, "log_abstentions", True)
-        for start in range(0, len(pending), MAX_BATCH):
-            batch = pending[start:start + MAX_BATCH]
+        size = batch_limit(tier, question)
+        per_item = getattr(tier, "per_item", False) is True
+        for start in range(0, len(pending), size):
+            batch = pending[start:start + size]
             peers = hashlib.sha256("\0".join(sorted(items[i].subject_id for i in batch))
                                    .encode()).hexdigest()[:32]
             answers, failure, ref = self._answers(tier, question, [items[i] for i in batch])
             meta = _Batch("jb_" + uuid.uuid4().hex, len(batch), tier_index, peers, ref,
-                          batching_regime(len(batch), model=is_model_tier(tier)))
+                          batching_regime(len(batch), model=is_model_tier(tier), per_item=per_item))
             asked = answers is not None
             for pos, index in enumerate(batch):
                 if failure is not None:  # asked and failed as a whole: receipted (I-09)
@@ -461,7 +484,7 @@ class RulesTier:
 
 __all__ = ["ABSTAIN", "BATCHING_REGIMES", "EXPLICIT_OLDER_VALUE", "EXPLICIT_RULE", "EXPLICIT_VALUE_CHANGED",
            "batching_regime",
-           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH",
+           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH", "batch_limit",
            "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
            "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",
            "write_receipts"]

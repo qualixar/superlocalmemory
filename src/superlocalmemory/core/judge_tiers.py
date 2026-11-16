@@ -24,7 +24,14 @@ import logging
 from dataclasses import replace
 from typing import Any, Callable, Sequence
 
-from superlocalmemory.core.judge_ladder import Item, JudgeLadder, RulesTier, TierAnswer, TierFailure
+from superlocalmemory.core.judge_ladder import (
+    MAX_BATCH,
+    Item,
+    JudgeLadder,
+    RulesTier,
+    TierAnswer,
+    TierFailure,
+)
 from superlocalmemory.core.judge_questions import LOCAL_ONLY, Question
 
 JudgeSupplier = Callable[[], Any | None]
@@ -51,6 +58,10 @@ class LayaTier:
     #: change memory is decided by ``judge_calibration.ActingGate`` from labels.
     #: (25 labelled pairs: positives 0.66-0.95, negatives at most 0.09.)
     floors = {"same": 0.8}
+    #: The worker scores each pair as its own item: on 128 real pairs the score
+    #: was identical alone, reshuffled and in the same batch (F-43). Its receipts
+    #: are ``single`` at any batch size, so batches of 16 stay and its cells can certify.
+    per_item = True
 
     def __init__(self, supplier: JudgeSupplier) -> None:
         self._supplier = supplier
@@ -123,6 +134,13 @@ class JevTier:
         if question.privacy == LOCAL_ONLY or not _literally_true(self._live):
             return None
         return _consent_ref(self._consent_ref)
+
+    @staticmethod
+    def batch_limit(question: Question) -> int:
+        """One pair per request for a consequential question (D-43): batched, its
+        answer moved with order and partners at about three times its own noise
+        (F-42). Background only, so the extra requests never slow a recall."""
+        return 1 if question.consequential else MAX_BATCH
 
     def available(self, question: Question) -> bool:
         if self._permit(question) is None:

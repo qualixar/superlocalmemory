@@ -39,6 +39,9 @@ class Question:
     #: ``default_threshold``.
     thresholds: Mapping[str, float] = field(default_factory=dict)
     default_threshold: float = 0.7
+    #: An answer can lead to a memory change (a retirement). A model whose batched
+    #: answers move with their peers is asked such a question one item at a time.
+    consequential: bool = False
 
     def threshold(self, label: str) -> float:
         return float(self.thresholds.get(label, self.default_threshold))
@@ -71,6 +74,7 @@ SLOT_RELATION = Question(
     # one answer that could lead to a retirement (which still needs a certificate).
     thresholds=MappingProxyType({"replaces": 0.85}),
     default_threshold=0.7,
+    consequential=True,
 )
 
 QUESTIONS: Mapping[str, Question] = MappingProxyType({SLOT_RELATION.question_id: SLOT_RELATION})

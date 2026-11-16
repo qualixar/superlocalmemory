@@ -199,7 +199,8 @@ def test_a_ladder_that_is_on_with_consent_asks_the_hosted_judge() -> None:
                                       hosted_live=lambda: True)
     assert ladder.tier_names == ("rules", "laya", "jev")
     decisions, _ = ladder.decide(SLOT_RELATION, _items(2))
-    assert jev.asked == 1 and [d.tier for d in decisions] == ["jev", "jev"]
+    # SLOT_RELATION is consequential: one pair per hosted request (D-43).
+    assert jev.asked == 2 and [d.tier for d in decisions] == ["jev", "jev"]
 
 
 def test_switching_to_shadow_mid_pass_stops_hosted_calls_before_the_next_ask() -> None:
