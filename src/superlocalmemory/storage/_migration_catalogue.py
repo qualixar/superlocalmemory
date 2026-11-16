@@ -235,6 +235,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M076_session_end_stamps_are_flagged as _M076,
 )
+from superlocalmemory.storage.migrations import (
+    M077_judge_certificates as _M077,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -503,4 +506,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # date or time (R-31). Deferred, like M068: it reads atomic_facts.non_answer.
     Migration(name=_M076.NAME, db_target="memory", ddl=_M076.DDL,
               dependencies=(_M060.NAME, _M062.NAME)),
+    # M077 stores judge certificates with issue and void times (I-14, R-26).
+    # Deferred like M072, whose receipts and labels they rest on.
+    Migration(name=_M077.NAME, db_target="memory", ddl=_M077.DDL,
+              dependencies=(_M072.NAME,)),
 ]

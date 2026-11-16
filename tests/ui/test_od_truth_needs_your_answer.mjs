@@ -173,7 +173,9 @@ describe('Health page: Truth checks', () => {
       return reply(200, { success: true, results: [
         { invariant: 'I-01', title: 't', status: 'ok', count: 0 },
         { invariant: 'I-05', title: 't', status: 'violated', count: 3 },
-        { invariant: 'I-09', title: 'Raw title for I-09', status: 'not_checked', count: 0 } ] });
+        { invariant: 'I-09', title: 'Raw title for I-09', status: 'not_checked', count: 0 } ],
+        certificates: [{ tier: 'laya', verdict: 'separate_events', n: 412, errors: 0, issued_at: '2026-11-16T00:00:00Z', voided_at: null },
+                       { tier: 'jev', verdict: 'replaces', n: 80, errors: 3, issued_at: '2026-11-10T00:00:00Z', voided_at: '2026-11-15T00:00:00Z', void_reason: 'drift' }] });
     };
     const host = d.window.document.getElementById('health');
     d.window.odMountTruthChecks(host);
@@ -186,6 +188,8 @@ describe('Health page: Truth checks', () => {
     assert.match(text, /1 check found a problem/);
     assert.match(text, /Values follow each other in time without overlapping\..*Problem found \(3\)/);
     assert.match(text, /Raw title for I-09.*Not checked yet/);
+    assert.match(text, /laya may answer "separate events" \(412 audited, 0 wrong\)Since/);
+    assert.match(text, /jev may answer "replaces".*Stopped: its recent answers changed/);
   });
 });
 

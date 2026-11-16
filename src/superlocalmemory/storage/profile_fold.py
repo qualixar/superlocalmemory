@@ -66,7 +66,7 @@ VEC     fact_embeddings, reembed_next_vec, reembed_prev_vec, reembed_trash_vec
 DELETE  activation_cache, backup_destinations, behavioral_assertions,
         behavioral_patterns, community_summaries, compliance_audit,
         core_memory_blocks, cross_platform_sync_log, entity_communities,
-        entity_link_repair_undo, graph_generation, memory_kind_runs,
+        entity_link_repair_undo, graph_generation, judge_certificates, memory_kind_runs,
         memory_slots, mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state,
         pending_outcomes, persona_summary, rbac_memberships, slot_disputes, slot_key_alias,
         slot_revisions,
@@ -109,6 +109,9 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "injection_receipts": (MOVE, "per-fact receipts of those deliveries, with the facts"),
     "slot_disputes": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "judge_receipts": (MOVE, "ids-only receipts of judge decisions on the moved memories"),
+    "judge_certificates": (DELETE, "a statement about the source profile's own labels; the "
+                           "labels move with their receipts and the target earns its "
+                           "certificate again from the combined set"),
     # search indexes and vectors
     "bm25_tokens": (MOVE, "keyword index"),
     "fact_embeddings": (VEC, "vectors (partition per profile)"),

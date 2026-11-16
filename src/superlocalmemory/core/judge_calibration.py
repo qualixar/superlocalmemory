@@ -280,7 +280,7 @@ SELECT r.receipt_id, r.confidence, l.label FROM judge_receipts r
        AND l.source = 'audit' AND l.blind = 1
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
    AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
-   AND r.batching_regime = ? AND r.audit_selected = 1
+   AND r.batching_regime = ? AND r.audit_selected = 1 AND r.decided_at > ?
  ORDER BY r.decided_at, r.receipt_id
 """
 
@@ -337,15 +337,22 @@ class ActingGate:
         self._alpha_for = alpha_for or risk_policy.alpha_for
         self._delta = risk_policy.DELTA if delta is None else delta
         self._cache: dict[tuple[str, str, str, str, str], Certificate] = {}
+        self._drawn_ids: dict[tuple[str, str, str, str, str], list[str]] = {}
+        self._recorded: set[tuple[str, str, str, str, str]] = set()
 
     def certificate(self, tier: str, model: str, verdict: str, population: str,
                     regime: str) -> Certificate:
         key = (tier, model, verdict, population, regime)
         if key not in self._cache:
+            from superlocalmemory.core import judge_certificates as records
+
+            # R-26: after a drift void only decisions made since then count.
+            since = records.labels_since(self._conn, self._cell(*key))
             rows = self._conn.execute(_DRAWN, (self._profile, self._question, self._version,
                                                tier, model, verdict, population,
-                                               regime)).fetchall()
+                                               regime, since)).fetchall()
             drawn = _drawn_prefix(rows)
+            self._drawn_ids[key] = list(dict.fromkeys(r[0] for r in rows))[:len(drawn)]
             scores = [score for score, _ in drawn]
             # Disagreeing labellers or "cannot tell" count as an error (conservative).
             wrong = [len(labels) > 1 or CANNOT_TELL in labels
@@ -359,6 +366,43 @@ class ActingGate:
                 cert = self._closing(scores, wrong, verdict, tier, model, population)
             self._cache[key] = cert
         return self._cache[key]
+
+    def _cell(self, tier: str, model: str, verdict: str, population: str, regime: str):
+        from superlocalmemory.core.judge_certificates import Cell
+
+        return Cell(self._profile, self._question, self._version, tier, model, verdict,
+                    population, regime)
+
+    @staticmethod
+    def _method(verdict: str, regime: str) -> str:
+        if verdict == RETIRING:
+            return "eprocess"
+        return "rule-closing-D35" if regime == "unbatched" else "eprocess+base-rate-M02"
+
+    def _record(self, tier: str, model: str, verdict: str, population: str,
+                regime: str) -> Certificate:
+        """I-14 / R-26: store the certificate's issue or void, and void it on drift
+        (M-07); returns the certificate that holds after that."""
+        from superlocalmemory.core import judge_certificates as records
+
+        key = (tier, model, verdict, population, regime)
+        cert = self.certificate(*key)
+        if key in self._recorded:
+            return cert
+        self._recorded.add(key)
+        cell = self._cell(*key)
+        records.reconcile(self._conn, cell, cert, method=self._method(verdict, regime),
+                          receipt_ids=self._drawn_ids.get(key, []))
+        if cert.acts:
+            audited = [_score(c) for (c,) in self._conn.execute(
+                "SELECT confidence FROM judge_receipts WHERE receipt_id IN (%s)"
+                % ",".join("?" * len(self._drawn_ids.get(key, []))),
+                tuple(self._drawn_ids.get(key, [])))] if self._drawn_ids.get(key) else []
+            drift = records.check_drift(self._conn, cell, audited, score_of=_score)
+            if drift.shifted and records.void_for_drift(self._conn, cell):
+                self._cache.pop(key, None)
+                cert = self.certificate(*key)  # only labels since the void count now
+        return cert
 
     def _rule_closing(self, scores: list[float], wrong: list[bool], verdict: str) -> Certificate:
         """D-35: a deterministic rule closes on the e-process at alpha_close over its
@@ -398,7 +442,7 @@ class ActingGate:
                population: str, regime: str, routing_threshold: float | None = None) -> bool:
         if regime not in CERTIFIABLE_REGIMES:
             return False  # W0-04: batched labels are not independent trials
-        cert = self.certificate(tier, model, verdict, population, regime)
+        cert = self._record(tier, model, verdict, population, regime)
         if not (cert.acts and _score(confidence) >= cert.threshold):
             return False
         # W0-10: the acted set is {score >= max(t*, r)}; it is bounded only when r

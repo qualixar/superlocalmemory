@@ -80,7 +80,8 @@ from pathlib import Path
 #: M074 (fact_origin, D-21) is additive, floor 51.
 #: M075 (injection receipts, D-22) is additive, floor 51.
 #: M076 runs M062's stub pass again for session-end stamps (data only), floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 76
+#: M077 (judge certificates, I-14) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 77
 
 
 class SchemaVersionError(RuntimeError):

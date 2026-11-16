@@ -36,9 +36,12 @@ def cmd_doctor_truth(args: Namespace) -> None:
         else:
             print(message, file=sys.stderr)
         sys.exit(2)
+    from superlocalmemory.core import judge_certificates as certs
+
     conn = inv.open_read_only(str(path))
     try:
         results = inv.check(conn)
+        certificates = certs.records(conn, None)
     finally:
         conn.close()
     violated = [r for r in results if r.status == inv.VIOLATED]
@@ -46,7 +49,7 @@ def cmd_doctor_truth(args: Namespace) -> None:
         from superlocalmemory.cli.json_output import json_print
         json_print("doctor", data={"store": str(path), "truth": [
             {"invariant": r.invariant, "title": r.title, "status": r.status, "count": r.count,
-             "sample": list(r.sample)} for r in results]})
+             "sample": list(r.sample)} for r in results], "certificates": certificates})
     else:
         print(f"Truth invariants on {path} (read-only)")
         for r in results:
@@ -55,6 +58,13 @@ def cmd_doctor_truth(args: Namespace) -> None:
             tail = f": {r.count} ({', '.join(r.sample)})" if r.status == inv.VIOLATED else ""
             print(f"  [{mark}] {r.invariant} {r.title}{tail}")
         print(f"{len(violated)} violated" if violated else "No violations among the checked invariants")
+        live = [c for c in certificates if not c["voided_at"]]
+        print(f"Judge certificates: {len(live)} open, {len(certificates) - len(live)} voided")
+        for c in certificates[:20]:
+            state = (f"voided {c['voided_at'][:10]} ({c['void_reason']})" if c["voided_at"]
+                     else f"open since {c['issued_at'][:10]}")
+            print(f"  {c['tier']}/{c['model']} {c['verdict']} [{c['population']}, {c['regime']}]: "
+                  f"{state}; {c['n']} audited, {c['errors']} wrong, threshold {c['threshold']:.2f}")
     if violated:
         sys.exit(1)
 

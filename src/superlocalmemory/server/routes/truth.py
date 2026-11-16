@@ -226,15 +226,22 @@ def truth_checks(request: Request, profile_id: str = ""):
     try:
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
+        from superlocalmemory.core import judge_certificates as certs
+
         conn = _read(engine)
         try:
             results = invariants.check(conn)
+            certificates = certs.records(conn, target)
         finally:
             conn.close()
         return {"success": True, "profile_id": target,
                 "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "results": [{"invariant": r.invariant, "title": r.title, "status": r.status,
-                             "count": r.count} for r in results]}
+                             "count": r.count} for r in results],
+                "certificates": [{k: c[k] for k in ("tier", "model", "verdict", "population",
+                                                   "regime", "n", "errors", "issued_at",
+                                                   "voided_at", "void_reason")}
+                                 for c in certificates]}
     except HTTPException:
         raise
     except m._UnknownRoutedProfile as exc:

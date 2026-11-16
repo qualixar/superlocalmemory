@@ -298,6 +298,7 @@ pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: a
 .truth-check-text { flex: 1 1 auto; min-width: 0; }
 .truth-check-status { flex: 0 0 auto; font-weight: 600; font-size: 12.5px; }
 #od-truth-checks .truth-checks { margin-top: var(--space-3); }
+#od-truth-checks .truth-certs-title { margin-top: var(--space-3); }
 .dash-minis { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-3); }
 .dash-mini-label { font-size: 12px; display: block; margin-bottom: var(--space-1); }
 .dash-mini-value { font-size: 19px; font-weight: 650; }

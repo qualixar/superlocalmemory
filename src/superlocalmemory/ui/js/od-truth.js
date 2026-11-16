@@ -247,6 +247,24 @@
         words[0] + (r.status === 'violated' && r.count ? ' (' + r.count + ')' : '')));
       list.appendChild(row);
     });
+    var certs = data.certificates || [];
+    var live = certs.filter(function (c) { return !c.voided_at; });
+    list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'Judges allowed to act on their own'));
+    if (!live.length) {
+      list.appendChild(el('p', 'dash-card-meta', 'None yet. A judge earns this only from your ' +
+        'answers to its audit questions, and loses it when they stop supporting it.'));
+    }
+    certs.forEach(function (c) {
+      var row = el('div', 'list-row');
+      row.appendChild(el('span', 'truth-check-text',
+        c.tier + ' may answer "' + String(c.verdict).replace(/_/g, ' ') + '" (' + c.n + ' audited, ' +
+        c.errors + ' wrong)'));
+      row.appendChild(el('span', 'truth-check-status ' + (c.voided_at ? '' : 'tone-ok'),
+        c.voided_at ? (c.void_reason === 'drift' ? 'Stopped: its recent answers changed'
+                                                 : 'Stopped: answers no longer support it')
+                    : 'Since ' + day(c.issued_at)));
+      list.appendChild(row);
+    });
     var lead = el('p', 'dash-card-lead ' + (bad ? 'tone-warn' : 'tone-ok'),
       bad ? bad + (bad === 1 ? ' check found a problem.' : ' checks found a problem.') +
             ' Run slm doctor --truth in a terminal for the details.'
