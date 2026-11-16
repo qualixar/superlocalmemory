@@ -572,6 +572,12 @@ def _cmd_corrections_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_disputes_dispatch(args: Namespace) -> None:
+    """4.2.30: disputed values and changed source files (cli/disputes_cmd.py)."""
+    from superlocalmemory.cli.disputes_cmd import run
+    run(args)
+
+
 def _cmd_view_dispatch(args: Namespace) -> None:
     """4.1.21: saved views through the daemon (cli/view_cmd.py)."""
     from superlocalmemory.cli.view_cmd import cmd_view
@@ -748,6 +754,7 @@ def dispatch(args: Namespace) -> None:
         "features": _cmd_features_dispatch,
         "view": _cmd_view_dispatch,
         "corrections": _cmd_corrections_dispatch,
+        "disputes": _cmd_disputes_dispatch,
         "outcome": _cmd_outcome_dispatch,
         "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
@@ -1920,7 +1927,7 @@ def _cli_remember_idempotency_key(body: dict) -> str:
     Re-running a command is the only resend a CLI user has, so it must be
     recognised as the same request: the daemon then answers with the first
     receipt instead of storing the memory again. Anything that makes it a
-    different request (wording, tags, scope, kind, replaces) gives a
+    different request (wording, tags, scope, kind, replaces, slot) gives a
     different key. Keys are scoped per profile by the daemon.
     """
     import hashlib
@@ -1988,6 +1995,17 @@ def cmd_remember(args: Namespace) -> None:
                 else:
                     print(exc.message, file=sys.stderr)
                 sys.exit(2)
+        from superlocalmemory.truth.slot_keys import SlotSpecError, parse_spec
+
+        try:  # D-36: refused before the daemon is asked, as a bad kind is
+            slot_claim = parse_spec(getattr(args, "slot", None), getattr(args, "slot_value", None))
+        except SlotSpecError as exc:
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("remember", error={"code": "INVALID_SLOT", "message": str(exc)})
+            else:
+                print(str(exc), file=sys.stderr)
+            sys.exit(2)
         if not (is_daemon_running() or ensure_daemon()):
             _daemon_unavailable("remember", use_json)
         path = "/remember?wait=true" if sync_mode else "/remember"
@@ -2005,6 +2023,12 @@ def cmd_remember(args: Namespace) -> None:
             body["replaces"] = replaces
         if (getattr(args, "speaker", "") or "").strip():
             body["speaker"] = args.speaker.strip()
+        if slot_claim is not None:  # sent only when set, so a plain command keeps its key
+            body["slot"] = slot_claim[0]
+            if slot_claim[1]:
+                body["slot_value"] = slot_claim[1]
+        if getattr(args, "source_file", None):  # D-38: made absolute here, checked by the daemon
+            body["source_file"] = str(Path(args.source_file).expanduser().resolve())
         body["idempotency_key"] = _cli_remember_idempotency_key(body)
         try:
             result = daemon_request("POST", path, body,
@@ -2268,6 +2292,7 @@ def cmd_recall(args: Namespace) -> None:
                     result_line,
                     status_line,
                     tag_line,
+                    truth_lines,
                 )
                 incomplete = incomplete_line(result)
                 if not result["results"]:
@@ -2289,7 +2314,7 @@ def cmd_recall(args: Namespace) -> None:
                     print(status_line(result))
                 for i, r in enumerate(result["results"], 1):
                     print(result_line(i, r))
-                    for line in context_lines(r):
+                    for line in (*context_lines(r), *truth_lines(r)):
                         print(line)
                 for note in filter(None, (incomplete, project_line(result), fidelity_line(result),
                                           _answer_check_line(result))):
@@ -3046,6 +3071,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("embedder", "Switch the embedding model in the background"),
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
+        ("disputes", "What needs your answer: disputed values, changed source files"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
         ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
     ]),
@@ -3307,6 +3333,11 @@ def cmd_doctor(args: Namespace) -> None:
     """
     import threading
 
+    if getattr(args, "truth", False):  # R-27: its own read-only mode, no daemon, no engine
+        from superlocalmemory.cli.doctor_truth import cmd_doctor_truth
+
+        cmd_doctor_truth(args)
+        return
     use_json = getattr(args, "json", False)
     deep = bool(getattr(args, "deep", False) or getattr(args, "fix", False))
     budget = DOCTOR_DEEP_TIMEOUT if deep else DOCTOR_TIMEOUT

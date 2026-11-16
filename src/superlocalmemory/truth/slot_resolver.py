@@ -54,12 +54,12 @@ PROPOSED = "proposed"
 #: ledger is left as it is and the slot waits for a person (R-22).
 RETIRED_FOR_ANOTHER = "retired_for_another"
 
-#: W0-18: ``truth.slots.auto_apply`` retires memories with no certificate and no
-#: approval, and R-34 (an explicit key hashes the whole content, so a reworded
-#: restatement supersedes) is still open. Until W1 lands the lawful basis the
-#: background passes treat the flag as off, whatever it says. W1 sets this True
-#: in the commit that closes R-34 and R-04's explicit-key basis.
-AUTO_APPLY_BASIS_READY = False
+#: W0-18: ``truth.slots.auto_apply`` let the resolver retire memories with no
+#: certificate and no approval. Since D-36 nothing retires here: an explicit
+#: key's new value opens a dispute, and the dispute pass retires only what the
+#: ``ActingGate`` allows on a certificate (rules ``explicit-v1`` included), so
+#: the flag now has a lawful basis (I-10). It stays off by default.
+AUTO_APPLY_BASIS_READY = True
 
 
 def auto_apply_allowed(flags) -> bool:
@@ -174,30 +174,22 @@ def reconcile_ledger(conn: sqlite3.Connection, *, auto_apply: bool,
 
 
 def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, scope: str,
-                 content: str, valid_from: str | None, auto_apply: bool,
+                 content: str, valid_from: str | None,
                  resolve_subject: Callable[[str], str | None] | None = None,
-                 explicit_key: str | None = None) -> Resolution:
-    """Key, bind and (optionally) apply one fact. Never raises for a bad key."""
-    key = slot_keys.extract(content, resolve_subject=resolve_subject, explicit=explicit_key)
+                 explicit_key: str | None = None,
+                 explicit_value: str | None = None) -> Resolution:
+    """Key and bind one fact. Never raises for a bad key, and never retires.
+
+    What a binding decides is recorded on the slot; a retirement only ever
+    comes from a settled dispute (``truth.dispute_pass``, D-36, I-10).
+    """
+    key = slot_keys.extract(content, resolve_subject=resolve_subject, explicit=explicit_key,
+                            explicit_value=explicit_value)
     if key is None:
         return Resolution(fact_id=fact_id, keyed=False)
     binding = slot_store.bind(conn, profile_id=profile_id, scope=scope, fact_id=fact_id,
                               key=key, valid_from=valid_from)
-    if binding.outcome != slot_store.SUPERSEDE or binding.other_fact_id is None:
-        return Resolution(fact_id, True, binding.outcome, binding.slot_id)
-    if not auto_apply:
-        return Resolution(fact_id, True, binding.outcome, binding.slot_id, PENDING)
-    try:
-        ledger, case_id = retire_superseded(conn, profile_id=profile_id, scope=scope,
-                                            predecessor=binding.other_fact_id,
-                                            successor=fact_id)
-    except (CorrectionCaseError, ValueError):
-        # The ledger refused (scope moved, fact being deleted, ...): the slot
-        # decision stands and the retirement waits for review.
-        return Resolution(fact_id, True, binding.outcome, binding.slot_id, DEFERRED_TO_REVIEW)
-    if ledger == APPLIED and case_id is not None:
-        slot_store.record_case(conn, binding.revision_id, case_id)
-    return Resolution(fact_id, True, binding.outcome, binding.slot_id, ledger, case_id)
+    return Resolution(fact_id, True, binding.outcome, binding.slot_id)
 
 
 def rollback_slot_cases(conn: sqlite3.Connection, *, profile_id: str | None = None

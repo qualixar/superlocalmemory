@@ -59,7 +59,7 @@ Developers who use AI coding agents and want decisions, conventions and fixes to
 | Governance | Roles, trust, retention, GDPR export and erasure, hash-chained audit |
 | Optimize | Reversible compression and caching, with no proxy needed |
 | Bounded loops | Iteration that ends only when an independent gate passes |
-| 110 MCP tools in profiles | `core` 19, `code` 39, `full` 58, `power` 70, `mesh` 9, `whole` 110 |
+| 112 MCP tools in profiles | `core` 21, `code` 41, `full` 60, `power` 72, `mesh` 9, `whole` 112 |
 
 ## The research
 

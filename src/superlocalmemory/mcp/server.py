@@ -159,6 +159,10 @@ _ESSENTIAL_TOOLS: set[str] = {
     # Update, review, and list form one core correction lifecycle.
     "review_correction",
     "list_corrections",
+    # 4.2.30 (D-37): an agent that meets a dispute in recall must be able to
+    # list and settle it with the user's answer.
+    "list_disputes",
+    "settle_dispute",
     # v4.0.8 (#113): readable summaries. Present here as well as in the named
     # profiles because this set is the FALLBACK surface — it must mirror
     # ``full``, and a tool that ships in the smallest profile ("core") cannot be

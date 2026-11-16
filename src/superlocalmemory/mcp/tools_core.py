@@ -178,6 +178,9 @@ def register_core_tools(server, get_engine: Callable) -> None:
         kind: str = "",
         replaces: str | None = None,
         speaker: str = "",
+        slot: str = "",
+        slot_value: str = "",
+        source_file: str = "",
     ) -> dict:
         """Store content to memory with intelligent indexing.
 
@@ -224,6 +227,21 @@ def register_core_tools(server, get_engine: Callable) -> None:
         and they mean you, the calling agent. Pass ``"user"`` when you are
         saving the user's own words verbatim ("I prefer dark mode"), or a name
         when you are recording what someone else said.
+
+        ``slot`` names the one thing this memory states the current value of,
+        as ``subject/relation`` or ``subject/relation/qualifier`` (for example
+        ``SLM/release cadence``), and ``slot_value`` is that value in a few
+        words (``monthly``). Set both when you save a value that a later save
+        may change: a later memory with the same slot and the same value is a
+        restatement and changes nothing; a different value is checked before
+        the older memory is retired. Leave both empty otherwise. A slot with no
+        value only groups the memories; it never retires anything.
+
+        ``source_file`` is the absolute path of the local file this memory was
+        learned from (a config, a README, a source file). SuperLocalMemory takes
+        the file's fingerprint now, and a later recall marks the memory
+        ``source: changed`` or ``missing`` when the file changes or goes, so you
+        know to read it again. Leave it empty when the memory came from no file.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -263,6 +281,18 @@ def register_core_tools(server, get_engine: Callable) -> None:
         declared_kind, kind_error = rk.parse_declared_kind(kind)
         if kind_error is not None:
             return kind_error
+        # D-36: a malformed slot is refused here, before anything is sent.
+        from superlocalmemory.truth.slot_keys import SlotSpecError, parse_spec
+
+        try:
+            slot_claim = parse_spec(slot, slot_value)
+        except SlotSpecError as exc:
+            return {"success": False, "code": "INVALID_SLOT", "retryable": False,
+                    "error": str(exc)}
+        source_file = (source_file or "").strip()
+        if source_file and not source_file.startswith(("/", "~")) and ":\\" not in source_file[:3]:
+            return {"success": False, "code": "INVALID_SOURCE_FILE", "retryable": False,
+                    "error": "source_file must be an absolute path to a file"}
         replaces_id = None
         if replaces is not None:
             from superlocalmemory.core.replaces_input import (
@@ -288,6 +318,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             # so every key derived for a plain call is unchanged.
             replaces_part = (f"\0replaces={replaces_id}" if replaces_id is not None else ""
                              ) + rk.kind_key_part(declared_kind)  # so is the kind
+            if slot_claim is not None:  # and the slot: added only when set
+                replaces_part += f"\0slot={slot_claim[0]}\0slot_value={slot_claim[1] or ''}"
+            if source_file:  # and the source file (D-38)
+                replaces_part += f"\0source_file={source_file}"
             if session_id:
                 material = (
                     f"{agent_id}\0{session_id}\0{scope or ''}\0{shared_with}\0{content}"
@@ -351,6 +385,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     if replaces_id is not None:
                         # Sent only when set, so a plain call is unchanged.
                         body["replaces"] = replaces_id
+                    if slot_claim is not None:
+                        body["slot"] = slot_claim[0]
+                        if slot_claim[1]:
+                            body["slot_value"] = slot_claim[1]
+                    if source_file:
+                        body["source_file"] = source_file
                     body, request_flags = rk.with_declared_kind(body, request_flags, declared_kind)
                     resp = None
                     try:
@@ -485,6 +525,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 worker_meta["replaces"] = replaces_id
             if (speaker or "").strip():
                 worker_meta["speaker"] = speaker.strip()
+            if slot_claim is not None:  # lifted into request fields by the proxy
+                worker_meta["slot"] = slot_claim[0]
+                if slot_claim[1]:
+                    worker_meta["slot_value"] = slot_claim[1]
+            if source_file:
+                worker_meta["source_file"] = source_file
 
             def _store_via_daemon_pool():
                 pool = choose_pool()
@@ -1770,6 +1816,83 @@ def register_core_tools(server, get_engine: Callable) -> None:
         except Exception:
             logger.exception("list_corrections failed")
             return {"success": False, "retryable": True, "error": "correction listing unavailable"}
+
+    @server.tool(title="List Disputes", annotations=READ_ONLY)
+    async def list_disputes(limit: int = 50, profile_id: str = "") -> dict:
+        """What needs the user's answer: open disputes and changed source files.
+
+        A dispute is two memories that state different values of the same thing
+        (``sides``, newest first, with when each was said). Ask the user which is
+        true now, then call ``settle_dispute``. ``changed_sources`` are memories
+        whose source file changed or went missing: read the file again before
+        relying on them. Recall results carry the same ``disputes`` and
+        ``source`` fields on the memories they return.
+        """
+        return await _truth_request("GET", _truth_path("/api/truth/attention", limit,
+                                                       profile_id), None)
+
+    @server.tool(title="Settle Dispute", annotations=DESTROYS_ONCE)
+    @admits(OperationKind.CORRECT)
+    async def settle_dispute(dispute_id: str, keep: str, profile_id: str = "") -> dict:
+        """Record the user's answer to one dispute from ``list_disputes`` or recall.
+
+        ``keep`` is the ``fact_id`` of the side the user says is true now (the
+        other memory is retired and can be rolled back with
+        ``review_correction``), ``both`` when both are true, or ``unrelated``
+        when the two were never about the same thing. Settle only with the
+        user's answer; when unsure, leave the dispute open.
+        """
+        import urllib.parse
+
+        body: dict[str, object] = {"keep": keep, "channel": "agent"}
+        if (profile_id or "").strip():
+            body["profile_id"] = profile_id.strip()
+        path = "/api/disputes/" + urllib.parse.quote(dispute_id or "", safe="") + "/settle"
+        return await _truth_request("POST", path, body)
+
+    def _truth_path(base: str, limit: int, profile_id: str) -> str:
+        import urllib.parse
+
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
+            limit = 50
+        path = f"{base}?limit={limit}"
+        if (profile_id or "").strip():
+            path += "&profile_id=" + urllib.parse.quote(profile_id.strip(), safe="")
+        return path
+
+    async def _truth_request(method: str, path: str, body: dict | None) -> dict:
+        """One daemon call for the dispute tools; a refusal is an answer, not a retry."""
+        import asyncio
+
+        from superlocalmemory.cli.daemon import (
+            DaemonConflict,
+            DaemonNotFound,
+            DaemonRefused,
+            DaemonUnprocessable,
+            daemon_request,
+            is_daemon_running,
+        )
+        from superlocalmemory.mcp.remote_visibility import with_view
+
+        try:
+            if not await asyncio.to_thread(is_daemon_running):
+                return {"success": False, "retryable": True,
+                        "error": "disputes need the resident SuperLocalMemory daemon"}
+            args = (method, with_view(path)) if body is None else (method, with_view(path), body)
+            try:
+                result = await asyncio.to_thread(
+                    daemon_request, *args, preserve_conflict=True, preserve_not_found=True,
+                    preserve_unprocessable=True)
+            except (DaemonConflict, DaemonNotFound, DaemonRefused,
+                    DaemonUnprocessable) as refused:
+                return {"success": False, "retryable": False, "error": f"refused: {refused}"}
+            if isinstance(result, dict) and result.get("success"):
+                return result
+            return {"success": False, "retryable": True,
+                    "error": "the daemon did not answer the dispute request"}
+        except Exception:
+            logger.exception("dispute request failed")
+            return {"success": False, "retryable": True, "error": "disputes unavailable"}
 
     @server.tool(title="Get Attribution", annotations=READ_ONLY)
     async def get_attribution() -> dict:

@@ -8,10 +8,10 @@
 //   {
 //     current: "full",
 //     profiles: {
-//       core:  { count: 19, tools: [...], description: "..." },
-//       code:  { count: 39, tools: [...], description: "..." },
-//       full:  { count: 58, tools: [...], description: "..." },
-//       power: { count: 70, tools: [...], description: "..." },
+//       core:  { count: 21, tools: [...], description: "..." },
+//       code:  { count: 41, tools: [...], description: "..." },
+//       full:  { count: 60, tools: [...], description: "..." },
+//       power: { count: 72, tools: [...], description: "..." },
 //       mesh:  { count:  9, tools: [...], description: "..." },
 //     },
 //     aliases: { "code21": "code", ... },
@@ -389,10 +389,10 @@
     // Use textContent — no API data, just static example strings
     codeBlock.textContent =
       '"env": {\n' +
-      '  "SLM_MCP_PROFILE": "core"    // 19 tools — minimal\n' +
-      '  // "SLM_MCP_PROFILE": "code"  // 39 tools — + Brain, code graph, loops, kinds\n' +
-      '  // "SLM_MCP_PROFILE": "full"  // 58 tools — + mesh\n' +
-      '  // "SLM_MCP_PROFILE": "power" // 70 tools — + governance\n' +
+      '  "SLM_MCP_PROFILE": "core"    // 21 tools — minimal\n' +
+      '  // "SLM_MCP_PROFILE": "code"  // 41 tools — + Brain, code graph, loops, kinds\n' +
+      '  // "SLM_MCP_PROFILE": "full"  // 60 tools — + mesh\n' +
+      '  // "SLM_MCP_PROFILE": "power" // 72 tools — + governance\n' +
       '  // "SLM_MCP_PROFILE": "mesh"  //  9 tools — mesh only\n' +
       '}';
     body2.appendChild(codeBlock);

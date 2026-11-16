@@ -524,6 +524,21 @@ def main() -> None:
              "from remember or recall). The old one stops being returned; undo "
              "with review_correction.",
     )
+    remember_p.add_argument(
+        "--slot", default=None,
+        help="The one thing this memory states the current value of, as "
+             "subject/relation or subject/relation/qualifier (e.g. 'SLM/release cadence')",
+    )
+    remember_p.add_argument(
+        "--source-file", dest="source_file", default=None,
+        help="The file this memory was learned from; recall then says when that file "
+             "changed or went missing, so the memory is checked again",
+    )
+    remember_p.add_argument(
+        "--slot-value", dest="slot_value", default=None,
+        help="That value in a few words (e.g. 'monthly'). The same value later is a "
+             "restatement; a different one is checked before the older memory is retired.",
+    )
     remember_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
     remember_p.add_argument(
         "--sync", dest="sync_mode", action="store_true",
@@ -740,6 +755,12 @@ def main() -> None:
         "--yes", action="store_true",
         help="Apply --refile-hidden instead of only showing what it would do",
     )
+    doctor_p.add_argument(
+        "--truth", action="store_true",
+        help="Check the truth layer's invariants (slots, disputes, validity) read-only; "
+             "use --db to point it at a copy of the store",
+    )
+    doctor_p.add_argument("--db", default=None, help="Store file for --truth (default: yours)")
 
     repair_speaker_p = sub.add_parser(
         "repair-speaker",
@@ -1268,6 +1289,8 @@ def main() -> None:
     register_view_parser(sub)
     from superlocalmemory.cli.corrections_cmd import register_corrections_parsers
     register_corrections_parsers(sub)  # 4.1.22: corrections your own actions overtook
+    from superlocalmemory.cli.disputes_cmd import register_disputes_parsers
+    register_disputes_parsers(sub)  # 4.2.30: what needs your answer (D-37..D-39)
     from superlocalmemory.cli.outcome_cmd import register_outcome_parser
     register_outcome_parser(sub)  # 4.1.25: report whether recalled memories helped
     from superlocalmemory.cli.hide_cmd import register_hide_parser

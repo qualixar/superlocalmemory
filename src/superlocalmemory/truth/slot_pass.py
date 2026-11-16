@@ -4,13 +4,15 @@
 
 One path for every fact: the 43k already stored and each new save, which the
 next maintenance cycle picks up. Oldest first, so a store's history builds its
-slots in the order it happened (a newer value supersedes, an out-of-order older
-one joins history). The save hot path is untouched.
+slots in the order it happened (a newer value opens a dispute that the dispute
+pass settles, an out-of-order older one joins history; nothing is retired here,
+D-36). A slot the caller named on the save (``truth.slot_claims``) keys the
+memory's first fact. The save hot path is untouched.
 
 Bounded: ``batch`` facts per transaction, ``max_batches`` per run, a cursor
 file so a stop loses nothing, and ``stop()`` honoured between batches. Off
-unless ``truth.slots`` is shadow or on; retiring facts additionally needs
-``truth.slots.auto_apply``.
+unless ``truth.slots`` is shadow or on; filing a person's settled decision in
+the ledger additionally needs ``truth.slots.auto_apply``.
 
 The queue (``slot_pass_queue``, M069) is drained before the cursor moves on:
 facts to bind again because erasing a slot's head rebuilt it (``rebind``), and
@@ -32,12 +34,15 @@ from pathlib import Path
 from typing import Any
 
 from superlocalmemory.core.feature_flags import FeatureFlags
+from superlocalmemory.truth.slot_claims import claim_for_fact
 from superlocalmemory.truth.slot_keys import MAX_CHARS
 from superlocalmemory.truth.slot_resolver import auto_apply_allowed, resolve_fact
 
 logger = logging.getLogger(__name__)
 
 STATE = "slot-pass.json"
+#: The lease step's own watermark (facts by rowid), beside the pass's.
+LEASE_STATE = "slot-pass-leases.json"
 
 _FIELDS = """f.rowid AS rid, f.fact_id, f.profile_id, f.scope, f.content,
        COALESCE(v.valid_from, f.valid_from, f.created_at) AS valid_from"""
@@ -114,6 +119,36 @@ class SlotPass:
         tmp.write_text(json.dumps({"after_rowid": after_rowid}), encoding="utf-8")
         os.replace(tmp, self._state)
 
+    def _leases(self) -> None:
+        """D-38: lease rows for memories saved with a source file, then a bounded
+        sweep. Files are checked with no database lock held, so saves never wait
+        behind a hash. Leases are the truth layer's own table, so shadow runs it."""
+        from superlocalmemory.core import recall_gate
+        from superlocalmemory.truth import leases
+
+        state = self._state.with_name(LEASE_STATE)
+        try:
+            after = int(json.loads(state.read_text(encoding="utf-8"))["after_rowid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            after = 0
+        with self._db.raw_connection() as conn:
+            made, last = leases.materialize(conn, after, limit=self._batch * 5)
+            due = leases.due(conn, limit=self._batch)
+        with recall_gate.background_work():
+            checked = leases.recheck(due)
+        with self._db.raw_connection() as conn:
+            swept = leases.record(conn, checked)
+        if last != after:
+            state.parent.mkdir(parents=True, exist_ok=True)
+            tmp = state.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({"after_rowid": last}), encoding="utf-8")
+            os.replace(tmp, state)
+        if made:
+            self.counts["leases_made"] += made
+        for key in (leases.CHANGED, leases.MISSING):
+            if swept[key]:
+                self.counts[f"leases_{key}"] += swept[key]
+
     def _one_batch(self, after: int, auto_apply: bool) -> int | None:
         with self._db.raw_connection() as conn:
             rows = conn.execute(_ELIGIBLE, (after, self._batch)).fetchall()
@@ -156,9 +191,11 @@ class SlotPass:
         """One fact in its own savepoint: a failure undoes only that fact."""
         conn.execute("SAVEPOINT slot_fact")
         try:
+            claim = claim_for_fact(conn, row[1])  # the slot the caller named (D-36)
             result = resolve_fact(
                 conn, fact_id=row[1], profile_id=row[2], scope=row[3], content=row[4],
-                valid_from=row[5], auto_apply=auto_apply)
+                valid_from=row[5], explicit_key=claim[0] if claim else None,
+                explicit_value=claim[1] if claim else None)
         except Exception as exc:  # noqa: BLE001 - one bad fact must not stall the pass
             conn.execute("ROLLBACK TO slot_fact")
             conn.execute("RELEASE slot_fact")
@@ -182,6 +219,19 @@ class SlotPass:
             return {}
         # A child flag never acts beyond its parent: shadow slots retire nothing.
         auto_apply = auto_apply_allowed(self._flags)  # W0-18 guard
+        # R-09: slots back in step with the lifecycle and the ledger first, so the
+        # facts the repair queues bind again in this same run. Only the truth
+        # layer's own tables are written, so shadow runs it too.
+        from superlocalmemory.truth import legacy_cases
+        from superlocalmemory.truth.slot_repair import repair
+
+        with self._db.raw_connection() as conn:
+            self.counts.update({f"repair_{k}": v for k, v in
+                                repair(conn, limit=self._batch).items()})
+            # D-40: applied ledger cases from outside the slot layer, each on its
+            # own private slot, so their intervals are history like any other.
+            self.counts.update(legacy_cases.load(conn, limit=self._batch))
+        self._leases()
         after = self._cursor()
         batches = 0
         while not self._stop.is_set():

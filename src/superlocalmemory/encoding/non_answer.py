@@ -85,19 +85,48 @@ def is_empty_structure(text: str) -> bool:
     return bool(_EMPTY.fullmatch(text or ''))
 
 
+#: R-31 (4.2.30): the extraction model's rewordings of a session's end, hidden
+#: only when everything after "ended" is a date, a time or a weekday. Measured
+#: on one real store: 353 such rows, every one of them a bare stamp; the 52
+#: rewordings that say anything else ("ended with files X, Y", "ended in
+#: AgentAssert", "ended after the e2e test") stay visible (M076).
+_MONTH = (r"january|february|march|april|may|june|july|august|september|october|november|"
+          r"december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec")
+_WEEKDAY = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+_STAMP_WORD = (rf"(?:\d+(?:st|nd|rd|th)?|{_MONTH}|{_WEEKDAY}|on|at|the|of|a|an|utc|gmt|am|pm|"
+               r"manually|unspecified|time)")
+_STAMP_TAIL = re.compile(rf"^(?:[\s,:.+\-/]*{_STAMP_WORD}(?=[\s,:.+\-/]|$))+[\s,:.+\-/]*$",
+                         re.IGNORECASE)
+_STAMP_HAS_WHEN = re.compile(rf"\d|{_WEEKDAY}|unspecified|manually", re.IGNORECASE)
+_SESSION_END_HEAD = re.compile(
+    r"^(?:the\s+)?(?:\[[^\]]+\]\s*)?(?:session|conversation|chat)\s+(?:ended|closed|finished)\b"
+    r"(?P<tail>.*)$", re.IGNORECASE)
+_SESSION_END_DATE_FIRST = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\s+is\s+the\s+(?:end\s+date|date\s+when)"
+    r"\b.{0,60}\bsession(?:\s+ended)?\.?$", re.IGNORECASE)
+
+
+def _session_end_stamp(value: str) -> bool:
+    text = " ".join(value.split())
+    if _SESSION_END_DATE_FIRST.match(text):
+        return True
+    head = _SESSION_END_HEAD.match(text)
+    return bool(head and _STAMP_TAIL.match(head["tail"]) and _STAMP_HAS_WHEN.search(head["tail"]))
+
+
 def is_stub(text: str) -> bool:
     value = (text or '').strip()
     return bool(value and (_EMPTY.fullmatch(value) or _SESSION.fullmatch(value)
                            or _SESSION_DATE_FIRST.fullmatch(value)
-                           or _RECEIPT.fullmatch(value) or _hook_line(value)))
+                           or _RECEIPT.fullmatch(value) or _hook_line(value)
+                           or _session_end_stamp(value)))
 
 
 #: The extraction model's rewordings of a session's end ("The conversation ended
 #: at 2026-09-04 13:32", "2026-08-16 is the end date of X's session", "The
-#: session ended at 18:47 on October 8, 2026"). ``is_stub`` does not yet include
-#: them: folding them in changes what session start shows and needs a data
-#: migration of its own. The judge ladder uses this now, so two such records are
-#: never judged as one replacing the other.
+#: session ended at 18:47 on October 8, 2026"). ``is_stub`` takes the bare-stamp
+#: ones (R-31, M076); this broader rule keeps every rewording, because the judge
+#: ladder only uses it to say two such records are separate events.
 _SESSION_END_REWORDED = re.compile(
     r"^(?:the\s+)?(?:\[[^\]]+\]\s*)?(?:session|conversation|chat)\s+(?:ended|closed|finished)"
     r"(?:\s+(?:at|on))?\s+[\w ,:.+-]{4,60}$"

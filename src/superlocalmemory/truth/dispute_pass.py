@@ -56,16 +56,34 @@ SUBJECT_KIND = "slot_dispute"
 _RESOLUTION = {"replaces": "b", "same": "same", "both_true": "both",
                "separate_events": "both", "unrelated": "unrelated"}
 
+
+def _item(r: tuple) -> Item:
+    """The pair in time order: a value older than the head is the older text (R-10)."""
+    head, challenger = (r[3], r[2]), (r[5], r[4])
+    older, newer = (challenger, head) if r[7] in slot_store.OLDER_REASONS else (head, challenger)
+    return Item(SUBJECT_KIND, r[0], r[1], {"older": older[0], "newer": newer[0]},
+                fact_ids=(older[1], newer[1]), basis=r[7] or "")
+
+
+def _resolution(verdict: str, basis: str) -> str:
+    """``replaces`` means the newer text wins: the head, when the challenger is older."""
+    if verdict == "replaces" and basis in slot_store.OLDER_REASONS:
+        return "a"
+    return _RESOLUTION[verdict]
+
 _OPEN = """
-SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.content, fb.scope
+SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.content, fb.scope,
+       d.reason_code
   FROM slot_disputes d
   JOIN slot_revisions ra ON ra.revision_id = d.revision_a
   JOIN slot_revisions rb ON rb.revision_id = d.revision_b
   JOIN atomic_facts fa ON fa.fact_id = ra.fact_id
   JOIN atomic_facts fb ON fb.fact_id = rb.fact_id
- WHERE d.state = 'open'
+ WHERE d.state = 'open' AND d.reason_code != 'rolled_back'
  ORDER BY d.opened_at
 """
+#: A dispute the ledger reopened by rolling a retirement back is a person's to
+#: settle (R-09): no judge answers it, so the same judge cannot act on it again.
 
 #: Every receipt per judged pair under this question version.
 _EARLIER = """
@@ -91,8 +109,7 @@ class DisputePass:
             return {}
         with self._db.raw_connection() as conn:  # 1. read, then let go of the connection
             rows = conn.execute(_OPEN).fetchall()
-            items = [Item(SUBJECT_KIND, r[0], r[1], {"older": r[3], "newer": r[5]},
-                          fact_ids=(r[2], r[4])) for r in rows]
+            items = [_item(r) for r in rows]
             hashes = [(it.profile_id, inputs_hash(SLOT_RELATION, it, self._key)) for it in items]
             earlier = self._earlier(conn, hashes)
         # Which model tiers could answer here now (nothing is asked to find out).
@@ -176,21 +193,22 @@ class DisputePass:
             self._act(conn, row, decision, auto_apply)
 
     def _act(self, conn: Any, row: tuple, decision: Decision, auto_apply: bool) -> None:
-        dispute_id, profile_id, _older, _a, newer, _b, scope = row
+        dispute_id, profile_id, _older, _a, _newer, _b, scope, basis = row
         verdict = decision.verdict
         if verdict == "replaces" and not auto_apply:
             self.counts["held_for_review"] += 1
             return
         conn.execute("SAVEPOINT dispute")
         try:
-            retire = slot_store.resolve_dispute(conn, dispute_id, _RESOLUTION[verdict],
+            retire = slot_store.resolve_dispute(conn, dispute_id, _resolution(verdict, basis or ""),
                                                 resolved_by="judge_ladder")
             for loser in retire:  # exactly what the resolution names, read in this transaction
+                successor = slot_store.successor_fact(conn, dispute_id, loser)
                 ledger, case = retire_superseded(conn, profile_id=profile_id, scope=scope,
-                                                 predecessor=loser, successor=newer)
+                                                 predecessor=loser, successor=successor)
                 if ledger != "applied":
                     raise _NotApplied(ledger)
-            self._mark(conn, decision, f"resolved_{verdict}")
+            self._mark(conn, decision, f"resolved_{verdict}", dispute_id)
             self.counts[f"resolved_{verdict}"] += 1
         except slot_store.StaleDisputeError:
             conn.execute("ROLLBACK TO dispute")  # undo anything done before the check
@@ -209,10 +227,14 @@ class DisputePass:
             conn.execute("RELEASE dispute")
 
     @staticmethod
-    def _mark(conn: Any, decision: Decision, action: str) -> None:
+    def _mark(conn: Any, decision: Decision, action: str, dispute_id: str | None = None) -> None:
         if decision.receipts:
             conn.execute("UPDATE judge_receipts SET action_taken = ? WHERE receipt_id = ?",
                          (action, decision.receipts[-1]))
+            if dispute_id is not None:  # R-09: the revision the decision changed names it
+                conn.execute("UPDATE slot_revisions SET receipt_id = ? WHERE revision_id = "
+                             "(SELECT revision_b FROM slot_disputes WHERE dispute_id = ?)",
+                             (decision.receipts[-1], dispute_id))
 
 
 class _NotApplied(Exception):

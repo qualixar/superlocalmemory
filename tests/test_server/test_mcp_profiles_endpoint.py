@@ -19,10 +19,10 @@ from superlocalmemory.server.unified_daemon import create_app
 _ENDPOINT = "/api/v3/mcp/profiles"
 
 _EXPECTED_COUNTS = {
-    "core": 19,   # v4.1.0: + switch_profile; 4.1.25: + expand (layered recall)
-    "code": 39,   # 4.1.19 WP8: + memory-kind management; 4.1.25: + expand
-    "full": 58,   # 4.1.21: + saved views; 4.1.25: + expand
-    "power": 70,  # + saved views and expand, via full
+    "core": 21,   # v4.1.0: + switch_profile; 4.1.25: + expand (layered recall); 4.2.30: + disputes
+    "code": 41,   # 4.1.19 WP8: + memory-kind management; 4.1.25: + expand
+    "full": 60,   # 4.1.21: + saved views; 4.1.25: + expand
+    "power": 72,  # + saved views and expand, via full
     "mesh": 9,
 }
 
@@ -144,7 +144,7 @@ def test_mcp_profiles_descriptions_present(trusted_client, monkeypatch):
 def test_mcp_profiles_current_defaults_to_full(trusted_client, monkeypatch):
     """When SLM_MCP_PROFILE is unset, the MCP server falls back to
     `_ESSENTIAL_TOOLS`, which `tests/test_mcp/test_mcp_exposure_contract.py`
-    asserts is exactly the `full` profile (58 tools) — not `core` (19). The
+    asserts is exactly the `full` profile (60 tools) — not `core` (21). The
     dashboard used to claim 'core' here, understating the real no-profile
     surface by 36 tools (L3-05).
     """

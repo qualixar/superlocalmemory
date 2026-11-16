@@ -584,6 +584,9 @@ class MemoryEngine:
         *,
         scope: str = "personal",
         shared_with: list[str] | None = None,
+        slot: str | None = None,
+        slot_value: str | None = None,
+        source_file: str | None = None,
         profile_id: str | None = None,
     ) -> list[str]:
         """Store content and finish canonical materialization. Returns fact_ids.
@@ -598,8 +601,16 @@ class MemoryEngine:
         switching the engine's active profile (same convention as
         ``recall``): ``None``/``""`` means the active profile, and the
         active pointer is never mutated by the call.
+
+        ``slot`` / ``slot_value`` name the one thing this memory states the
+        current value of, as ``remember(slot=…)`` does on MCP, CLI and HTTP
+        (D-36); ``source_file`` is the local file it was learned from, so a
+        later recall says when that file changed (D-38). A malformed slot or a
+        path that is not a readable file raises ``ValueError`` before anything
+        is stored.
         """
         self._require_full("store")
+        trusted = _truth_claims(slot, slot_value, source_file)
         self._ensure_init()
 
         from superlocalmemory.core.engine_ingestion import (
@@ -620,6 +631,7 @@ class MemoryEngine:
             role=role,
             require_complete=True,
             profile_id=profile_id,
+            **({"trusted_metadata": trusted} if trusted else {}),
         )
 
     def _store_coverage_fact(self, fact: AtomicFact) -> str:
@@ -1518,3 +1530,21 @@ class MemoryEngine:
                 f"is LIGHT; route through WorkerPool (pool.{operation}) or "
                 f"construct MemoryEngine(config, capabilities=Capabilities.FULL)."
             )
+
+
+def _truth_claims(slot: str | None, slot_value: str | None,
+                  source_file: str | None) -> dict:
+    """The reserved slot and lease metadata ``store`` sets (never caller metadata)."""
+    out: dict = {}
+    if slot is not None or slot_value is not None:
+        from superlocalmemory.truth.slot_claims import METADATA_KEY, encode
+
+        claim = encode(slot, slot_value)
+        if claim is not None:
+            out[METADATA_KEY] = claim
+    if source_file:
+        from superlocalmemory.truth.leases import METADATA_KEY as LEASE_KEY
+        from superlocalmemory.truth.leases import fingerprint
+
+        out[LEASE_KEY] = fingerprint(source_file).as_meta()
+    return out

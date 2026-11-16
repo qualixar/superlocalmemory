@@ -32,5 +32,7 @@ def test_not_records_of_moments(text) -> None:
     assert not is_event_record(text)
 
 
-def test_is_stub_is_unchanged_for_the_rewordings() -> None:
-    assert not is_stub("The conversation ended at 2026-09-04 13:32")
+def test_is_stub_takes_only_the_bare_stamp_rewordings() -> None:
+    # R-31 (M076): a rewording that is only a stamp is bookkeeping; one that says more is not.
+    assert is_stub("The conversation ended at 2026-09-04 13:32")
+    assert not is_stub("The session ended with the e2e protocol test")

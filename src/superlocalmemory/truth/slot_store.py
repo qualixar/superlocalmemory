@@ -38,11 +38,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from superlocalmemory.truth.slot_keys import SlotKey
-from superlocalmemory.truth.validity import BEFORE, INCOMPARABLE, order
+from superlocalmemory.truth.slot_keys import EXPLICIT, EXPLICIT_UNVALUED, SlotKey, is_stated
+from superlocalmemory.truth.validity import BEFORE, INCOMPARABLE, order, span
 
 HEAD, DUPLICATE, COMPATIBLE, HISTORICAL, SUPERSEDE, DISPUTE = (
     "head", "duplicate", "compatible", "historical", "supersede", "dispute")
+#: Why a dispute was opened. ``explicit_value_changed`` is the one reason the
+#: rule tier ``explicit-v1`` answers (D-36).
+EXPLICIT_VALUE_CHANGED = "explicit_value_changed"
+INCOMPARABLE_TIME = "incomparable_time"
+#: A value older in valid time than the head (R-10): it is history, but making it
+#: history retires a fact, so it is a dispute, never a silent label. Its sides
+#: are asked in time order (the newcomer is the older text) and ``replaces``
+#: settles it for the head. ``explicit_older_value`` when both values were stated.
+OLDER_THAN_HEAD = "older_than_head"
+EXPLICIT_OLDER_VALUE = "explicit_older_value"
+OLDER_REASONS = frozenset({OLDER_THAN_HEAD, EXPLICIT_OLDER_VALUE})
 
 
 class SlotConflictError(RuntimeError):
@@ -180,9 +191,19 @@ def _decide(key: SlotKey, head: tuple | None, valid_from: str | None) -> str:
         return HISTORICAL
     if when == INCOMPARABLE:
         return DISPUTE  # cannot tell which value is newer: a person or a judge decides
-    # Only a key the writer named explicitly supersedes on its own (D-10, R-18);
-    # every other new value is a question for a person or a certified judge.
-    return SUPERSEDE if key.key_source == "explicit" else DISPUTE
+    # No key moves a head on its own (I-10: a head move is a memory change). A
+    # later value on an explicit key is a ``replaces`` question for the rule tier
+    # ``explicit-v1``, which acts only on its own certificate (D-36); every other
+    # new value is a question for a person or a certified judge (D-10).
+    return DISPUTE
+
+
+def _dispute_reason(key: SlotKey, when: str | None, head: tuple) -> str:
+    if order(when, head[3] or head[4]) == INCOMPARABLE:
+        return INCOMPARABLE_TIME
+    if key.key_source == EXPLICIT and is_stated(key.value_hash) and is_stated(head[2]):
+        return EXPLICIT_VALUE_CHANGED  # a stated value against a stated value only
+    return key.key_source if key.key_source == EXPLICIT_UNVALUED else "pattern_key"
 
 
 def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str, key: SlotKey,
@@ -209,18 +230,11 @@ def bind(conn: sqlite3.Connection, *, profile_id: str, scope: str, fact_id: str,
     if outcome in (DUPLICATE, COMPATIBLE):
         _insert_revision(conn, state=outcome, reason=f"{outcome}_value", **common)
         return Binding(outcome, slot_id, revision_id, head[1], head[0])
-    if outcome == HISTORICAL:
-        _insert_revision(conn, state="historical", reason="older_than_head",
-                         superseded_by=head[0], **common)
-        return Binding(HISTORICAL, slot_id, revision_id, head[1], head[0])
-    if outcome == SUPERSEDE:
-        _insert_revision(conn, state="head", reason="newer_value", **common)
-        _move_head(conn, slot_id, version, revision_id, "current", now)
-        conn.execute("UPDATE slot_revisions SET state = 'superseded', superseded_by = ? "
-                     "WHERE revision_id = ?", (revision_id, head[0]))
-        return Binding(SUPERSEDE, slot_id, revision_id, head[1], head[0])
-    reason = ("incomparable_time" if order(when, head[3] or head[4]) == INCOMPARABLE
-              else "pattern_key")
+    if outcome == HISTORICAL:  # R-10: history retires a fact, so it is a question
+        stated = key.key_source == EXPLICIT and is_stated(key.value_hash) and is_stated(head[2])
+        reason = EXPLICIT_OLDER_VALUE if stated else OLDER_THAN_HEAD
+    else:
+        reason = _dispute_reason(key, when, head)
     _insert_revision(conn, state="disputed", reason=reason, **common)
     dispute_id = open_dispute(conn, slot_id=slot_id, profile_id=profile_id,
                               revision_a=head[0], revision_b=revision_id,
@@ -264,11 +278,11 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     """
     if resolution not in RESOLUTIONS:
         raise ValueError(f"resolution must be one of {RESOLUTIONS}")
-    row = conn.execute("SELECT slot_id, revision_a, revision_b FROM slot_disputes "
+    row = conn.execute("SELECT slot_id, revision_a, revision_b, reason_code FROM slot_disputes "
                        "WHERE dispute_id = ? AND state = 'open'", (dispute_id,)).fetchone()
     if row is None:
         raise LookupError(f"no open dispute {dispute_id}")
-    slot_id, rev_a, rev_b = row
+    slot_id, rev_a, rev_b, reason_code = row
     now = _now()
     head, version = conn.execute("SELECT head_revision_id, version FROM memory_slots "
                                  "WHERE slot_id = ?", (slot_id,)).fetchone()
@@ -283,8 +297,12 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
     if winner is not None:
         conn.execute("UPDATE slot_revisions SET state = 'head', superseded_by = NULL "
                      "WHERE revision_id = ?", (winner,))
+        # An older value keeping the head ends where the next value in time begins,
+        # which may be a value the head itself superseded (I-05: no overlaps).
+        after = (_successor_in_time(conn, slot_id, loser) or winner
+                 if reason_code in OLDER_REASONS and winner == rev_a else winner)
         conn.execute("UPDATE slot_revisions SET state = 'superseded', superseded_by = ? "
-                     "WHERE revision_id = ?", (winner, loser))
+                     "WHERE revision_id = ?", (after, loser))
         _move_head(conn, slot_id, version, winner, "current", now)
         retire = (conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
                                (loser,)).fetchone()[0],)
@@ -302,6 +320,32 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
                                                          dispute_id))
     _reanchor(conn, slot_id, dispute_id, now)
     return retire
+
+
+def _when(row: tuple) -> str | None:
+    return row[1] or row[2]
+
+
+def _successor_in_time(conn: sqlite3.Connection, slot_id: str, revision_id: str) -> str | None:
+    """The slot's value that began first after ``revision_id``'s value did."""
+    mine = conn.execute("SELECT revision_id, valid_from, recorded_at FROM slot_revisions "
+                        "WHERE revision_id = ?", (revision_id,)).fetchone()
+    later = [r for r in conn.execute(
+        "SELECT revision_id, valid_from, recorded_at FROM slot_revisions WHERE slot_id = ? "
+        "AND revision_id != ? AND state IN ('head', 'superseded')", (slot_id, revision_id))
+        if order(_when(mine), _when(r)) == BEFORE]
+    if not later:
+        return None
+    return min(later, key=lambda r: span(_when(r))[0])[0]
+
+
+def successor_fact(conn: sqlite3.Connection, dispute_id: str, fact_id: str) -> str | None:
+    """The fact whose value followed ``fact_id``'s in the dispute's slot (for the ledger)."""
+    row = conn.execute(
+        "SELECT w.fact_id FROM slot_revisions r JOIN slot_revisions w "
+        "ON w.revision_id = r.superseded_by WHERE r.fact_id = ? AND r.slot_id = "
+        "(SELECT slot_id FROM slot_disputes WHERE dispute_id = ?)", (fact_id, dispute_id)).fetchone()
+    return row[0] if row else None
 
 
 def dismiss_dispute(conn: sqlite3.Connection, dispute_id: str, *, by: str) -> None:
@@ -338,6 +382,8 @@ def _reanchor(conn: sqlite3.Connection, slot_id: str, settled: str, now: str) ->
 
 
 __all__ = ["Binding", "COMPATIBLE", "DISPUTE", "DUPLICATE", "HEAD", "HISTORICAL", "RESOLUTIONS",
-           "SUPERSEDE", "SlotConflictError", "SlotKeyTakenError", "StaleDisputeError", "bind",
+           "EXPLICIT_OLDER_VALUE", "EXPLICIT_VALUE_CHANGED", "INCOMPARABLE_TIME", "OLDER_REASONS",
+           "OLDER_THAN_HEAD", "SUPERSEDE", "SlotConflictError",
+           "SlotKeyTakenError", "StaleDisputeError", "bind",
            "dismiss_dispute", "find_slot", "open_dispute", "record_case", "rekey_slot",
-           "resolve_dispute"]
+           "resolve_dispute", "successor_fact"]

@@ -246,6 +246,7 @@ def _envelope(engine: Any, call: RecallCall, response: Any, snapshot: Any) -> di
     for item in results:
         item["content"] = sanitize_json_text(item.get("content", ""))
     results, layers = _layers(engine, call, results)
+    results = _truth_notes(engine, call, results)
     return {
         "ok": True,
         # The profile that actually served this recall: the routed profile when
@@ -267,6 +268,24 @@ def _envelope(engine: Any, call: RecallCall, response: Any, snapshot: Any) -> di
         **({"query_evidence": dict(getattr(response, "query_evidence", {}) or {})}
            if call.include_evidence else {}),
     }
+
+
+def _truth_notes(engine: Any, call: RecallCall, results: list[dict]) -> list[dict]:
+    """Open disputes and source-file state on each result (D-37..D-39), read-only
+    and fail-open; another side's text goes through the caller's visibility."""
+    try:
+        from superlocalmemory.infra.data_root import canonical_data_root
+        from superlocalmemory.retrieval import visibility
+        from superlocalmemory.truth.recall_notes import annotate
+
+        pid = call.profile_id or engine.profile_id
+        with _visibility_for(engine, call):
+            return annotate(engine._db.db_path, pid, results,
+                            hidden=lambda ids: visibility.hidden_among(engine._db, pid, ids),
+                            slm_home=canonical_data_root())
+    except Exception as exc:  # noqa: BLE001 - notes must never fail a recall
+        logger.debug("truth notes skipped (%s)", type(exc).__name__)
+        return results
 
 
 def _layers(engine: Any, call: RecallCall, results: list[dict]) -> tuple[list[dict], dict]:

@@ -13,7 +13,7 @@ The sidebar groups the panes as follows.
 | Workspace | Product surface | What to verify separately |
 |---|---|---|
 | Answer Check | which check runs, a Try it panel, how often recall said it did not have the answer, timings, recent checks. See [Answer check](answer-check.md) | `slm recall` output and the response fields |
-| Dashboard | runtime summary, daemon identity, storage and runtime health, diagnostics and recent activity, and a dismissible **What's new** card that shows only what is not yet on | `slm status`, `slm doctor` |
+| Dashboard | runtime summary, daemon identity, storage and runtime health, diagnostics and recent activity, a **Needs your answer** card (disputed values with one-click answers, memories whose source file changed; hidden when empty), and a dismissible **What's new** card that shows only what is not yet on | `slm status`, `slm doctor`, `slm disputes` |
 | Brain | consolidation, behavioral patterns, feedback and outcomes, reward and soft-prompt state | mode and configuration, and the underlying data |
 
 ### Memory group

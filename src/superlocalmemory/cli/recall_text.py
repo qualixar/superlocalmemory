@@ -80,6 +80,26 @@ def context_lines(item: dict) -> list[str]:
     return out
 
 
+def truth_lines(item: dict) -> list[str]:
+    """An open dispute (both sides, how to settle) and a changed source file (D-39, D-38)."""
+    out = []
+    for d in item.get("disputes") or ():
+        out.append(f"       disputed: {d.get('question', 'Which is true now?')}")
+        for side in d.get("sides") or ():
+            text = side.get("content") if side.get("visible") else "(not visible to you)"
+            when = str(side.get("said_at") or "")[:10]
+            now = " (current)" if side.get("current") else ""
+            out.append(f"         - {when}{now}: {' '.join(str(text or '').split())[:160]}"
+                       f"  [fact {side.get('fact_id')}]")
+        out.append(f"         settle: slm disputes settle {d.get('dispute_id')} "
+                   "--keep FACT_ID|both|unrelated")
+    source = item.get("source") or {}
+    if source.get("state") in ("changed", "missing"):
+        word = "changed since it was saved" if source["state"] == "changed" else "is gone"
+        out.append(f"       source file {word}: {source.get('file')} (read it again before trusting this)")
+    return out
+
+
 def status_line(result: dict) -> str:
     """The warming-up note, when the recall ran before SLM was ready and no
     other line printed says so already."""

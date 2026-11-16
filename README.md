@@ -308,7 +308,7 @@ Engineering controls that support a compliance program, not a certification.
 
 ## MCP memory server: tool profiles
 
-Every app, plugin and extension gets `full` (58 tools: all of memory, SLM-Mesh, optimize, loops; 5 more while images are on) unless you choose otherwise. That fits hosts that cap the total number of MCP tools at about 100, with room for your other servers. To change it for every app at once, run one command and restart your apps:
+Every app, plugin and extension gets `full` (60 tools: all of memory, SLM-Mesh, optimize, loops; 5 more while images are on) unless you choose otherwise. That fits hosts that cap the total number of MCP tools at about 100, with room for your other servers. To change it for every app at once, run one command and restart your apps:
 
 ```bash
 slm tools                # current set, and how many tools each set has
@@ -319,12 +319,12 @@ To change one app only, set `SLM_MCP_PROFILE` in that app's MCP config (`slm con
 
 | Profile | Tools | For |
 |---|---:|---|
-| `core` | 19 | Remember, recall, expand, sessions, optimize, correction review |
-| `code` | 39 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
+| `core` | 21 | Remember, recall, expand, sessions, optimize, correction review, disputes |
+| `code` | 41 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
 | `mesh` | 9 | SLM-Mesh coordination only |
-| `full` (default, when unset) | 58 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries (63 with pictures and documents on) |
-| `power` | 70 | Full plus administration, lifecycle and diagnostics (75 with pictures and documents on) |
-| `whole` | 110 | Every registered tool |
+| `full` (default, when unset) | 60 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries (65 with pictures and documents on) |
+| `power` | 72 | Full plus administration, lifecycle and diagnostics (77 with pictures and documents on) |
+| `whole` | 112 | Every registered tool |
 
 stdio: `{"command": "slm", "args": ["mcp"]}` · HTTP: `http://127.0.0.1:8765/mcp/` · [MCP tools](https://github.com/qualixar/superlocalmemory/blob/main/docs/mcp-tools.md)
 

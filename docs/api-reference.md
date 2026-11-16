@@ -54,6 +54,9 @@ fact_ids = engine.store(
     scope="personal",
     shared_with=None,
     profile_id=None,
+    slot=None,
+    slot_value=None,
+    source_file=None,
 )
 ```
 
@@ -62,6 +65,15 @@ write to a named profile without moving the active one. `scope` accepts
 `personal`, `shared`, or `global`; `shared_with` contains profile IDs allowed to
 read a shared fact. Shared/global recall is opt-in and remains subject to the
 configured scope policy.
+
+`slot` and `slot_value` name the one thing the memory states the current value
+of, as `subject/relation` or `subject/relation/qualifier` with the value in a
+few words, exactly as `remember(slot=…, slot_value=…)` on MCP, the CLI and HTTP.
+The same value later changes nothing; a different one opens a dispute. A
+`source_file` (an absolute path to a readable local file) is fingerprinted now,
+so a later recall can say the file changed or is gone. A malformed slot or a
+path that is not a readable file raises `ValueError` before anything is stored;
+neither can be set through `metadata`.
 
 The daemon, MCP, CLI, hooks, and Python API attach a trusted actor before
 persistence. A caller-supplied agent label is attribution metadata, not an

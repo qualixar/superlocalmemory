@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-SuperLocalMemory exposes 110 tools and 7 resources through the Model Context
+SuperLocalMemory exposes 112 tools and 7 resources through the Model Context
 Protocol (MCP). A client sees only the tools its tool set allows (see
 [Which tools a client sees](#which-tools-a-client-sees)); the registered
 function signatures are the source of truth for names and parameters, and a
@@ -45,14 +45,14 @@ changes. The tool set is fixed when the MCP server starts.
 
 | `SLM_MCP_PROFILE` | Tools | What it adds |
 |---|---:|---|
-| `core` | 19 | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five optimize tools, review_correction, list_corrections, get_memory_summary, switch_profile |
-| `code` | 39 | `core` plus the code-graph tools build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes; Brain evidence; memory-kind tools; the three bounded-loop tools; report_outcome, report_feedback |
-| `full` | 58 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
-| `power` | 70 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
+| `core` | 21 | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five optimize tools, review_correction, list_corrections, list_disputes, settle_dispute, get_memory_summary, switch_profile |
+| `code` | 41 | `core` plus the code-graph tools build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes; Brain evidence; memory-kind tools; the three bounded-loop tools; report_outcome, report_feedback |
+| `full` | 60 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
+| `power` | 72 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | 9 | the mesh tools only |
-| `whole` | 110 | every registered tool |
+| `whole` | 112 | every registered tool |
 
-With no `SLM_MCP_PROFILE`, a client gets the same 58 tools as `full` (the mesh
+With no `SLM_MCP_PROFILE`, a client gets the same 60 tools as `full` (the mesh
 tools are included while mesh is enabled, which is the default).
 `SLM_MCP_ALL_TOOLS=1` exposes all 110. `SLM_MCP_TOOLS=name1,name2` exposes
 exactly the names listed. An unknown `SLM_MCP_PROFILE` value is an error, not a
@@ -87,6 +87,9 @@ result for retrieval.
 | `profile_id` | string | No | Write to this profile instead of the active one |
 | `kind` | string | No | One of the nine [memory kinds](memory-kinds.md). A declared kind is confirmed; leave it empty when unsure |
 | `replaces` | string | No | `fact_id` of an earlier memory this one replaces |
+| `slot` | string | No | The one thing this memory states the current value of, as `subject/relation` or `subject/relation/qualifier` (for example `SLM/release cadence`) |
+| `slot_value` | string | No | That value in a few words (`monthly`). The same value later is a restatement; a different one opens a dispute |
+| `source_file` | string | No | Absolute path of the local file this memory was learned from. Recall marks the memory when that file changes or goes |
 
 The result is a receipt with `fact_ids`, `count`, `operation_id`,
 `materialization_state` and `pending`. A normal call returns once the memory is
@@ -246,6 +249,28 @@ text.
 |-----------|------|-------------|
 | `limit` | integer | Max cases (default 100) |
 | `profile_id` | string | List this profile's cases |
+
+### `list_disputes`
+
+What needs the user's answer: open disputes (two memories that state different
+values of the same thing, both sides newest first, each with when it was said)
+and memories whose source file changed or went missing. Recall results carry
+the same information as `disputes` and `source` on the memories they return.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `limit` | integer | Max items of each kind (default 50, up to 200) |
+| `profile_id` | string | List this profile's items |
+
+### `settle_dispute`
+
+Record the user's answer to one dispute. Settle only with the user's answer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dispute_id` | string, required | From `list_disputes` or a recall result's `disputes` |
+| `keep` | string, required | The `fact_id` of the side that is true now (the other memory is retired and can be rolled back with `review_correction`), `both`, or `unrelated` |
+| `profile_id` | string | Profile the dispute belongs to |
 
 ### `delete_memory`
 

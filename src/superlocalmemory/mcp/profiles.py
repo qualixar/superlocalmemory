@@ -17,13 +17,16 @@ from __future__ import annotations
 # Named profile definitions (introduced in v3.6.14)
 # ---------------------------------------------------------------------------
 
-_PROFILE_CORE: frozenset[str] = frozenset({  # 18
+_PROFILE_CORE: frozenset[str] = frozenset({  # 21
     "remember", "recall", "search", "fetch", "expand", "list_recent", "update_memory", "forget",
     "session_init", "close_session",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # A client that can propose a correction must be able to inspect and
     # authenticate its review; otherwise the core lifecycle is incomplete.
     "review_correction", "list_corrections",
+    # 4.2.30 (D-37): recall shows disputes to the agent holding the conversation;
+    # it must be able to bring the user's answer back.
+    "list_disputes", "settle_dispute",
     # v4.0.8: the readable summary layer (issue #113). In CORE because the
     # natural caller is the agent holding the conversation — an assistant
     # asked "what did I work on yesterday" should not need a power profile.
@@ -108,6 +111,7 @@ _PROFILE_FULL: frozenset[str] = frozenset({
     "get_brain_evidence_status", "record_agent_experience",
     "record_cognitive_turn", "finalize_cognitive_turn",
     "observe_bounded_loop_evidence", "review_correction", "list_corrections",
+    "list_disputes", "settle_dispute",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # v3.8.0: bounded-loop tools (CLI + /slm-loop command + MCP).

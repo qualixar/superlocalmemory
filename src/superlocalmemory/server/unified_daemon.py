@@ -758,6 +758,14 @@ class RememberRequest(BaseModel):
     #: The id of an earlier memory this one replaces (core/remember_replaces.py).
     #: Absent = none. Present but empty or malformed is refused with 422.
     replaces: str | None = None
+    #: The slot this memory states a value of, ``subject/relation[/qualifier]``,
+    #: and the value it states (D-36, ``truth/slot_claims.py``). Absent = none;
+    #: malformed is refused with 422 before anything is saved.
+    slot: str | None = None
+    slot_value: str | None = None
+    #: The absolute path of the local file this memory was learned from (D-38,
+    #: ``truth/leases.py``): fingerprinted here, before the file can change.
+    source_file: str | None = None
 
     @field_validator("session_date")
     @classmethod
@@ -4825,7 +4833,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Optional routers
     for _mod_name in (
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
-        "insights", "timeline", "abstraction", "integrity", "overtaken",
+        "insights", "timeline", "abstraction", "integrity", "overtaken", "truth",
     ):
         try:
             _mod = __import__(
@@ -5525,6 +5533,38 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 from superlocalmemory.server.kind_error import invalid_kind_http
                 raise invalid_kind_http(InvalidKind(req.kind))
 
+        # A slot claim too (D-36): a malformed one is refused before anything is
+        # journaled, never stored as a memory with no claim.
+        slot_claim = None
+        if req.slot is not None or req.slot_value is not None:
+            from superlocalmemory.truth.slot_claims import encode as encode_slot_claim
+            from superlocalmemory.truth.slot_keys import SlotSpecError
+
+            try:
+                slot_claim = encode_slot_claim(req.slot, req.slot_value)
+            except SlotSpecError as exc:
+                raise HTTPException(
+                    422, detail={"code": "INVALID_SLOT", "message": str(exc)}) from exc
+
+        # A source file (D-38): fingerprinted now, refused before anything is
+        # journaled when it is not a local file this machine can read. A remote
+        # app never names one: it would probe this machine's files.
+        lease_meta = None
+        if req.source_file:
+            from superlocalmemory.truth.leases import SourceFileError, fingerprint
+
+            if caller_view:
+                raise HTTPException(422, detail={
+                    "code": "INVALID_SOURCE_FILE",
+                    "message": "source_file is for local callers only"})
+            try:
+                import asyncio as _asyncio  # a hash must not hold the event loop
+
+                lease_meta = (await _asyncio.to_thread(fingerprint, req.source_file)).as_meta()
+            except SourceFileError as exc:
+                raise HTTPException(
+                    422, detail={"code": "INVALID_SOURCE_FILE", "message": str(exc)}) from exc
+
         # Same for ``replaces``: refused here, before the try below would turn
         # the 422 into a 500, and before anything is journaled or saved.
         replaces_id = None
@@ -5593,6 +5633,14 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 from superlocalmemory.storage.memory_kinds import METADATA_KEY
 
                 meta[METADATA_KEY] = declared_kind.value
+            if slot_claim is not None:  # reserved key: set only here, after stripping
+                from superlocalmemory.truth.slot_claims import METADATA_KEY as SLOT_KEY
+
+                meta[SLOT_KEY] = slot_claim
+            if lease_meta is not None:  # reserved key: set only here, after stripping
+                from superlocalmemory.truth.leases import METADATA_KEY as LEASE_KEY
+
+                meta[LEASE_KEY] = lease_meta
 
             from superlocalmemory.memory_core import (
                 pii_redaction_enabled,

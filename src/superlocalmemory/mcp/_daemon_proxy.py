@@ -291,6 +291,9 @@ class DaemonPoolProxy:
         shared_with = meta.pop("shared_with", None)
         session_date = meta.pop("session_date", "")
         speaker = str(meta.pop("speaker", "") or "")
+        slot = meta.pop("slot", None)  # D-36: request fields, never memory metadata
+        slot_value = meta.pop("slot_value", None)
+        source_file = meta.pop("source_file", None)  # D-38: a request field too
         tags = meta.get("tags", "")
         if isinstance(tags, (list, tuple, set)):
             tags = ",".join(str(tag) for tag in tags)
@@ -313,6 +316,12 @@ class DaemonPoolProxy:
             body["replaces"] = replaces
         if speaker.strip():
             body["speaker"] = speaker.strip()
+        if slot:
+            body["slot"] = slot
+            if slot_value:
+                body["slot_value"] = slot_value
+        if source_file:
+            body["source_file"] = source_file
         from superlocalmemory.mcp._remember_kind import with_declared_kind
 
         body, flags = with_declared_kind(body, flags, (kind or "").strip())

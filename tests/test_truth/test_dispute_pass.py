@@ -116,15 +116,14 @@ def test_replaces_without_auto_apply_is_held_for_review(disputed) -> None:
     assert _retired(db, old) == (None, None, None)
 
 
-def test_the_auto_apply_flag_alone_retires_nothing_until_the_basis_lands(disputed) -> None:
-    db, old, _new = disputed  # W0-18: the flag can be set by an env var; the guard holds
-    counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "on",
-                                        "truth.slots.auto_apply": "on"})
-    assert counts["held_for_review"] == 1 and _open(db) == 1
+def test_the_auto_apply_flag_alone_retires_nothing_without_a_certificate(disputed) -> None:
+    db, old, _new = disputed  # W0-18 lifted by D-36: the gate, not a guard, holds it
+    counts, _ = _run(db, "replaces", calibrated=False,
+                     **{"judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"})
+    assert counts["held_uncalibrated"] == 1 and _open(db) == 1
     assert _retired(db, old) == (None, None, None)
 
 
-@pytest.mark.usefixtures("auto_apply_basis")
 def test_replaces_with_auto_apply_retires_through_the_ledger(disputed) -> None:
     db, old, new = disputed
     counts, _ = _run(db, "replaces", **{"judge.ladder": "on", "truth.slots": "on",
@@ -148,7 +147,6 @@ def test_non_retiring_answers_settle_without_touching_facts(disputed, verdict, s
                       (new,))[0]["state"] == state
 
 
-@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_head_already_retired_for_another_dismisses_the_dispute_and_changes_nothing(
         disputed) -> None:
     from superlocalmemory.truth.slot_resolver import retire_superseded
@@ -215,7 +213,6 @@ def test_review_labels_never_certify(disputed) -> None:
     assert counts["held_uncalibrated"] == 1 and _retired(db, old) == (None, None, None)
 
 
-@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_decision_made_in_shadow_is_acted_on_later_without_re_asking(disputed) -> None:
     db, old, new = disputed
     _run(db, "replaces", calibrated=False, **{"judge.ladder": "shadow"})
@@ -324,3 +321,145 @@ def test_audited_rules_close_a_dispute(disputed) -> None:
                      "WHERE tier = 'rules'")
     counts = _pass(db, RuleSame(), **{"judge.ladder": "on"})
     assert counts["resolved_same"] == 1 and _open(db) == 0
+
+
+# -- D-36: an explicit key's new stated value is answered by the rule explicit-v1 -------------
+
+@pytest.fixture
+def explicit(tmp_path):
+    from superlocalmemory.truth.slot_resolver import resolve_fact
+
+    db = _db(tmp_path / "memory.db")
+    old = _fact(db, "We ship SLM every week", "2026-03-01T00:00:00Z")
+    new = _fact(db, "From now on SLM ships one big release", "2026-11-14T00:00:00Z")
+    with db.raw_connection() as conn:
+        for fact, value, when in ((old, "weekly", "2026-03-01"),
+                                  (new, "one big release", "2026-11-14T00:00:00+00:00")):
+            resolve_fact(conn, fact_id=fact, profile_id="default", scope="personal",
+                         content="", valid_from=when, explicit_key="SLM/release cadence",
+                         explicit_value=value)
+    assert db.execute("SELECT reason_code FROM slot_disputes")[0][0] == "explicit_value_changed"
+    return db, old, new
+
+
+def _certify_explicit(db, n=80, wrong=0):
+    _seed(db, "replaces", n, tier="rules", model="explicit-v1", wrong=wrong, regime="unbatched")
+    with db.raw_connection() as conn:
+        conn.execute("UPDATE judge_receipts SET confidence = NULL WHERE model = 'explicit-v1'")
+
+
+def test_explicit_v1_answers_replaces_and_its_receipt_is_always_audited(explicit) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, _old, _new = explicit
+    assert _pass(db, RulesTier()) == {"rules:replaces": 1}
+    rows = db.execute("SELECT tier, model, verdict, confidence, batching_regime, "
+                      "audit_probability, audit_selected FROM judge_receipts")
+    assert [tuple(r) for r in rows] == [
+        ("rules", "explicit-v1", "replaces", None, "unbatched", 1.0, 1)]  # D-35: pi = 1
+
+
+def test_explicit_v1_without_its_own_certificate_retires_nothing(explicit) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, old, _new = explicit
+    counts = _pass(db, RulesTier(), **{"judge.ladder": "on", "truth.slots": "on",
+                                       "truth.slots.auto_apply": "on"})
+    assert counts["held_uncalibrated"] == 1 and _open(db) == 1
+    assert _retired(db, old) == (None, None, None)
+
+
+def test_a_certified_explicit_v1_retires_the_old_value_through_the_ledger(explicit) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, old, new = explicit
+    _certify_explicit(db)
+    held = _pass(db, RulesTier(), **{"judge.ladder": "on"})
+    assert held["held_for_review"] == 1 and _retired(db, old) == (None, None, None)
+    with db.raw_connection() as conn:  # the same decision, acted on once auto_apply is on
+        conn.execute("DELETE FROM judge_receipts WHERE subject_kind = 'slot_dispute'")
+    counts = _pass(db, RulesTier(), **{"judge.ladder": "on", "truth.slots": "on",
+                                       "truth.slots.auto_apply": "on"})
+    assert counts["resolved_replaces"] == 1 and _open(db) == 0
+    assert _retired(db, old)[2] == new
+    case = db.execute("SELECT status, reason_code FROM correction_cases")[0]
+    assert (case["status"], case["reason_code"]) == ("applied", "slot_supersede")
+    acted = db.execute("SELECT receipt_id FROM judge_receipts WHERE action_taken = "
+                       "'resolved_replaces'")[0]["receipt_id"]
+    linked = db.execute("SELECT receipt_id FROM slot_revisions WHERE fact_id = ?", (new,))
+    assert linked[0]["receipt_id"] == acted  # R-09: a rollback can label what acted
+
+
+def test_an_audit_that_finds_explicit_v1_wrong_stops_it(explicit) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, old, _new = explicit
+    _certify_explicit(db, n=120, wrong=6)
+    counts = _pass(db, RulesTier(), **{"judge.ladder": "on", "truth.slots": "on",
+                                       "truth.slots.auto_apply": "on"})
+    assert counts["held_uncalibrated"] == 1 and _retired(db, old) == (None, None, None)
+
+
+def test_explicit_v1_never_answers_a_dispute_it_did_not_open(disputed) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+
+    db, _old, _new = disputed  # pattern keys: telling a change from a paraphrase is a model's job
+    assert _pass(db, RulesTier()) == {"none:abstain": 1}
+    assert db.execute("SELECT COUNT(*) AS n FROM judge_receipts")[0]["n"] == 0
+
+
+# -- R-10: a value older than the head is history, settled through the ladder and the ledger ---
+
+@pytest.fixture
+def older(tmp_path):
+    db = _db(tmp_path / "memory.db")
+    new = _fact(db, "The release cadence of SLM is one big release", "2026-11-14T00:00:00Z")
+    old = _fact(db, "The release cadence of SLM is one release every week", "2026-03-01T00:00:00Z")
+    SlotPass(db, _flags(**{"truth.slots": "shadow"}), state_dir=tmp_path).run()
+    assert db.execute("SELECT reason_code FROM slot_disputes")[0][0] == "older_than_head"
+    return db, old, new
+
+
+class Recording(Fixed):
+    def answer(self, question, items):
+        self.seen = [dict(i.texts) for i in items]
+        return super().answer(question, items)
+
+
+def test_an_older_value_is_asked_in_time_order(older) -> None:
+    db, _old, _new = older
+    tier = Recording("replaces")
+    _pass(db, tier)
+    assert tier.seen == [{"older": "The release cadence of SLM is one release every week",
+                          "newer": "The release cadence of SLM is one big release"}]
+
+
+def test_replaces_on_an_older_value_retires_it_and_keeps_the_head(older) -> None:
+    db, old, new = older
+    _calibrate(db, "replaces")
+    counts = DisputePass(db, FeatureFlags(file_values={
+        "judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"}, environ={}),
+        JudgeLadder([Fixed("replaces")])).run()
+    assert counts["resolved_replaces"] == 1 and _open(db) == 0
+    until, expired, by = _retired(db, old)
+    assert by == new and expired is not None  # no longer current: R-10's stale memory
+    head = db.execute("SELECT r.fact_id FROM memory_slots s JOIN slot_revisions r "
+                      "ON r.revision_id = s.head_revision_id")[0]["fact_id"]
+    assert head == new
+
+
+def test_explicit_v1_answers_a_stated_older_value(tmp_path) -> None:
+    from superlocalmemory.core.judge_ladder import RulesTier
+    from superlocalmemory.truth.slot_resolver import resolve_fact
+
+    db = _db(tmp_path / "memory.db")
+    new = _fact(db, "SLM ships one big release", "2026-11-14T00:00:00Z")
+    old = _fact(db, "SLM shipped weekly", "2026-03-01T00:00:00Z")
+    with db.raw_connection() as conn:
+        for fact, value, when in ((new, "one big release", "2026-11-14"),
+                                  (old, "weekly", "2026-03-01")):
+            resolve_fact(conn, fact_id=fact, profile_id="default", scope="personal", content="",
+                         valid_from=when, explicit_key="SLM/release cadence",
+                         explicit_value=value)
+    assert db.execute("SELECT reason_code FROM slot_disputes")[0][0] == "explicit_older_value"
+    assert _pass(db, RulesTier()) == {"rules:replaces": 1}

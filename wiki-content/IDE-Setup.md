@@ -61,7 +61,7 @@ claude plugin install superlocalmemory@qualixar
 
 The plugin brings the MCP server, 16 skills, four advisor agents, the `/slm-loop` command and lifecycle hooks. If you do not want the plugin, `slm hooks install` writes additive hooks directly, and you can add the MCP server by hand with `claude mcp add --transport http superlocalmemory http://127.0.0.1:8765/mcp/`. On native Windows install SLM first (`pipx install superlocalmemory` or `pip install superlocalmemory`) so `slm` is on PATH; the plugin's server runs your installed SLM and says so in its log if it is missing.
 
-Codex gets the MCP entry from `slm connect codex`, lifecycle hooks from `slm hooks install --agent codex` (written to `~/.codex/hooks.json`), and its own skills and subagents from `slm codex install|remove|status`. Both plugins serve the default 58-tool profile unless you add `SLM_MCP_PROFILE=code`. Details and the upgrade path are in [Host Upgrades](Host-Upgrades).
+Codex gets the MCP entry from `slm connect codex`, lifecycle hooks from `slm hooks install --agent codex` (written to `~/.codex/hooks.json`), and its own skills and subagents from `slm codex install|remove|status`. Both plugins serve the default 60-tool profile unless you add `SLM_MCP_PROFILE=code`. Details and the upgrade path are in [Host Upgrades](Host-Upgrades).
 
 ## Tools without a connect target
 

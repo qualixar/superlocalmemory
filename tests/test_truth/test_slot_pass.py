@@ -77,28 +77,93 @@ def test_resumes_from_its_cursor_and_picks_up_new_saves(store) -> None:
     assert SlotPass(db, flags, state_dir=tmp).run()["dispute"] == 1
 
 
-def _resolve_explicit(db, fact_id, value, when, auto_apply=True):
+def _resolve_explicit(db, fact_id, value, when, *, stated=True):
     from superlocalmemory.truth.slot_resolver import resolve_fact
 
     with db.raw_connection() as conn:
         return resolve_fact(conn, fact_id=fact_id, profile_id="default", scope="personal",
-                            content=value, valid_from=when, auto_apply=auto_apply,
-                            explicit_key="SLM/release cadence")
+                            content=f"SLM ships {value}", valid_from=when,
+                            explicit_key="SLM/release cadence",
+                            explicit_value=value if stated else None)
 
 
-def test_an_explicit_key_retires_the_old_value_through_the_ledger(store) -> None:
-    db, old, new, _tmp = store
+def _dispute(db) -> tuple:
+    return tuple(db.execute("SELECT dispute_id, reason_code, state FROM slot_disputes")[0])
+
+
+def _settled_by_a_person(db, old, new) -> None:
+    """An explicit key's new value, settled ``b`` the way a person's review does."""
+    from superlocalmemory.truth import slot_store
+
+    assert _resolve_explicit(db, old, "weekly", "2026-03-01").outcome == "head"
+    assert _resolve_explicit(db, new, "one big release",
+                             "2026-11-14T00:00:00+00:00").outcome == "dispute"
+    with db.raw_connection() as conn:
+        assert slot_store.resolve_dispute(conn, _dispute(db)[0], "b",
+                                          resolved_by="person:alex") == (old,)
+
+
+def _reconcile(db, auto_apply=True):
+    from superlocalmemory.truth.slot_resolver import reconcile_ledger
+
+    with db.raw_connection() as conn:
+        return reconcile_ledger(conn, auto_apply=auto_apply)
+
+
+def test_an_explicit_key_never_retires_on_its_own(store) -> None:
+    db, old, new, _tmp = store  # D-36, I-10: a head move is a memory change
     assert _resolve_explicit(db, old, "weekly", "2026-03-01").outcome == "head"
     result = _resolve_explicit(db, new, "one big release", "2026-11-14T00:00:00+00:00")
-    assert (result.outcome, result.ledger) == ("supersede", "applied")
+    assert (result.outcome, result.ledger) == ("dispute", None)
+    assert _dispute(db)[1:] == ("explicit_value_changed", "open")
+    assert _retired(db, old) == (None, None, None)
+    head = db.execute("SELECT r.fact_id FROM memory_slots s JOIN slot_revisions r "
+                      "ON r.revision_id = s.head_revision_id")[0]["fact_id"]
+    assert head == old
+
+
+def test_a_reworded_restatement_of_the_same_stated_value_changes_nothing(store) -> None:
+    from superlocalmemory.truth.slot_resolver import resolve_fact
+
+    db, old, new, _tmp = store  # R-34: the value is the one stated, never the wording
+    with db.raw_connection() as conn:
+        resolve_fact(conn, fact_id=old, profile_id="default", scope="personal",
+                     content="We release SLM every week", valid_from="2026-03-01",
+                     explicit_key="SLM/release cadence", explicit_value="Weekly")
+        again = resolve_fact(conn, fact_id=new, profile_id="default", scope="personal",
+                             content="SLM has a weekly release.", valid_from="2026-11-14",
+                             explicit_key="slm/Release Cadence", explicit_value="weekly ")
+    assert again.outcome == "duplicate"
+    assert db.execute("SELECT COUNT(*) AS n FROM slot_disputes")[0]["n"] == 0
+
+
+def test_a_slot_with_no_stated_value_disputes_and_is_not_an_explicit_change(store) -> None:
+    db, old, new, _tmp = store
+    _resolve_explicit(db, old, "weekly", "2026-03-01", stated=False)
+    assert _resolve_explicit(db, new, "one big release", "2026-11-14",
+                             stated=False).outcome == "dispute"
+    assert _dispute(db)[1] == "explicit_unvalued"
+
+
+def test_a_stated_value_against_a_head_with_none_is_not_an_explicit_change(store) -> None:
+    db, old, new, _tmp = store  # the wording hash and the value hash never compare
+    _resolve_explicit(db, old, "weekly", "2026-03-01", stated=False)
+    assert _resolve_explicit(db, new, "weekly", "2026-11-14").outcome == "dispute"
+    assert _dispute(db)[1] == "pattern_key"
+
+
+def test_a_settled_explicit_change_retires_the_old_value_through_the_ledger(store) -> None:
+    db, old, new, _tmp = store
+    _settled_by_a_person(db, old, new)
+    assert _reconcile(db)["ledger_applied"] == 1
     valid_until, expired, by = _retired(db, old)
     assert by == new and expired is not None
     assert valid_until == "2026-11-14T00:00:00+00:00"  # when the new value was saved
-    case = db.execute("SELECT status, reason_code FROM correction_cases "
+    case = db.execute("SELECT case_id, status, reason_code FROM correction_cases "
                       "WHERE predecessor_fact_id = ?", (old,))[0]
     assert (case["status"], case["reason_code"]) == ("applied", "slot_supersede")
     linked = db.execute("SELECT case_id FROM slot_revisions WHERE fact_id = ?", (new,))[0]
-    assert linked["case_id"] == result.case_id
+    assert linked["case_id"] == case["case_id"]
 
 
 def _consolidator_proposal(db, case_id, predecessor, successor) -> None:
@@ -117,8 +182,8 @@ def _consolidator_proposal(db, case_id, predecessor, successor) -> None:
 def test_an_existing_consolidator_proposal_is_settled_not_duplicated(store) -> None:
     db, old, new, _tmp = store
     _consolidator_proposal(db, "cons-1", old, new)
-    _resolve_explicit(db, old, "weekly", "2026-03-01")
-    assert _resolve_explicit(db, new, "one big release", "2026-11-14").ledger == "applied"
+    _settled_by_a_person(db, old, new)
+    assert _reconcile(db)["ledger_applied"] == 1
     cases = db.execute("SELECT case_id, status FROM correction_cases")
     assert [(c["case_id"], c["status"]) for c in cases] == [("cons-1", "applied")]
 
@@ -127,9 +192,8 @@ def test_a_rival_proposal_is_left_for_review(store) -> None:
     db, old, new, _tmp = store
     other = _fact(db, "Unrelated memory that the consolidator matched.", "2026-05-01T00:00:00Z")
     _consolidator_proposal(db, "cons-2", old, other)
-    _resolve_explicit(db, old, "weekly", "2026-03-01")
-    assert _resolve_explicit(db, new, "one big release", "2026-11-14").ledger == (
-        "deferred_to_review")
+    _settled_by_a_person(db, old, new)
+    assert _reconcile(db)["ledger_deferred_to_review"] == 1
     assert _retired(db, old) == (None, None, None)
 
 
@@ -142,9 +206,9 @@ def test_a_retirement_already_applied_for_another_successor_is_not_reported_appl
     with db.raw_connection() as conn:
         assert retire_superseded(conn, profile_id="default", scope="personal",
                                  predecessor=old, successor=other)[0] == "applied"
-    _resolve_explicit(db, old, "weekly", "2026-03-01")
-    result = _resolve_explicit(db, new, "one big release", "2026-11-14")
-    assert result.ledger == RETIRED_FOR_ANOTHER  # R-22: was "applied"
+    _settled_by_a_person(db, old, new)
+    counts = _reconcile(db)  # R-22: never "applied"; a retired head is not read again
+    assert not counts.get("ledger_applied") and RETIRED_FOR_ANOTHER  # dispute pass: own test
     assert _retired(db, old)[2] == other  # the earlier retirement stands untouched
     linked = db.execute("SELECT case_id FROM slot_revisions WHERE fact_id = ?", (new,))[0]
     assert linked["case_id"] is None
@@ -263,14 +327,10 @@ def _link(db, fact_id):
 
 def _pending_supersede(store):
     db, old, new, _tmp = store
-    assert _resolve_explicit(db, old, "weekly", "2026-03-01", auto_apply=False).outcome == "head"
-    r = _resolve_explicit(db, new, "one big release", "2026-11-14T00:00:00+00:00",
-                          auto_apply=False)
-    assert (r.outcome, r.ledger) == ("supersede", "pending")
+    _settled_by_a_person(db, old, new)  # settled, not yet in the ledger
     return db, old, new
 
 
-@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_stranded_supersede_is_proposed_then_applied_as_flags_allow(store) -> None:
     db, old, new = _pending_supersede(store)
     tmp = store[3]
@@ -290,7 +350,6 @@ def test_a_stranded_supersede_is_proposed_then_applied_as_flags_allow(store) -> 
     assert not any(k.startswith("ledger_") for k in again)  # settled: not read again
 
 
-@pytest.mark.usefixtures("auto_apply_basis")
 def test_a_decision_made_in_shadow_is_applied_directly_once_allowed(store) -> None:
     db, old, new = _pending_supersede(store)
     counts = SlotPass(db, _flags(**{"truth.slots": "on", "truth.slots.auto_apply": "on"}),
@@ -316,8 +375,8 @@ def test_rollback_slot_cases_restores_only_the_truth_layers_retirements(store) -
     from superlocalmemory.truth.slot_resolver import rollback_slot_cases
 
     db, old, new, _tmp = store
-    _resolve_explicit(db, old, "weekly", "2026-03-01")
-    _resolve_explicit(db, new, "one big release", "2026-11-14T00:00:00+00:00")
+    _settled_by_a_person(db, old, new)
+    _reconcile(db)
     assert _retired(db, old)[2] == new
     other = _fact(db, "Some unrelated memory about a plant", "2026-05-01T00:00:00+00:00")
     third = _fact(db, "Another memory about the plant", "2026-06-01T00:00:00+00:00")

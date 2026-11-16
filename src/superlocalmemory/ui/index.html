@@ -30,7 +30,7 @@
     <!-- Connected apps pane + MCP & Tools pointer card (4.1.23) -->
     <link rel="stylesheet" href="static/css/od-apps.css?v=7600a0ed">
     <!-- Website palette, responsive fixes, dashboard home, help UI (loaded last) -->
-    <link rel="stylesheet" href="static/css/theme-slm.css?v=9a8efc28">
+    <link rel="stylesheet" href="static/css/theme-slm.css?v=99d8fff3">
     <link rel="stylesheet" href="static/css/od-star-ask.css?v=da9c16a1">
 </head>
 <body>
@@ -266,6 +266,16 @@
                 </div>
 
                 <div class="dash-col">
+                  <!-- 4.2.30: what needs a person's answer, filled by od-truth.js; hidden when empty -->
+                  <div class="card" id="dash-attention-card" hidden>
+                    <div class="card-head">
+                      <h3>Needs your answer</h3>
+                      <span class="chip-pill violet" id="dash-attention-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-attention-body"></div>
+                  </div>
+
                   <div class="card" id="dash-health-card">
                     <div class="card-head">
                       <h3>Memory health</h3>
@@ -1682,7 +1692,7 @@
     <script src="static/js/od-connections.js?v=f388116a"></script>
     <script src="static/js/od-local-apps.js?v=c7abee0b"></script>
     <script src="static/js/od-apps.js?v=27e2a223"></script>
-    <script src="static/js/od-mcp.js?v=9b3b2e0f"></script>
+    <script src="static/js/od-mcp.js?v=69283b7b"></script>
     <!-- 4.1.25: images and documents card, shared by the Documents & Images pane -->
     <script src="static/js/od-features.js?v=afbe0191"></script>
     <script src="static/js/od-welcome.js?v=a48dd6b3"></script>
@@ -1691,7 +1701,8 @@
     <script src="static/js/od-sources.js?v=b96dd2f9"></script>
     <script src="static/js/od-media-find.js?v=10cc0e63"></script>
     <script src="static/js/od-media.js?v=4171a7af"></script>
-    <script src="static/js/od-dash-home.js?v=82cd4e3d"></script>
+    <script src="static/js/od-dash-home.js?v=aa602e3d"></script>
+    <script src="static/js/od-truth.js?v=199639ad"></script>
     <script src="static/js/od-help.js?v=e06df0d4"></script>
     <script src="static/js/od-polish.js?v=0ca34b74"></script>
     <script src="static/js/od-startup.js?v=e8035f95"></script>

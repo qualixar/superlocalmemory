@@ -3,7 +3,7 @@
     "name": "Qualixar",
     "url": "https://github.com/qualixar/superlocalmemory"
   },
-  "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server, with optional pictures, PDFs and bot messaging. Serves the 58-tool full profile by default; `slm tools set <name>` changes it for every app.",
+  "description": "Local-first agent memory + reversible context compression and KV cache, as an MCP server, with optional pictures, PDFs and bot messaging. Serves the 60-tool full profile by default; `slm tools set <name>` changes it for every app.",
   "displayName": "SuperLocalMemory",
   "documentationUrl": "https://github.com/qualixar/superlocalmemory/blob/main/docs/plugins.md",
   "homepage": "https://superlocalmemory.com",

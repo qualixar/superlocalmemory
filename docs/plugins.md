@@ -264,7 +264,7 @@ it from there. Safe to re-run.
 ## Choosing how many tools
 
 Every plugin and extension here starts SuperLocalMemory with the default tool
-set, `full`: 58 tools covering memory, SLM-Mesh, optimize and bounded loops (5 more while images are on)
+set, `full`: 60 tools covering memory, SLM-Mesh, optimize and bounded loops (5 more while images are on)
 (63 while pictures and documents are on). None of them sets a tool set of its
 own, so one saved choice applies to all of them:
 
@@ -281,11 +281,11 @@ Codex, Antigravity, Hermes, Grok CLI, Muse CLI, the VS Code extension and every
 
 | Set | Tools | When to pick it |
 |---|---:|---|
-| `core` | 19 | A host with a small tool limit, or a bot that only needs remember and recall |
-| `full` | 58 | The default: everything most people use, including SLM-Mesh |
-| `power` | 70 | Adds governance: audit trail, retention, lifecycle, diagnostics |
-| `code` | 39 | Adds the code graph but leaves out the mesh |
-| `whole` | 110 | Every tool; only for hosts with no tool limit |
+| `core` | 21 | A host with a small tool limit, or a bot that only needs remember and recall |
+| `full` | 60 | The default: everything most people use, including SLM-Mesh |
+| `power` | 72 | Adds governance: audit trail, retention, lifecycle, diagnostics |
+| `code` | 41 | Adds the code graph but leaves out the mesh |
+| `whole` | 112 | Every tool; only for hosts with no tool limit |
 
 Some hosts limit the total number of MCP tools across all your servers, often
 to about 100, so a bigger set can push another server's tools out. To give one

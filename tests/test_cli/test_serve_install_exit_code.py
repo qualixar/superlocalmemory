@@ -4,13 +4,19 @@ from argparse import Namespace
 
 import pytest
 
-from superlocalmemory.cli import commands, service_installer
+from superlocalmemory.cli import commands
+
+#: Patched by dotted path, so the module ``cmd_serve`` imports at call time is
+#: the one patched: a test that re-imports the CLI under another platform
+#: (``test_platform_import_safety``) leaves a stale module object behind, and
+#: patching that one let the real installer run ``launchctl load`` (F-38).
+_INSTALLER = "superlocalmemory.cli.service_installer"
 
 
 @pytest.mark.parametrize(("action", "attr"), [("install", "install_service"),
                                               ("uninstall", "uninstall_service")])
 def test_failed_service_change_exits_nonzero(action, attr, monkeypatch, capsys):
-    monkeypatch.setattr(service_installer, attr, lambda: False)
+    monkeypatch.setattr(f"{_INSTALLER}.{attr}", lambda: False)
     with pytest.raises(SystemExit) as stopped:
         commands.cmd_serve(Namespace(action=action))
     assert stopped.value.code == 1
@@ -18,7 +24,7 @@ def test_failed_service_change_exits_nonzero(action, attr, monkeypatch, capsys):
 
 
 def test_successful_install_still_exits_zero(monkeypatch, capsys):
-    monkeypatch.setattr(service_installer, "install_service", lambda: True)
+    monkeypatch.setattr(f"{_INSTALLER}.install_service", lambda: True)
     commands.cmd_serve(Namespace(action="install"))
     assert "Service installed" in capsys.readouterr().out
 

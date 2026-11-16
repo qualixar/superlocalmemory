@@ -10,7 +10,8 @@ would let a new memory retire an unrelated one).
 
 Rules recognise four shapes, in order:
 
-* an explicit key the caller gives (``subject/relation[/qualifier]``);
+* an explicit key the caller gives (``subject/relation[/qualifier]``), with the
+  value it states (D-36);
 * "the <attribute> of <subject> is <value>";
 * "<subject>'s <attribute> is <value>";
 * "<subject> prefers|chose|switched to|moved to|uses <value> for <purpose>".
@@ -166,22 +167,82 @@ def _subject(text: str, resolve: Callable[[str], str | None] | None) -> str | No
     return f"name:{term}" if term else None
 
 
-def explicit_key(spec: str, value: str) -> SlotKey | None:
-    """``subject/relation[/qualifier]`` given by the caller, taken as stated."""
+#: An explicit key with the value the caller stated: a different value on its
+#: slot is a ``replaces`` question for the rule tier ``explicit-v1`` (D-36).
+EXPLICIT = "explicit"
+#: An explicit key with no stated value: the slot is the caller's, but what the
+#: memory says about it is only its wording, so a different wording disputes.
+EXPLICIT_UNVALUED = "explicit_unvalued"
+MAX_SPEC_CHARS = 200
+#: Marks the hash of a value the caller stated, so a revision records whether it
+#: holds a stated value or only a wording: the two never compare equal, and only
+#: a stated value against a stated value can be a ``replaces`` question.
+STATED_PREFIX = "stated:"
+MAX_VALUE_CHARS = MAX_CHARS
+
+
+class SlotSpecError(ValueError):
+    """A ``slot`` or ``slot_value`` a caller gave that cannot be a key."""
+
+
+def parse_spec(spec: str | None, value: str | None = None) -> tuple[str, str | None] | None:
+    """The caller's ``slot`` and ``slot_value``, checked; None when no slot is given.
+
+    Raises ``SlotSpecError`` for a malformed one, so a door can refuse the save
+    before anything is stored, as it does for ``replaces``.
+    """
+    spec = (spec or "").strip()
+    value = value.strip() if isinstance(value, str) else None
+    if not spec:
+        if value:
+            raise SlotSpecError("slot_value needs a slot (subject/relation[/qualifier])")
+        return None
+    if len(spec) > MAX_SPEC_CHARS:
+        raise SlotSpecError(f"slot is longer than {MAX_SPEC_CHARS} characters")
     parts = [normalise_term(p) for p in spec.split("/")]
-    if len(parts) not in (2, 3) or not all(parts) or not value.strip():
+    if len(parts) not in (2, 3) or not all(parts):
+        raise SlotSpecError("slot must be subject/relation or subject/relation/qualifier")
+    if value is not None and len(value) > MAX_VALUE_CHARS:
+        raise SlotSpecError(f"slot_value is longer than {MAX_VALUE_CHARS} characters")
+    return spec, (value or None)
+
+
+def explicit_key(spec: str, content: str, *, value: str | None = None) -> SlotKey | None:
+    """``subject/relation[/qualifier]`` given by the caller, taken as stated.
+
+    The value is the one the caller stated, never the memory's wording (R-34):
+    "deploys run on Fridays" and "we deploy every Friday" with ``value="Friday"``
+    are the same value. Without a stated value the key is ``explicit_unvalued``
+    and its value is the wording, which can only ever open a dispute.
+    """
+    try:
+        parsed = parse_spec(spec, value)
+    except SlotSpecError:
+        return None
+    if parsed is None:
+        return None
+    parts = [normalise_term(p) for p in parsed[0].split("/")]
+    stated = parsed[1]
+    if not (stated or content.strip()):
         return None
     return SlotKey(subject_key=f"name:{parts[0]}", relation_key=parts[1],
                    qualifier=parts[2] if len(parts) == 3 else "", cardinality="single",
-                   key_source="explicit", confidence=EXPLICIT_CONFIDENCE,
-                   value_hash=value_hash(value))
+                   key_source=EXPLICIT if stated else EXPLICIT_UNVALUED,
+                   confidence=EXPLICIT_CONFIDENCE,
+                   value_hash=(STATED_PREFIX + value_hash(stated)) if stated
+                   else value_hash(content))
+
+
+def is_stated(stored_hash: str | None) -> bool:
+    """Whether a revision's value hash is of a value the caller stated."""
+    return bool(stored_hash) and str(stored_hash).startswith(STATED_PREFIX)
 
 
 def extract(content: str, *, resolve_subject: Callable[[str], str | None] | None = None,
-            explicit: str | None = None) -> SlotKey | None:
+            explicit: str | None = None, explicit_value: str | None = None) -> SlotKey | None:
     """The slot key ``content`` states, or None when the rules cannot tell."""
     if explicit:
-        return explicit_key(explicit, content)
+        return explicit_key(explicit, content, value=explicit_value)
     body = _one_statement(content)
     if body is None:
         return None
@@ -211,5 +272,6 @@ def extract(content: str, *, resolve_subject: Callable[[str], str | None] | None
     return None
 
 
-__all__ = ["EXPLICIT_CONFIDENCE", "MAX_CHARS", "PATTERN_CONFIDENCE", "SlotKey", "explicit_key",
-           "extract", "normalise_term", "value_hash"]
+__all__ = ["EXPLICIT", "EXPLICIT_CONFIDENCE", "EXPLICIT_UNVALUED", "MAX_CHARS", "MAX_SPEC_CHARS",
+           "MAX_VALUE_CHARS", "PATTERN_CONFIDENCE", "STATED_PREFIX", "SlotKey", "SlotSpecError", "explicit_key",
+           "extract", "is_stated", "normalise_term", "parse_spec", "value_hash"]

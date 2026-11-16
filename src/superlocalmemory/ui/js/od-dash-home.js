@@ -199,6 +199,7 @@
   function loadAll() {
     lastLoad = Date.now();
     docsTile(); appsTile(); answerCheckTile(); healthTile();
+    if (window.SLMTruth) window.SLMTruth.reload();
     var body = $('dash-apps-body');
     if (body) skeleton(body, 2);
   }

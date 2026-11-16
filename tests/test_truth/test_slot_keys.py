@@ -55,10 +55,15 @@ def test_non_statements_get_no_key(text) -> None:
 
 
 def test_explicit_key_wins_and_validates() -> None:
-    key = extract("one big release", explicit="SLM/release cadence")
+    key = extract("We ship one big release", explicit="SLM/release cadence",
+                  explicit_value="one big release")
     assert key is not None and (key.subject_key, key.relation_key, key.qualifier) == (
         "name:slm", "release_cadence", "")
     assert key.key_source == "explicit" and key.confidence == 1.0
+    assert key.value_hash == "stated:" + value_hash("One big release.")  # R-34
+    bare = extract("We ship one big release", explicit="SLM/release cadence")
+    assert bare is not None and bare.key_source == "explicit_unvalued"
+    assert bare.value_hash == value_hash("We ship one big release")
     assert extract("x", explicit="only-one-part") is None
     assert extract("x", explicit="a//c") is None
     assert extract("  ", explicit="a/b") is None
@@ -88,7 +93,7 @@ def test_a_leading_participle_is_part_of_the_relation(text, relation) -> None:
     assert key is not None and key.relation_key == relation
 
 
-def test_only_explicit_keys_supersede_on_their_own() -> None:
+def test_no_key_supersedes_on_its_own() -> None:
     import sqlite3
 
     from superlocalmemory.storage.migrations import M069_memory_slots as M069
@@ -97,7 +102,8 @@ def test_only_explicit_keys_supersede_on_their_own() -> None:
     conn = sqlite3.connect(":memory:")
     M069.apply(conn)
     pattern = [extract("The owner of SLM is Alex"), extract("The owner of SLM is Sam")]
-    explicit = [extract("Alex", explicit="slm/maintainer"), extract("Sam", explicit="slm/maintainer")]
+    explicit = [extract("Alex runs it", explicit="slm/maintainer", explicit_value="Alex"),
+                extract("Sam runs it", explicit="slm/maintainer", explicit_value="Sam")]
     for key in pattern + explicit:
         assert key is not None
     ss.bind(conn, profile_id="p", scope="s", fact_id="f1", key=pattern[0], valid_from="2026-01-01")
@@ -105,4 +111,7 @@ def test_only_explicit_keys_supersede_on_their_own() -> None:
                    valid_from="2026-02-01").outcome == ss.DISPUTE
     ss.bind(conn, profile_id="p", scope="s", fact_id="f3", key=explicit[0], valid_from="2026-01-01")
     assert ss.bind(conn, profile_id="p", scope="s", fact_id="f4", key=explicit[1],
-                   valid_from="2026-02-01").outcome == ss.SUPERSEDE
+                   valid_from="2026-02-01").outcome == ss.DISPUTE  # D-36: for explicit-v1
+    reasons = [r[0] for r in conn.execute("SELECT reason_code FROM slot_disputes "
+                                          "ORDER BY opened_at, rowid")]
+    assert reasons == ["pattern_key", ss.EXPLICIT_VALUE_CHANGED]

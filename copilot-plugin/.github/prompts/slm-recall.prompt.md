@@ -370,6 +370,24 @@ applies. Views are created from the dashboard, with `slm view create`, or with
 
 ---
 
+### 8b. Disputes and changed source files
+
+Two fields can appear on a recalled memory:
+
+- `disputed: true` with `disputes`: this memory and another state different
+  values of the same thing. Each dispute lists both `sides`, newest first, with
+  when each was said and which is `current`. Do not choose for the user: show
+  both, ask which is true now, then call
+  `settle_dispute(dispute_id, keep=<fact_id of the true side>)` (or
+  `keep="both"`, or `keep="unrelated"` when they were never about the same
+  thing). If the user is not sure, leave it open. `list_disputes` shows every
+  open one.
+- `source: {state: "changed" | "missing", file}`: the file this memory came from
+  changed or went away since it was saved. Read the file before relying on the
+  memory. If it still holds, `slm disputes still-true FACT_ID` records that.
+
+CLI: `slm disputes`, `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated`.
+
 ### 9. Close the loop — say which memories helped
 
 Whether a memory has been useful is evidence SLM records only if you supply it.

@@ -57,6 +57,9 @@ class Item:
     profile_id: str
     texts: Mapping[str, str]
     fact_ids: tuple[str, ...] = ()
+    #: Why the item exists, when its source says (a dispute's ``reason_code``).
+    #: Not shown to a model and not part of ``inputs_hash``: only a rule reads it.
+    basis: str = ""
 
 
 @dataclass(frozen=True)
@@ -398,10 +401,25 @@ def _tokens(text: str) -> list[str]:
     return _TOKEN.findall(folded)
 
 
+#: A dispute's reason when both sides are values the caller stated for a slot it
+#: named (``truth.slot_store.EXPLICIT_VALUE_CHANGED``; kept as text here so the
+#: ladder imports nothing from the truth layer).
+EXPLICIT_VALUE_CHANGED = "explicit_value_changed"
+#: The same, for a stated value older in valid time than the stated head (R-10);
+#: the pair is asked in time order, so ``replaces`` is right either way.
+EXPLICIT_OLDER_VALUE = "explicit_older_value"
+_EXPLICIT_BASES = frozenset({EXPLICIT_VALUE_CHANGED, EXPLICIT_OLDER_VALUE})
+#: The rule that answers it, and the calibration cell its audits fill.
+EXPLICIT_RULE = "explicit-v1"
+
+
 class RulesTier:
     """Tier 0: answers only what plain rules can be sure of; abstains otherwise.
 
-    For ``SLOT_RELATION``: a record of a moment (a session ending, a file
+    For ``SLOT_RELATION``: a dispute opened because the caller stated a new
+    value for a slot they named (``explicit_value_changed``, D-36) is a
+    replacement (``explicit-v1``), unless one of the rules below says
+    otherwise first. A record of a moment (a session ending, a file
     changing) never replaces another one -- on the maintainer's backlog such
     records were 29 of the 32 pairs a model judge called replacements -- and two
     texts identical after Unicode normalisation and case folding (sentence-final
@@ -432,10 +450,17 @@ class RulesTier:
         if a and a == _tokens(newer):
             return TierAnswer("same", 1.0, {"same": 1.0}, model="rules-v3",
                               calibration_id="rules-v3")
+        if item.basis in _EXPLICIT_BASES:
+            # The caller named the slot and stated a later value than the one
+            # stated before (D-36). Like every rule, it acts only on a
+            # certificate from blind audits of its own decisions (I-10).
+            return TierAnswer("replaces", 1.0, {"replaces": 1.0}, model=EXPLICIT_RULE,
+                              calibration_id=EXPLICIT_RULE)
         return None
 
 
-__all__ = ["ABSTAIN", "BATCHING_REGIMES", "batching_regime",
+__all__ = ["ABSTAIN", "BATCHING_REGIMES", "EXPLICIT_OLDER_VALUE", "EXPLICIT_RULE", "EXPLICIT_VALUE_CHANGED",
+           "batching_regime",
            "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH",
            "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
            "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",

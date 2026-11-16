@@ -89,6 +89,8 @@ SCOPED_WRITE_TOOLS: frozenset[str] = frozenset({"remember", "remember_media", "r
 #: the host's active profile untouched.
 ROUTED_TOOLS: frozenset[str] = frozenset({
     "recall", "remember", "list_corrections", "review_correction",
+    # 4.2.30 (D-37): disputes are read and settled in the key's own profile.
+    "list_disputes", "settle_dispute",
     # 4.1.21: everything else a remote agent uses on its own profile.
     "search", "fetch", "expand", "list_recent", "prestage_context", "recall_trace",
     "session_init", "close_session", "observe", "update_memory", "delete_memory",
@@ -146,6 +148,15 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     # it cannot select a stored report or another workspace.
     "reply_to", "report_id", "reversible", "run_id",
     "saved_by", "session_date", "session_id", "show_weak", "skill_name",
+    # slot / slot_value (4.2.30, D-36): the slot a save states a value of; slots are
+    # keyed inside the profile the fact is saved to, so neither selects a profile.
+    "slot", "slot_value",
+    # dispute_id / keep (4.2.30, D-39): which dispute and which side; disputes live
+    # inside the profile the call is routed to, so neither selects a profile.
+    "dispute_id", "keep",
+    # source_file (4.2.30, D-38): the local file a save was learned from; selects no
+    # profile (and a remote caller is refused it at the door).
+    "source_file",
     # speaker (4.2.7, #265): who "I" is in the saved text; selects no profile.
     "speaker", "tags", "tags_match",
     "target",

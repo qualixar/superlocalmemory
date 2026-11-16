@@ -199,7 +199,7 @@ Error responses:
 
 SuperLocalMemory works via both MCP and CLI:
 
-- **MCP**: 39 tools (`code` profile), 58 (`full`, the default; 62 with pictures and documents on) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`, bot-message tools `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait` (a connected web app passes each reply's `ack_ids` back as `ack`) and `mesh_state`
+- **MCP**: 41 tools (`code` profile), 58 (`full`, the default; 65 with pictures and documents on) for IDE integration (Claude Code, Cursor, Windsurf, VS Code, JetBrains, Zed); includes bounded-loop tools `slm_loop_run/history/show`, bot-message tools `mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait` (a connected web app passes each reply's `ack_ids` back as `ack`) and `mesh_state`
 - **CLI**: commands with `--json` for scripts, CI/CD, and agent frameworks; includes `slm loop demo/history/show`
 
 ---

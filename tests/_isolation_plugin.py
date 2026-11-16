@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -123,6 +124,28 @@ else:
     # 4.1.25 installs the answer check (~1 GB) by default; no test may start
     # that download by accident. Tests of the default clear this themselves.
     os.environ["SLM_SKIP_LAYA"] = "1"
+    # No test may register a real login service. A test HOME keeps the plist
+    # out of the user's LaunchAgents, but ``launchctl load`` still hands the job
+    # to the user's launchd, which keeps its daemon running (and restarts it)
+    # after the suite: on 16 Nov a ``-n 3`` run left eight such jobs holding
+    # ports and memory (F-38). A shim first on PATH, inherited by every child
+    # process, logs the verbs that register a job and passes the rest through.
+    _SHIM_DIR = _TEST_ROOT / "bin"
+    _SHIM_DIR.mkdir(parents=True, exist_ok=True)
+    _real_launchctl = shutil.which("launchctl")
+    if _real_launchctl:
+        _shim = _SHIM_DIR / "launchctl"
+        _shim.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "  load|bootstrap|submit|enable|kickstart|start)\n"
+            "    echo \"$*\" >> \"$SLM_TEST_ROOT/launchctl-refused.log\"\n"
+            "    exit 0 ;;\n"
+            "esac\n"
+            f"exec '{_real_launchctl}' \"$@\"\n",
+            encoding="utf-8")
+        _shim.chmod(0o755)
+        os.environ["PATH"] = f"{_SHIM_DIR}{os.pathsep}{os.environ.get('PATH', '')}"
 for _unsafe_env in (
     "SLM_TEST_ALLOW_LIVE_HOME",
     "SLM_HOOK_DAEMON_URL",

@@ -188,7 +188,8 @@ import pytest
 #: and side table, backfill of a new column only), floor 51.
 #: 74 as of 4.2.30: +M074_fact_origin (deferred, memory.db; additive table), floor 51.
 #: 75 as of 4.2.30: +M075_injection_receipts (deferred, memory.db; additive tables), floor 51.
-_EXPECTED_SCHEMA_VERSION: int = 75
+#: 76 as of 4.2.30: +M076_session_end_stamps_are_flagged (deferred, memory.db; data only), floor 51.
+_EXPECTED_SCHEMA_VERSION: int = 76
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -217,7 +218,7 @@ _EXPECTED_SCHEMA_VERSION: int = 75
 # 63 as of 4.2.8: +M064_orphan_index_rows_are_removed (deferred, memory.db).
 # 65 as of 4.2.8: +M065_fabricated_dates_are_removed,
 #                 +M066_wrongly_archived_memories_are_restored (deferred, memory.db).
-_EXPECTED_MIGRATION_COUNT: int = 74  # +M068 (4.2.16), +M069-M075 (4.2.30)
+_EXPECTED_MIGRATION_COUNT: int = 75  # +M068 (4.2.16), +M069-M076 (4.2.30)
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:

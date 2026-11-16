@@ -1,6 +1,6 @@
 ---
 name: slm-getting-started-bot
-description: First-session orientation for SuperLocalMemory on a headless bot host (Grok Bot, or any Cursor-format plugin install with no hooks, no dashboard, and no interactive setup wizard). What is different here vs. Claude Code/Codex, which 19 tools are actually available, and the first three calls to make.
+description: First-session orientation for SuperLocalMemory on a headless bot host (Grok Bot, or any Cursor-format plugin install with no hooks, no dashboard, and no interactive setup wizard). What is different here vs. Claude Code/Codex, which 21 tools are actually available, and the first three calls to make.
 when_to_use: |
   - The very first session after SLM is installed as a Grok Bot / Cursor plugin
   - "What can I do with SuperLocalMemory here?"
@@ -45,16 +45,17 @@ format in the first place.
 
 ---
 
-## What IS available: the core profile (19 tools)
+## What IS available: the core profile (21 tools)
 
 This plugin sets `SLM_MCP_PROFILE=core`, the smallest tool tier, on purpose —
 a shared, memory-tight computer should not load tool descriptions or RAM for
-tiers it will not use. The 19 tools:
+tiers it will not use. The 21 tools:
 
 `remember`, `recall`, `search`, `fetch`, `expand`, `list_recent`, `update_memory`,
 `forget`, `session_init`, `close_session`, `slm_compress`, `slm_retrieve`,
 `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`, `review_correction`,
-`list_corrections`, `get_memory_summary`, `switch_profile`.
+`list_corrections`, `list_disputes`, `settle_dispute`, `get_memory_summary`,
+`switch_profile`.
 
 If you are looking at another skill that mentions a tool NOT in this list
 (`build_code_graph`, `mesh_send`, `mesh_wait`, `remember_media`,
@@ -68,7 +69,9 @@ Two things the core set does cover that other skills explain: `remember` takes
 `kind` and `replaces` (a newer version of a memory should be saved with
 `replaces=<fact_id>`; see `slm-remember`), and `list_corrections` /
 `review_correction` handle the review of an `update_memory` edit. A bot with
-no one to review should prefer `replaces` over `update_memory`.
+no one to review should prefer `replaces` over `update_memory`. When recall
+shows `disputed: true`, ask the user which side is true now and pass the answer
+to `settle_dispute`; never settle one on a guess.
 
 ---
 

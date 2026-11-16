@@ -47,7 +47,7 @@ def test_first_value_becomes_head(conn) -> None:
 
 
 def _explicit(value):
-    return extract(value, explicit="SLM/release cadence")
+    return extract(f"SLM ships {value}", explicit="SLM/release cadence", explicit_value=value)
 
 
 def test_a_pattern_key_with_a_new_value_opens_a_dispute(conn) -> None:
@@ -57,10 +57,20 @@ def test_a_pattern_key_with_a_new_value_opens_a_dispute(conn) -> None:
     assert _slot(conn, head.slot_id)[0:2] == (head.revision_id, "disputed")
 
 
-def test_newer_value_supersedes_and_moves_the_head(conn) -> None:
+def test_a_newer_stated_value_disputes_and_the_head_stays(conn) -> None:
+    old = _bind(conn, "f1", "", "2026-01-01", key=_explicit("monthly"))  # D-36, I-10
+    new = _bind(conn, "f2", "", "2026-11-14", key=_explicit("one big release"))
+    assert new.outcome == ss.DISPUTE and new.other_fact_id == "f1"
+    assert _slot(conn, new.slot_id)[0:2] == (old.revision_id, "disputed")
+    assert _state(conn, old.revision_id) == ("head", None)
+    reason = conn.execute("SELECT reason_code FROM slot_disputes").fetchone()[0]
+    assert reason == ss.EXPLICIT_VALUE_CHANGED
+
+
+def test_settling_b_supersedes_and_moves_the_head(conn) -> None:
     old = _bind(conn, "f1", "", "2026-01-01", key=_explicit("monthly"))
     new = _bind(conn, "f2", "", "2026-11-14", key=_explicit("one big release"))
-    assert new.outcome == ss.SUPERSEDE and new.other_fact_id == "f1"
+    assert ss.resolve_dispute(conn, new.dispute_id, "b", resolved_by="person:alex") == ("f1",)
     assert _slot(conn, new.slot_id)[0:2] == (new.revision_id, "current")
     assert _state(conn, old.revision_id) == ("superseded", new.revision_id)
 
@@ -78,12 +88,35 @@ def test_plural_slots_keep_both(conn) -> None:
     assert b.outcome == ss.COMPATIBLE and _slot(conn, a.slot_id)[0] == a.revision_id
 
 
-def test_an_older_value_joins_history_without_replacing(conn) -> None:
-    head = _bind(conn, "f1", "", "2026-11-14", key=_explicit("one big release"))
+def test_an_older_value_is_a_question_never_a_silent_label(conn) -> None:
+    head = _bind(conn, "f1", "", "2026-11-14", key=_explicit("one big release"))  # R-10
     past = _bind(conn, "f2", "", "2026-03-01", key=_explicit("weekly"))
-    assert past.outcome == ss.HISTORICAL
+    assert past.outcome == ss.DISPUTE
     assert _slot(conn, head.slot_id)[0] == head.revision_id
-    assert _state(conn, past.revision_id) == ("historical", head.revision_id)
+    assert _state(conn, past.revision_id) == ("disputed", None)
+    reason = conn.execute("SELECT reason_code FROM slot_disputes").fetchone()[0]
+    assert reason == ss.EXPLICIT_OLDER_VALUE
+
+
+def test_an_older_pattern_value_is_older_than_head(conn) -> None:
+    _bind(conn, "f1", "The release cadence of SLM is monthly", "2026-11-14")
+    _bind(conn, "f2", "The release cadence of SLM is weekly", "2026-03-01")
+    assert conn.execute("SELECT reason_code FROM slot_disputes").fetchone()[0] == (
+        ss.OLDER_THAN_HEAD)
+
+
+def test_an_older_value_settled_for_the_head_ends_where_the_next_value_began(conn) -> None:
+    first = _bind(conn, "f1", "", "2026-01-01", key=_explicit("weekly"))
+    mid = _bind(conn, "f2", "", "2026-06-01", key=_explicit("monthly"))
+    ss.resolve_dispute(conn, mid.dispute_id, "b", resolved_by="person:alex")
+    now = _bind(conn, "f3", "", "2026-11-01", key=_explicit("one big release"))
+    ss.resolve_dispute(conn, now.dispute_id, "b", resolved_by="person:alex")
+    late = _bind(conn, "f4", "", "2026-03-01", key=_explicit("fortnightly"))  # learned late
+    assert ss.resolve_dispute(conn, late.dispute_id, "a", resolved_by="person:alex") == ("f4",)
+    assert _state(conn, late.revision_id) == ("superseded", mid.revision_id)  # I-05
+    assert ss.successor_fact(conn, late.dispute_id, "f4") == "f2"
+    assert _slot(conn, now.slot_id)[0:2] == (now.revision_id, "current")
+    assert first.outcome == ss.HEAD
 
 
 def test_an_unconfident_key_opens_a_dispute_and_keeps_the_head(conn) -> None:

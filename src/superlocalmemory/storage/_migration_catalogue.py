@@ -232,6 +232,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M075_injection_receipts as _M075,
 )
+from superlocalmemory.storage.migrations import (
+    M076_session_end_stamps_are_flagged as _M076,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -496,4 +499,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # M075 adds injection receipts with propensities (D-14, D-22). Deferred: its
     # erase trigger watches atomic_facts.
     Migration(name=_M075.NAME, db_target="memory", ddl=_M075.DDL),
+    # M076 runs M062's stub pass again for reworded session ends that are only a
+    # date or time (R-31). Deferred, like M068: it reads atomic_facts.non_answer.
+    Migration(name=_M076.NAME, db_target="memory", ddl=_M076.DDL,
+              dependencies=(_M060.NAME, _M062.NAME)),
 ]

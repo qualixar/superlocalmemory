@@ -53,6 +53,9 @@ _EXPECTED_CORE = frozenset({
     "session_init", "close_session",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     "review_correction", "list_corrections",
+    # 4.2.30 (D-37): an agent meets disputes in recall and settles them with
+    # the user's answer, so the smallest profile can list and settle them.
+    "list_disputes", "settle_dispute",
     # v4.0.8 (#113): readable summaries. Read-only and off the hot path, so it
     # belongs in the smallest profile — an agent asking "what did I do
     # yesterday" should not need the full surface to get an answer.
@@ -70,7 +73,7 @@ def test_profile_core_exact():
     assert core == _EXPECTED_CORE, (
         f"core diff — extra: {core - _EXPECTED_CORE}, missing: {_EXPECTED_CORE - core}"
     )
-    assert len(core) == 19, f"core must be 19 names, got {len(core)}"
+    assert len(core) == 21, f"core must be 21 names, got {len(core)}"
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +108,7 @@ def test_profile_code_exact():
     assert code == expected, (
         f"code diff — extra: {code - expected}, missing: {expected - code}"
     )
-    assert len(code) == 39, f"code must be 39 names, got {len(code)}"
+    assert len(code) == 41, f"code must be 41 names, got {len(code)}"
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ _EXPECTED_FULL_BASE = frozenset({
     "record_cognitive_turn", "finalize_cognitive_turn",
     "observe_bounded_loop_evidence",
     "review_correction", "list_corrections",
+    "list_disputes", "settle_dispute",
     "evolve_skill", "skill_health", "skill_lineage", "switch_profile",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # 3.8.0: bounded-loop tools (CLI + command + MCP).
@@ -152,7 +156,7 @@ def test_profile_full_exact():
     assert full == _EXPECTED_FULL, (
         f"full diff — extra: {full - _EXPECTED_FULL}, missing: {_EXPECTED_FULL - full}"
     )
-    assert len(full) == 58, f"full must be 58 names, got {len(full)}"
+    assert len(full) == 60, f"full must be 60 names, got {len(full)}"
     # Must ⊇ core memory names
     core = mod._PROFILE_DEFINITIONS["core"]
     assert core <= full, f"full must be a superset of core; missing from full: {core - full}"
@@ -179,7 +183,7 @@ def test_profile_power_exact():
     assert power == _EXPECTED_POWER, (
         f"power diff — extra: {power - _EXPECTED_POWER}, missing: {_EXPECTED_POWER - power}"
     )
-    assert len(power) == 70, f"power must be 70 names, got {len(power)}"
+    assert len(power) == 72, f"power must be 72 names, got {len(power)}"
     full = mod._PROFILE_DEFINITIONS["full"]
     assert full <= power, f"power must be a superset of full; missing: {full - power}"
 

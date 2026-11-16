@@ -142,6 +142,9 @@ remember(
   idempotency_key: str = "",# replaying the same key will not store a second copy
   kind: str = "",      # what sort of memory this is; see "Say what kind it is"
   replaces: str = None,# fact_id (or memory_id) of the earlier memory this one replaces
+  slot: str = "",      # "subject/relation[/qualifier]": the one thing this states a value of
+  slot_value: str = "",# that value in a few words; the same value later changes nothing
+  source_file: str = "",# absolute path of the file this was learned from (recall flags changes)
   profile_id: str = "",# write to another existing profile; "" = the active one
   agent_id: str = "mcp_client", # attribution; resolved from the connection when left alone
 )
@@ -260,6 +263,27 @@ reject: a rejected case counts as decided, and a memory in a decided case can
 never be deleted, so rejecting thousands would lock their memories for good.
 Never reject cases in bulk to tidy the list. To cut the guesses at the source,
 see `slm-status` ("Too many model calls").
+
+### 6b. Values that change: name the slot, and the file it came from
+
+For a value a later save may change (a port, a version, a release cadence, a
+preference), name the slot and the value:
+
+```
+remember(content="SLM now ships one big release a month",
+         slot="SLM/release cadence", slot_value="monthly")
+```
+
+A later memory with the same slot and the same value is a restatement and
+changes nothing. A different value does not silently replace the old one: it
+opens a dispute, and the user's answer (or a checked rule) settles it. A slot
+with no value only groups memories and never retires anything.
+
+When the fact was read from a local file, pass `source_file` with its absolute
+path. SuperLocalMemory fingerprints the file at once; a later recall marks the
+memory `source: changed` or `missing` when the file changes or goes, so the
+next agent reads it again before relying on it. CLI: `--slot`, `--slot-value`,
+`--source-file`.
 
 ### 7. One fact per call
 
