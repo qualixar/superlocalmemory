@@ -13,6 +13,7 @@ from superlocalmemory.evaluation.calibration import (
 )
 from superlocalmemory.evaluation.gold_presence import check_presence, presence_summary
 from superlocalmemory.evaluation.judge_permutation import check as permutation_check
+from superlocalmemory.evaluation.question_eval import evaluate as evaluate_question
 
 __all__ = [
     "CalibrationArtifactError",
@@ -24,5 +25,6 @@ __all__ = [
     "check_presence",
     "presence_summary",
     "compute_calibration_metrics",
+    "evaluate_question",
     "permutation_check",
 ]

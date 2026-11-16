@@ -1,0 +1,28 @@
+{"id": "adm-01", "texts": {"memory": "Alex decided to use PostgreSQL instead of MySQL for the analytics service."}, "label": "keep"}
+{"id": "adm-02", "texts": {"memory": "The client asked for weekly status reports every Friday."}, "label": "keep"}
+{"id": "adm-03", "texts": {"memory": "Sam prefers short meeting notes with action items at the top."}, "label": "keep"}
+{"id": "adm-04", "texts": {"memory": "The launch is planned for 14 March, after the security review."}, "label": "keep"}
+{"id": "adm-05", "texts": {"memory": "Production deploys must go through the release checklist."}, "label": "keep"}
+{"id": "adm-06", "texts": {"memory": "Priya's team owns the billing service."}, "label": "keep"}
+{"id": "adm-07", "texts": {"memory": "We agreed to drop support for Python 3.9 in the next major release."}, "label": "keep"}
+{"id": "adm-08", "texts": {"memory": "The office moves to the new building on 1 June."}, "label": "keep"}
+{"id": "adm-09", "texts": {"memory": "The root cause of the outage was an expired TLS certificate."}, "label": "keep"}
+{"id": "adm-10", "texts": {"memory": "Alex is vegetarian."}, "label": "keep"}
+{"id": "adm-11", "texts": {"memory": "Session ended at 17:06."}, "label": "bookkeeping"}
+{"id": "adm-12", "texts": {"memory": "[2026-05-04 10:12:33] INFO worker started pid=4412"}, "label": "bookkeeping"}
+{"id": "adm-13", "texts": {"memory": "Tool call: read_file returned 200 lines."}, "label": "bookkeeping"}
+{"id": "adm-14", "texts": {"memory": "Checkpoint saved."}, "label": "bookkeeping"}
+{"id": "adm-15", "texts": {"memory": "Heartbeat ok at 09:00:01."}, "label": "bookkeeping"}
+{"id": "adm-16", "texts": {"memory": "Command exited with code 0."}, "label": "bookkeeping"}
+{"id": "adm-17", "texts": {"memory": "Synced 14 files."}, "label": "bookkeeping"}
+{"id": "adm-18", "texts": {"memory": "Context window at 61 percent."}, "label": "bookkeeping"}
+{"id": "adm-19", "texts": {"memory": "Started session 8f2c."}, "label": "bookkeeping"}
+{"id": "adm-20", "texts": {"memory": "Cache warmed in 1.2 s."}, "label": "bookkeeping"}
+{"id": "adm-21", "texts": {"memory": "Running the test suite now."}, "label": "transient"}
+{"id": "adm-22", "texts": {"memory": "I'm looking at the login bug at the moment."}, "label": "transient"}
+{"id": "adm-23", "texts": {"memory": "Waiting for the build to finish."}, "label": "transient"}
+{"id": "adm-24", "texts": {"memory": "Just opened the pull request page."}, "label": "transient"}
+{"id": "adm-25", "texts": {"memory": "Currently reading the config file."}, "label": "transient"}
+{"id": "adm-26", "texts": {"memory": "Thinking about how to name this function right now."}, "label": "transient"}
+{"id": "adm-27", "texts": {"memory": "The deploy is in progress."}, "label": "transient"}
+{"id": "adm-28", "texts": {"memory": "I'm typing the reply to Sam now."}, "label": "transient"}

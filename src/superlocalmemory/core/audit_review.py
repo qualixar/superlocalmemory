@@ -49,6 +49,17 @@ PLAIN: dict[str, dict] = {
             (CANNOT_TELL, "I can't tell"),
         ),
     },
+    # W2: the same time order as the judge's question (``a`` is the older memory).
+    "DUPLICATE": {
+        "question": "Memory A was saved before memory B. Do they hold the same information?",
+        "options": (
+            ("duplicate", "Yes: keeping either one loses nothing"),
+            ("a_contains_b", "A holds everything in B and more"),
+            ("b_contains_a", "B holds everything in A and more"),
+            ("different", "Each holds something the other does not"),
+            (CANNOT_TELL, "I can't tell"),
+        ),
+    },
 }
 
 _PENDING = """

@@ -1,0 +1,24 @@
+{"id": "cit-01", "texts": {"sentence": "The release shipped on 4 May.", "source": "Release 2.3 went out to all customers on 4 May."}, "label": "supported"}
+{"id": "cit-02", "texts": {"sentence": "Priya leads payments.", "source": "Priya Shah has led the payments team since January."}, "label": "supported"}
+{"id": "cit-03", "texts": {"sentence": "Backups are kept for 30 days.", "source": "Nightly backups are retained for 30 days in cold storage."}, "label": "supported"}
+{"id": "cit-04", "texts": {"sentence": "The outage was caused by an expired certificate.", "source": "Root cause: the TLS certificate on the gateway expired at 03:10."}, "label": "supported"}
+{"id": "cit-05", "texts": {"sentence": "Deploys need two approvals.", "source": "Every production deploy requires approval from two reviewers."}, "label": "supported"}
+{"id": "cit-06", "texts": {"sentence": "The API allows 600 requests per minute.", "source": "Rate limit: 600 requests per minute per key."}, "label": "supported"}
+{"id": "cit-07", "texts": {"sentence": "Alex moved to Lisbon in March to join the design team.", "source": "Alex moved to Lisbon in March."}, "label": "partial"}
+{"id": "cit-08", "texts": {"sentence": "The release shipped on 4 May and fixed the login bug.", "source": "Release 2.3 shipped on 4 May."}, "label": "partial"}
+{"id": "cit-09", "texts": {"sentence": "Backups run nightly at 02:00 and are encrypted.", "source": "Backups run nightly at 02:00 UTC."}, "label": "partial"}
+{"id": "cit-10", "texts": {"sentence": "Priya leads payments and reports to Sam.", "source": "Priya leads the payments team."}, "label": "partial"}
+{"id": "cit-11", "texts": {"sentence": "The contract renews in June at a 5 percent higher price.", "source": "The contract renews in June."}, "label": "partial"}
+{"id": "cit-12", "texts": {"sentence": "The outage lasted two hours and affected EU customers.", "source": "The outage lasted two hours."}, "label": "partial"}
+{"id": "cit-13", "texts": {"sentence": "Sam approved the budget.", "source": "The budget meeting is scheduled for Thursday."}, "label": "unsupported"}
+{"id": "cit-14", "texts": {"sentence": "The team chose Redis for caching.", "source": "The team discussed several caching options last week."}, "label": "unsupported"}
+{"id": "cit-15", "texts": {"sentence": "Alex speaks Portuguese.", "source": "Alex moved to Lisbon in March."}, "label": "unsupported"}
+{"id": "cit-16", "texts": {"sentence": "The mobile app has 10,000 users.", "source": "The mobile app supports iOS 17 and Android 14."}, "label": "unsupported"}
+{"id": "cit-17", "texts": {"sentence": "The migration finished early.", "source": "The migration is planned for the weekend."}, "label": "unsupported"}
+{"id": "cit-18", "texts": {"sentence": "Priya joined in 2019.", "source": "Priya leads the payments team."}, "label": "unsupported"}
+{"id": "cit-19", "texts": {"sentence": "The release shipped on 4 May.", "source": "Release 2.3 shipped on 18 May after a two-week delay."}, "label": "contradicted"}
+{"id": "cit-20", "texts": {"sentence": "Backups are kept for 30 days.", "source": "Backups are kept for 7 days."}, "label": "contradicted"}
+{"id": "cit-21", "texts": {"sentence": "Deploys need one approval.", "source": "Every production deploy requires two approvals."}, "label": "contradicted"}
+{"id": "cit-22", "texts": {"sentence": "The standup is at 9:30.", "source": "The standup moved to 10:00 from this week."}, "label": "contradicted"}
+{"id": "cit-23", "texts": {"sentence": "Sam leads the search team.", "source": "Sam left the search team; Priya leads it now."}, "label": "contradicted"}
+{"id": "cit-24", "texts": {"sentence": "The API allows 600 requests per minute.", "source": "The API rate limit is 60 requests per minute."}, "label": "contradicted"}

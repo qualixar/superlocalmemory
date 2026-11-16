@@ -1,0 +1,20 @@
+{"id": "inj-01", "texts": {"query": "What time is the team standup?", "memory": "The team standup is at 9:30 every weekday."}, "label": "helps"}
+{"id": "inj-02", "texts": {"query": "Which database does staging use?", "memory": "Staging runs PostgreSQL 16."}, "label": "helps"}
+{"id": "inj-03", "texts": {"query": "Who leads the payments team?", "memory": "Priya leads the payments team."}, "label": "helps"}
+{"id": "inj-04", "texts": {"query": "How long are backups kept?", "memory": "Nightly backups are kept for 30 days."}, "label": "helps"}
+{"id": "inj-05", "texts": {"query": "What caused last week's outage?", "memory": "The outage was caused by an expired TLS certificate."}, "label": "helps"}
+{"id": "inj-06", "texts": {"query": "How many approvals does a deploy need?", "memory": "Production deploys need two approvals."}, "label": "helps"}
+{"id": "inj-07", "texts": {"query": "What is the API rate limit?", "memory": "The API rate limit is 600 requests per minute."}, "label": "helps"}
+{"id": "inj-08", "texts": {"query": "What time is the team standup?", "memory": "Sam is allergic to peanuts."}, "label": "neutral"}
+{"id": "inj-09", "texts": {"query": "Which database does staging use?", "memory": "The office moves to the new building on 1 June."}, "label": "neutral"}
+{"id": "inj-10", "texts": {"query": "Who leads the payments team?", "memory": "The mobile app supports iOS 17."}, "label": "neutral"}
+{"id": "inj-11", "texts": {"query": "How long are backups kept?", "memory": "Alex prefers tabs over spaces."}, "label": "neutral"}
+{"id": "inj-12", "texts": {"query": "What caused last week's outage?", "memory": "Invoices go out on the first of each month."}, "label": "neutral"}
+{"id": "inj-13", "texts": {"query": "How many approvals does a deploy need?", "memory": "The design review is on Thursday."}, "label": "neutral"}
+{"id": "inj-14", "texts": {"query": "Write a haiku about autumn.", "memory": "The staging server is at staging.example.com."}, "label": "neutral"}
+{"id": "inj-15", "texts": {"query": "What time is the team standup? (It moved to 10:00 this month.)", "memory": "The team standup is at 9:30 every weekday."}, "label": "misleads"}
+{"id": "inj-16", "texts": {"query": "Who leads the search team now that Sam has left it?", "memory": "Sam leads the search team."}, "label": "misleads"}
+{"id": "inj-17", "texts": {"query": "What is the current API rate limit after the January change to 60 per minute?", "memory": "The API rate limit is 600 requests per minute."}, "label": "misleads"}
+{"id": "inj-18", "texts": {"query": "How long are backups kept since the policy changed to 7 days?", "memory": "Nightly backups are kept for 30 days."}, "label": "misleads"}
+{"id": "inj-19", "texts": {"query": "Which Python versions do we support after dropping 3.9?", "memory": "We support Python 3.9 to 3.12."}, "label": "misleads"}
+{"id": "inj-20", "texts": {"query": "Where is Alex based now that the Lisbon move was cancelled?", "memory": "Alex moved to Lisbon in March."}, "label": "misleads"}

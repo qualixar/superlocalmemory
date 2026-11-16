@@ -1,0 +1,28 @@
+{"id": "dup-01", "texts": {"a": "The team standup is at 9:30 every weekday.", "b": "Daily standup happens at 9:30 on weekdays."}, "label": "duplicate"}
+{"id": "dup-02", "texts": {"a": "Alex prefers tabs over spaces in Python files.", "b": "In Python files Alex likes tabs, not spaces."}, "label": "duplicate"}
+{"id": "dup-03", "texts": {"a": "The staging database runs PostgreSQL 16.", "b": "Staging DB: PostgreSQL 16."}, "label": "duplicate"}
+{"id": "dup-04", "texts": {"a": "Sam's laptop is a ThinkPad X1 Carbon.", "b": "Sam uses a ThinkPad X1 Carbon laptop."}, "label": "duplicate"}
+{"id": "dup-05", "texts": {"a": "The release branch is cut every second Tuesday.", "b": "Every other Tuesday we cut the release branch."}, "label": "duplicate"}
+{"id": "dup-06", "texts": {"a": "Invoices are sent on the first of each month.", "b": "On the 1st of every month invoices go out."}, "label": "duplicate"}
+{"id": "dup-07", "texts": {"a": "The API rate limit is 600 requests per minute.", "b": "Rate limit for the API: 600 requests a minute."}, "label": "duplicate"}
+{"id": "dup-08", "texts": {"a": "Priya leads the payments team.", "b": "The payments team is led by Priya."}, "label": "duplicate"}
+{"id": "dup-09", "texts": {"a": "The office wifi network is called Harbor.", "b": "The office wifi network is called Harbor and its password rotates every quarter."}, "label": "b_contains_a"}
+{"id": "dup-10", "texts": {"a": "Deploys need two approvals.", "b": "Deploys need two approvals, and one must be from the on-call engineer."}, "label": "b_contains_a"}
+{"id": "dup-11", "texts": {"a": "Alex is moving to Lisbon.", "b": "Alex is moving to Lisbon in March to join the design team there."}, "label": "b_contains_a"}
+{"id": "dup-12", "texts": {"a": "The build uses Node 22.", "b": "The build uses Node 22 with pnpm 9 and runs on Ubuntu runners."}, "label": "b_contains_a"}
+{"id": "dup-13", "texts": {"a": "Backups run nightly at 02:00 UTC and are kept for 30 days in cold storage.", "b": "Backups run nightly at 02:00 UTC."}, "label": "a_contains_b"}
+{"id": "dup-14", "texts": {"a": "The mobile app supports iOS 17 and Android 14, with tablets added in May.", "b": "The mobile app supports iOS 17 and Android 14."}, "label": "a_contains_b"}
+{"id": "dup-15", "texts": {"a": "Sam is allergic to peanuts and shellfish.", "b": "Sam is allergic to peanuts."}, "label": "a_contains_b"}
+{"id": "dup-16", "texts": {"a": "The contract renews in June and the price rises 5 percent.", "b": "The contract renews in June."}, "label": "a_contains_b"}
+{"id": "dup-17", "texts": {"a": "The team standup is at 9:30.", "b": "The team standup is at 10:00."}, "label": "different"}
+{"id": "dup-18", "texts": {"a": "The staging database runs PostgreSQL 16.", "b": "The production database runs PostgreSQL 15."}, "label": "different"}
+{"id": "dup-19", "texts": {"a": "Priya leads the payments team.", "b": "Priya leads the search team."}, "label": "different"}
+{"id": "dup-20", "texts": {"a": "Release 2.3 shipped on 4 May.", "b": "Release 2.4 shipped on 18 May."}, "label": "different"}
+{"id": "dup-21", "texts": {"a": "Alex prefers tabs over spaces.", "b": "Sam prefers spaces over tabs."}, "label": "different"}
+{"id": "dup-22", "texts": {"a": "The rate limit is 600 requests per minute.", "b": "The rate limit is 60 requests per minute."}, "label": "different"}
+{"id": "dup-23", "texts": {"a": "Invoices are sent on the first of each month.", "b": "Payroll runs on the last Friday of each month."}, "label": "different"}
+{"id": "dup-24", "texts": {"a": "The status of ticket 482 is open.", "b": "The status of ticket 482 is closed."}, "label": "different"}
+{"id": "dup-25", "texts": {"a": "The meeting with the vendor was on Monday.", "b": "The meeting with the vendor was on Thursday."}, "label": "different"}
+{"id": "dup-26", "texts": {"a": "The design review found two accessibility issues.", "b": "The design review found no accessibility issues."}, "label": "different"}
+{"id": "dup-27", "texts": {"a": "We chose Redis for the session cache.", "b": "We chose Redis for the job queue."}, "label": "different"}
+{"id": "dup-28", "texts": {"a": "Sam's birthday is 12 August.", "b": "Sam's work anniversary is 12 August."}, "label": "different"}
