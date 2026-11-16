@@ -282,8 +282,31 @@ def record_outcome_event(
         from superlocalmemory.storage.retention_access import record_use_clock
 
         record_use_clock(conn, report.profile_id, report.fact_ids, outcome_id, stamp)
+    if cur.rowcount == 1:
+        _join_usage(conn, report, reward, current)
     attributed = bool(report.recall_query_id) and "recall_query_id" in present
     return OutcomeWrite(outcome_id, reward, cur.rowcount == 1, attributed)
+
+
+def _join_usage(conn, report: OutcomeReport, reward: float, current: datetime) -> int:
+    """W3-2: tie a new report to the deliveries that answered its question (by
+    the keyed query digest), so explicit outcomes are read against what was
+    delivered. Never raises: the report itself is what this write is for."""
+    try:
+        from superlocalmemory.outcomes import usage
+
+        row = conn.execute("PRAGMA database_list").fetchone()
+        if not row or not row[2]:
+            return 0  # an in-memory store has no key beside it
+        home = Path(row[2]).parent
+        return usage.join_question(
+            conn, profile_id=report.profile_id,
+            query_digest=usage.query_digest(home, report.query),
+            fact_ids=report.fact_ids, signal=usage.EXPLICIT + report.outcome,
+            observed_at=usage.stamp(current), value=reward)
+    except Exception as exc:
+        logger.info("outcome usage join skipped: %s", exc)
+        return 0
 
 
 def _insert_report(conn, report, outcome_id, reward, stamp, fingerprint):

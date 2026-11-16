@@ -35,12 +35,12 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
-from superlocalmemory.outcomes import randomiser
+from superlocalmemory.outcomes import randomiser, usage
 from superlocalmemory.outcomes.randomiser import Candidate, Choice
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def _insert(conn: sqlite3.Connection, p: DeliveryPlan, delivered: frozenset[str]
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (p.delivery_id, p.profile_id, p.session_id, p.client, p.path, randomiser.DESIGN,
          p.holdout_state, p.epsilon, a.eligible_count, a.withhold_draw, a.pick_draw, p.key_id,
-         p.query_digest, len(a.choices), at.isoformat()))
+         p.query_digest, len(a.choices), usage.stamp(at)))
     conn.executemany(
         "INSERT INTO injection_receipts (delivery_id, fact_id, profile_id, role, position,"
         " score, eligible, exclusion, propensity, included, delivered)"
@@ -267,6 +267,9 @@ class Pull:
     #: (fact id, score) per result, in the order shown; score may be None.
     results: tuple[tuple[str, float | None], ...]
     client: str | None = None
+    #: When the answer left, not when the writer got to it: a usage signal is
+    #: joined to deliveries at or before it, so a late write must not move this.
+    at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 def record_pull(pull: Pull, *, flags=None) -> bool:
@@ -287,7 +290,8 @@ def record_pull(pull: Pull, *, flags=None) -> bool:
             logger.warning("pull receipt refused: %s withheld on %s", len(plan_.withheld),
                            pull.path)
             return False
-        return record(pull.db_path, plan_, frozenset(c.fact_id for c in candidates))
+        return record(pull.db_path, plan_, frozenset(c.fact_id for c in candidates),
+                      now=pull.at)
     except Exception as exc:
         logger.info("pull receipt skipped: %s", exc)
         return False

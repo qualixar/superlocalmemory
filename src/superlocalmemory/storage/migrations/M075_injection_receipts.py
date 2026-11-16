@@ -13,6 +13,12 @@ decided it are on the delivery row, with the id of the key that made them, so
 every decision can be checked later. No memory text and no query text (the
 query is a keyed digest). The causal estimates of WS-3 (M-12) read only these rows.
 
+``injection_usage`` (W3-2, amended in place under D-29: M075 is unshipped) holds
+one row per sign that a delivered memory was used: the agent echoed its marker
+in a later tool call, or an explicit outcome named it. Each row points at the
+delivery it came from, so usage is always read against what was delivered and
+with which propensity. Ids, signal names and numbers only.
+
 CHECKs hold invariants only (ranges, 0/1, cross-column rules), never lists of
 names, which SQLite could not extend after release (W0-29). Erasing a fact
 erases its receipts (I-11); a delivery row holds no fact id and stays.
@@ -66,7 +72,17 @@ CREATE TABLE IF NOT EXISTS injection_receipts (
     CHECK (eligible = 1 OR (propensity = 1 AND included = 1)),
     CHECK (included = 1 OR delivered = 0)
 );
-CREATE INDEX IF NOT EXISTS idx_injection_receipts_fact ON injection_receipts (fact_id)
+CREATE INDEX IF NOT EXISTS idx_injection_receipts_fact ON injection_receipts (fact_id);
+CREATE TABLE IF NOT EXISTS injection_usage (
+    delivery_id TEXT NOT NULL,
+    fact_id     TEXT NOT NULL,
+    profile_id  TEXT NOT NULL,
+    signal      TEXT NOT NULL,
+    value       REAL,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY (delivery_id, fact_id, signal)
+);
+CREATE INDEX IF NOT EXISTS idx_injection_usage_fact ON injection_usage (fact_id)
 """
 
 _FACT_TRIGGER = """
@@ -74,6 +90,7 @@ CREATE TRIGGER IF NOT EXISTS trg_injection_receipts_fact_erased
 AFTER DELETE ON atomic_facts
 BEGIN
     DELETE FROM injection_receipts WHERE fact_id = OLD.fact_id;
+    DELETE FROM injection_usage WHERE fact_id = OLD.fact_id;
 END
 """
 
@@ -93,10 +110,16 @@ def apply(conn: sqlite3.Connection) -> None:
 
 def verify(conn: sqlite3.Connection) -> bool:
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-    if not {"injection_deliveries", "injection_receipts"} <= names:
+    if not {"injection_deliveries", "injection_receipts", "injection_usage"} <= names:
         return False
-    return not _has_facts(conn) or "trg_injection_receipts_fact_erased" in names
+    if not _has_facts(conn):
+        return True
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='trigger' "
+                       "AND name='trg_injection_receipts_fact_erased'").fetchone()
+    return bool(sql) and "injection_usage" in sql[0]
 
 
 def repair(conn: sqlite3.Connection) -> None:
+    """Build what is missing; an erase trigger from before W3-2 is rebuilt."""
+    conn.execute("DROP TRIGGER IF EXISTS trg_injection_receipts_fact_erased")
     apply(conn)

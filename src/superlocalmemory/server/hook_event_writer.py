@@ -195,6 +195,51 @@ def _apply_reward(db: Path, event) -> None:
         model.close()
 
 
+#: Hook signal -> usage signal (W3-2). ``requery`` arrives on an outcome, not a fact.
+_USAGE_SIGNAL = {"edit": "marker_edit", "dwell_ms": "marker_tool", "cite": "cite",
+                 "requery": "requery"}
+
+
+def _join_usage(conn: sqlite3.Connection, events: list) -> int:
+    """Tie this batch's usage signals to the deliveries they came from, in the
+    batch's own transaction (so a replayed batch adds nothing). Never raises
+    for a store without the outcome tables."""
+    from superlocalmemory.outcomes import usage
+
+    joined = 0
+    for event in events:
+        signal = _USAGE_SIGNAL.get(getattr(event, "signal_name", ""))
+        if signal is None:
+            continue
+        value = event.signal_value
+        number = float(value) if isinstance(value, (int, float)) and not isinstance(
+            value, bool) else None
+        if isinstance(event, FactSignalIn):
+            session, facts = event.session_id, list(event.fact_ids)
+        elif isinstance(event, OutcomeSignalIn):
+            session, facts = _pending_scope(conn, event.outcome_id)
+        else:
+            continue
+        if session and facts:
+            joined += usage.join_session(
+                conn, profile_id=event.profile_id, session_id=session, fact_ids=facts,
+                signal=signal, observed_at=usage.from_ms(event.observed_ms), value=number)
+    return joined
+
+
+def _pending_scope(conn: sqlite3.Connection, outcome_id: str) -> tuple[str, list[str]]:
+    """(session, fact ids) of the recall an outcome signal is about, or ("", [])."""
+    try:
+        row = conn.execute("SELECT session_id, fact_ids_json FROM pending_outcomes "
+                           "WHERE outcome_id = ?", (outcome_id,)).fetchone()
+        facts = json.loads(row[1]) if row else []
+    except (sqlite3.OperationalError, ValueError, TypeError):
+        return "", []
+    if not row or not isinstance(facts, list):
+        return "", []
+    return str(row[0] or ""), [str(f) for f in facts if f]
+
+
 class _SeenIds:
     """Bounded insertion-ordered set of event ids already written."""
 
@@ -329,6 +374,7 @@ class HookEventWriter:
                     _apply_reward(self._db, event)
         with memory_write(self._db) as conn:
             _insert_tool_events(conn, [e for e in fresh if isinstance(e, ToolEventIn)])
+            _join_usage(conn, rewards)
             _set_cursor(conn, key, cursor)
         self._seen.add_all(e.event_id for e in fresh)
         return DrainReport(applied=len(fresh), duplicates=len(events) - len(fresh))
