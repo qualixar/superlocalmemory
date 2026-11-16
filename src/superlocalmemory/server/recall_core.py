@@ -139,6 +139,9 @@ class RecallCall:
     #: 4.1.25: the monotonic instant the daemon stops waiting for the engine;
     #: the answer check, which has its own budget, never runs past it.
     answer_deadline: float | None = None
+    #: W3-1: which client asked (``mcp``, ``cli``, ``hook``); names the
+    #: injection receipt's path. Anything else is an HTTP caller.
+    via: str = ""
 
 
 def effective_budget_s(call: RecallCall) -> float:
@@ -378,9 +381,53 @@ async def run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:
     """
     from superlocalmemory.server import recall_cache
 
-    return await recall_cache.recall_once(
+    envelope = await recall_cache.recall_once(
         call, call.profile_id or getattr(engine, "profile_id", ""),
         lambda: _run_recall(engine, call, app_state=app_state))
+    _receipt(engine, call, envelope)
+    return envelope
+
+
+#: The receipt path for each client that names itself (W3-1, D-22).
+_VIA_PATHS = {"mcp": "mcp_recall", "cli": "cli_recall", "hook": "hook_recall"}
+
+
+def receipt_path(call: RecallCall) -> str | None:
+    """The delivery path of this answer, or None when a person, not an agent, reads it."""
+    from superlocalmemory.core.answer_check_history import (
+        ORIGIN_DASHBOARD,
+        ORIGIN_VIEW_DASHBOARD,
+        VIEW_ORIGINS,
+    )
+
+    if call.origin in (ORIGIN_DASHBOARD, ORIGIN_VIEW_DASHBOARD):
+        return None
+    if call.origin in VIEW_ORIGINS:
+        return "view_recall"
+    return _VIA_PATHS.get(call.via, "http_recall")
+
+
+def _receipt(engine: Any, call: RecallCall, envelope: Any) -> None:
+    """Queue this answer's injection receipt: one per delivery, even when identical
+    questions shared one run. Off the answer's path; never raises."""
+    try:
+        if not isinstance(envelope, dict) or not envelope.get("ok"):
+            return
+        path = receipt_path(call)
+        if path is None:
+            return
+        from superlocalmemory.outcomes import receipts
+
+        pull = receipts.pull_from_results(
+            engine, path=path,
+            profile_id=str(envelope.get("profile") or call.profile_id
+                           or getattr(engine, "profile_id", "")),
+            session_id=call.session_id, query=call.query,
+            results=envelope.get("results"), client=call.agent_id)
+        if pull is not None:
+            receipts.submit_pull(pull)
+    except Exception as exc:  # a receipt is never worth a failed recall
+        logger.info("recall receipt skipped: %s", exc)
 
 
 async def _run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:

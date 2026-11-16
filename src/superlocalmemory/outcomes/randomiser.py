@@ -41,10 +41,15 @@ EPSILON_MAX = 0.10
 #: This design's share of eligible deliveries that lose one memory (D-33).
 EPSILON = 0.10
 
-#: Delivery paths that write receipts (W0: the two session-start pushes).
-PATHS = frozenset({"session_init", "session_context"})
 #: Paths whose eligible candidates are randomised: pushes only, never a pull.
 RANDOMISED_PATHS = frozenset({"session_init", "session_context"})
+#: Pull paths (W3-1): an agent asked, so nothing is withheld (each candidate is
+#: logged at propensity 1, ``path_not_randomised``), but every answer is on record.
+PULL_PATHS = frozenset({"mcp_recall", "cli_recall", "http_recall", "hook_recall",
+                        "view_recall"})
+#: Delivery paths that write receipts: every surface that puts memories in an
+#: agent's context (D-22). A person reading the dashboard is not a delivery.
+PATHS = RANDOMISED_PATHS | PULL_PATHS
 
 #: Candidate roles, and the reason a role is never withheld.
 ELIGIBLE_ROLES = frozenset({"recall", "recent", "session_summary"})
@@ -141,5 +146,5 @@ def choose(key: bytes, delivery_id: str, path: str, candidates: Iterable[Candida
 
 
 __all__ = ["DESIGN", "ELIGIBLE_ROLES", "EPSILON", "EPSILON_MAX", "HOLDOUT_OFF",
-           "NEVER_WITHHELD", "NOT_RANDOMISED_PATH", "PATHS", "RANDOMISED_PATHS", "ROLES",
-           "Assignment", "Candidate", "Choice", "choose", "draw"]
+           "NEVER_WITHHELD", "NOT_RANDOMISED_PATH", "PATHS", "PULL_PATHS", "RANDOMISED_PATHS",
+           "ROLES", "Assignment", "Candidate", "Choice", "choose", "draw"]

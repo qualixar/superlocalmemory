@@ -2279,7 +2279,8 @@ def cmd_recall(args: Namespace) -> None:
                     "GET",
                     f"/recall?q={quote(args.query)}&limit={args.limit}"
                     f"&session_id={quote(session_id)}{fast_qs}{scope_qs}{window_qs}{as_of_qs}"
-                    f"{known_as_of_qs}{valid_at_qs}{unknown_qs}{facet_qs}{kind_qs}",
+                    f"{known_as_of_qs}{valid_at_qs}{unknown_qs}{facet_qs}{kind_qs}"
+                    "&via=cli",  # W3-1: names the injection receipt's path
                     preserve_server_error=True,
                 )
             except DaemonServerError as busy_exc:

@@ -115,9 +115,9 @@ def test_the_proxy_sends_budget_s_only_when_given(monkeypatch):
                         lambda method, path, *a, **k: paths.append(path) or {"results": []})
     proxy = _daemon_proxy.DaemonPoolProxy(port=8765)
     proxy.recall("q")
-    assert paths[-1] == "/recall?q=q&limit=10&session_id="  # byte-identical to before
+    assert paths[-1] == "/recall?q=q&limit=10&session_id=&via=mcp"  # + the W3-1 path name
     proxy.recall("q", budget_s=7.25)
-    assert paths[-1] == "/recall?q=q&limit=10&session_id=&budget_s=7.250"
+    assert paths[-1] == "/recall?q=q&limit=10&session_id=&via=mcp&budget_s=7.250"
 
 
 @pytest.mark.asyncio

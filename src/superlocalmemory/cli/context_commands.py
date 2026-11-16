@@ -46,7 +46,7 @@ def _daemon_recall(q: str, limit: int, _profile: str, *, project: str = "") -> l
         return []
     with context_load():
         raw = DaemonPoolProxy(port=_get_port()).recall(
-            q, limit=limit, project=project or "", answer_check=False)
+            q, limit=limit, project=project or "", answer_check=False, via="cli")
     if not isinstance(raw, dict) or raw.get("ok") is False:
         return []
     return [{"text": r.get("content", ""), "score": float(r.get("score") or 0.0)}

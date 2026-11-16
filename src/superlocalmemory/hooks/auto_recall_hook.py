@@ -190,6 +190,7 @@ def _fallback_response(query: str, limit: int, session_id: str) -> dict | None:
             # 4.1.25: a hook injects a glance (one-line previews); the agent
             # asks recall or expand for more.
             "depth": "0",
+            "via": "hook",  # W3-1: names the injection receipt's path
         })
         data = daemon_request("GET", f"/recall?{params}", timeout_seconds=5.0)
         if not isinstance(data, dict):

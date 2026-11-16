@@ -103,6 +103,7 @@ class DaemonPoolProxy:
         include_related: bool = False,
         depth: int | None = None,
         max_tokens: int | None = None,
+        via: str = "mcp",
     ) -> dict[str, Any]:
         if self._unavailable:
             return self._unavailable_response()
@@ -110,6 +111,7 @@ class DaemonPoolProxy:
             "q": query,
             "limit": limit,
             "session_id": session_id or "",
+            "via": via,  # W3-1: names the injection receipt's path
         }
         # Per-request profile routing (spec section 3/5): the anchor is only
         # serialized when the caller set it — an unset profile_id keeps the

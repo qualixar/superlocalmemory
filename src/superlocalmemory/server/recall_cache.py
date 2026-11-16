@@ -36,7 +36,7 @@ RECALL_CACHE_TTL_S = 8.0
 RECALL_CACHE_ENTRIES = 512
 
 #: Per-call values that never change what is retrieved.
-_NOT_IN_KEY = frozenset({"answer_deadline", "origin", "budget_s"})
+_NOT_IN_KEY = frozenset({"answer_deadline", "origin", "budget_s", "via"})
 
 _cache = LruCache(max_size=RECALL_CACHE_ENTRIES, ttl_seconds=RECALL_CACHE_TTL_S,
                   thread_safe=True)

@@ -333,13 +333,9 @@ def _render_session(engine, named, response, pins, standing, relevant, limit):
 
 def _outcome_paths(engine):
     """(SLM home, memory.db) of a real engine, or (None, None)."""
-    from pathlib import Path
+    from superlocalmemory.outcomes.receipts import engine_paths
 
-    home = getattr(getattr(engine, "config", None), "base_dir", None)
-    db_path = getattr(getattr(engine, "db", None), "db_path", None)
-    if isinstance(home, Path) and isinstance(db_path, Path):
-        return home, db_path
-    return None, None
+    return engine_paths(engine)
 
 
 def _deliver_session(engine, named, pid, sid, query, response, pins, standing, relevant, limit,

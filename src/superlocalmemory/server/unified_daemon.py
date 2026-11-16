@@ -895,7 +895,25 @@ class EngineRecallAdapter:
             else nullcontext()
         )
         with lease:
-            return self._recall(query, limit=limit, session_id=session_id)
+            out = self._recall(query, limit=limit, session_id=session_id)
+        self._receipt(query, session_id, out)
+        return out
+
+    def _receipt(self, query: str, session_id: str, out: dict) -> None:
+        """W3-1: the queue serves hooks only, so its answers are ``hook_recall``
+        deliveries. Queued for the background writer; never raises."""
+        try:
+            from superlocalmemory.outcomes import receipts
+
+            pull = receipts.pull_from_results(
+                self._engine, path="hook_recall",
+                profile_id=str(getattr(self._engine, "profile_id", "") or ""),
+                session_id=session_id, query=query, results=out.get("results"),
+                client="hook")
+            if pull is not None:
+                receipts.submit_pull(pull)
+        except Exception as exc:
+            logger.info("hook recall receipt skipped: %s", exc)
 
     def _recall(self, query: str, limit: int = 10, session_id: str = "") -> dict:
         response = self._engine.recall(
@@ -5182,6 +5200,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
         request: Request,
         q: str = "", query: str = "", limit: int = CANONICAL_RECALL_LIMIT,
         session_id: str = "",
+        # W3-1: the client names itself (mcp, cli, hook) so the injection
+        # receipt records the delivery path; anything else is an HTTP caller.
+        via: str = "",
         # Per-request profile routing (spec section 3/5): a non-empty
         # profile_id serves this one recall against THAT profile — same
         # existence check and same 404 envelope as POST /remember — without
@@ -5420,6 +5441,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             context_load=_context_load, depth=_depth, max_tokens=_max_tokens,
             budget_s=parse_budget_s(budget_s),
             caller_view=parse_view(caller_view),
+            via=via if via in ("mcp", "cli", "hook") else "",
         )
         try:
             from superlocalmemory.server.recall_core import as_http

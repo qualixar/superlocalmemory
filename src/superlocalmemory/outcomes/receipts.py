@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import queue
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Sequence
@@ -48,6 +50,12 @@ R = TypeVar("R")
 
 #: Longest a delivery waits for the writer (routing only: a latency budget).
 WRITE_WAIT_S = 0.25
+#: Pull receipts waiting for the background writer; past this they are dropped
+#: and counted (routing only: a memory bound, never a reason to slow a recall).
+PULL_QUEUE_MAX = 256
+#: The writer thread ends after this long with nothing to write and starts again
+#: on the next receipt (routing only: no thread lingers in an idle process).
+PULL_IDLE_S = 0.5
 
 HOLDOUT_ON = "on"
 HOLDOUT_OFF = "off"
@@ -246,5 +254,140 @@ def _insert(conn: sqlite3.Connection, p: DeliveryPlan, delivered: frozenset[str]
           int(c.included and c.fact_id in delivered)) for c in a.choices])
 
 
-__all__ = ["HOLDOUT_OFF", "HOLDOUT_ON", "WRITE_WAIT_S", "DeliveryPlan", "deliver", "plan",
-           "protected_roles", "record", "shown_in_text"]
+@dataclass(frozen=True)
+class Pull:
+    """One answered recall: what an agent asked for and was shown (W3-1)."""
+
+    slm_home: Path
+    db_path: Path
+    profile_id: str
+    session_id: str | None
+    path: str
+    query: str
+    #: (fact id, score) per result, in the order shown; score may be None.
+    results: tuple[tuple[str, float | None], ...]
+    client: str | None = None
+
+
+def record_pull(pull: Pull, *, flags=None) -> bool:
+    """Store one pull delivery now: every result delivered, nothing withheld.
+
+    A pull path is never randomised (``randomiser.RANDOMISED_PATHS``), so each
+    result is logged at propensity 1. Never raises; False when nothing was stored.
+    """
+    try:
+        candidates = [Candidate(fid, "recall", None if score is None else float(score))
+                      for fid, score in pull.results if fid]
+        plan_ = plan(slm_home=pull.slm_home, db_path=pull.db_path, profile_id=pull.profile_id,
+                     session_id=pull.session_id, path=pull.path, query=pull.query,
+                     candidates=candidates, client=pull.client, flags=flags)
+        if plan_ is None:
+            return False
+        if plan_.withheld:  # a pull never withholds; refuse rather than misrecord
+            logger.warning("pull receipt refused: %s withheld on %s", len(plan_.withheld),
+                           pull.path)
+            return False
+        return record(pull.db_path, plan_, frozenset(c.fact_id for c in candidates))
+    except Exception as exc:
+        logger.info("pull receipt skipped: %s", exc)
+        return False
+
+
+class _PullWriter:
+    """One background thread that stores pull receipts, so a recall never waits."""
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[Pull] = queue.Queue(maxsize=PULL_QUEUE_MAX)
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self.dropped = 0
+        self.stored = 0
+
+    def submit(self, pull: Pull) -> bool:
+        try:
+            self._queue.put_nowait(pull)
+        except queue.Full:
+            self.dropped += 1
+            return False
+        self._start()
+        return True
+
+    def _start(self) -> None:
+        with self._lock:
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="slm-pull-receipts",
+                                                daemon=True)
+                self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            try:
+                pull = self._queue.get(timeout=PULL_IDLE_S)
+            except queue.Empty:
+                with self._lock:  # a receipt queued now finds no writer and starts one
+                    if self._queue.empty():
+                        self._thread = None
+                        return
+                continue
+            try:
+                if record_pull(pull):
+                    self.stored += 1
+            finally:
+                self._queue.task_done()
+
+    def drain(self, timeout: float = 5.0) -> bool:
+        """Wait until every submitted receipt is handled (tests, shutdown)."""
+        deadline = time.monotonic() + timeout
+        while self._queue.unfinished_tasks:
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.005)
+        return True
+
+
+PULL_WRITER = _PullWriter()
+
+
+def submit_pull(pull: Pull) -> bool:
+    """Queue one pull receipt for the background writer; never blocks, never raises."""
+    try:
+        return PULL_WRITER.submit(pull)
+    except Exception as exc:
+        logger.info("pull receipt not queued: %s", exc)
+        return False
+
+
+def engine_paths(engine) -> tuple[Path | None, Path | None]:
+    """(SLM home, memory.db) of a real engine, or (None, None).
+
+    ``MemoryEngine`` keeps its config private (``_config``); reading only a
+    public ``config`` found nothing on a real engine, so session-start receipts
+    were never written there (found in W3-1).
+    """
+    config = getattr(engine, "config", None) or getattr(engine, "_config", None)
+    home = getattr(config, "base_dir", None)
+    db_path = getattr(getattr(engine, "db", None), "db_path", None)
+    if isinstance(home, Path) and isinstance(db_path, Path):
+        return home, db_path
+    return None, None
+
+
+def pull_from_results(engine, *, path: str, profile_id: str, session_id: str | None,
+                      query: str, results, client: str | None = None) -> Pull | None:
+    """The receipt for a serialized recall answer, or None without a real store."""
+    from superlocalmemory.core.session_identity import is_conversation
+
+    home, db_path = engine_paths(engine)
+    if home is None or db_path is None or path not in randomiser.PULL_PATHS:
+        return None
+    rows = tuple((str(r.get("fact_id") or ""), r.get("score")) for r in (results or [])
+                 if isinstance(r, dict))
+    sid = session_id if is_conversation(session_id, profile_id) else None
+    return Pull(home, db_path, profile_id, sid, path, query or "",
+                tuple((f, s if isinstance(s, (int, float)) else None) for f, s in rows if f),
+                client or None)
+
+
+__all__ = ["HOLDOUT_OFF", "HOLDOUT_ON", "PULL_IDLE_S", "PULL_QUEUE_MAX", "PULL_WRITER", "WRITE_WAIT_S",
+           "DeliveryPlan", "Pull", "deliver", "engine_paths", "plan", "protected_roles",
+           "pull_from_results", "record", "record_pull", "shown_in_text", "submit_pull"]
