@@ -588,6 +588,7 @@
         window.odRenderComponents(document.getElementById('od-h-components'));
       }
       if (window.odMountMemoryHealth) window.odMountMemoryHealth(container);
+      if (window.odMountTruthChecks) window.odMountTruthChecks(container);
 
     }).catch(function (err) {
       container.innerHTML =

@@ -11,6 +11,9 @@
 // (POST /api/disputes/{id}/settle, POST /api/changed-sources/{fact}/still-true).
 // Memory text is only ever set with textContent. The card hides itself when
 // nothing needs an answer.
+//
+// Also: the memory detail's "When it was true" section (SLMTruth.detail) and
+// the Health page's "Truth checks" card (odMountTruthChecks), both read-only.
 (function () {
   'use strict';
 
@@ -163,6 +166,122 @@
       .then(render, function () { var c = card(); if (c) c.hidden = true; });
   }
 
-  window.SLMTruth = { reload: load, _render: render };
+  // ----- memory detail: "When it was true" (§8.10.3 b) -----
+  var STATE_WORDS = {
+    head: 'Shown now', superseded: 'Replaced', historical: 'Earlier value',
+    disputed: 'In question', duplicate: 'Same as another memory', compatible: 'Also true',
+    unbound: 'Not about this', gone: 'No longer kept'
+  };
+
+  function valueRow(v) {
+    var row = el('div', 'truth-side');
+    var head = el('div', 'truth-side-head');
+    head.appendChild(el('span', 'dash-card-meta', 'From ' + day(v.began)));
+    head.appendChild(el('span', 'chip-pill', v.current ? 'Shown now' : (STATE_WORDS[v.state] || v.state)));
+    if (v.this_memory) head.appendChild(el('span', 'chip-pill violet', 'This memory'));
+    row.appendChild(head);
+    row.appendChild(el('p', 'truth-text', v.visible ? (v.content || '') : '(You cannot see this memory.)'));
+    return row;
+  }
+
+  // Slot keys are stored normalised ("release_cadence"); people read words.
+  function words(key) { return String(key || '').replace(/_/g, ' '); }
+
+  function slotBlock(s) {
+    var box = el('div', 'truth-item');
+    var what = s.legacy ? 'Part of a correction: one memory replaced another.'
+      : 'It states the value of: ' + [s.subject, s.relation].filter(Boolean).map(words).join(' · ') +
+        (s.qualifier ? ' (' + words(s.qualifier) + ')' : '');
+    box.appendChild(el('p', 'dash-card-lead', what));
+    (s.values || []).forEach(function (v) { box.appendChild(valueRow(v)); });
+    return box;
+  }
+
+  function detail(factId, container) {
+    if (!container || !factId) return Promise.resolve();
+    container.textContent = '';
+    return fetch('/api/truth/facts/' + encodeURIComponent(factId), { credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        var slots = d.slots || [], open = d.disputes || [], src = d.source;
+        var stale = src && src.state !== 'fresh';
+        container.textContent = '';
+        if (!slots.length && !open.length && !stale) return;
+        container.appendChild(el('h3', 'truth-detail-title', 'When it was true'));
+        open.forEach(function (dsp) {
+          var row = disputeRow(dsp);
+          container.appendChild(row);
+        });
+        if (stale) container.appendChild(sourceRow({ fact_id: factId, state: src.state, file: src.file }));
+        slots.forEach(function (s) { container.appendChild(slotBlock(s)); });
+      }, function () { container.textContent = ''; });
+  }
+
+  // ----- Health page: truth checks (§8.10.3 d) -----
+  var CHECK_WORDS = {
+    'I-01': 'Every value shown now comes from a memory that still exists.',
+    'I-02': 'Nothing has two values shown at once.',
+    'I-03': 'Every open question compares against the value shown now.',
+    'I-04': 'Values in question have an open question; empty ones show nothing.',
+    'I-05': 'Values follow each other in time without overlapping.',
+    'I-06': 'Every replaced value was retired, or is waiting to be.',
+    'I-07': 'Every change SuperLocalMemory made to a value is recorded with its reason.',
+    'I-08': 'Undoing a change also brings the earlier value back.',
+    'I-12': 'Every end date comes after its start and says where it came from.',
+    'I-16': 'Values shown now have no open question.'
+  };
+  var STATUS_WORDS = {
+    ok: ['OK', 'tone-ok'], violated: ['Problem found', 'tone-warn'],
+    not_checked: ['Not checked yet', ''], not_applicable: ['Not used here', '']
+  };
+
+  function checkRows(list, data) {
+    list.textContent = '';
+    var bad = 0;
+    (data.results || []).forEach(function (r) {
+      var words = STATUS_WORDS[r.status] || [r.status, ''];
+      if (r.status === 'violated') bad++;
+      var row = el('div', 'list-row');
+      row.appendChild(el('span', 'truth-check-text', CHECK_WORDS[r.invariant] || r.title));
+      row.appendChild(el('span', 'truth-check-status ' + words[1],
+        words[0] + (r.status === 'violated' && r.count ? ' (' + r.count + ')' : '')));
+      list.appendChild(row);
+    });
+    var lead = el('p', 'dash-card-lead ' + (bad ? 'tone-warn' : 'tone-ok'),
+      bad ? bad + (bad === 1 ? ' check found a problem.' : ' checks found a problem.') +
+            ' Run slm doctor --truth in a terminal for the details.'
+          : 'Everything that was checked is consistent.');
+    list.insertBefore(lead, list.firstChild);
+  }
+
+  function mountChecks(container) {
+    if (!container || document.getElementById('od-truth-checks')) return;
+    var card = el('div', 'card');
+    card.id = 'od-truth-checks';
+    card.style.marginTop = '16px';
+    var head = el('div', 'card-head');
+    head.appendChild(el('h3', null, 'Truth checks'));
+    card.appendChild(head);
+    var pad = el('div', 'card-pad dash-kv');
+    pad.appendChild(el('p', 'dash-card-meta', 'Checks that the values SuperLocalMemory shows now, ' +
+      'and their history, are consistent. It only reads; nothing is changed.'));
+    var list = el('div', 'truth-checks');
+    var run = button('Run checks', 'primary', function () {
+      run.disabled = true;
+      list.textContent = 'Checking…';
+      fetch('/api/truth/checks', { credentials: 'same-origin' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (d) { checkRows(list, d); },
+              function () { list.textContent = 'The checks could not run. Try again in a moment.'; })
+        .then(function () { run.disabled = false; });
+    });
+    pad.appendChild(run);
+    pad.appendChild(list);
+    card.appendChild(pad);
+    container.appendChild(card);
+  }
+
+  window.odMountTruthChecks = mountChecks;
+  window.SLMTruth = { reload: load, detail: detail, _render: render };
   document.addEventListener('DOMContentLoaded', function () { setTimeout(load, 300); });
 }());

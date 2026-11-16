@@ -118,3 +118,73 @@ describe('Needs your answer card', () => {
     assert.equal(buttons(d, 'Keep this one')[0].disabled, false);
   });
 });
+
+const FACT = {
+  success: true, fact_id: 'new', disputes: [], source: { state: 'changed', file: '/p/config.yaml', next: 'reread_source' },
+  slots: [
+    { legacy: false, subject: 'slm', relation: 'release_cadence', qualifier: null, values: [
+      { fact_id: 'new', state: 'head', began: '2026-11-14T00:00:00Z', current: true, this_memory: true, visible: true, content: 'One big release a month' },
+      { fact_id: 'old', state: 'superseded', began: '2026-03-01T00:00:00Z', current: false, this_memory: false, visible: false, content: null } ] },
+    { legacy: true, subject: null, relation: null, values: [] },
+  ],
+};
+
+function bare(routes) {
+  const d = new JSDOM('<!DOCTYPE html><html><body><div id="detail"></div><div id="health"></div></body></html>',
+                      { runScripts: 'outside-only', url: 'http://localhost:8765/' });
+  d.window.fetch = (url) => {
+    const key = Object.keys(routes).find((k) => url.startsWith(k));
+    return key ? reply(200, routes[key]) : reply(404, {});
+  };
+  d.window.eval(SRC);
+  return d;
+}
+
+describe('Memory detail: When it was true', () => {
+  it('shows the slot, each value with its date and state, the changed file, never hidden text', async () => {
+    const d = bare({ '/api/truth/facts/new': FACT });
+    const box = d.window.document.getElementById('detail');
+    await d.window.SLMTruth.detail('new', box); await flush();
+    const text = box.textContent;
+    assert.match(text, /When it was true/);
+    assert.match(text, /It states the value of: slm · release cadence/);
+    assert.match(text, /Shown now/);
+    assert.match(text, /Replaced/);
+    assert.match(text, /This memory/);
+    assert.match(text, /You cannot see this memory/);
+    assert.match(text, /Part of a correction/);
+    assert.match(text, /came from a file that changed/);
+  });
+
+  it('adds nothing for a memory that is in no slot', async () => {
+    const d = bare({ '/api/truth/facts/plain': { success: true, slots: [], disputes: [], source: null } });
+    const box = d.window.document.getElementById('detail');
+    await d.window.SLMTruth.detail('plain', box); await flush();
+    assert.equal(box.textContent, '');
+  });
+});
+
+describe('Health page: Truth checks', () => {
+  it('runs only when asked and says the result in plain words', async () => {
+    let asked = 0;
+    const d = bare({});
+    d.window.fetch = (url) => {
+      asked++;
+      return reply(200, { success: true, results: [
+        { invariant: 'I-01', title: 't', status: 'ok', count: 0 },
+        { invariant: 'I-05', title: 't', status: 'violated', count: 3 },
+        { invariant: 'I-09', title: 'Raw title for I-09', status: 'not_checked', count: 0 } ] });
+    };
+    const host = d.window.document.getElementById('health');
+    d.window.odMountTruthChecks(host);
+    d.window.odMountTruthChecks(host);  // mounting twice adds one card
+    assert.equal(d.window.document.querySelectorAll('#od-truth-checks').length, 1);
+    assert.equal(asked, 0);
+    buttons(d, 'Run checks')[0].click(); await flush();
+    const text = host.textContent;
+    assert.equal(asked, 1);
+    assert.match(text, /1 check found a problem/);
+    assert.match(text, /Values follow each other in time without overlapping\..*Problem found \(3\)/);
+    assert.match(text, /Raw title for I-09.*Not checked yet/);
+  });
+});

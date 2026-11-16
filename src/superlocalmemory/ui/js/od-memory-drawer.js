@@ -80,6 +80,7 @@
         // TODO: /api/memories/{id}/score-breakdown — Semantic/BM25/EntityGraph/Temporal
         //       decomposition is not yet exposed by the daemon; show when available.
       '</div>' +
+      '<div id="od-drawer-truth"></div>' +
       '<h3 style="font-size:13px;margin:20px 0 8px">Atomic facts</h3>' +
       '<div id="od-drawer-facts" style="color:var(--fg-2);font-size:13px">Loading facts…</div>' +
       '<div id="od-drawer-code"></div>' +
@@ -112,6 +113,10 @@
     }
     // Code links hang off the FACT, so this one takes the row id.
     if (mem.id) _loadCodeLinks(mem.id);
+    // 4.2.30: when it was true, open disputes, a changed source file (od-truth.js).
+    if (mem.id && window.SLMTruth && window.SLMTruth.detail) {
+      window.SLMTruth.detail(mem.id, document.getElementById('od-drawer-truth'));
+    }
     drawer.querySelector('[data-od-act="close-drawer"]').focus();
   }
 

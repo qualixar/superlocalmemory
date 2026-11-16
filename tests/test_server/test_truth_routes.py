@@ -103,3 +103,44 @@ def test_a_remote_app_cannot_see_or_settle_a_dispute_with_a_side_it_may_not_see(
     r = client.post(f"/api/disputes/{did}/settle", params=remote, json={"keep": new})
     assert r.status_code == 404
     assert client.get("/api/truth/attention").json()["counts"]["disputes"] == 1
+
+
+def test_one_memorys_truth_view_shows_its_slot_values_and_dispute(disputed) -> None:
+    client, _app, old, new = disputed
+    body = client.get(f"/api/truth/facts/{new}").json()
+    assert body["success"] and body["fact_id"] == new
+    (slot,) = body["slots"]
+    assert slot["legacy"] is False and slot["subject"] and slot["relation"]
+    assert [v["fact_id"] for v in slot["values"]] == [new, old]  # newest first
+    mine = slot["values"][0]
+    assert mine["this_memory"] is True and mine["current"] is False
+    assert slot["values"][1]["current"] is True and slot["values"][1]["content"]
+    assert len(body["disputes"]) == 1 and body["source"] is None
+
+
+def test_a_memory_in_no_slot_has_an_empty_view(routed) -> None:
+    client, app = routed
+    plain = _fact(app.state.engine._db, "Lunch was good", "2026-11-16T00:00:00Z")
+    body = client.get(f"/api/truth/facts/{plain}").json()
+    assert body["slots"] == [] and body["disputes"] == [] and body["source"] is None
+
+
+def test_the_truth_checks_report_every_invariant_in_order(disputed) -> None:
+    client, _app, _old, _new = disputed
+    body = client.get("/api/truth/checks").json()
+    assert body["success"] and body["checked_at"]
+    ids = [r["invariant"] for r in body["results"]]
+    assert ids[:2] == ["I-01", "I-02"] and "I-16" in ids
+    assert all(r["status"] != "violated" for r in body["results"])
+    assert all(set(r) == {"invariant", "title", "status", "count"} for r in body["results"])
+
+
+def test_a_remote_app_cannot_open_the_truth_view_of_a_memory_it_may_not_see(disputed) -> None:
+    client, app, old, _new = disputed
+    app.state.engine._db.execute(
+        "UPDATE memories SET metadata_json = ? WHERE memory_id = "
+        "(SELECT memory_id FROM atomic_facts WHERE fact_id = ?)",
+        (json.dumps({"_slm_source": {"type": "folder", "source_id": "s1", "relpath": "a.md",
+                                     "version": "1"}}), old))
+    assert client.get(f"/api/truth/facts/{old}", params={"caller_view": "remote"}).status_code == 404
+    assert client.get(f"/api/truth/facts/{old}").status_code == 200

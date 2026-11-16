@@ -6,6 +6,8 @@
 ``slm disputes`` and the MCP ``list_disputes`` tool read ``GET /api/disputes``.
 ``POST /api/disputes/{id}/settle`` is the one door for a person's answer, from an
 agent (MCP ``settle_dispute``), the CLI or the dashboard (``truth/disputes.settle``).
+``GET /api/truth/facts/{fact_id}`` feeds the memory detail and
+``GET /api/truth/checks`` the Health page.
 ``POST /api/changed-sources/{fact_id}/still-true`` records that someone looked at
 a changed file and the memory still holds.
 
@@ -183,3 +185,59 @@ def still_true(request: Request, fact_id: str, body: StillTrueRequest, caller_vi
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Source check error")
+
+
+@router.get("/api/truth/facts/{fact_id}")
+def fact_truth(request: Request, fact_id: str, profile_id: str = "", caller_view: str = ""):
+    """One memory's slots, values over time, open disputes and source file (dashboard detail)."""
+    from superlocalmemory.server.routes import memories as m
+    from superlocalmemory.truth.fact_truth import for_fact
+
+    try:
+        profile = m._routed_profile(profile_id)
+        engine, target = m._authorize_review_read(request, profile)
+        m._refuse_if_hidden(caller_view, engine, target, [fact_id], "Memory not found")
+        conn = _read(engine)
+        try:
+            found = for_fact(conn, target, fact_id, hidden=_hidden(engine, target, caller_view))
+        finally:
+            conn.close()
+        return {"success": True, "profile_id": target, **found}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Memory truth view error")
+
+
+@router.get("/api/truth/checks")
+def truth_checks(request: Request, profile_id: str = ""):
+    """``slm doctor --truth`` for the Health page: the invariants, read-only, store-wide.
+
+    Counts and ids only, never memory text. Run when someone asks (a button),
+    not on every page load: on a large store it reads every slot.
+    """
+    from datetime import UTC, datetime
+
+    from superlocalmemory.server.routes import memories as m
+    from superlocalmemory.truth import invariants
+
+    try:
+        profile = m._routed_profile(profile_id)
+        engine, target = m._authorize_review_read(request, profile)
+        conn = _read(engine)
+        try:
+            results = invariants.check(conn)
+        finally:
+            conn.close()
+        return {"success": True, "profile_id": target,
+                "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "results": [{"invariant": r.invariant, "title": r.title, "status": r.status,
+                             "count": r.count} for r in results]}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Truth check error")
