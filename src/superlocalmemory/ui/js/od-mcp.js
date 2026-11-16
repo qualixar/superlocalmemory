@@ -8,8 +8,8 @@
 //   {
 //     current: "full",
 //     profiles: {
-//       core:  { count: 21, tools: [...], description: "..." },
-//       code:  { count: 41, tools: [...], description: "..." },
+//       core:  { count: 20, tools: [...], description: "..." },
+//       code:  { count: 40, tools: [...], description: "..." },
 //       full:  { count: 60, tools: [...], description: "..." },
 //       power: { count: 72, tools: [...], description: "..." },
 //       mesh:  { count:  9, tools: [...], description: "..." },
@@ -389,8 +389,8 @@
     // Use textContent — no API data, just static example strings
     codeBlock.textContent =
       '"env": {\n' +
-      '  "SLM_MCP_PROFILE": "core"    // 21 tools — minimal\n' +
-      '  // "SLM_MCP_PROFILE": "code"  // 41 tools — + Brain, code graph, loops, kinds\n' +
+      '  "SLM_MCP_PROFILE": "core"    // 20 tools — minimal\n' +
+      '  // "SLM_MCP_PROFILE": "code"  // 40 tools — + Brain, code graph, loops, kinds\n' +
       '  // "SLM_MCP_PROFILE": "full"  // 60 tools — + mesh\n' +
       '  // "SLM_MCP_PROFILE": "power" // 72 tools — + governance\n' +
       '  // "SLM_MCP_PROFILE": "mesh"  //  9 tools — mesh only\n' +

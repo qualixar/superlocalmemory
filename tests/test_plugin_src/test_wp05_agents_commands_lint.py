@@ -114,6 +114,9 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "token",   # slm token show (4.1.25)
         "remote",  # slm remote keys allow|disallow web-<id> mesh|media
         "mesh",    # slm mesh status|peers (the only mesh commands)
+        # 4.2.30 truth layer, real top-level commands (slm <cmd> --help):
+        "disputes",  # slm disputes list|settle|still-true
+        "audit",     # slm audit [--count]: asks a person at a terminal
     }
 )
 

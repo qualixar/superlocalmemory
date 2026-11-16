@@ -319,8 +319,8 @@ To change one app only, set `SLM_MCP_PROFILE` in that app's MCP config (`slm con
 
 | Profile | Tools | For |
 |---|---:|---|
-| `core` | 21 | Remember, recall, expand, sessions, optimize, correction review, disputes |
-| `code` | 41 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
+| `core` | 20 | Remember, recall, expand, sessions, optimize, correction review, settling disputes |
+| `code` | 40 | Core plus code graph, memory kinds, Brain evidence, profile switching, bounded loops |
 | `mesh` | 9 | SLM-Mesh coordination only |
 | `full` (default, when unset) | 60 | Memory, kinds, Brain, optimize, skill evolution, mesh, loops, views and summaries (65 with pictures and documents on) |
 | `power` | 72 | Full plus administration, lifecycle and diagnostics (77 with pictures and documents on) |

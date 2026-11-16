@@ -145,7 +145,7 @@ def _register_every_tool(target) -> None:
         # v4.0.8: get_memory_summary added to CORE — the summary layer's MCP
         # surface (issue #113). Counts bumped deliberately, which is what
         # this contract exists to force.
-        ("named-core", "core", 21),
+        ("named-core", "core", 20),
         # v4.1.12: +settle_session_outcomes and
         # +observe_bounded_loop_execution_learning. Both are whole-profile
         # tools; smaller profiles retain their explicit allowlists.
@@ -187,7 +187,7 @@ def test_registration_exposure_is_exact_and_duplicate_free(
 
     listed_names = {tool.name for tool in asyncio.run(mod.server.list_tools())}
     assert listed_names == set(strict.tools) - mod._MEDIA_TOOLS
-    assert len(listed_names) == {"essential": 60, "named-core": 21, "whole": 107}[exposure]
+    assert len(listed_names) == {"essential": 60, "named-core": 20, "whole": 107}[exposure]
 
 
 @pytest.mark.asyncio

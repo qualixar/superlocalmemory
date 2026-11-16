@@ -45,16 +45,16 @@ format in the first place.
 
 ---
 
-## What IS available: the core profile (21 tools)
+## What IS available: the core profile (20 tools)
 
 This plugin sets `SLM_MCP_PROFILE=core`, the smallest tool tier, on purpose —
 a shared, memory-tight computer should not load tool descriptions or RAM for
-tiers it will not use. The 21 tools:
+tiers it will not use. The 20 tools:
 
 `remember`, `recall`, `search`, `fetch`, `expand`, `list_recent`, `update_memory`,
 `forget`, `session_init`, `close_session`, `slm_compress`, `slm_retrieve`,
 `slm_cache_set`, `slm_cache_get`, `slm_optimize_stats`, `review_correction`,
-`list_corrections`, `list_disputes`, `settle_dispute`, `get_memory_summary`,
+`list_corrections`, `settle_dispute`, `get_memory_summary`,
 `switch_profile`.
 
 If you are looking at another skill that mentions a tool NOT in this list

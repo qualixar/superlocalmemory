@@ -17,16 +17,18 @@ from __future__ import annotations
 # Named profile definitions (introduced in v3.6.14)
 # ---------------------------------------------------------------------------
 
-_PROFILE_CORE: frozenset[str] = frozenset({  # 21
+_PROFILE_CORE: frozenset[str] = frozenset({  # 20
     "remember", "recall", "search", "fetch", "expand", "list_recent", "update_memory", "forget",
     "session_init", "close_session",
     "slm_compress", "slm_retrieve", "slm_cache_set", "slm_cache_get", "slm_optimize_stats",
     # A client that can propose a correction must be able to inspect and
     # authenticate its review; otherwise the core lifecycle is incomplete.
     "review_correction", "list_corrections",
-    # 4.2.30 (D-37): recall shows disputes to the agent holding the conversation;
-    # it must be able to bring the user's answer back.
-    "list_disputes", "settle_dispute",
+    # 4.2.30 (D-37): recall shows disputes on its results to the agent holding
+    # the conversation; it must be able to bring the user's answer back. Listing
+    # every open dispute (list_disputes) is in full/power/whole and `slm disputes`:
+    # with it here `code` reached 41 tools, over Cursor's 40-tool ceiling.
+    "settle_dispute",
     # v4.0.8: the readable summary layer (issue #113). In CORE because the
     # natural caller is the agent holding the conversation — an assistant
     # asked "what did I work on yesterday" should not need a power profile.

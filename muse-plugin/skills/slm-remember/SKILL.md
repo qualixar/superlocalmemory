@@ -258,6 +258,14 @@ never be deleted, so rejecting thousands would lock their memories for good.
 Never reject cases in bulk to tidy the list. To cut the guesses at the source,
 see `slm-status` ("Too many model calls").
 
+Since 4.2.30 the background judges also read these guesses. A judge may close
+one only when its answer is that the older memory stays true (the two say the
+same thing, both hold, they are separate events, or they are unrelated), and
+only once it has earned a certificate from people's audit answers on this
+store. Closed guesses show in `slm corrections overtaken` as `judge_closed` and
+come back with `slm corrections restore-overtaken <case_id>`. A guess that the
+newer memory replaces the older one always waits for a person.
+
 ### 6b. Values that change: name the slot, and the file it came from
 
 For a value a later save may change (a port, a version, a release cadence, a

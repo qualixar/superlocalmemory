@@ -65,7 +65,7 @@ def test_images_on_lists_the_five_tools_in_default_and_full(monkeypatch):
 def test_images_on_leaves_core_unchanged(monkeypatch):
     _server, profiles = _load(monkeypatch, True)
     assert not (MEDIA_TOOLS & profiles._PROFILE_DEFINITIONS["core"])
-    assert len(profiles._PROFILE_DEFINITIONS["core"]) == 21
+    assert len(profiles._PROFILE_DEFINITIONS["core"]) == 20
 
 
 def test_a_failing_check_means_images_off_and_never_raises(monkeypatch):

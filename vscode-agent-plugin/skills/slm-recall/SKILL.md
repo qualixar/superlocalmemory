@@ -375,8 +375,8 @@ Two fields can appear on a recalled memory:
   both, ask which is true now, then call
   `settle_dispute(dispute_id, keep=<fact_id of the true side>)` (or
   `keep="both"`, or `keep="unrelated"` when they were never about the same
-  thing). If the user is not sure, leave it open. `list_disputes` shows every
-  open one.
+  thing). If the user is not sure, leave it open. `list_disputes` (in the `full`,
+  `power` and `whole` tool sets) or `slm disputes list` shows every open one.
 - `source: {state: "changed" | "missing", file}`: the file this memory came from
   changed or went away since it was saved. Read the file before relying on the
   memory. If it still holds, `slm disputes still-true FACT_ID` records that.

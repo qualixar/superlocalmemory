@@ -113,11 +113,11 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 
 ---
 
-## Tool reference (core profile — 21 tools)
+## Tool reference (core profile — 20 tools)
 
 > The MCP config ships only `SLM_AGENT_ID=codex` — no `SLM_MCP_PROFILE` — so
 > it falls back to the same no-profile default every install gets: the
-> 60-tool `full` surface. That is the 21 core tools below **plus** mesh
+> 60-tool `full` surface. That is the 20 core tools below **plus** mesh
 > coordination (9: `mesh_summary`, `mesh_peers`, `mesh_send`, `mesh_inbox`,
 > `mesh_wait`, `mesh_state`, `mesh_lock`, `mesh_events`, `mesh_status`), portable-evidence
 > tools (5: `get_brain_evidence_status`, `record_agent_experience`,
@@ -130,7 +130,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 > `run_maintenance`, `consolidate_cognitive`, `get_soft_prompts`, `set_mode`,
 > `log_tool_event`, `get_assertions`, `reinforce_assertion`,
 > `contradict_assertion`, `evolve_skill`, `skill_health`, `skill_lineage`).
-> Set `SLM_MCP_PROFILE=code` yourself for the narrower 41-tool `code` surface,
+> Set `SLM_MCP_PROFILE=code` yourself for the narrower 40-tool `code` surface,
 > which trades mesh and administration tools for 6 code-graph tools
 > (`build_code_graph`, `get_blast_radius`, `query_graph`,
 > `semantic_search_code`, `get_review_context`, `detect_changes`). Use
@@ -159,8 +159,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | `slm_optimize_stats` | `()`                                                                                       | Returns compress_runs, tokens_saved_compress, cache_kv_hits |
 | `review_correction` | `case_id, action, expected_version, event_valid_until=None, profile_id=""`                  | Apply, reject or roll back a review-gated correction |
 | `list_corrections` | `limit=100, profile_id=""`                                                                   | Correction cases for review, active profile |
-| `list_disputes`    | `limit=50, profile_id=""`                                                                    | Open disputes and changed source files: what needs the user's answer |
-| `settle_dispute`   | `dispute_id, keep, profile_id=""`                                                            | Record the user's answer: `keep` = the true side's fact_id, `both` or `unrelated` |
+| `settle_dispute`   | `dispute_id, keep, profile_id=""`                                                            | Record the user's answer: `keep` = the true side's fact_id, `both` or `unrelated`. Recall results carry the disputes; `list_disputes` (every open one) is in `full`, `power` and `whole`, or `slm disputes list` |
 | `get_memory_summary` | `kind="day", target="", profile_id="", limit=0, offset=0`                                  | Readable summary of a `day`, `project`, `session` or `community` |
 | `switch_profile`   | `profile_id`                                                                                 | Change the active memory profile; every later call scopes to it |
 
@@ -181,7 +180,7 @@ When the SLM MCP server is unavailable, use these CLI equivalents:
 | slm-governance | Roles, retention and lifecycle, audit, GDPR |
 | slm-mesh | Cross-session peer coordination (full/power/mesh tool sets and the default) |
 | slm-bot-memory | Sharing one computer with other bots: what isolates and what does not |
-| slm-getting-started-bot | First session on a headless bot host (the 21-tool core set) |
+| slm-getting-started-bot | First session on a headless bot host (the 20-tool core set) |
 | slm-media | Pictures, PDFs and folders: save, find, limits, privacy, upload links, `slm media`, `slm sources` |
 | slm-web-access | Connecting web apps: Connected apps switches, upload links, what a web app can call |
 

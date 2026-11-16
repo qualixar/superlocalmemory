@@ -55,7 +55,7 @@ _EXPECTED_CORE = frozenset({
     "review_correction", "list_corrections",
     # 4.2.30 (D-37): an agent meets disputes in recall and settles them with
     # the user's answer, so the smallest profile can list and settle them.
-    "list_disputes", "settle_dispute",
+    "settle_dispute",
     # v4.0.8 (#113): readable summaries. Read-only and off the hot path, so it
     # belongs in the smallest profile — an agent asking "what did I do
     # yesterday" should not need the full surface to get an answer.
@@ -73,7 +73,7 @@ def test_profile_core_exact():
     assert core == _EXPECTED_CORE, (
         f"core diff — extra: {core - _EXPECTED_CORE}, missing: {_EXPECTED_CORE - core}"
     )
-    assert len(core) == 21, f"core must be 21 names, got {len(core)}"
+    assert len(core) == 20, f"core must be 20 names, got {len(core)}"
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ def test_profile_code_exact():
     assert code == expected, (
         f"code diff — extra: {code - expected}, missing: {expected - code}"
     )
-    assert len(code) == 41, f"code must be 41 names, got {len(code)}"
+    assert len(code) == 40, f"code must be 40 names, got {len(code)}"
 
 
 # ---------------------------------------------------------------------------

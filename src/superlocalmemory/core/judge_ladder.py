@@ -178,7 +178,7 @@ def is_model_tier(tier: object) -> bool:
 
 #: How a decision was asked (M-01): alone, among peers, or by a rule, which
 #: answers each item on its own whatever the batch. A model whose ``per_item``
-#: was measured with ``judge_permutation`` (Laya, F-43) answers each item as if
+#: was measured with ``evaluation.judge_permutation`` (Laya, F-43) answers each item as if
 #: alone, so its receipts are ``single`` at any batch size. Errors measured in one
 #: regime say nothing about another (R-23), so each is its own certificate cell.
 BATCHING_REGIMES = ("single", "batched", "unbatched")

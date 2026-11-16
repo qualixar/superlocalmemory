@@ -291,8 +291,13 @@ class MaintenanceScheduler:
                     hosted_live=lambda: FeatureFlags(home).enabled("judge.ladder"))
                 from superlocalmemory.core.receipt_key import load_or_create
 
-                DisputePass(self._db, flags, ladder, hash_key=load_or_create(home)).run()
+                key = load_or_create(home)
+                DisputePass(self._db, flags, ladder, hash_key=key).run()
                 self._record_step("dispute pass", True)
+                from superlocalmemory.truth.backlog_pass import BacklogPass
+
+                BacklogPass(self._db, flags, ladder, hash_key=key).run()  # D-13
+                self._record_step("backlog pass", True)
         except Exception as exc:  # noqa: BLE001
             self._record_step("slot pass", False, str(exc))
 

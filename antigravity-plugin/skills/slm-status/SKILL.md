@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections"
+when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections, truth checks, slm doctor --truth, judge certificates, second opinions, audit questions waiting, slm audit --count"
 allowed-tools: slm_optimize_stats, get_status, get_brain_evidence_status, Bash(slm:*)
 ---
 
@@ -236,6 +236,32 @@ is the `media_status` MCP tool, not this command. Details, limits and the
 16 GB requirement: `slm-media`. `slm status` also prints an "Embedding switch" line while a model switch or
 the memory-engine upgrade is pending.
 
+## Truth checks, judges and audit questions (4.2.30)
+
+```bash
+slm doctor --truth [--json] [--db <path>]   # read-only; exits 1 when an invariant is violated
+slm audit --count [--json]                  # how many audit questions wait for a person
+```
+
+`slm doctor --truth` reports three things, counts and ids only:
+
+- **Invariants** (I-01 ... I-16): whether the current values and their history
+  are consistent. `FAIL` lines name the invariant and a few ids.
+- **Judge certificates**: which judges may act on their own, from how many
+  audited answers, and which were stopped (`labels`: new answers no longer
+  support it; `drift`: its recent scores changed). None is normal on a new store.
+- **Second opinions**: how often a stronger judge, asked in the background
+  about 1 in 20 confident answers, was sure of something else, with 95% bounds.
+  A disagreement is a warning, not a proven error.
+
+The dashboard shows the same on the Health page's **Truth checks** card.
+
+**Audit questions are the user's.** `slm audit` asks a person at a terminal
+and refuses to run without one; there is no MCP tool that answers them. An
+agent may report the count (`slm audit --count --json` → `data.count`) and
+suggest the user runs `slm audit` or opens the dashboard card. Never answer an
+audit question for the user: those answers are what let a judge earn trust.
+
 ## Recommended Health Workflow
 
 1. Run `slm doctor --json` at session start to confirm all subsystems are up.
@@ -244,6 +270,7 @@ the memory-engine upgrade is pending.
 4. If `ok: false` on any MCP tool — check `note` field, then run `slm doctor` to isolate the failure.
 5. If recall seems to miss memories that were saved, run `slm db integrity` before concluding anything.
 6. If a picture will not come back for a question about what it shows, run `slm media status`, then `slm media repair --dry-run`.
+7. If remembered values look wrong or contradictory, run `slm doctor --truth`, then `slm disputes list`.
 
 ## Fail-Open
 

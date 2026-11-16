@@ -43,7 +43,7 @@ from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_calibration import ActingGate
 from superlocalmemory.core.judge_ladder import Context, Decision, Item, JudgeLadder, inputs_hash, write_receipts
 from superlocalmemory.core.judge_questions import SLOT_RELATION
-from superlocalmemory.truth import slot_store
+from superlocalmemory.truth import judge_reuse, slot_store
 from superlocalmemory.truth.slot_resolver import (
     RETIRED_FOR_ANOTHER,
     auto_apply_allowed,
@@ -85,15 +85,6 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
 #: A dispute the ledger reopened by rolling a retirement back is a person's to
 #: settle (R-09): no judge answers it, so the same judge cannot act on it again.
 
-#: Every receipt per judged pair under this question version.
-_EARLIER = """
-SELECT inputs_hash, receipt_id, tier, model, verdict, confidence, accepted, failure_kind,
-       batching_regime, threshold
-  FROM judge_receipts WHERE question_version = ? AND profile_id = ? AND inputs_hash IN ({marks})
- ORDER BY decided_at
-"""
-
-
 class DisputePass:
     def __init__(self, db: Any, flags: FeatureFlags, ladder: JudgeLadder, *,
                  limit: int = 32, hash_key: bytes | None = None) -> None:
@@ -111,21 +102,12 @@ class DisputePass:
             rows = conn.execute(_OPEN).fetchall()
             items = [_item(r) for r in rows]
             hashes = [(it.profile_id, inputs_hash(SLOT_RELATION, it, self._key)) for it in items]
-            earlier = self._earlier(conn, hashes)
+            seen = judge_reuse.earlier(conn, SLOT_RELATION.version, hashes)
         # Which model tiers could answer here now (nothing is asked to find out).
         # Without one, only the free deterministic rules run, so no limit applies.
         available = self._ladder.available_model_tiers(SLOT_RELATION)
         limit = self._limit if available else len(items)
-        reused: dict[int, Decision] = {}
-        ask: list[int] = []
-        for i, h in enumerate(hashes):
-            seen = earlier.get(h, frozenset())
-            if isinstance(seen, Decision):  # an accepted answer: act on it, never re-ask
-                reused[i] = seen
-            elif h in earlier and available <= seen:
-                continue  # every tier that could answer here has abstained: page past it
-            elif len(ask) < limit:  # never judged, a tier failed, or a tier is newly here
-                ask.append(i)
+        reused, ask = judge_reuse.plan(hashes, seen, available, limit)
         if not reused and not ask:
             return {}
         ctx = Context(population=SUBJECT_KIND, flag_state=self._flags.state("judge.ladder").value,
@@ -139,38 +121,6 @@ class DisputePass:
             self._apply(conn, [(rows[i], decided[i]) for i in sorted(decided)])
         logger.info("Dispute pass: %s", dict(self.counts))
         return dict(self.counts)
-
-    def _earlier(self, conn: Any, keys: list[tuple[str, str]]
-                 ) -> dict[tuple[str, str], Decision | frozenset[str]]:
-        """Per (profile, pair hash): the accepted decision, or the tiers that gave
-        it a real answer (an abstention, never a failure: a failed ask judged
-        nothing). Never across profiles (W0-15): the same two texts in another
-        profile are judged, receipted and erased on their own."""
-        out: dict[tuple[str, str], Decision | frozenset[str]] = {}
-        by_profile: dict[str, list[str]] = {}
-        for profile, h in keys:
-            by_profile.setdefault(profile, []).append(h)
-        for profile, hashes in by_profile.items():
-            for start in range(0, len(hashes), 500):
-                part = hashes[start:start + 500]
-                self._earlier_part(conn, profile, part, out)
-        return out
-
-    @staticmethod
-    def _earlier_part(conn: Any, profile: str, part: list[str],
-                      out: dict[tuple[str, str], Decision | frozenset[str]]) -> None:
-        sql = _EARLIER.format(marks=",".join("?" * len(part)))
-        for h, rid, tier, model, verdict, conf, accepted, failure, regime, routed in conn.execute(
-                sql, (SLOT_RELATION.version, profile, *part)):
-            key = (profile, h)
-            seen = out.get(key, frozenset())
-            if isinstance(seen, Decision):
-                continue
-            if accepted:
-                out[key] = Decision(verdict, 1.0 if conf is None else float(conf), tier,
-                                    (rid,), model=model, regime=regime, routing_threshold=routed)
-            else:
-                out[key] = seen | ({tier} if failure is None else set())
 
     def _apply(self, conn: Any, pairs: list) -> None:
         acting = self._flags.enabled("judge.ladder")

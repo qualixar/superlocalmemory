@@ -81,7 +81,7 @@ env = { SLM_AGENT_ID = "codex" }
 
 This registers the `superlocalmemory` MCP server with only the agent id. No profile is
 forced, so it serves the default 60-tool profile; add `SLM_MCP_PROFILE = "code"` yourself
-for the 41-tool code profile (memory, portable Brain evidence, code graph, profile
+for the 40-tool code profile (memory, portable Brain evidence, code graph, profile
 switching, memory-kind management, and bounded loops).
 
 ### 3 — Append lifecycle hooks (optional)

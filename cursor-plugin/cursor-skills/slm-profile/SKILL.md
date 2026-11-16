@@ -97,8 +97,8 @@ named differently (for example `superlocalmemory-personal` and
 
 | Profile | Tools | What it is |
 |---------|-------|------------|
-| `core` | 21 tools — remember, recall, search, fetch, expand, list_recent, update_memory, forget, session, optimize, corrections, summaries, switch_profile | Smallest set |
-| `code` | 41 tools — core + portable Brain evidence, report_outcome/report_feedback, 6 code-graph tools, memory kinds, bounded loops | For coding agents that need the graph; no mesh, no `get_status` |
+| `core` | 20 tools — remember, recall, search, fetch, expand, list_recent, update_memory, forget, session, optimize, corrections, summaries, switch_profile | Smallest set |
+| `code` | 40 tools — core + portable Brain evidence, report_outcome/report_feedback, 6 code-graph tools, memory kinds, bounded loops | For coding agents that need the graph; no mesh, no `get_status` |
 | `full` | 60 tools (5 more while images are on) — everyday memory, delete_memory, get_status, observe, saved views, learning tools, skills, optimize, kinds, loops, mesh | The default for every app |
 | `power` | 72 tools — full + audit_trail, retention, compaction, consistency_check, behavioral and diagnostic tools | Governance and admin work |
 | `mesh` | 9 tools — mesh coordination only | Lightweight cross-session signalling |

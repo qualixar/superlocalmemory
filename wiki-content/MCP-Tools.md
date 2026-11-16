@@ -20,14 +20,14 @@ Every tool that reads or writes memory takes an optional `profile_id`. Empty mea
 
 ## Choosing which tools a client sees
 
-> Current profile counts: `core` **21**, `code` **41**, `full` **60**, `power` **72**, `mesh` **9**, `whole` **112**. While pictures and documents are on, `full` and `power` each gain five tools (65 and 77).
+> Current profile counts: `core` **20**, `code` **40**, `full` **60**, `power` **72**, `mesh` **9**, `whole` **112**. While pictures and documents are on, `full` and `power` each gain five tools (65 and 77).
 
 Three environment variables decide the surface, and the first one that applies wins: `SLM_MCP_ALL_TOOLS=1` exposes all 110, then `SLM_MCP_TOOLS=a,b,c` exposes exactly the names listed, then `SLM_MCP_PROFILE` picks a named profile, and with none of them set the default applies. The default is the same set as `full`. An unknown `SLM_MCP_PROFILE` value is an error, not a silent fallback. `slm connect IDE --profile NAME` writes the variable into an IDE's entry. The choice is fixed when the server starts. It has nothing to do with the memory profile that `switch_profile` changes.
 
 | `SLM_MCP_PROFILE` | Tools | What it holds |
 |---|---:|---|
-| `core` | **21** | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five Optimize tools, review_correction, list_disputes, settle_dispute, list_corrections, get_memory_summary, switch_profile |
-| `code` | **41** | `core`, plus the five Brain tools, the four memory-kind tools, six code-graph tools (build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes), the three bounded-loop tools, report_outcome and report_feedback |
+| `core` | **20** | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five Optimize tools, review_correction, settle_dispute, list_corrections, get_memory_summary, switch_profile |
+| `code` | **40** | `core`, plus the five Brain tools, the four memory-kind tools, six code-graph tools (build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes), the three bounded-loop tools, report_outcome and report_feedback |
 | `full` | **60** | Everyday memory, sessions, learning, skills, Optimize, bounded loops, saved views, memory kinds, Brain tools and the nine mesh tools. This is also the default |
 | `power` | **72** | `full`, plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | **9** | The nine `mesh_*` tools only |
@@ -57,7 +57,7 @@ In the tables, a parameter followed by `?` is optional. The Profiles column says
 | `delete_memory` | `fact_id`, `agent_id`?, `profile_id`? | Delete one memory by exact fact id | full, power | write |
 | `review_correction` | `case_id`, `action`, `expected_version`, `event_valid_until`?, `profile_id`? | Apply, reject or roll back a review-gated correction case; `expected_version` guards against stale reviews | core, code, full, power | write |
 | `list_corrections` | `limit`?, `profile_id`? | List correction cases for a human or host reviewer | core, code, full, power | read |
-| `list_disputes` | `limit`?, `profile_id`? | What needs the user's answer: open disputes (both sides, newest first) and memories whose source file changed | core, code, full, power | read |
+| `list_disputes` | `limit`?, `profile_id`? | What needs the user's answer: open disputes (both sides, newest first) and memories whose source file changed | full, power | read |
 | `settle_dispute` | `dispute_id`, `keep`, `profile_id`? | Record the user's answer: `keep` is the true side's `fact_id`, `both` or `unrelated` | core, code, full, power | write |
 | `switch_profile` | `profile_id` | Change the active memory profile. This is a different concept from the MCP tool profile that decides which tools you see | core, code, full, power | host only |
 | `core_memory` | `action`, `fact_id`?, `profile_id`? | Manage the Core Memory pin set: `action` is `pin`, `unpin` or `list`. A pinned fact is always injected | whole only | write |

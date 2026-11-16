@@ -45,8 +45,8 @@ changes. The tool set is fixed when the MCP server starts.
 
 | `SLM_MCP_PROFILE` | Tools | What it adds |
 |---|---:|---|
-| `core` | 21 | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five optimize tools, review_correction, list_corrections, list_disputes, settle_dispute, get_memory_summary, switch_profile |
-| `code` | 41 | `core` plus the code-graph tools build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes; Brain evidence; memory-kind tools; the three bounded-loop tools; report_outcome, report_feedback |
+| `core` | 20 | remember, recall, search, fetch, expand, list_recent, update_memory, forget, session_init, close_session, the five optimize tools, review_correction, list_corrections, settle_dispute, get_memory_summary, switch_profile |
+| `code` | 40 | `core` plus the code-graph tools build_code_graph, get_blast_radius, query_graph, semantic_search_code, get_review_context, detect_changes; Brain evidence; memory-kind tools; the three bounded-loop tools; report_outcome, report_feedback |
 | `full` | 60 | everyday memory, sessions, learning, skills, optimize, bounded loops, saved views, memory kinds, Brain evidence, and the 9 mesh tools |
 | `power` | 72 | `full` plus get_version, get_mode, health, consistency_check, recall_trace, get_lifecycle_status, set_retention_policy, compact_memories, get_behavioral_patterns, audit_trail, quantize, get_retention_stats |
 | `mesh` | 9 | the mesh tools only |

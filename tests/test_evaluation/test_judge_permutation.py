@@ -4,9 +4,9 @@
 
 from __future__ import annotations
 
-from superlocalmemory.core import judge_permutation as perm
 from superlocalmemory.core.judge_ladder import Item, TierAnswer
 from superlocalmemory.core.judge_questions import SLOT_RELATION
+from superlocalmemory.evaluation import judge_permutation as perm
 
 
 def _items(n: int) -> list[Item]:
