@@ -54,7 +54,7 @@ The sidebar groups the panes as follows.
 
 | Workspace | Product surface | What to verify separately |
 |---|---|---|
-| Settings | mode, provider, answer check (including **Calibrate on my store**), auto-capture and auto-recall, scope defaults and other product configuration | effective configuration and secret management |
+| Settings | mode, provider, answer check (including **Calibrate on my store** and, under Online with Jev, **Background judges**: the owner agrees once to let the background judges ask Jev, or stops it; `slm consent`), auto-capture and auto-recall, scope defaults and other product configuration | effective configuration and secret management |
 | Cloud Backup | backup destinations, schedule status, last backup time, manual trigger, encryption | actual backup file presence and restore path |
 
 ## Data and trust boundary

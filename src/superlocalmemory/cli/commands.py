@@ -578,6 +578,12 @@ def _cmd_audit_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_consent_dispatch(args: Namespace) -> None:
+    """4.2.30 W2: consents to send memory text off the machine (cli/consent_cmd.py)."""
+    from superlocalmemory.cli.consent_cmd import run
+    run(args)
+
+
 def _cmd_disputes_dispatch(args: Namespace) -> None:
     """4.2.30: disputed values and changed source files (cli/disputes_cmd.py)."""
     from superlocalmemory.cli.disputes_cmd import run
@@ -762,6 +768,7 @@ def dispatch(args: Namespace) -> None:
         "corrections": _cmd_corrections_dispatch,
         "disputes": _cmd_disputes_dispatch,
         "audit": _cmd_audit_dispatch,
+        "consent": _cmd_consent_dispatch,
         "outcome": _cmd_outcome_dispatch,
         "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
@@ -3088,6 +3095,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         # mention it at all. The drift test caught it; the omission is the thing
         # that test exists to prevent.
         ("gdpr", "Subject rights: status, export, erase, verify"),
+        ("consent", "What may leave this computer: list, give (at a terminal), withdraw"),
         ("backup", "Cloud backup encryption: recovery key, decrypt a download"),
     ]),
     ("Run SLM (daemon & dashboard)", [

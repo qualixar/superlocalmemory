@@ -414,10 +414,29 @@ def build_status(app_state: Any) -> dict[str, Any]:
             **key_state(provider),
             "consent": retrieval.sufficiency_jev_consent is True,
             "rerank": rerank,
+            "ladder": ladder_state(provider),
         },
         "apple_silicon": sufficiency.laya_supported(),
         "calibration_status": calibration_status(active, rerank["active"]),
     }
+
+
+def ladder_state(provider: str) -> dict:
+    """The background judges' consent (``judge_ladder_hosted``) and whether they
+    would use it now: only with ``judge.ladder`` on (W2, D-20, D-27)."""
+    from superlocalmemory.core import consent_store
+    from superlocalmemory.core.feature_flags import FeatureFlags
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    home = canonical_data_root()
+    now = consent_store.state(home, "judge_ladder_hosted")
+    try:
+        flag = FeatureFlags(home).state("judge.ladder").value
+    except Exception:  # noqa: BLE001 - an unreadable flag is shown as off
+        flag = "off"
+    return {"consent": bool(now["given"]) and now["provider"] in (None, provider),
+            "since": now["at"], "flag": flag,
+            "notice": consent_store.notice("judge_ladder_hosted", provider)}
 
 
 __all__ = [
@@ -437,6 +456,7 @@ __all__ = [
     "read_tests",
     "record_test",
     "key_state",
+    "ladder_state",
     "laya_paths",
     "live_engine",
     "live_judge",

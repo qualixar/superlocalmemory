@@ -134,9 +134,10 @@ def test_the_inbox_draw_is_per_pair_whatever_tiers_answered_it() -> None:
 
 
 def test_an_earlier_decision_in_one_profile_is_never_reused_in_another() -> None:
-    from superlocalmemory.truth.dispute_pass import DisputePass
+    from superlocalmemory.core.judge_questions import SLOT_RELATION
+    from superlocalmemory.truth import judge_reuse  # shared by the dispute and backlog passes
 
     conn = _store()  # W0-15
     _receipts(conn, 1, tag="a")  # profile 'p', pair hash 'ha0', accepted
-    seen = DisputePass._earlier(object.__new__(DisputePass), conn, [("p", "ha0"), ("q", "ha0")])
+    seen = judge_reuse.earlier(conn, SLOT_RELATION.version, [("p", "ha0"), ("q", "ha0")])
     assert ("p", "ha0") in seen and ("q", "ha0") not in seen

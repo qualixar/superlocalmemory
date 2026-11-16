@@ -267,6 +267,12 @@ agent may report the count (`slm audit --count --json` → `data.count`) and
 suggest the user runs `slm audit` or opens the dashboard card. Never answer an
 audit question for the user: those answers are what let a judge earn trust.
 
+`slm consent [--json]` lists what may leave this computer. The background
+judges may ask the online Jev judge about pairs of memories only with the
+user's consent (`judge_ladder_hosted`), given in the dashboard or with
+`slm consent give` at a terminal. Never give it for the user; withdrawing
+(`slm consent withdraw judge_ladder_hosted`) is fine when they ask.
+
 ## Recommended Health Workflow
 
 1. Run `slm doctor --json` at session start to confirm all subsystems are up.

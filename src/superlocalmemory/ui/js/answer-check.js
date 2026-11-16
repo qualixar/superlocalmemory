@@ -550,7 +550,39 @@
     else if (draft.rerank && draft.mode !== 'jev') {
       box.appendChild(note('Reordering with Jev is off while ' + NAMES[draft.mode] + ' is chosen. Your choice is kept for when you choose Jev again.', 'dim', 'ac-rerank-paused'));
     }
+    box.appendChild(buildLadder(jev));
     return box;
+  }
+
+  /* Background judges (4.2.30 W2, D-20): their own consent, given here or with
+     `slm consent give` at a terminal. Acts at once; no Save needed. */
+  function buildLadder(jev) {
+    var ladder = jev.ladder || {};
+    var wrap = el('div', { class: 'ac-ladder' }, { marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '10px' });
+    wrap.appendChild(el('div', { text: 'Background judges' }, { fontWeight: '600', fontSize: '13px' }));
+    var ready = status.mode === 'jev' && !!jev.consent;
+    if (!ready) {
+      wrap.appendChild(note('Turn on the online answer check with Jev and save first: the background judges use the same connection.', 'dim', 'ac-ladder-needs'));
+      return wrap;
+    }
+    wrap.appendChild(note(ladder.notice || '', null, 'ac-ladder-notice'));
+    if (ladder.consent) {
+      wrap.appendChild(note('Allowed' + (ladder.since ? ' since ' + String(ladder.since).slice(0, 10) : '') + '.', 'ok', 'ac-ladder-state'));
+      if (ladder.flag !== 'on') {
+        wrap.appendChild(note('They only watch for now: they will not ask Jev until they are switched on (slm flags).', 'dim', 'ac-ladder-watch'));
+      }
+      wrap.appendChild(row(onClick(btn('Stop', false, 'ac-ladder-stop'), function () { ladderConsent(false); })));
+    } else {
+      wrap.appendChild(row(onClick(btn('I agree', false, 'ac-ladder-allow'), function () { ladderConsent(true); })));
+    }
+    return wrap;
+  }
+  function ladderConsent(on) {
+    send('/jev/ladder', 'POST', { accepted: on, provider: (status.jev || {}).provider || draft.provider })
+      .then(function (r) {
+        if (!r.ok) toast(why(r));
+        refresh(true);
+      });
   }
   function checkbox(id, text, checked, onChange) {
     var label = el('label', null, { display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '10px',

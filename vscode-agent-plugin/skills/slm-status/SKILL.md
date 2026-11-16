@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections, truth checks, slm doctor --truth, judge certificates, second opinions, audit questions waiting, slm audit --count"
+when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections, truth checks, slm doctor --truth, judge certificates, second opinions, audit questions waiting, slm audit --count, slm consent, what leaves my computer"
 allowed-tools: slm_optimize_stats, get_status, get_brain_evidence_status, Bash(slm:*)
 ---
 
@@ -261,6 +261,12 @@ and refuses to run without one; there is no MCP tool that answers them. An
 agent may report the count (`slm audit --count --json` → `data.count`) and
 suggest the user runs `slm audit` or opens the dashboard card. Never answer an
 audit question for the user: those answers are what let a judge earn trust.
+
+`slm consent [--json]` lists what may leave this computer. The background
+judges may ask the online Jev judge about pairs of memories only with the
+user's consent (`judge_ladder_hosted`), given in the dashboard or with
+`slm consent give` at a terminal. Never give it for the user; withdrawing
+(`slm consent withdraw judge_ladder_hosted`) is fine when they ask.
 
 ## Recommended Health Workflow
 

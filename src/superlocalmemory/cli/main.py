@@ -1293,6 +1293,8 @@ def main() -> None:
     register_disputes_parsers(sub)  # 4.2.30: what needs your answer (D-37..D-39)
     from superlocalmemory.cli.audit_cmd import register_audit_parsers
     register_audit_parsers(sub)  # 4.2.30 W2: blind audit answers from a person (R-16)
+    from superlocalmemory.cli.consent_cmd import register_consent_parsers
+    register_consent_parsers(sub)  # 4.2.30 W2: consents to send memory text off the machine
     from superlocalmemory.cli.outcome_cmd import register_outcome_parser
     register_outcome_parser(sub)  # 4.1.25: report whether recalled memories helped
     from superlocalmemory.cli.hide_cmd import register_hide_parser

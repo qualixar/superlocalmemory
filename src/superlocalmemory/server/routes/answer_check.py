@@ -132,6 +132,20 @@ class JevRerankRequest(BaseModel):
     provider: str = Field(..., pattern=_PROVIDER_PATTERN)
 
 
+class JevLadderRequest(BaseModel):
+    """Let the background judges ask Jev about pairs of memories (consent
+    ``judge_ladder_hosted``). ``accepted`` is the person accepting the notice,
+    which names ``provider``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accepted: StrictBool
+    provider: str = Field(..., pattern=_PROVIDER_PATTERN)
+
+
+LADDER_PURPOSE = "judge_ladder_hosted"
+
+
 # ---------------------------------------------------------------------------
 # Gates and small helpers
 # ---------------------------------------------------------------------------
@@ -493,6 +507,7 @@ def post_jev_consent(request: Request, body: JevConsentRequest):
                 record_change(request, "rerank", before=before, accepted=False,
                               provider=body.provider)
             retrieval = support.save(_consent_change(bool(body.accepted), body.provider))
+            _withdraw_ladder_unless(request, accepted=bool(body.accepted), provider=body.provider)
             if was_jev:
                 # Rebuilt either way, so the running check uses the provider and
                 # the reordering setting just saved — not the ones before.
@@ -579,6 +594,69 @@ def post_jev_rerank(request: Request, body: JevRerankRequest):
         raise
     except Exception:
         return _internal_error()
+
+# ---------------------------------------------------------------------------
+# POST /api/v3/answer-check/jev/ladder
+# ---------------------------------------------------------------------------
+
+
+def _ladder_home():
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return canonical_data_root()
+
+
+def _withdraw_ladder_unless(request: Request, *, accepted: bool, provider: str) -> None:
+    """The background judges' consent follows the answer check's: withdrawn with
+    it, and withdrawn when the answer check moves to another provider."""
+    from superlocalmemory.core import consent_store
+    from superlocalmemory.server.consent_receipts import _actor
+
+    now = consent_store.state(_ladder_home(), LADDER_PURPOSE)
+    if now["given"] and (not accepted or now["provider"] != provider):
+        try:
+            consent_store.change(_ladder_home(), LADDER_PURPOSE, False, via="dashboard",
+                                 actor=_actor(request), provider=str(now["provider"] or provider))
+        except consent_store.ConsentNotRecorded as exc:
+            raise HTTPException(503, detail="The consent could not be recorded, so nothing "
+                                            "was changed. Try again.") from exc
+
+
+@router.post("/jev/ladder")
+def post_jev_ladder(request: Request, body: JevLadderRequest):
+    """Give or withdraw consent for the background judges to ask Jev (W2, D-20)."""
+    _gate(request)
+    from superlocalmemory.core import consent_store
+    from superlocalmemory.server.consent_receipts import _actor
+
+    try:
+        app_state = request.app.state
+        with support.MUTATION_LOCK:
+            retrieval = support.effective_retrieval()
+            if body.accepted:
+                if body.provider != retrieval.sufficiency_jev_provider:
+                    return _error("The provider changed. Read the notice again, then agree.", 409)
+                if (retrieval.sufficiency_judge != judge_selection.MODE_JEV
+                        or retrieval.sufficiency_jev_consent is not True):
+                    return _error("Turn on the online answer check with Jev first: the "
+                                  "background judges use the same connection.")
+            try:
+                consent_store.change(_ladder_home(), LADDER_PURPOSE, bool(body.accepted),
+                                     via="dashboard", actor=_actor(request),
+                                     provider=body.provider)
+            except consent_store.ConsentNotRecorded:
+                return _error("The consent could not be recorded, so nothing was changed. "
+                              "Try again.", 503)
+            status_body = support.build_status(app_state)
+        status_body["message"] = (
+            "The background judges may now ask Jev." if body.accepted
+            else "The background judges will no longer ask Jev.")
+        return status_body
+    except HTTPException:
+        raise
+    except Exception:
+        return _internal_error()
+
 
 # Reuse the same credential + MANAGE boundary for store calibration.
 

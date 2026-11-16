@@ -175,6 +175,35 @@ describe('Answer check settings', function () {
     assert.equal(save.body.rerank, true, 'the choice is kept, not reset');
   });
 
+  it('background judges: need Jev first, then agree once, show watch-only, and stop', async function () {
+    const NOTICE = 'In the background, SuperLocalMemory sends pairs of your memories to TypeSafe, one pair per request.';
+    let p = await mount(status());
+    assert.match(p.text('.ac-ladder-needs'), /Turn on the online answer check with Jev/);
+    assert.equal(p.ac('ac-ladder-allow'), null, 'no way to agree before Jev is on');
+
+    const on = { mode: 'jev', active: 'jev', laya: { state: 'ready', action: '', error: '' },
+                 jev: { has_key: true, key_hint: '****abcd', consent: true,
+                        ladder: { consent: false, since: null, flag: 'shadow', notice: NOTICE } } };
+    p = await mount(status(on));
+    assert.equal(p.text('.ac-ladder-notice'), NOTICE);
+    await click(p, p.ac('ac-ladder-allow'));
+    const agreed = p.sent.find((s) => s.url.endsWith('/jev/ladder'));
+    assert.deepEqual(agreed.body, { accepted: true, provider: 'typesafe' });
+
+    const given = JSON.parse(JSON.stringify(on));
+    given.jev.ladder = { consent: true, since: '2026-11-16T22:00:00+00:00', flag: 'shadow', notice: NOTICE };
+    p = await mount(status(given));
+    assert.match(p.text('.ac-ladder-state'), /Allowed since 2026-11-16/);
+    assert.match(p.text('.ac-ladder-watch'), /only watch for now/);
+    await click(p, p.ac('ac-ladder-stop'));
+    assert.deepEqual(p.sent.find((s) => s.url.endsWith('/jev/ladder')).body,
+                     { accepted: false, provider: 'typesafe' });
+
+    given.jev.ladder.flag = 'on';
+    p = await mount(status(given));
+    assert.equal(p.text('.ac-ladder-watch'), '', 'no watch-only note once they are on');
+  });
+
   it('test results stay on the page, with when and how long', async function () {
     const p = await mount(status({ laya: { state: 'ready', action: '', error: '' },
       jev: { has_key: true, key_hint: '****abcd' },

@@ -117,6 +117,7 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         # 4.2.30 truth layer, real top-level commands (slm <cmd> --help):
         "disputes",  # slm disputes list|settle|still-true
         "audit",     # slm audit [--count]: asks a person at a terminal
+        "consent",   # slm consent list|give|withdraw: give asks a person at a terminal
     }
 )
 

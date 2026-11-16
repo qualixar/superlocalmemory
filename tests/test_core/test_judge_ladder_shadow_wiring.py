@@ -51,10 +51,13 @@ def built(tmp_path, monkeypatch):
 
     config = MagicMock()
     config.forgetting.scheduler_interval_minutes = 360
-    scheduler = MaintenanceScheduler(MagicMock(), config, judge_supplier=lambda: object())
+    live = {"judge": object()}
+    scheduler = MaintenanceScheduler(MagicMock(), config, judge_supplier=lambda: live["judge"])
     scheduler._running = True
 
-    def run(ladder_state: FlagState):
+    def run(ladder_state: FlagState, judge=None):
+        if judge is not None:
+            live["judge"] = judge
         write_flag(tmp_path, "judge.ladder", ladder_state)
         scheduler._slot_pass()
         return ladders[-1]
@@ -71,3 +74,14 @@ def test_an_acting_ladder_has_the_hosted_tier(built) -> None:
     assert ladder.tier_names == ("rules", "laya", "jev")
     jev = ladder._tiers[-1]
     assert jev._consent_ref().startswith("judge_ladder_hosted@")  # the record, for I-15
+
+
+def test_a_consent_for_another_provider_is_not_used(built, tmp_path) -> None:
+    from types import SimpleNamespace
+
+    consent_store.change(tmp_path, "judge_ladder_hosted", True, via="test", actor="t",
+                         provider="typesafe", audit_path=tmp_path / "audit.db")
+    jev = built(FlagState.ON, judge=SimpleNamespace(_provider="openrouter"))._tiers[-1]
+    assert jev._consent_ref() is None  # the answer check moved: nothing is sent
+    jev = built(FlagState.ON, judge=SimpleNamespace(_provider="typesafe"))._tiers[-1]
+    assert jev._consent_ref().startswith("judge_ladder_hosted@")

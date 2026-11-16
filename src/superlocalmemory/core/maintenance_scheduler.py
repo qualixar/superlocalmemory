@@ -285,9 +285,18 @@ class MaintenanceScheduler:
                 home = canonical_data_root()
                 # Hosted Jev only while judge.ladder is on (re-read at every ask);
                 # in shadow the ladder is rules and Laya only (D-27, R-41).
+                def _consent_ref() -> str | None:
+                    # The consent names its provider: if the answer check moved to
+                    # another provider since, nothing is sent until the person agrees again.
+                    judge = self._judge_supplier() if self._judge_supplier else None
+                    provider = getattr(judge, "_provider", None)
+                    return consent_store.reference(
+                        home, "judge_ladder_hosted",
+                        provider=provider if isinstance(provider, str) else None)
+
                 ladder = build_ladder(
                     self._judge_supplier,
-                    hosted_consent_ref=lambda: consent_store.reference(home, "judge_ladder_hosted"),
+                    hosted_consent_ref=_consent_ref,
                     hosted_live=lambda: FeatureFlags(home).enabled("judge.ladder"))
                 from superlocalmemory.core.receipt_key import load_or_create
 
