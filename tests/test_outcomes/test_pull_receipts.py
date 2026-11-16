@@ -348,3 +348,40 @@ def test_a_real_hook_recall_is_on_record(mode_a_engine) -> None:  # noqa: F811
         ("hook_recall", "conv-real", len(shown))]
     assert [r[0] for r in _rows(db_path, "SELECT fact_id FROM injection_receipts "
                                          "WHERE delivered = 1 ORDER BY position")] == shown
+
+
+# -- a fetch whose caller records its own delivery is not a second delivery -----------------------
+
+def test_session_inits_own_fetch_writes_no_daemon_receipt() -> None:
+    assert receipt_path(_call(via=recall_core.VIA_INTERNAL)) is None
+
+
+def test_session_init_fetches_as_internal_and_the_adapter_forwards_it(monkeypatch) -> None:
+    import asyncio as _asyncio
+
+    from superlocalmemory.mcp import _pool_adapter, session_start
+
+    seen: dict = {}
+    real_pool_recall = _pool_adapter.pool_recall
+
+    def fake_pool_recall(query, limit=10, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(results=[])
+
+    monkeypatch.setattr(_pool_adapter, "pool_recall", fake_pool_recall)
+    _asyncio.run(session_start._recall("q", "", "", "default", 5, 30))
+    assert seen.get("via") == recall_core.VIA_INTERNAL
+
+    sent: dict = {}
+
+    class Proxy:
+        def recall(self, **kw):
+            sent.update(kw)
+            return {"ok": True, "results": []}
+
+    monkeypatch.setattr(_pool_adapter, "_pool", lambda: Proxy())
+    try:
+        real_pool_recall("q", limit=3, via="internal")
+    except Exception:  # noqa: BLE001 - the reshape of an empty answer is not under test
+        pass
+    assert sent.get("via") == "internal"

@@ -117,6 +117,9 @@ def pool_recall(query: str, limit: int = 10, **kwargs: Any) -> PoolRecallRespons
         _recall_kwargs["include_shared"] = kwargs["include_shared"]
     if kwargs.get("window"):
         _recall_kwargs["window"] = kwargs["window"]
+    # W3-1: who asked, for the injection receipt (the proxy's default is "mcp").
+    if kwargs.get("via"):
+        _recall_kwargs["via"] = kwargs["via"]
     # #150: a project filter / preference, forwarded only when set. A named
     # profile is per-request routing (the active profile is not moved).
     for _name in ("project", "prefer_project", "profile_id"):

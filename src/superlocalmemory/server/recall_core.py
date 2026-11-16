@@ -388,6 +388,11 @@ async def run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:
     return envelope
 
 
+#: A fetch whose caller records its own delivery (session_init renders a subset
+#: of what it fetched and writes the ``session_init`` receipt itself).
+VIA_INTERNAL = "internal"
+#: Every ``via`` a client may send; anything else is an HTTP caller.
+VIAS = frozenset({"mcp", "cli", "hook", VIA_INTERNAL})
 #: The receipt path for each client that names itself (W3-1, D-22).
 _VIA_PATHS = {"mcp": "mcp_recall", "cli": "cli_recall", "hook": "hook_recall"}
 
@@ -400,8 +405,8 @@ def receipt_path(call: RecallCall) -> str | None:
         VIEW_ORIGINS,
     )
 
-    if call.origin in (ORIGIN_DASHBOARD, ORIGIN_VIEW_DASHBOARD):
-        return None
+    if call.origin in (ORIGIN_DASHBOARD, ORIGIN_VIEW_DASHBOARD) or call.via == VIA_INTERNAL:
+        return None  # a person reads it, or the caller records its own delivery
     if call.origin in VIEW_ORIGINS:
         return "view_recall"
     return _VIA_PATHS.get(call.via, "http_recall")

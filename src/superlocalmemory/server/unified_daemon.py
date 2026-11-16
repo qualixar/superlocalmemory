@@ -5419,6 +5419,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # (server/recall_core.py), so a view and this route cannot drift apart.
         from superlocalmemory.retrieval.remote_view import parse_view
         from superlocalmemory.server.recall_core import (
+            VIAS,
             RecallCall,
             parse_budget_s,
             run_recall,
@@ -5441,7 +5442,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             context_load=_context_load, depth=_depth, max_tokens=_max_tokens,
             budget_s=parse_budget_s(budget_s),
             caller_view=parse_view(caller_view),
-            via=via if via in ("mcp", "cli", "hook") else "",
+            via=via if via in VIAS else "",
         )
         try:
             from superlocalmemory.server.recall_core import as_http

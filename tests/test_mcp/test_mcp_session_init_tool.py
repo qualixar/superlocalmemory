@@ -122,7 +122,7 @@ class TestSessionInitTool:
         assert result["memory_count"] == 2
         assert len(result["memories"]) == 2
         mock_pool_recall.assert_called_once_with(
-            "project context project", limit=10, fast=None,
+            "project context project", limit=10, fast=None, via="internal",
             prefer_project="/my/project",  # 4.1.21 (#150)
         )
 
@@ -143,7 +143,7 @@ class TestSessionInitTool:
         asyncio.run(session_init(query="what is Q-CLAW"))
 
         mock_pool_recall.assert_called_once_with(
-            "what is Q-CLAW", limit=10, fast=None,
+            "what is Q-CLAW", limit=10, fast=None, via="internal",
         )
 
     @patch("superlocalmemory.mcp.tools_active._canonical_feedback_count")
@@ -202,7 +202,7 @@ class TestSessionInitTool:
         assert result["success"] is True
         assert len(result["memories"]) == 3
         mock_pool_recall.assert_called_once_with(
-            "recent important decisions", limit=3, fast=None,
+            "recent important decisions", limit=3, fast=None, via="internal",
         )
 
     @patch("superlocalmemory.mcp.tools_active._emit_event")

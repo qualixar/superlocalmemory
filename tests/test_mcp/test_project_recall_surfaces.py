@@ -123,7 +123,7 @@ def test_session_init_prefers_its_project_and_names_it_in_the_query() -> None:
         asyncio.run(srv.tools["session_init"](project_path="/Users/alice/work/acme-billing"))
         asyncio.run(srv.tools["session_init"](query="release plan"))
     assert seen[0] == {"query": "project context acme-billing", "fast": None,
-                       "prefer_project": "/Users/alice/work/acme-billing"}
+                       "prefer_project": "/Users/alice/work/acme-billing", "via": "internal"}
     assert seen[1]["query"] == "release plan" and "prefer_project" not in seen[1]
 
 

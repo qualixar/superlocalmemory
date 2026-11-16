@@ -20,7 +20,7 @@ class _FakePool:
 
     def recall(
         self, query: str, limit: int = 10, session_id: str = "",
-        fast: bool = False, prefer_project: str = "",
+        fast: bool = False, prefer_project: str = "", via: str = "mcp",
     ):
         self.recall_calls.append((query, limit, session_id, fast))
         self.prefer_project = prefer_project

@@ -23,6 +23,9 @@ async def _recall(query, project_path, named, pid, max_results, max_age_days):
     from superlocalmemory.mcp._pool_adapter import pool_recall
 
     kwargs = {"prefer_project": project_path.strip()} if project_path.strip() else {}
+    # session_init records its own delivery (path session_init, with what it
+    # actually shows); the daemon must not record this fetch as a second one.
+    kwargs["via"] = "internal"
     if named:
         kwargs["profile_id"] = named
     try:
