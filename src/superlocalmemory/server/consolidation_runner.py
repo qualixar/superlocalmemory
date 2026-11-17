@@ -104,6 +104,40 @@ def _consolidate_blocking(app_state: Any, profile_id: str, lightweight: bool) ->
     return res
 
 
+#: Routing only: the newest memories a workflow run reads.
+WORKFLOW_MEMORIES = 2000
+
+
+def workflow_step(profile_id: str, *, config: Any = None) -> dict:
+    """Mine workflow patterns from this profile's own memories, in shadow
+    (W3-6f, D-45). Before 4.2.30 the miner read a table nothing ever filled
+    (F-48). Read-only on memory.db; writes only ``workflow_patterns`` in
+    learning.db; nothing reaches soft prompts. Never raises."""
+    import sqlite3
+
+    try:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.learning.workflows import WorkflowMiner
+
+        config = config or SLMConfig.load()
+        learning_db = config.base_dir / "learning.db"
+        if not learning_db.exists() or not config.db_path.exists():
+            return {"skipped": "no_store"}
+        conn = sqlite3.connect(f"{config.db_path.resolve().as_uri()}?mode=ro", uri=True,
+                               timeout=5.0)
+        try:
+            rows = conn.execute(
+                "SELECT content, created_at FROM atomic_facts WHERE profile_id = ?"
+                " ORDER BY created_at DESC LIMIT ?", (profile_id, WORKFLOW_MEMORIES)).fetchall()
+        finally:
+            conn.close()
+        memories = [{"content": c or "", "created_at": t} for c, t in reversed(rows)]
+        return WorkflowMiner(learning_db).learn_from_memories(profile_id, memories)
+    except Exception as exc:  # noqa: BLE001 - shadow learning never breaks consolidation
+        logger.warning("workflow step failed: %s", exc)
+        return {"error": str(exc)}
+
+
 def ranker_step(profile_id: str, *, config: Any = None) -> dict:
     """Retrain the ranker when due (D-45, W3-6c), in a subprocess.
 
@@ -174,6 +208,7 @@ async def run_full_consolidation(
             # Outside the profile lease: a retrain takes up to minutes and a
             # profile switch must not wait on it.
             result["ranker"] = await asyncio.to_thread(ranker_step, profile_id)
+            result["workflows"] = await asyncio.to_thread(workflow_step, profile_id)
         logger.info(
             "consolidation finished (trigger=%s): assertions=%s patterns=%s",
             trigger,

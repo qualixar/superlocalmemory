@@ -401,6 +401,7 @@ class _PullWriter:
             try:
                 if record_pull(pull):
                     self.stored += 1
+                    learn_together(pull)
             finally:
                 self._queue.task_done()
 
@@ -412,6 +413,32 @@ class _PullWriter:
                 return False
             time.sleep(0.005)
         return True
+
+
+#: The memories of one answer linked as retrieved together (as the dashboard's
+#: own recall path has always used; routing only).
+CO_RETRIEVAL_TOP = 10
+
+
+def learn_together(pull: Pull) -> int:
+    """W3-6f (D-45): memories an agent was given in one answer strengthen their
+    co-retrieval link. Before 4.2.30 only the dashboard's recall trace (a
+    person searching) wrote these links, so co-retrieval never learned from an
+    agent (F-48). Runs on this background thread after the receipt is stored,
+    never creates the learning store, never raises."""
+    ids = [f for f, _score in pull.results if f][:CO_RETRIEVAL_TOP]
+    if len(ids) < 2:
+        return 0
+    try:
+        path = Path(pull.slm_home) / "learning.db"
+        if not path.exists():
+            return 0
+        from superlocalmemory.learning.signals import LearningSignals
+
+        return LearningSignals(path).record_co_retrieval(pull.profile_id, ids)
+    except Exception as exc:  # a learning signal is never worth a lost receipt
+        logger.debug("co-retrieval skipped: %s", exc)
+        return 0
 
 
 PULL_WRITER = _PullWriter()
@@ -459,7 +486,8 @@ def pull_from_results(engine, *, path: str, profile_id: str, session_id: str | N
                 swap=swap)
 
 
-__all__ = ["HOLDOUT_OFF", "HOLDOUT_ON", "PULL_IDLE_S", "PULL_QUEUE_MAX", "PULL_WRITER", "WRITE_WAIT_S",
+__all__ = ["CO_RETRIEVAL_TOP", "learn_together",
+           "HOLDOUT_OFF", "HOLDOUT_ON", "PULL_IDLE_S", "PULL_QUEUE_MAX", "PULL_WRITER", "WRITE_WAIT_S",
            "Begun", "DeliveryPlan", "Pull", "begin", "deliver", "deliver_recorded",
            "engine_paths", "plan", "protected_roles",
            "pull_from_results", "record", "record_pull", "shown_in_text", "submit_pull"]

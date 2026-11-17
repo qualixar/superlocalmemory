@@ -206,6 +206,34 @@ class WorkflowMiner:
     # Internals
     # ------------------------------------------------------------------
 
+    def learn_from_memories(self, profile_id: str, memories: list[dict]) -> dict:
+        """Mine this profile's own memories and store what was found (W3-6f, D-45).
+
+        Shadow learning: the patterns are kept in ``workflow_patterns`` (the
+        profile's rows replaced each run) for the learning report, and nothing
+        here reaches soft prompts; that needs evidence they help (D-45). The top
+        sequences are kept with their measured support, whatever it is.
+        """
+        sequences = self.mine_from_memories(memories, min_support=0.0)
+        temporal = self.mine_temporal(memories)
+        now = datetime.now(UTC).isoformat()
+        rows = [(profile_id, "sequence", " -> ".join(s["sequence"]), json.dumps(s),
+                 float(s["support"]), int(s["count"]), now) for s in sequences]
+        rows += [(profile_id, "time_of_day", bucket, json.dumps(v),
+                  float(v["confidence"]), int(v["evidence_count"]), now)
+                 for bucket, v in temporal.items()]
+        conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+        try:
+            with conn:
+                conn.execute("DELETE FROM workflow_patterns WHERE profile_id = ?", (profile_id,))
+                conn.executemany(
+                    "INSERT INTO workflow_patterns (profile_id, pattern_type, pattern_key,"
+                    " pattern_value, confidence, evidence_count, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+        finally:
+            conn.close()
+        return {"sequences": len(sequences), "time_of_day": len(temporal)}
+
     def _ensure_schema(self) -> None:
         conn = sqlite3.connect(str(self._db_path))
         try:

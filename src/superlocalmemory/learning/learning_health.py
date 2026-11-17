@@ -15,7 +15,8 @@ does, for each learner, with one rule and no tuned threshold:
 * ``waiting``: it learns only when an agent calls a tool, and none has yet;
 * ``not_wired``: nothing in production feeds it (named so it is wired or
   removed, D-45 item 5);
-* ``no_input``: nothing has arrived for it to learn from.
+* ``no_input``: nothing has arrived for it to learn from;
+* ``retired``: deliberately not wired, with the reason (D-45 item 5).
 
 Read-only, counts and times only, never memory text. Both stores are opened by
 the caller with ``mode=ro``; a missing table reads as "not created".
@@ -35,6 +36,7 @@ OFF = "off"
 WAITING = "waiting"
 NOT_WIRED = "not_wired"
 NO_INPUT = "no_input"
+RETIRED = "retired"
 
 #: Routing only: a learner that runs inside consolidation (every 6 h at most,
 #: and only once the daemon has been idle) should have run within a day.
@@ -73,7 +75,7 @@ _TIME_COLUMNS = {
     "learning_model_state": "trained_at", "co_retrieval_edges": "updated_at",
     "_store_patterns": "updated_at", "learning_signals": "created_at",
     "bandit_plays": "played_at", "agent_experiences": "created_at",
-    "execution_learning_events": "created_at", "workflow_actions": "created_at",
+    "execution_learning_events": "created_at", "workflow_patterns": "created_at",
     "transferable_patterns": "NULL",
 }
 
@@ -191,13 +193,16 @@ def measure(learning: sqlite3.Connection | None, memory: sqlite3.Connection | No
                            LEARNING if rows else WAITING,
                            "fed by agents" if rows else f"learns when an agent calls {tool}; "
                                                         "none has yet"))
-    for name, learns, table, why in (
-            ("workflow_mining", "repeated sequences of actions", "workflow_actions",
-             "nothing in production records actions for it"),
-            ("cross_project", "preferences that carry across projects", "transferable_patterns",
-             "its aggregation is never called")):
-        rows, last = _stat(learning, table, p)
-        out.append(Learner(name, learns, rows, _jd_to_iso(last), NOT_WIRED, why))
+    out.append(_flow("workflow_mining", "your recurring sequences of work and time-of-day habits "
+                     "(kept in shadow: nothing reaches soft prompts yet)",
+                     _stat(learning, "workflow_patterns", p), saved,
+                     CONSOLIDATION_CADENCE_H, "new memory"))
+    rows, _last = _stat(learning, "transferable_patterns", p)
+    out.append(Learner("cross_project", "preferences carried from one workspace to another",
+                       rows, None, RETIRED,
+                       "not wired by design (D-45): it would carry one workspace's preferences "
+                       "into another, which profile isolation forbids, and its input table is "
+                       "an empty leftover"))
     return out
 
 
@@ -208,6 +213,6 @@ def summary(learners: list[Learner]) -> dict:
     return counts
 
 
-__all__ = ["CONSOLIDATION_CADENCE_H", "LEARNING", "NOT_WIRED", "NO_INPUT", "OFF",
+__all__ = ["CONSOLIDATION_CADENCE_H", "LEARNING", "NOT_WIRED", "NO_INPUT", "OFF", "RETIRED",
            "PER_RECALL_CADENCE_H", "RANKER_CADENCE_H", "STALLED", "WAITING", "Learner",
            "measure", "summary"]

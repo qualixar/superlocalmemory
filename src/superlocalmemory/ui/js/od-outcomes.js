@@ -25,7 +25,8 @@
                    channel: 'Searching with every retrieval method' };
   var STATE = { learning: ['Learning', 'tone-ok'], stalled: ['Stalled', 'tone-warn'],
                 off: ['Off', ''], waiting: ['Waiting for agents', ''],
-                not_wired: ['Not connected', 'tone-warn'], no_input: ['Nothing to learn yet', ''] };
+                not_wired: ['Not connected', 'tone-warn'], no_input: ['Nothing to learn yet', ''],
+                retired: ['Retired', ''] };
   var OUTCOME = { used: 'the agent acting on a memory', reask: 'the agent having to ask memory again' };
 
   function row(list, text, status, tone) {

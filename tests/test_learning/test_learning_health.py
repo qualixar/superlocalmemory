@@ -29,7 +29,7 @@ def stores():
     learning = _db({"learning_model_state": "trained_at", "co_retrieval_edges": "updated_at",
                     "_store_patterns": "updated_at", "learning_signals": "created_at",
                     "bandit_plays": "played_at", "agent_experiences": "created_at",
-                    "execution_learning_events": "created_at", "workflow_actions": "created_at",
+                    "execution_learning_events": "created_at", "workflow_patterns": "created_at",
                     "transferable_patterns": "pattern"})
     memory = _db({"action_outcomes": "timestamp", "injection_usage": "observed_at",
                   "fact_access_log": "accessed_at", "atomic_facts": "created_at"})
@@ -95,7 +95,13 @@ def test_agent_fed_learners_wait_and_unwired_ones_are_named(stores) -> None:
     assert got["execution_learning"].state == lh.WAITING
     _put(learning, "agent_experiences", "created_at", "2026-11-10T00:00:00+00:00")
     assert _by_name(learning, memory)["agent_experiences"].state == lh.LEARNING
-    assert got["workflow_mining"].state == got["cross_project"].state == lh.NOT_WIRED
+    assert got["cross_project"].state == lh.RETIRED and "profile isolation" in \
+        got["cross_project"].reason
+    assert got["workflow_mining"].state == lh.NO_INPUT
+    _put(memory, "atomic_facts", "created_at", "2026-11-10T00:00:00+00:00")
+    assert _by_name(learning, memory)["workflow_mining"].state == lh.STALLED
+    _put(learning, "workflow_patterns", "created_at", "2026-11-10T06:00:00+00:00")
+    assert _by_name(learning, memory)["workflow_mining"].state == lh.LEARNING
 
 
 def test_counts_are_per_profile(stores) -> None:
@@ -109,7 +115,7 @@ def test_a_store_without_the_tables_says_not_created() -> None:
     got = {x.name: x for x in lh.measure(None, sqlite3.connect(":memory:"), "default",
                                          environ={})}
     assert got["ranker_training"].rows is None and got["ranker_training"].state == lh.NO_INPUT
-    assert lh.summary(list(got.values()))[lh.NOT_WIRED] == 2
+    assert lh.summary(list(got.values()))[lh.RETIRED] == 1
 
 
 def test_a_quote_in_a_profile_name_is_data_not_sql(stores) -> None:
