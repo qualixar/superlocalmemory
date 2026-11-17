@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge
@@ -434,8 +435,13 @@ def render_context(
     mode: str = "B",
     cfg=None,
     wrap: bool = True,
+    notes: Sequence[str] = (),
 ) -> str:
     """Full pipeline → final injectable string.
+
+    ``notes`` (the session start's project lines: workspace, open disputes,
+    changed sources) are shown first under "This project", inside the same
+    untrusted-evidence frame and sanitised like memory text.
 
     1. Split core block vs dynamic
     2. Clamp dynamic to (budget - core tokens)
@@ -447,6 +453,7 @@ def render_context(
     mems = supported_only(list(mems))
     if not mems:
         return ""
+    notes = tuple(n for n in notes if n and n.strip())
 
     # GAP-FIX: strip junk + duplicates before anything else, so neither the
     # core block nor the dynamic section can surface placeholder/template noise.
@@ -460,7 +467,10 @@ def render_context(
     budget = resolve_budget(mode, cfg)
     core = select_core_block(list(mems), cfg)
     core_ids = {m.fact_id for m in core if m.fact_id}
-    dynamic = [m for m in mems if m.fact_id not in core_ids] if core_ids else list(mems)
+    # A core item without a fact id (a core memory block, a soft prompt) is
+    # matched by value: it used to be shown twice, under both headings.
+    dynamic = [m for m in mems if not (m.fact_id in core_ids
+                                       or (not m.fact_id and m in core))]
 
     core_tokens = sum(estimate_tokens(m.content) for m in core)
     dynamic = clamp_to_budget(dynamic, max(0, budget - core_tokens), cfg)
@@ -480,6 +490,10 @@ def render_context(
         return (f" (provenance: {', '.join(fields)})" if fields else "") + label
 
     parts: list[str] = []
+    if notes:
+        parts.append("## This project")
+        parts.extend(f"- {sanitize_untrusted_content(n)}" for n in notes)
+        parts.append("")
     if core:
         parts.append("## Core Memory (pinned, high-value)")
         for m in core:

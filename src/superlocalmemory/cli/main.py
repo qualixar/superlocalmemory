@@ -901,6 +901,11 @@ def main() -> None:
         help="Use full engine path (slower, requires Ollama). Default is fast SQLite path.",
     )
     ctx_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
+    ctx_p.add_argument(
+        "--project-dir", default=None,
+        help="The project folder the session is in (default: $CLAUDE_PROJECT_DIR, else the "
+             "current folder); picks that project's memories, last session and open issues.",
+    )
 
     # #49: local session open/close (for hooks; no model roundtrip)
     session_p = sub.add_parser(

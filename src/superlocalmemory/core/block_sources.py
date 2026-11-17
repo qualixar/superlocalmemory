@@ -62,6 +62,15 @@ def source_filter(store: Any) -> tuple[str, tuple[str, ...]]:
     return " AND NOT " + _NOT_A_SOURCE + _not_retired(store), (REQUEST_SOURCE,)
 
 
+def current_filter(store: Any) -> str:
+    """``" AND ..."`` keeping only facts not retired (replaced), over ``atomic_facts f``.
+
+    For a block that shows bookkeeping on purpose (the session start's last
+    session summary), where ``source_filter`` would also drop it as a non-answer.
+    """
+    return _not_retired(store)
+
+
 def _not_retired(store: Any) -> str:
     from superlocalmemory.storage.database import _compose_current_clause
 
@@ -108,4 +117,4 @@ def _content(row: Any) -> Any:
         return getattr(row, "content", "")
 
 
-__all__ = ["OVERSAMPLE", "keep_sources", "not_sources", "source_filter"]
+__all__ = ["OVERSAMPLE", "current_filter", "keep_sources", "not_sources", "source_filter"]

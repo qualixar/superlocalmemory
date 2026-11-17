@@ -5223,64 +5223,16 @@ def cmd_session_context(args: Namespace) -> None:
         except sqlite3.OperationalError:
             pass
 
-        # Recent important memories — age gate from --max-age-days (default 30)
+        # 4.2.30 W3-7c: chosen for the project the agent is in (core/session_brief):
+        # this project's memories and last sessions first, then the profile's
+        # recent important memories (a new project still gets context).
+        # Age gate on the profile-wide fill from --max-age-days (default 30).
         max_age = getattr(args, "max_age_days", 30)
-        age_clause = (
-            f"AND created_at >= datetime('now', '-{int(max_age)} days') "
-            if max_age > 0 else ""
-        )
+        workspace, project_notes, picked = _session_project_part(args, db_path, pid)
+        fact_mems.extend(picked)
         try:
-            from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
-
-            # 4.2.14 prompts and bookkeeping; 4.2.17 retired (replaced) facts.
-            with memory_read(db_path) as conn:
-                not_prompt, not_prompt_params = source_filter(conn)
-                fact_rows = conn.execute(
-                    "SELECT f.fact_id, f.content, f.importance, f.access_count, f.fact_type "
-                    "FROM atomic_facts f WHERE f.profile_id = ? "
-                    f"{age_clause.replace('created_at', 'f.created_at')}"
-                    "AND f.lifecycle = 'active'" + not_prompt + " "
-                    "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
-                    (pid, *not_prompt_params, 10 * OVERSAMPLE),
-                ).fetchall()
-            fact_rows = keep_sources(fact_rows, 10)
-            # 4.2.17: Jev orders them when the person chose Jev reordering
-            # (core/session_jev: order only, 1.5 s budget, else unchanged).
-            fact_rows = _jev_session_order(args, config, fact_rows)
-            for r in fact_rows:
-                fact_mems.append(("recent", InjectableMemory(
-                    content=r["content"],
-                    score=r["importance"] or 0.5,
-                    fact_id=r["fact_id"],
-                    importance=r["importance"] or 0.0,
-                    access_count=r["access_count"] or 0,
-                )))
-        except sqlite3.OperationalError:
-            pass
-
-        # Session markers (last session summary)
-        try:
-            # The last sessions' summaries: a bare marker ("session ended
-            # <date>") says nothing and is left out (4.2.14, non_answer).
-            from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources
-
-            with memory_read(db_path) as conn:
-                not_source, not_source_params = source_filter(conn)
-                sess_rows = keep_sources(conn.execute(
-                    "SELECT f.fact_id, f.content, f.importance, f.access_count "
-                    "FROM atomic_facts f "
-                    "WHERE f.profile_id = ? AND f.content LIKE 'Session%'" + not_source + " "
-                    "ORDER BY f.created_at DESC LIMIT ?",
-                    (pid, *not_source_params, 3 * OVERSAMPLE),
-                ).fetchall(), 3)
-            for r in sess_rows:
-                fact_mems.append(("session_summary", InjectableMemory(
-                    content=r["content"],
-                    score=r["importance"] or 0.3,
-                    fact_id=r["fact_id"],
-                    importance=r["importance"] or 0.0,
-                    access_count=r["access_count"] or 0,
-                )))
+            fact_mems.extend(_session_recent_fill(args, config, db_path, pid, max_age,
+                                                  fact_mems, workspace))
         except sqlite3.OperationalError:
             pass
 
@@ -5316,7 +5268,7 @@ def cmd_session_context(args: Namespace) -> None:
 
         def _render(kept: list[tuple[str, InjectableMemory]]) -> str:
             mems = core_mems + [m for _, m in kept] + soft_mems
-            return render_context(mems, mode=mode, cfg=cfg_inj, wrap=True)
+            return render_context(mems, mode=mode, cfg=cfg_inj, wrap=True, notes=project_notes)
 
         context = _session_context_delivery(
             config, db_path, pid, getattr(args, "query", "") or "", fact_mems, _render)
@@ -5335,6 +5287,72 @@ def cmd_session_context(args: Namespace) -> None:
 
     except Exception as exc:
         logger.debug("session-context (fast) failed: %s", exc)
+
+
+def _session_project_part(args, db_path, pid) -> tuple[object, tuple[str, ...], list]:
+    """The workspace, its notes, and this project's memories and last sessions
+    for the session start (4.2.30 W3-7c) as ``(role, InjectableMemory)``; empty
+    when there is no project or anything fails."""
+    import os
+
+    from superlocalmemory.core import session_brief as sb
+    from superlocalmemory.core.block_sources import current_filter, keep_sources, source_filter
+    from superlocalmemory.storage.memory_write import memory_read
+
+    root = (getattr(args, "project_dir", None) or os.environ.get("CLAUDE_PROJECT_DIR")
+            or os.getcwd())
+    ws = sb.Workspace()
+    try:
+        ws = sb.read_workspace(root)
+        with memory_read(db_path) as conn:
+            brief = sb.build(conn, pid, ws, source_filter(conn), current_filter(conn),
+                             limit=10, keep=keep_sources)
+    except Exception as exc:  # noqa: BLE001 - the start must never fail over this
+        logger.debug("session brief skipped (%s)", type(exc).__name__)
+        return ws, (), []
+    return ws, brief.notes, [(role, _injectable_row(r)) for role, r in brief.facts]
+
+
+def _injectable_row(r):
+    from superlocalmemory.core.injection import InjectableMemory
+
+    return InjectableMemory(content=r["content"], score=r["importance"] or 0.5,
+                            fact_id=r["fact_id"], importance=r["importance"] or 0.0,
+                            access_count=r["access_count"] or 0,
+                            created_at=str(r["created_at"] or ""))
+
+
+def _session_recent_fill(args, config, db_path, pid, max_age, have, ws) -> list:
+    """The profile's recent important memories topping the start up to 10,
+    never one saved under another project (4.2.14 prompts and bookkeeping and
+    4.2.17 retired facts left out, as before)."""
+    from superlocalmemory.core import session_brief as sb
+    from superlocalmemory.core.block_sources import OVERSAMPLE, keep_sources, source_filter
+    from superlocalmemory.storage.memory_write import memory_read
+
+    room = 10 - sum(1 for role, _m in have if role == "recall")
+    if room <= 0:
+        return []
+    age = (f"AND f.created_at >= datetime('now', '-{int(max_age)} days') "
+           if max_age > 0 else "")
+    with memory_read(db_path) as conn:
+        not_prompt, not_prompt_params = source_filter(conn)
+        rows = conn.execute(
+            "SELECT f.fact_id, f.content, f.importance, f.access_count, f.created_at, "
+            "CASE WHEN json_valid(m.metadata_json) "
+            "THEN json_extract(m.metadata_json, '$.project') END AS project "
+            "FROM atomic_facts f LEFT JOIN memories m ON m.memory_id = f.memory_id "
+            f"WHERE f.profile_id = ? {age}AND f.lifecycle = 'active'" + not_prompt + " "
+            "ORDER BY f.importance DESC, f.created_at DESC LIMIT ?",
+            (pid, *not_prompt_params, 10 * OVERSAMPLE),
+        ).fetchall()
+    taken = {m.fact_id for _role, m in have}
+    rows = [r for r in rows if r["fact_id"] not in taken
+            and (not ws.keys or sb.relation(r["project"], ws) is not False)]
+    # 4.2.17: Jev orders them when the person chose Jev reordering
+    # (core/session_jev: order only, 1.5 s budget, else unchanged).
+    rows = _jev_session_order(args, config, keep_sources(rows, room))
+    return [("recent", _injectable_row(r)) for r in rows]
 
 
 def _session_context_delivery(config, db_path, pid, query, fact_mems, render) -> str:
