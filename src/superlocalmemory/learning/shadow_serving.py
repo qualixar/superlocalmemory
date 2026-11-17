@@ -81,6 +81,25 @@ def _load_candidate(learning_db: Path, profile_id: str, cid: int) -> Any:
     return model
 
 
+def _candidate_certified(path: Path, profile_id: str, candidate_id: Any) -> bool:
+    """Whether this candidate holds an offline certificate (D-45)."""
+    import sqlite3
+
+    from superlocalmemory.learning.offline_certificate import certified
+
+    try:
+        conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=2.0)
+        try:
+            row = conn.execute("SELECT shadow_results_json FROM learning_model_state"
+                               " WHERE id = ? AND profile_id = ?",
+                               (candidate_id, profile_id)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+    return bool(row) and certified(row[0])
+
+
 def serving_model(learning_db: Path | str, profile_id: str, query_id: str,
                   active_model: Any) -> Any:
     """The model that should rank this recall. ``active_model`` if no test."""
@@ -95,8 +114,8 @@ def serving_model(learning_db: Path | str, profile_id: str, query_id: str,
         path = Path(learning_db)
         router = get_shadow_router(learning_db=str(path), profile_id=profile_id)
         cid = router.refresh_candidate()
-        if cid is None:
-            return active_model
+        if cid is None or not _candidate_certified(path, profile_id, cid):
+            return active_model  # D-45: no live test without an offline certificate
         chosen = active_model
         if router.route_query(query_id) == ARM_CANDIDATE:
             chosen = _load_candidate(path, profile_id, cid)

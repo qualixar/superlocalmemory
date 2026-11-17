@@ -90,6 +90,16 @@ def _consolidate(
     return worker.run(profile_id, dry_run=dry_run)
 
 
+def _shadow_retrain(memory_db: str, learning_db: str, profile_id: str) -> dict:
+    """Only the ranker's retrain step (D-45): a candidate, never a promotion."""
+    import lightgbm  # noqa: F401  (import-order side effect is intentional)
+
+    from superlocalmemory.learning.consolidation_worker import _run_shadow_cycle
+
+    return _run_shadow_cycle(memory_db_path=memory_db, learning_db_path=learning_db,
+                             profile_id=profile_id)
+
+
 def _emit(obj: dict) -> None:
     """Write the verdict as a single JSON line (default=str for safety)."""
     sys.stdout.write(json.dumps(obj, default=str) + "\n")
@@ -98,7 +108,8 @@ def _emit(obj: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="slm-lightgbm-subprocess")
-    parser.add_argument("--task", choices=["retrain", "consolidate"], default="retrain")
+    parser.add_argument("--task", choices=["retrain", "consolidate", "shadow_retrain"],
+                        default="retrain")
     parser.add_argument("--learning-db", required=True)
     parser.add_argument("--memory-db")
     parser.add_argument("--profile", default="default")
@@ -113,6 +124,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.learning_db, args.profile,
                 include_synthetic=args.include_synthetic,
             )
+        elif args.task == "shadow_retrain":
+            if not args.memory_db:
+                raise ValueError("--memory-db is required for the shadow_retrain task")
+            result["cycle"] = _shadow_retrain(args.memory_db, args.learning_db, args.profile)
         else:
             if not args.memory_db:
                 raise ValueError("--memory-db is required for the consolidate task")
@@ -228,6 +243,26 @@ def run_consolidation_isolated(
         args.append("--dry-run")
     verdict = _run_isolated(args, timeout_sec=timeout_sec)
     verdict.setdefault("stats", None)
+    verdict.setdefault("error", None)
+    return verdict
+
+
+def run_shadow_retrain_isolated(
+    memory_db: str | Path,
+    learning_db: str | Path,
+    profile_id: str,
+    *,
+    timeout_sec: int = RETRAIN_TIMEOUT_SEC,
+) -> dict:
+    """The ranker's retrain step alone, in a subprocess (D-45: run by the
+    consolidation timer). Returns ``{"cycle": dict|None, "error": str|None}``."""
+    verdict = _run_isolated([
+        "--task", "shadow_retrain",
+        "--memory-db", str(memory_db),
+        "--learning-db", str(learning_db),
+        "--profile", profile_id,
+    ], timeout_sec=timeout_sec)
+    verdict.setdefault("cycle", None)
     verdict.setdefault("error", None)
     return verdict
 

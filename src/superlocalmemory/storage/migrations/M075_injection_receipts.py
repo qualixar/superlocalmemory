@@ -25,6 +25,11 @@ draw, the channel switched off for the fetch, and ``memory_share`` (the chance a
 treated delivery on that path takes the memory arm), so every propensity can be
 recomputed from the row.
 
+``recall_query_id`` (W3-6c, D-45, also amended in place) is the recall
+engine's own id for the answer a pull delivered (the ``query_id`` on the
+recall envelope, the key the learning layer logs its features under), so a
+ranker can learn from what agents used of exactly that answer.
+
 CHECKs hold invariants only (ranges, 0/1, cross-column rules), never lists of
 names, which SQLite could not extend after release (W0-29). Erasing a fact
 erases its receipts (I-11); a delivery row holds no fact id and stays.
@@ -60,6 +65,7 @@ CREATE TABLE IF NOT EXISTS injection_deliveries (
     arm_draw       REAL CHECK (arm_draw IS NULL OR (arm_draw >= 0 AND arm_draw < 1)),
     dropped_channel TEXT,
     memory_share   REAL CHECK (memory_share IS NULL OR (memory_share > 0 AND memory_share <= 1)),
+    recall_query_id TEXT,
     CHECK ((withhold_draw IS NULL) = (pick_draw IS NULL)),
     CHECK (withhold_draw IS NULL OR key_id IS NOT NULL),
     CHECK (arm IS NULL OR withhold_draw IS NOT NULL),
@@ -118,7 +124,13 @@ def apply(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
     if _has_facts(conn):
         conn.execute(_FACT_TRIGGER)
+    _add_missing_columns(conn)
+    conn.execute(_QUERY_INDEX)
 
+
+#: Built after the columns exist, so an older table cannot fail the DDL.
+_QUERY_INDEX = ("CREATE INDEX IF NOT EXISTS idx_injection_deliveries_recall_query"
+                " ON injection_deliveries (profile_id, recall_query_id)")
 
 #: Columns added after the first draft; a table without them is repaired in place.
 _ARM_COLUMNS = (
@@ -127,6 +139,7 @@ _ARM_COLUMNS = (
     ("dropped_channel", "TEXT"),
     ("memory_share", "REAL CHECK (memory_share IS NULL OR (memory_share > 0 "
                      "AND memory_share <= 1))"),
+    ("recall_query_id", "TEXT"),
 )
 
 
@@ -139,7 +152,8 @@ def verify(conn: sqlite3.Connection) -> bool:
     if _missing_columns(conn):
         return False
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-    if not {"injection_deliveries", "injection_receipts", "injection_usage"} <= names:
+    if not {"injection_deliveries", "injection_receipts", "injection_usage",
+            "idx_injection_deliveries_recall_query"} <= names:
         return False
     if not _has_facts(conn):
         return True
@@ -152,5 +166,8 @@ def repair(conn: sqlite3.Connection) -> None:
     """Build what is missing; an erase trigger from before W3-2 is rebuilt."""
     conn.execute("DROP TRIGGER IF EXISTS trg_injection_receipts_fact_erased")
     apply(conn)
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
     for name, decl in _missing_columns(conn):
         conn.execute(f"ALTER TABLE injection_deliveries ADD COLUMN {name} {decl}")

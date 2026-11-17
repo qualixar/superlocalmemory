@@ -376,6 +376,12 @@ class _ReadOnlyLearningView:
             connection.close()
 
 
+def _measuring(config: Any) -> bool:
+    from superlocalmemory.learning.exposures import measuring
+
+    return measuring(config)
+
+
 def _resolve_ranking_mode(env: "dict[str, str] | os._Environ[str]") -> str:
     """Map the ``SLM_RANKING`` env var to a canonical mode.
 
@@ -429,6 +435,12 @@ def apply_ranking(
     run_recall chained these; collapsing keeps precedence explicit.
     """
     if pipeline_version == "off":
+        if record_signals:
+            # Shadow (D-45): record what this recall offered so a ranker can
+            # learn from what agents then used; the order is left as it is.
+            from superlocalmemory.learning.exposures import enqueue_exposures
+
+            enqueue_exposures(response, query, profile_id, query_id)
         return response
     try:
         response = apply_adaptive_ranking(response, query, profile_id,
@@ -1517,13 +1529,15 @@ def run_recall(
         query_id = str(query_id or "") or _uuid.uuid4().hex
         mode = _resolve_ranking_mode(_os.environ)
         # Exposure features are recorded (asynchronously, by the signal
-        # worker) only when the operator turned adaptive ranking on: they are
-        # the trainer's input, and without them no labelled row can exist.
-        # An exposure is never counted as feedback.
+        # worker) with adaptive ranking on, and in shadow while it is off and
+        # the store measures (D-45): they are the trainer's input, and without
+        # them no labelled row can exist. An exposure is never counted as
+        # feedback.
         response = apply_ranking(
             response, query, profile_id, query_id,
             config=config, pipeline_version=mode,
-            record_signals=(mode == "v2-ensemble"),
+            record_signals=(mode == "v2-ensemble"
+                            or (mode == "off" and _measuring(config))),
             # the store THIS recall read from, so the outcome bonus
             # cannot resolve a different one
             memory_db_path=getattr(db, "db_path", None),

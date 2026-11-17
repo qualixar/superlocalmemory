@@ -224,11 +224,14 @@ class TestItRecordsWithoutActing:
         assert _resolve_ranking_mode({"SLM_RANKING": "v1"}) == "v1"
         assert _resolve_ranking_mode({"SLM_RANKING": "v2-ensemble"}) == "v2-ensemble"
 
-    def test_exposure_rows_are_written_only_when_ranking_is_on(self) -> None:
+    def test_exposure_rows_are_written_with_ranking_on_or_in_shadow(self) -> None:
         """Exposures are the ranker's only feature source (audit BRN-12), so
-        they are recorded when the operator enables v2-ensemble ranking — and
-        never otherwise. The 2,675x phase inflation they once caused is closed
-        where it belonged: the phase counter excludes exposure kinds."""
+        they are recorded when the operator enables v2-ensemble ranking, and,
+        since 4.2.30 (D-45), in shadow while ranking is off and the store
+        measures: with them off by default no training row could ever exist
+        (F-48). The order is never changed in shadow (tested in
+        ``test_ledger_training``). The 2,675x phase inflation they once caused
+        is closed where it belonged: the phase counter excludes exposure kinds."""
         import inspect
 
         from superlocalmemory.core import recall_pipeline
@@ -238,6 +241,7 @@ class TestItRecordsWithoutActing:
         )
 
         source = inspect.getsource(recall_pipeline.run_recall)
-        assert 'record_signals=(mode == "v2-ensemble")' in source
+        assert 'record_signals=(mode == "v2-ensemble"' in source
+        assert 'or (mode == "off" and _measuring(config))' in source
         assert "candidate" in EXPOSURE_SIGNAL_TYPES
         assert not is_feedback("candidate")

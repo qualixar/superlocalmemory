@@ -17,7 +17,12 @@ Three defects kept the online retrain from ever firing on a real store:
 
 Two guards: never retrain while a candidate is under test (persisting a new
 candidate would delete it mid-experiment), and honour the post-rollback
-cooldown.
+cooldown. Only a candidate with an offline certificate is under test (D-45):
+an uncertified one is never served, so the next retrain replaces it.
+
+New labels also come from the injection ledger (W3-6c): every delivered memory
+of a pull that names its recall is labelled (used or not) once its outcome
+window has closed.
 """
 
 from __future__ import annotations
@@ -54,14 +59,41 @@ def labelled_outcomes_since(memory_db: str | Path, profile_id: str,
         conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True,
                                timeout=2.0)
         try:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM action_outcomes WHERE profile_id = ? "
-                "AND reward IS NOT NULL AND COALESCE(recall_query_id, '') != '' "
-                "AND timestamp > ?", (profile_id, stamp)).fetchone()
+            return (_outcomes_since(conn, profile_id, stamp)
+                    + _ledger_labels_since(conn, profile_id, stamp))
         finally:
             conn.close()
     except sqlite3.Error:
         return 0
+
+
+def _outcomes_since(conn: sqlite3.Connection, profile_id: str, stamp: str) -> int:
+    """Explicit outcome reports that name a recall, newer than ``stamp``."""
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM action_outcomes WHERE profile_id = ? "
+            "AND reward IS NOT NULL AND COALESCE(recall_query_id, '') != '' "
+            "AND timestamp > ?", (profile_id, stamp)).fetchone()
+    except sqlite3.OperationalError:
+        return 0  # a store without outcome reports still has its ledger
+    return int(row[0] or 0) if row else 0
+
+
+def _ledger_labels_since(conn: sqlite3.Connection, profile_id: str, stamp: str) -> int:
+    """Delivered memories of pulls that name their recall, window closed, newer than
+    ``stamp``: each is a label (used or not) for the ranker (W3-6c)."""
+    from superlocalmemory.outcomes.effects import OUTCOME_WINDOW_H
+
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM injection_receipts r JOIN injection_deliveries d"
+            " ON d.delivery_id = r.delivery_id WHERE d.profile_id = ? AND r.delivered = 1"
+            " AND COALESCE(d.recall_query_id, '') != ''"
+            " AND julianday(d.delivered_at) > julianday(?)"
+            " AND julianday(d.delivered_at) + ? / 24.0 <= julianday('now')",
+            (profile_id, stamp, OUTCOME_WINDOW_H)).fetchone()
+    except sqlite3.OperationalError:
+        return 0  # a store from before the ledger
     return int(row[0] or 0) if row else 0
 
 
@@ -70,8 +102,8 @@ def _model_rows(learning_db: str, profile_id: str) -> list[sqlite3.Row]:
     try:
         conn.row_factory = sqlite3.Row
         return conn.execute(
-            "SELECT is_active, is_candidate, trained_at, metadata_json "
-            "FROM learning_model_state WHERE profile_id = ?",
+            "SELECT is_active, is_candidate, trained_at, metadata_json, "
+            "shadow_results_json FROM learning_model_state WHERE profile_id = ?",
             (profile_id,)).fetchall()
     finally:
         conn.close()
@@ -95,7 +127,9 @@ def should_retrain(learning_db: str, memory_db: str, profile_id: str, *,
     except sqlite3.Error as exc:
         logger.debug("should_retrain: %s", exc)
         return False
-    if any(int(r["is_candidate"] or 0) for r in rows):
+    from superlocalmemory.learning.offline_certificate import certified
+
+    if any(int(r["is_candidate"] or 0) and certified(r["shadow_results_json"]) for r in rows):
         return False  # an experiment is running; let it finish
     active = next((r for r in rows if int(r["is_active"] or 0)), None)
     meta = _meta(active)

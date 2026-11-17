@@ -433,7 +433,8 @@ def _receipt(engine: Any, call: RecallCall, envelope: Any) -> None:
             profile_id=str(envelope.get("profile") or call.profile_id
                            or getattr(engine, "profile_id", "")),
             session_id=call.session_id, query=call.query,
-            results=envelope.get("results"), client=call.agent_id)
+            results=envelope.get("results"), client=call.agent_id,
+            recall_query_id=envelope.get("query_id"))
         if pull is not None:
             receipts.submit_pull(pull)
     except Exception as exc:  # a receipt is never worth a failed recall

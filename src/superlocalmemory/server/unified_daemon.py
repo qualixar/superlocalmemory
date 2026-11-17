@@ -909,7 +909,7 @@ class EngineRecallAdapter:
                 self._engine, path="hook_recall",
                 profile_id=str(getattr(self._engine, "profile_id", "") or ""),
                 session_id=session_id, query=query, results=out.get("results"),
-                client="hook")
+                client="hook", recall_query_id=out.get("query_id"))
             if pull is not None:
                 receipts.submit_pull(pull)
         except Exception as exc:

@@ -104,6 +104,46 @@ def _consolidate_blocking(app_state: Any, profile_id: str, lightweight: bool) ->
     return res
 
 
+def ranker_step(profile_id: str, *, config: Any = None) -> dict:
+    """Retrain the ranker when due (D-45, W3-6c), in a subprocess.
+
+    Before 4.2.30 the online trainer ran only when someone called
+    ``POST /api/v3/learning/consolidate`` by hand, so it trained once in seven
+    months (F-48). It now runs here, after consolidation, when the trigger says
+    a retrain is due and the machine has memory to spare (it never trains under
+    memory pressure). It only ever writes a candidate: a candidate is served to
+    nobody until it holds an offline certificate. Never raises.
+    """
+    try:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.infra import memory_pressure
+        from superlocalmemory.learning.lightgbm_subprocess import run_shadow_retrain_isolated
+        from superlocalmemory.learning.ranker_retrain_online import (
+            RETRAIN_HOURS_THRESHOLD,
+            RETRAIN_NEW_OUTCOMES_THRESHOLD,
+        )
+        from superlocalmemory.learning.retrain_trigger import should_retrain
+
+        config = config or SLMConfig.load()
+        learning_db = config.base_dir / "learning.db"
+        if not learning_db.exists():
+            return {"skipped": "no_learning_store"}
+        from superlocalmemory.learning.exposure_retention import prune
+
+        pruned = prune(learning_db, config.db_path, profile_id)
+        if memory_pressure.pressed():
+            return {"skipped": "memory_pressure", "pruned": pruned}
+        if not should_retrain(str(learning_db), str(config.db_path), profile_id,
+                              new_outcomes_threshold=RETRAIN_NEW_OUTCOMES_THRESHOLD,
+                              hours_threshold=RETRAIN_HOURS_THRESHOLD):
+            return {"skipped": "not_due", "pruned": pruned}
+        return {**run_shadow_retrain_isolated(config.db_path, learning_db, profile_id),
+                "pruned": pruned}
+    except Exception as exc:  # noqa: BLE001 - a retrain never breaks consolidation
+        logger.warning("ranker retrain step failed: %s", exc)
+        return {"error": str(exc)}
+
+
 async def run_full_consolidation(
     app_state: Any,
     profile_id: str,
@@ -130,6 +170,10 @@ async def run_full_consolidation(
         result = await asyncio.to_thread(
             _consolidate_blocking, app_state, profile_id, lightweight,
         )
+        if not lightweight:
+            # Outside the profile lease: a retrain takes up to minutes and a
+            # profile switch must not wait on it.
+            result["ranker"] = await asyncio.to_thread(ranker_step, profile_id)
         logger.info(
             "consolidation finished (trigger=%s): assertions=%s patterns=%s",
             trigger,

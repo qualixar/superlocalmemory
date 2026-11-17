@@ -560,6 +560,7 @@ class LearningDatabase:
         """
         from superlocalmemory.learning.training_rows import (
             fetch_labelled_rows,
+            ledger_source,
             outcome_source,
         )
 
@@ -567,13 +568,14 @@ class LearningDatabase:
         conn = self._connect()
         try:
             table = outcome_source(conn, mem)
-            if table is None:
+            ledger = ledger_source(conn, mem)
+            if table is None and ledger is None:
                 return self._fetch_position_only(profile_id, limit,
                                                  include_synthetic)
             return fetch_labelled_rows(
                 conn, table, profile_id=profile_id, limit=limit,
                 min_outcome_age_sec=min_outcome_age_sec,
-                include_synthetic=include_synthetic,
+                include_synthetic=include_synthetic, ledger=ledger,
             )
         except sqlite3.Error as exc:
             logger.warning("fetch_training_examples failed: %s", exc)
