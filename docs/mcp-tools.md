@@ -155,6 +155,16 @@ and `abstention_reason` (for example `judged_insufficient`) carry its verdict.
 invent a memory, rewrite the query more specifically and try once more. An
 invalid `kind` returns `INVALID_KIND` before anything is retrieved.
 
+Each result carries a `why` block that says, in four keys, whether to rely on it.
+It is built from the result's own fields, so it never disagrees with them:
+
+| Key | Values |
+|-----|--------|
+| `found_by` | The retrieval channels that found it, strongest first (up to three). `["keyword"]` on the keyword fallback; empty when the answer was cut short and carries no channel scores |
+| `answer_check` | `supported`, `weak` (below the answer check's threshold), `related` (close, but does not answer the question), or `not_checked` |
+| `standing` | `current`; `disputed` (another memory says something different: ask which is true now); `source changed` or `source missing` (re-read the file before relying on it) |
+| `said` | How long ago it was saved, for example `3 days ago`; empty when undated |
+
 ### `expand`
 
 Drill into one recall result: the full fact and, at depth 2, its source memory, same-session

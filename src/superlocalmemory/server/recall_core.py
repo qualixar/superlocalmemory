@@ -391,7 +391,18 @@ async def run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:
         lambda: _run_recall(engine, call, app_state=app_state))
     envelope, swap = _swapped(engine, call, envelope)
     _receipt(engine, call, envelope, swap)
-    return envelope
+    return _why(envelope)
+
+
+def _why(envelope: Any) -> Any:
+    """WS-4: why each memory came back, on every path (full, partial, fallback)."""
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("results"), list):
+        return envelope
+    from superlocalmemory.server.answer_receipt import with_why
+
+    lexical = envelope.get("retrieval_mode") == "degraded_lexical"
+    return {**envelope, "results": with_why(envelope["results"],
+                                            found_by=("keyword",) if lexical else ())}
 
 
 def _swapped(engine: Any, call: RecallCall, envelope: Any) -> tuple[Any, Any]:

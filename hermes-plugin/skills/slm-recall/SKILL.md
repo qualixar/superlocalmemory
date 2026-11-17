@@ -383,6 +383,14 @@ Two fields can appear on a recalled memory:
 
 CLI: `slm disputes`, `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated`.
 
+Every recalled memory also carries `why`, the short answer to "should I rely on
+this?": `found_by` (the channels that found it), `answer_check` (`supported`,
+`weak`, `related` or `not_checked`), `standing` (`current`, `disputed`,
+`source changed` or `source missing`) and `said` (its age). Rely on a
+`supported`, `current` memory. Say so when you use a `weak` or `related` one,
+handle `disputed` and `source ...` as above, and weigh an old `said` against
+anything that may have changed since.
+
 ### 9. Close the loop — say which memories helped
 
 Whether a memory has been useful is evidence SLM records only if you supply it.

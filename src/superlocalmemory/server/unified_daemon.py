@@ -971,6 +971,9 @@ class EngineRecallAdapter:
         )
         for _r in results:
             _r["content"] = _sanitize_json_text(_r.get("content", ""))
+        from superlocalmemory.server.answer_receipt import with_why
+
+        results = with_why(results)
         return {
             "ok": True,
             "query": query,

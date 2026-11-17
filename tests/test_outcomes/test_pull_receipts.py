@@ -204,13 +204,20 @@ def _run(engine, call, envelope, monkeypatch, sent):
     return asyncio.run(recall_core.run_recall(engine, call, app_state=None))
 
 
+def _without_why(envelope: dict) -> dict:
+    """The answer as recall built it (W3-7b adds only a ``why`` block per result)."""
+    return {**envelope, "results": [{k: v for k, v in r.items() if k != "why"}
+                                    for r in envelope["results"]]}
+
+
 def test_each_caller_gets_its_own_receipt_even_when_the_run_was_shared(store, tmp_path,
                                                                       monkeypatch) -> None:
     sent: list = []
     envelope = {"ok": True, "profile": "default", "results": [{"fact_id": "a", "score": 0.5}]}
     engine = _engine(store, tmp_path)
     for via in ("mcp", "cli"):
-        assert _run(engine, _call(via=via), envelope, monkeypatch, sent) is envelope
+        assert _without_why(_run(engine, _call(via=via), envelope, monkeypatch, sent)) \
+            == envelope
     assert [(p.path, p.results) for p in sent] == [("mcp_recall", (("a", 0.5),)),
                                                   ("cli_recall", (("a", 0.5),))]
 
@@ -245,7 +252,7 @@ def test_a_receipt_failure_never_fails_the_recall(store, tmp_path, monkeypatch) 
     monkeypatch.setattr(receipts, "submit_pull", boom)
     got = asyncio.run(recall_core.run_recall(_engine(store, tmp_path), _call(via="mcp"),
                                              app_state=None))
-    assert got is envelope
+    assert _without_why(got) == envelope
 
 
 def test_via_never_splits_a_shared_run() -> None:
