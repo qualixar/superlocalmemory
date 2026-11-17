@@ -269,7 +269,9 @@ the agent acted on a memory, not proof it helped; "helps"/"hurts" appears only
 when the anytime-valid range excludes 0, and each line says how many
 deliveries it has against how many its plan needs (months of use on one store;
 a single retrieval channel's value is usually out of reach). Never report "no
-clear effect yet" as "memory does not help".
+clear effect yet" as "memory does not help". Its learning section lists each
+learner as learning, stalled, off, waiting or not wired: report a stalled learner
+as stalled (with its reason), never as healthy.
   A disagreement is a warning, not a proven error.
 
 The dashboard shows the same on the Health page's **Truth checks** card.

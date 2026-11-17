@@ -28,6 +28,11 @@ const REPORT = {
   ],
   certificates: [{ voided_at: null }, { voided_at: '2026-11-10' }],
   second_opinions: [],
+  learning: { learners: [
+    { name: 'ranker_training', learns: 'which memories to put first', state: 'stalled', reason: 'feedback has arrived that it has not learned from (147 days behind)' },
+    { name: 'pattern_mining', learns: 'your interests', state: 'learning', reason: 'up to date' },
+    { name: 'cross_project', learns: 'preferences across projects', state: 'not_wired', reason: 'its aggregation is never called' },
+  ] },
 };
 
 function page(report, opened) {
@@ -69,6 +74,17 @@ describe('What memory did for you card', () => {
     assert.match(text, /Not enough data yet \(0 of about 7536\)/);
     assert.match(text, /act on their own: 1\. Second opinions that disagreed: 0/);
     assert.equal(d.window.document.querySelectorAll('img').length, 0);
+  });
+
+  it('says which parts of SLM are learning, stalled or not connected', async () => {
+    const d = page(REPORT, []);
+    show(d).click();
+    await flush();
+    const text = d.window.document.body.textContent;
+    assert.match(text, /Is SLM still learning\?/);
+    assert.match(text, /Which memories to put first \(feedback has arrived.*147 days behind\)\)Stalled/);
+    assert.match(text, /Your interests \(up to date\)Learning/);
+    assert.match(text, /Not connected/);
   });
 
   it('opens a listed memory', async () => {

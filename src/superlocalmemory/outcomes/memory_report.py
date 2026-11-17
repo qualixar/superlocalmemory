@@ -14,7 +14,9 @@ disagree. Read-only, ids and numbers only (no memory text, no query text):
 * **use** (M-13): the store's use rate, per kind, the most used and the
   confidently rarely used memories, each with a credible interval;
 * **certificates** and **second opinions** (WS-2): which judge may act, and
-  where a higher tier disagreed (R-26, R-30).
+  where a higher tier disagreed (R-26, R-30);
+* **learning** (D-45): every learner's state (learning, stalled, off, waiting,
+  not wired), so a stalled learner is never silent again.
 
 Every section fails soft: a store without a table reports that section empty.
 """
@@ -98,6 +100,27 @@ def _judges(conn: sqlite3.Connection, profile_id: str) -> tuple[list, list]:
     return records, second
 
 
+def _learning(conn: sqlite3.Connection, profile_id: str, slm_home: Path | None) -> dict:
+    from superlocalmemory.learning import learning_health
+
+    path = None if slm_home is None else slm_home / "learning.db"
+    learning = None
+    try:
+        if path is not None and path.is_file():
+            from superlocalmemory.truth.invariants import open_read_only
+
+            learning = open_read_only(str(path))
+        learners = learning_health.measure(learning, conn, profile_id)
+    except Exception:  # noqa: BLE001 - the learning section never breaks the report
+        logger.debug("learning health unreadable", exc_info=True)
+        learners = []
+    finally:
+        if learning is not None:
+            learning.close()
+    return {"learners": [x.as_dict() for x in learners],
+            "states": learning_health.summary(learners)}
+
+
 def build(conn: sqlite3.Connection, profile_id: str, *, as_of: datetime | None = None,
           slm_home: Path | None = None) -> dict:
     """The whole report for one profile (JSON-ready)."""
@@ -113,6 +136,7 @@ def build(conn: sqlite3.Connection, profile_id: str, *, as_of: datetime | None =
         "use": _use(utility.measure(conn, profile_id, as_of=when)),
         "certificates": certificates,
         "second_opinions": second,
+        "learning": _learning(conn, profile_id, slm_home),
     }
 
 
@@ -171,6 +195,14 @@ def describe(report: dict) -> list[str]:
     active = [c for c in certs if not c.get("voided_at")]
     lines.append(f"  Judge certificates: {len(active)} active, {len(certs) - len(active)} voided")
     lines.append(f"  Second opinions that disagreed: {len(report['second_opinions'])}")
+    learning = report.get("learning") or {}
+    states = learning.get("states") or {}
+    if learning.get("learners"):
+        lines.append("  Is SLM learning? " + ", ".join(f"{n} {s.replace('_', ' ')}"
+                                                       for s, n in sorted(states.items())))
+        for item in learning["learners"]:
+            lines.append(f"    {item['name']}: {item['state'].replace('_', ' ')} "
+                         f"({item['reason']})")
     return lines
 
 

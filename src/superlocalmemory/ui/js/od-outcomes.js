@@ -23,6 +23,9 @@
 
   var CONTRAST = { memory: 'Giving one more memory at session start',
                    channel: 'Searching with every retrieval method' };
+  var STATE = { learning: ['Learning', 'tone-ok'], stalled: ['Stalled', 'tone-warn'],
+                off: ['Off', ''], waiting: ['Waiting for agents', ''],
+                not_wired: ['Not connected', 'tone-warn'], no_input: ['Nothing to learn yet', ''] };
   var OUTCOME = { used: 'the agent acting on a memory', reask: 'the agent having to ask memory again' };
 
   function row(list, text, status, tone) {
@@ -97,6 +100,16 @@
       var s = effectStatus(e);
       row(list, effectText(e), s[0], s[1]);
     });
+
+    var learners = (d.learning || {}).learners || [];
+    if (learners.length) {
+      list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'Is SLM still learning?'));
+      learners.forEach(function (x) {
+        var words = STATE[x.state] || [x.state, ''];
+        row(list, x.learns.charAt(0).toUpperCase() + x.learns.slice(1) + ' (' + x.reason + ')',
+            words[0], words[1]);
+      });
+    }
 
     var certs = d.certificates || [];
     var live = certs.filter(function (c) { return !c.voided_at; });
