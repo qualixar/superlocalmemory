@@ -494,6 +494,14 @@ def settle_stale_plays(
             age = (current - played).total_seconds()
             if age < _MIN_AGE_SEC:
                 continue  # not yet settleable
+            # W3-6e: a play a delivery names is the ledger's to settle once that
+            # delivery's 24 h window closes; closing it here first would discard
+            # the better evidence.
+            from superlocalmemory.learning.reward_from_ledger import awaiting_ledger
+
+            if awaiting_ledger(memory_conn, str(profile_id), str(row["query_id"] or ""),
+                               current):
+                continue
 
             # The play's own record first; the signals table only as a
             # fallback for rows written before M044.

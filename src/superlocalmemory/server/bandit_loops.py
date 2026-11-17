@@ -68,6 +68,7 @@ async def _reward_proxy_loop(
     interval_sec: float,
 ) -> None:
     """Run the proxy settler on a steady interval. Never raises."""
+    from superlocalmemory.learning.reward_from_ledger import settle_from_ledger
     from superlocalmemory.learning.reward_from_outcomes import (
         settle_from_outcomes,
     )
@@ -85,6 +86,10 @@ async def _reward_proxy_loop(
             )
             # The settler is synchronous + fast; run in a thread to avoid
             # blocking the event loop on unusual DB lock stalls.
+            used = await asyncio.to_thread(
+                settle_from_ledger,
+                profile_id, learning_db, memory_db,
+            )
             n = await asyncio.to_thread(
                 settle_stale_plays,
                 profile_id, learning_db, memory_db,
@@ -95,6 +100,8 @@ async def _reward_proxy_loop(
             # made this defect invisible.
             if real:
                 logger.info("bandit settled %d play(s) from outcomes", real)
+            if used:
+                logger.info("bandit settled %d play(s) from usage", used)
             if n:
                 logger.debug("bandit.reward_proxy settled=%d (default)", n)
         except asyncio.CancelledError:  # pragma: no cover — lifecycle
