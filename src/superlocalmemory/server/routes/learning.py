@@ -644,7 +644,7 @@ def get_patterns():
             logger.error("Error loading patterns from behavioral store: %s", exc)
             result["pattern_error"] = str(exc)
 
-    # Learning signal stats (feedback count, co-retrieval, channel credits)
+    # Learning signal stats (co-retrieval); channel value is in /api/outcomes/health (M-12)
     if LEARNING_AVAILABLE:
         try:
             from superlocalmemory.learning.signals import LearningSignals

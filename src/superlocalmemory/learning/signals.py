@@ -4,12 +4,19 @@
 
 """Zero-Cost Learning Signals — mathematical learning without LLM tokens.
 
-Four signal types that improve retrieval quality over time:
+Signal types that improve retrieval quality over time:
 
 1. Entropy Gap     — Surprising content gets deeper indexing.
 2. Co-Retrieval    — Memories retrieved together strengthen graph edges.
-3. Channel Credit  — Track which retrieval channel works for which query type.
-4. Confidence Lifecycle — Boost on access, decay over time.
+3. Confidence Lifecycle — Boost on access, decay over time.
+
+Channel Credit (per-channel hit rates turned into ranking weights) was removed
+in 4.2.30 (W3-6): nothing in production ever wrote or read it, and a hit rate
+is not a channel's value (a channel that ranks high is used more whatever it is
+worth). A channel's value is now estimated from randomised channel drops with
+logged propensities (``outcomes.effects``, M-12) and shown in the Memory Health
+report. An older store may still hold a ``channel_credits`` table; nothing reads
+it, and erasing a profile still clears it (``profile_fold_sidecars``).
 
 All signals are computed locally with zero LLM cost.
 Inspired by: Nemori (entropy), A-Mem (link evolution), RMM (citation feedback).
@@ -371,20 +378,6 @@ class LearningSignals:
             conn = self._connect()
             try:
                 conn.execute(
-                    "CREATE TABLE IF NOT EXISTS channel_credits ("
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                    "profile_id TEXT NOT NULL, "
-                    "query_type TEXT NOT NULL, "
-                    "channel TEXT NOT NULL, "
-                    "hits INTEGER DEFAULT 0, "
-                    "total INTEGER DEFAULT 0, "
-                    "updated_at TEXT NOT NULL)"
-                )
-                conn.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_credit_unique "
-                    "ON channel_credits(profile_id, query_type, channel)"
-                )
-                conn.execute(
                     "CREATE TABLE IF NOT EXISTS co_retrieval_edges ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                     "profile_id TEXT NOT NULL, "
@@ -507,57 +500,6 @@ class LearningSignals:
                 conn.close()
 
     # ------------------------------------------------------------------
-    # Signal 3: Channel Credit (recall-time)
-    # ------------------------------------------------------------------
-
-    def credit_channel(
-        self, profile_id: str, query_type: str, channel: str, hit: bool,
-    ) -> None:
-        """Credit a retrieval channel for a hit or miss."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                hit_val = 1 if hit else 0
-                conn.execute(
-                    "INSERT INTO channel_credits "
-                    "(profile_id, query_type, channel, hits, total, updated_at) "
-                    "VALUES (?, ?, ?, ?, 1, ?) "
-                    "ON CONFLICT(profile_id, query_type, channel) "
-                    "DO UPDATE SET hits = hits + ?, total = total + 1, updated_at = ?",
-                    (profile_id, query_type, channel, hit_val, now, hit_val, now),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-    def get_channel_weights(
-        self, profile_id: str, query_type: str,
-    ) -> dict[str, float]:
-        """Get learned channel weights for a query type.
-
-        Returns weight multipliers based on historical hit rates.
-        """
-        with self._lock:
-            conn = self._connect()
-            try:
-                rows = conn.execute(
-                    "SELECT channel, hits, total FROM channel_credits "
-                    "WHERE profile_id = ? AND query_type = ? AND total >= 5",
-                    (profile_id, query_type),
-                ).fetchall()
-                if not rows:
-                    return {}
-                weights = {}
-                for r in rows:
-                    d = dict(r)
-                    rate = d["hits"] / max(d["total"], 1)
-                    weights[d["channel"]] = 0.7 + (rate * 0.8)
-                return weights
-            finally:
-                conn.close()
-
-    # ------------------------------------------------------------------
     # Signal 4: Confidence Lifecycle (store + recall time)
     # ------------------------------------------------------------------
 
@@ -631,24 +573,9 @@ class LearningSignals:
                 ).fetchone()
                 co = dict(co_rows) if co_rows else {"c": 0, "total": 0}
 
-                ch_rows = conn.execute(
-                    "SELECT channel, hits, total FROM channel_credits "
-                    "WHERE profile_id = ? ORDER BY total DESC",
-                    (profile_id,),
-                ).fetchall()
-                channels = {
-                    dict(r)["channel"]: {
-                        "hits": dict(r)["hits"],
-                        "total": dict(r)["total"],
-                        "rate": round(dict(r)["hits"] / max(dict(r)["total"], 1), 3),
-                    }
-                    for r in ch_rows
-                }
-
                 return {
                     "co_retrieval_edges": co["c"],
                     "co_retrieval_events": co["total"],
-                    "channel_performance": channels,
                 }
             finally:
                 conn.close()

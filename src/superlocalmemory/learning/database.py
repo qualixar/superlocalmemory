@@ -610,9 +610,10 @@ class LearningDatabase:
     def _other_profile_tables(conn: sqlite3.Connection, already: list[str]) -> list[str]:
         """Every other table of learning.db that carries a profile (a producer added later).
 
-        ``channel_credits`` and ``co_retrieval_edges`` (written by ordinary recall)
-        were not in the list above, so an erasure left the ids of the memories a
-        person's queries co-retrieved. Receipts and the markers that refuse a late
+        ``co_retrieval_edges`` (written by recall) and ``channel_credits`` (no
+        longer created since 4.2.30 W3-6, but present in older stores) were not in
+        the list above, so an erasure left the ids of the memories a person's
+        queries co-retrieved. Receipts and the markers that refuse a late
         write are decided by ``profile_fold_sidecars`` and are not touched here.
         """
         from superlocalmemory.storage.profile_fold_sidecars import DELETE, LEARNING_DECISIONS

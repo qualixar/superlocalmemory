@@ -12,11 +12,19 @@ from superlocalmemory.learning.database import LearningDatabase
 from superlocalmemory.learning.signals import LearningSignals
 from superlocalmemory.storage import profile_fold_sidecars as sidecars
 
+#: An older store's table: no longer created or written since 4.2.30 (W3-6), but a
+#: profile erasure must still clear its rows.
+_OLD_CHANNEL_CREDITS = ("CREATE TABLE IF NOT EXISTS channel_credits (id INTEGER PRIMARY KEY "
+                        "AUTOINCREMENT, profile_id TEXT NOT NULL, query_type TEXT NOT NULL, "
+                        "channel TEXT NOT NULL, hits INTEGER DEFAULT 0, total INTEGER DEFAULT 0, "
+                        "updated_at TEXT NOT NULL)")
+
 
 def _recall_learns(path, profile: str) -> None:
-    """What a recall does to learning.db: credit a channel, link two memories."""
+    """What recall leaves in learning.db (an older store's channel credits too)."""
     signals = LearningSignals(str(path))
     conn = sqlite3.connect(path)
+    conn.execute(_OLD_CHANNEL_CREDITS)
     conn.execute("INSERT INTO channel_credits (profile_id, query_type, channel, hits, total, "
                  "updated_at) VALUES (?, 'q', 'bm25', 1, 2, 'now')", (profile,))
     conn.execute("INSERT INTO co_retrieval_edges (profile_id, fact_id_a, fact_id_b, updated_at) "

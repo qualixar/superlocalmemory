@@ -219,8 +219,6 @@ def test_legacy_learning_signals_class_unchanged(tmp_path):
 
     db_path = str(tmp_path / "sig.db")
     ls = LearningSignals(db_path)
-    ls.credit_channel("p1", "single_hop", "semantic", hit=True)
-    ls.credit_channel("p1", "single_hop", "semantic", hit=False)
     ls.record_co_retrieval("p1", ["a", "b", "c"])
     stats = ls.get_signal_stats("p1")
     assert "co_retrieval_edges" in stats
@@ -413,22 +411,27 @@ def test_reset_counters_helper():
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_get_channel_weights_empty(tmp_path):
+def test_channel_credit_is_gone_and_its_old_table_is_ignored(tmp_path):
+    """4.2.30 W3-6: the hit-rate channel weights had no production caller and a hit
+    rate is not a channel's value (M-12 estimates it from randomised drops). A new
+    store has no ``channel_credits``; an older one's rows are never read."""
+    import sqlite3
+
     from superlocalmemory.learning.signals import LearningSignals
 
-    ls = LearningSignals(str(tmp_path / "s.db"))
-    assert ls.get_channel_weights("p1", "single_hop") == {}
-
-
-def test_legacy_get_channel_weights_after_hits(tmp_path):
-    from superlocalmemory.learning.signals import LearningSignals
-
-    ls = LearningSignals(str(tmp_path / "s.db"))
-    for _ in range(6):
-        ls.credit_channel("p1", "single_hop", "semantic", hit=True)
-    weights = ls.get_channel_weights("p1", "single_hop")
-    assert "semantic" in weights
-    assert weights["semantic"] > 0.7
+    path = tmp_path / "s.db"
+    ls = LearningSignals(str(path))
+    assert not hasattr(ls, "credit_channel") and not hasattr(ls, "get_channel_weights")
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'channel_credits'"
+                        ).fetchone() is None
+    conn.execute("CREATE TABLE channel_credits (profile_id TEXT, query_type TEXT, "
+                 "channel TEXT, hits INTEGER, total INTEGER, updated_at TEXT)")
+    conn.execute("INSERT INTO channel_credits VALUES ('p1', 'q', 'bm25', 9, 10, 'now')")
+    conn.commit()
+    conn.close()
+    stats = ls.get_signal_stats("p1")
+    assert "channel_performance" not in stats and stats["co_retrieval_edges"] == 0
 
 
 def test_legacy_co_retrieval_boost(tmp_path):
@@ -470,17 +473,6 @@ def test_cosine_sim_helper_safety():
     assert _cosine_sim([], []) == 0.0
     assert _cosine_sim([0.0], [0.0]) == 0.0
     assert abs(_cosine_sim([1.0, 0.0], [1.0, 0.0]) - 1.0) < 1e-9
-
-
-def test_legacy_get_channel_weights_filters_low_count(tmp_path):
-    from superlocalmemory.learning.signals import LearningSignals
-
-    ls = LearningSignals(str(tmp_path / "s.db"))
-    # Only 2 events — falls below total>=5 threshold.
-    ls.credit_channel("p1", "q", "bm25", hit=True)
-    ls.credit_channel("p1", "q", "bm25", hit=False)
-    weights = ls.get_channel_weights("p1", "q")
-    assert weights == {}
 
 
 def test_legacy_entropy_gap_identical_cluster():
