@@ -22,7 +22,7 @@ MODULES = sorted((ROOT / "truth").glob("*.py")) + [
     ROOT / "core" / f"{name}.py" for name in (
         "judge_ladder", "judge_tiers", "judge_calibration", "judge_questions", "audit_sampler",
         "risk_policy", "judge_certificates", "shadow_escalation", "audit_value",
-        "relation_scorer", "consent_store")]
+        "relation_scorer", "consent_store")] + [ROOT / "outcomes" / "effects.py"]
 
 #: Bounds of a probability or score: never thresholds on their own.
 BOUNDS = {0.0, 1.0}
@@ -62,6 +62,13 @@ ALLOWED = {
     ("slot_keys.py", 0.6): "descriptive: PATTERN_CONFIDENCE, nothing branches on it (D-10)",
     ("slot_pass.py", 60.0): "routing only: retry backoff base (seconds)",
     ("slot_pass.py", 86400.0): "routing only: retry backoff cap (seconds)",
+    ("effects.py", 24.0): "policy: outcome window in hours, M-12 estimand (W0-17)",
+    ("effects.py", 0.05): "policy: two-sided error level of every effect interval, M-12",
+    ("effects.py", 0.1): "method: power-line effect size; tunes where the anytime interval "
+                         "is tightest, never a threshold on data, M-12",
+    ("effects.py", 0.8): "method: power-line power, M-12",
+    ("effects.py", 0.25): "method: largest variance of a 0/1 outcome, p(1 - p) <= 1/4",
+    ("effects.py", 2.0): "method: two-sided alpha / 2 and Robbins' normal-mixture boundary, M-12",
 }
 
 
