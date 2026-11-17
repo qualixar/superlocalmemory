@@ -415,11 +415,14 @@ beside a live daemon and on a copy). Ids and numbers only:
   anytime-valid range excludes 0; each line says how many deliveries it has and
   how many its plan needs.
 - **Judge certificates** and **second opinions**, as in `slm doctor --truth`.
-- **Is SLM learning?**: each learner (ranker training, co-retrieval, pattern mining,
+- **Is SLM learning?**: each learner (ranker training, the ranker's offline gate, co-retrieval, pattern mining,
   ranking, feature logging, bandit, agent experiences, execution learning, workflow
   mining, cross-project) as `learning`, `stalled` (new input it has not learned from
   for longer than its own schedule), `off` (the setting is named), `waiting` (fed only
-  when an agent calls its tool) or `not wired`, with its last activity.
+  when an agent calls its tool) or `not wired`, with its last activity. A newly
+  trained ranker reaches recall only after its offline gate certifies it (more uses
+  expected than the order you get, measured from logged swaps when `outcomes.swaps`
+  is on) and then passes the live test; until then the gate's reason is shown.
 
 ### `slm models`
 

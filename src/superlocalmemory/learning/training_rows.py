@@ -108,6 +108,7 @@ def _ledger_sql(prefix: str, synthetic_filter: str, n_signals: int) -> str:
     return (
         "SELECT s.id AS signal_id, s.query_id, s.fact_id, s.position, "
         "       s.created_at, f.features_json, MIN(r.propensity) AS propensity, "
+        "       MIN(r.position) AS shown_position, MIN(d.session_id) AS session_id, "
         "       MAX(EXISTS (SELECT 1 FROM " + prefix + "injection_usage u "
         "            WHERE u.delivery_id = r.delivery_id AND u.fact_id = r.fact_id "
         f"             AND u.signal IN ({marks}) "

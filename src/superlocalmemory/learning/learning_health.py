@@ -114,6 +114,31 @@ def _flow(name: str, learns: str, out: tuple, inp: float | None, cadence_h: floa
     return Learner(name, learns, rows, _jd_to_iso(last), LEARNING, "up to date")
 
 
+def _gate(learning: sqlite3.Connection | None, profile_id: str) -> Learner:
+    """The ranker candidate's offline gate verdict (D-45)."""
+    import json
+
+    learns = "checks a new ranker against the order you get, before anyone sees it"
+    try:
+        row = None if learning is None else learning.execute(
+            "SELECT shadow_results_json, trained_at FROM learning_model_state"
+            " WHERE profile_id = ? AND is_candidate = 1 LIMIT 1", (profile_id,)).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        return Learner("ranker_gate", learns, 0, None, NO_INPUT, "no candidate trained yet")
+    try:
+        results = json.loads(row[0] or "{}")
+    except (TypeError, ValueError):
+        results = {}
+    verdict = results.get("offline_gate") or {}
+    if results.get("offline_certificate") is True:
+        return Learner("ranker_gate", learns, 1, row[1], LEARNING,
+                       "certified: the candidate is in the live test")
+    return Learner("ranker_gate", learns, 1, row[1], WAITING,
+                   str(verdict.get("reason") or "not checked yet"))
+
+
 def _newest(*values: float | None) -> float | None:
     present = [v for v in values if v is not None]
     return max(present) if present else None
@@ -135,6 +160,7 @@ def measure(learning: sqlite3.Connection | None, memory: sqlite3.Connection | No
         _flow("ranker_training", "which memories to put first, from what agents used",
               _stat(learning, "learning_model_state", p), _newest(outcomes, used),
               RANKER_CADENCE_H, "feedback"),
+        _gate(learning, p),
         _flow("co_retrieval", "which memories belong together",
               _stat(learning, "co_retrieval_edges", p), recalls,
               PER_RECALL_CADENCE_H, "recall"),

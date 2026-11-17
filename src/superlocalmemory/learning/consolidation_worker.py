@@ -132,6 +132,35 @@ def _count_informative_labels(rows: list[dict]) -> int:
             seen += 1
     return seen
 
+def _offline_gate(booster, holdout_rows, feature_names, memory_db_path: str,
+                  profile_id: str) -> dict:
+    """The D-45 offline gate's verdict for this candidate (never raises)."""
+    import sqlite3 as _sqlite3
+    from pathlib import Path as _Path
+
+    from superlocalmemory.learning import offline_gate, position_bias
+
+    try:
+        import numpy as np
+
+        conn = _sqlite3.connect(f"{_Path(memory_db_path).resolve().as_uri()}?mode=ro",
+                                uri=True, timeout=5.0)
+        try:
+            model = position_bias.estimate(conn, profile_id)
+        finally:
+            conn.close()
+
+        def score(rows):
+            x = np.asarray([[float((r.get("features") or {}).get(n, 0.0))
+                             for n in feature_names] for r in rows], dtype=np.float32)
+            return booster.predict(x)
+
+        return offline_gate.evaluate(score, holdout_rows or [], model).as_dict()
+    except Exception as exc:  # noqa: BLE001 - no verdict means no certificate
+        logger.warning("offline gate failed: %s", exc)
+        return offline_gate.Verdict(False, f"gate error: {type(exc).__name__}").as_dict()
+
+
 def _run_shadow_cycle(
     *,
     memory_db_path: str,
@@ -253,6 +282,14 @@ def _run_shadow_cycle(
             out["metrics"] = metrics
             return out
 
+    # D-45: the offline gate against the order recall actually serves. Only a
+    # certified candidate may enter the live test (shadow_serving); either way
+    # the candidate and its verdict are recorded, and the next retrain replaces
+    # an uncertified one.
+    verdict = _offline_gate(booster, holdout_rows, feature_names,
+                            memory_db_path, profile_id)
+    out["offline_gate"] = verdict
+
     try:
         state_bytes = booster.model_to_string().encode("utf-8")
     except Exception as exc:  # pragma: no cover — defensive
@@ -266,7 +303,9 @@ def _run_shadow_cycle(
             state_bytes=state_bytes, feature_names=feature_names,
             trained_on_count=len(rows), metrics=metrics,
             shadow_results={"holdout_gate_pass": bool(prior_row is not None
-                                                       and holdout_rows)},
+                                                       and holdout_rows),
+                            "offline_certificate": bool(verdict.get("certified")),
+                            "offline_gate": verdict},
         )
     except sqlite3.Error as exc:
         logger.warning("persist_candidate failed: %s", exc)
