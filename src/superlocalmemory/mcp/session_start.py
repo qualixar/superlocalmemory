@@ -141,10 +141,20 @@ def _item(fact, *, pinned=False, source, score=0.0, tier=""):
         pinned=pinned,
         source_type=source,
         support_tier=str(tier),
+        created_at=str(getattr(fact, "created_at", "") or ""),
     )
 
 
 def _context(engine, named, response, memories, cfg):
+    try:
+        # WS-4: each unit says how far to trust it (disputes, changed sources).
+        from superlocalmemory.core.context_packer import annotate
+        from superlocalmemory.outcomes.receipts import engine_paths
+
+        home, db_path = engine_paths(engine)
+        memories = annotate(memories, db_path, named, slm_home=home)
+    except Exception as exc:  # presentation only: never fail a session start
+        shared.logger.debug("session_init standing skipped: %s", exc)
     try:
         context = render_context(
             memories, mode=str(getattr(engine, "mode", "B")).upper(), cfg=cfg, wrap=True

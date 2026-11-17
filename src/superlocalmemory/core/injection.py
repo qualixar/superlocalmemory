@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from superlocalmemory.retrieval.hosted_redaction import redact_for_hosted_judge
 
@@ -205,6 +205,13 @@ class InjectableMemory:
     #: The answer-support label recall gave this memory ("supported", "weak",
     #: "related"); "" when no support check ran (a context load, the gate off).
     support_tier: str = ""
+    #: Its standing as evidence (WS-4, ``context_packer.standing``): when it was
+    #: said, whether its value is disputed (and what the other side says), and
+    #: the state of the file it came from.
+    created_at: str = ""
+    disputed: bool = False
+    other_side: str = ""
+    source_state: str = ""
 
 
 #: The only support label that may enter an agent's context unasked.
@@ -349,19 +356,9 @@ def clamp_to_budget(
     for m in mems:
         t = estimate_tokens(m.content)
         if t > per_mem_max:
-            m_clamped = InjectableMemory(
-                content=m.content[: per_mem_max * 4],
-                score=m.score,
-                fact_id=m.fact_id,
-                importance=m.importance,
-                access_count=m.access_count,
-                tier=m.tier,
-                pinned=m.pinned,
-                is_core=m.is_core,
-                source_type=m.source_type,
-                source_id=m.source_id,
-                support_tier=m.support_tier,
-            )
+            from superlocalmemory.core.context_packer import pack_text
+
+            m_clamped = replace(m, content=pack_text(m.content, per_mem_max).text)
             t = estimate_tokens(m_clamped.content)
             if used + t > budget_tokens:
                 break
@@ -385,10 +382,9 @@ def clamp_content(content: str, cfg) -> str:
     """
     if not content:
         return content
-    per_mem_max = _default_per_memory_max_tokens(cfg)
-    if estimate_tokens(content) <= per_mem_max:
-        return content
-    return content[: per_mem_max * 4]
+    from superlocalmemory.core.context_packer import pack_text
+
+    return pack_text(content, _default_per_memory_max_tokens(cfg)).text
 
 
 def sanitize_untrusted_content(content: str) -> str:
@@ -478,7 +474,10 @@ def render_context(
             fields.append(f"source_type={memory.source_type}")
         if memory.source_id:
             fields.append(f"source_id={memory.source_id}")
-        return f" (provenance: {', '.join(fields)})" if fields else ""
+        from superlocalmemory.core.context_packer import standing
+
+        label = standing(memory)
+        return (f" (provenance: {', '.join(fields)})" if fields else "") + label
 
     parts: list[str] = []
     if core:
