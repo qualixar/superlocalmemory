@@ -431,7 +431,7 @@ Report how using recalled memories turned out.
 | `get_status` | `profile_id` | Fact, entity and edge counts, mode, profile, database size |
 | `get_version` | none | SLM, Python and platform versions |
 | `get_attribution` | none | Author, version, license and provenance |
-| `health` | `profile_id` | Math-layer, database and component health |
+| `health` | `profile_id`, `memory` | Math-layer, database and component health; `memory=true` returns the Memory Health report instead (deliveries, use rates with ranges, randomised effects with intervals, judge certificates, second opinions; ids and numbers only) |
 | `get_mode` | none | Current mode and its capabilities |
 | `set_mode` | `mode` (`a`, `b`, `c`) | Switch mode and reset the engine |
 | `switch_profile` | `profile_id` | Switch the active memory profile for this computer |

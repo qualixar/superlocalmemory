@@ -4851,7 +4851,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     # Optional routers
     for _mod_name in (
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
-        "insights", "timeline", "abstraction", "integrity", "overtaken", "truth",
+        "insights", "timeline", "abstraction", "integrity", "overtaken", "truth", "outcomes",
     ):
         try:
             _mod = __import__(

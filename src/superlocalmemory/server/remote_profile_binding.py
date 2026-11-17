@@ -154,6 +154,9 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     # dispute_id / keep (4.2.30, D-39): which dispute and which side; disputes live
     # inside the profile the call is routed to, so neither selects a profile.
     "dispute_id", "keep",
+    # memory (4.2.30, W3-5): ``health(memory=true)`` adds the Memory Health report of
+    # the profile the call is routed to; selects no profile.
+    "memory",
     # source_file (4.2.30, D-38): the local file a save was learned from; selects no
     # profile (and a remote caller is refused it at the door).
     "source_file",

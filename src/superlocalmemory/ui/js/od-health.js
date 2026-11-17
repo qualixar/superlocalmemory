@@ -589,6 +589,7 @@
       }
       if (window.odMountMemoryHealth) window.odMountMemoryHealth(container);
       if (window.odMountTruthChecks) window.odMountTruthChecks(container);
+      if (window.odMountMemoryOutcomes) window.odMountMemoryOutcomes(container);
 
     }).catch(function (err) {
       container.innerHTML =

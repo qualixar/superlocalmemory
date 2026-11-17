@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections, truth checks, slm doctor --truth, judge certificates, second opinions, audit questions waiting, slm audit --count, slm consent, what leaves my computer"
+when_to_use: "check slm status, health check, is slm working, optimize stats, tokens saved, cache hits, compress runs, slm doctor, preflight, db size, slm info, diagnose slm, slm media status, are pictures on, slm features, picture search not working, slm media repair, embedder status, memory health, slm enrich, repair memories, undo a repair, failed saves, repair saves, redacted memory, blanked memory, mode b slow, too many model calls, lower llm cost, pile of correction proposals, dismiss corrections, truth checks, slm doctor --truth, judge certificates, second opinions, slm health --memory, does memory help, which memories are used, memory use rate, withholding, audit questions waiting, slm audit --count, slm consent, what leaves my computer"
 ---
 
 # slm-status — Health and Optimize Stats
@@ -251,6 +251,19 @@ slm audit --count [--json]                  # how many audit questions wait for 
   support it; `drift`: its recent scores changed). None is normal on a new store.
 - **Second opinions**: how often a stronger judge, asked in the background
   about 1 in 20 confident answers, was sure of something else, with 95% bounds.
+
+```bash
+slm health --memory [--json] [--db <path>]   # read-only Memory Health report
+```
+
+(MCP: `health(memory=true)`.) It reports what was delivered (and whether
+withholding is on), how often each delivered memory is used, with a 95% range,
+and whether memory measurably helps. Read it honestly: a use rate is how often
+the agent acted on a memory, not proof it helped; "helps"/"hurts" appears only
+when the anytime-valid range excludes 0, and each line says how many
+deliveries it has against how many its plan needs (months of use on one store;
+a single retrieval channel's value is usually out of reach). Never report "no
+clear effect yet" as "memory does not help".
   A disagreement is a warning, not a proven error.
 
 The dashboard shows the same on the Health page's **Truth checks** card.

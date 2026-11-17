@@ -714,6 +714,12 @@ def main() -> None:
 
     health_p = sub.add_parser("health", help="Math layer health (scoring, consistency, and lifecycle layers)")
     health_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
+    health_p.add_argument(
+        "--memory", action="store_true",
+        help="What memory did for you: deliveries, use rates and randomised effects with "
+             "intervals, judge certificates and second opinions (read-only)")
+    health_p.add_argument("--db", help="With --memory: read this store file (e.g. a copy)")
+    health_p.add_argument("--profile", help="With --memory: the profile to report")
 
     models_p = sub.add_parser(
         "models", help="Installed Ollama models + recommendations, and the hosted catalogue",

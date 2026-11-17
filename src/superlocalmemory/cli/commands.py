@@ -2876,7 +2876,12 @@ def cmd_status(args: Namespace) -> None:
 
 
 def cmd_health(args: Namespace) -> None:
-    """Show math layer health status."""
+    """Show math layer health status (``--memory``: the Memory Health report)."""
+    if getattr(args, "memory", False):
+        from superlocalmemory.cli.health_memory import cmd_health_memory
+
+        cmd_health_memory(args)
+        return
     from superlocalmemory.core.config import SLMConfig
 
     use_json = getattr(args, 'json', False)

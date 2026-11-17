@@ -22,7 +22,7 @@ MODULES = sorted((ROOT / "truth").glob("*.py")) + [
     ROOT / "core" / f"{name}.py" for name in (
         "judge_ladder", "judge_tiers", "judge_calibration", "judge_questions", "audit_sampler",
         "risk_policy", "judge_certificates", "shadow_escalation", "audit_value",
-        "relation_scorer", "consent_store")] + [ROOT / "outcomes" / "effects.py"]
+        "relation_scorer", "consent_store")] + [ROOT / "outcomes" / f"{name}.py" for name in ("effects", "utility")]
 
 #: Bounds of a probability or score: never thresholds on their own.
 BOUNDS = {0.0, 1.0}
@@ -69,6 +69,14 @@ ALLOWED = {
     ("effects.py", 0.8): "method: power-line power, M-12",
     ("effects.py", 0.25): "method: largest variance of a 0/1 outcome, p(1 - p) <= 1/4",
     ("effects.py", 2.0): "method: two-sided alpha / 2 and Robbins' normal-mixture boundary, M-12",
+    ("utility.py", 30.0): "descriptive: a delivery's weight halves every 30 days, M-13",
+    ("utility.py", 86400.0): "method: seconds per day",
+    ("utility.py", 2.0): "method: half-life decay base and two-sided alpha / 2, M-13",
+    ("utility.py", 0.01): "method: lower bound of the fitted concentration (optimiser only)",
+    ("utility.py", 10000.0): "method: upper bound of the fitted concentration (optimiser only)",
+    ("utility.py", 12.0): "method: bound of the fitted logit mean (optimiser only)",
+    ("utility.py", 0.5): "method: optimiser start, a half count added to the pooled rate",
+    ("utility.py", 0.001): "method: optimiser start clipped inside (0, 1)",
 }
 
 

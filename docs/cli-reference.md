@@ -399,6 +399,23 @@ reported as not found; the command exits 1 only when none of the ids matched.
 Diagnostics for the mathematical layers (similarity, consistency and lifecycle
 dynamics), the embedding model and the database. `--json` for structured output.
 
+`slm health --memory [--json] [--db <path>] [--profile <name>]` is the Memory
+Health report instead, read-only (it opens the store with `mode=ro`, so it runs
+beside a live daemon and on a copy). Ids and numbers only:
+
+- **Deliveries**: whether receipts and withholding (`outcomes.holdout`) are on,
+  and how often memories reached an agent in the last 30 days, per path.
+- **Use**: how often a delivered memory is acted on within 24 hours (marker
+  echoed, cited, or named in a success report), store-wide, per kind, and per
+  memory with a 95% credible range (hierarchical Beta, recent use weighs more).
+  "Rarely used" lists memories whose whole range is under the store's rate.
+- **Does memory help?**: randomised estimates (IPW and doubly robust) of one
+  more memory at session start and of each retrieval channel, with a 95%
+  interval and an anytime-valid range. "helps" or "hurts" appears only when the
+  anytime-valid range excludes 0; each line says how many deliveries it has and
+  how many its plan needs.
+- **Judge certificates** and **second opinions**, as in `slm doctor --truth`.
+
 ### `slm models`
 
 Lists the Ollama models installed on this computer, the local models recommended

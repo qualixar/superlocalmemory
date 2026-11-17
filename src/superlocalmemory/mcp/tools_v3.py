@@ -22,6 +22,21 @@ from superlocalmemory.mcp.tool_hints import READ_ONLY, SETS
 logger = logging.getLogger(__name__)
 
 
+def _memory_health(engine, profile_id: str) -> dict:
+    """The Memory Health report (W3-5), read on a ``mode=ro`` connection."""
+    from superlocalmemory.outcomes import memory_report
+    from superlocalmemory.truth.invariants import open_read_only
+
+    db_path = engine._db.db_path
+    conn = open_read_only(str(db_path))
+    try:
+        report = memory_report.build(conn, profile_id, slm_home=db_path.parent)
+    finally:
+        conn.close()
+    return {"success": True, "profile": profile_id, "memory": report,
+            "lines": memory_report.describe(report)}
+
+
 def register_v3_tools(server, get_engine: Callable) -> None:
     """Register 5 V3-exclusive tools on *server*."""
 
@@ -162,13 +177,17 @@ def register_v3_tools(server, get_engine: Callable) -> None:
     # 3. health
     # ------------------------------------------------------------------
     @server.tool(title="Check System Health", annotations=READ_ONLY)
-    async def health(profile_id: str = "") -> dict:
+    async def health(profile_id: str = "", memory: bool = False) -> dict:
         """Get system health including math layer status.
 
         Reports on Fisher-Rao, Sheaf consistency, and Langevin dynamics
         health. Also includes database integrity and component status.
         ``profile_id`` counts another profile's memories (empty = the active
-        one).
+        one). ``memory=true`` returns the Memory Health report instead: what
+        was delivered, how often each memory is used (with intervals), whether
+        memory measurably helps (randomised; a claim only when its
+        anytime-valid range excludes 0), judge certificates and second
+        opinions. Ids and numbers only.
         """
         try:
             from superlocalmemory.mcp.request_profile import tool_profile
@@ -177,6 +196,8 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             pid, refused = tool_profile(engine, profile_id)
             if refused:
                 return refused
+            if memory:
+                return _memory_health(engine, pid)
 
             status: dict = {
                 "success": True,
