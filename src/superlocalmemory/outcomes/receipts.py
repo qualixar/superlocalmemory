@@ -80,6 +80,8 @@ class DeliveryPlan:
     assignment: randomiser.Assignment
     #: The recall engine's id for the answer delivered (pulls; W3-6c, D-45).
     recall_query_id: str | None = None
+    #: The pull's logged adjacent swap (D-46), or None when swaps are off.
+    swap: object | None = None
 
     @property
     def choices(self) -> tuple[Choice, ...]:
@@ -182,7 +184,8 @@ def begin(*, slm_home: Path, path: str, flags=None) -> Begun | None:
 def plan(*, slm_home: Path, db_path: Path | None, profile_id: str, session_id: str | None,
          path: str, query: str, candidates: Iterable[Candidate], client: str | None = None,
          flags=None, begun: Begun | None = None,
-         recall_query_id: str | None = None) -> DeliveryPlan | None:
+         recall_query_id: str | None = None, delivery_id: str | None = None,
+         swap: object | None = None) -> DeliveryPlan | None:
     """The delivery's choices, or ``None`` when no receipt will be written.
 
     ``begun`` carries a treatment drawn before the fetch; it is kept as drawn
@@ -201,7 +204,7 @@ def plan(*, slm_home: Path, db_path: Path | None, profile_id: str, session_id: s
             holdout_on = treatment.randomised and readable
             randomised = treatment.randomised
         else:  # drawn after the fetch: only the memory arm is possible now
-            delivery_id = f"dlv_{uuid.uuid4().hex}"
+            delivery_id = delivery_id or f"dlv_{uuid.uuid4().hex}"
             holdout_on = randomised = flags.enabled("outcomes.holdout") and readable
             treatment = randomiser.treat(key, delivery_id, path, holdout_on=holdout_on,
                                          epsilon=randomiser.EPSILON if holdout_on else 0.0,
@@ -219,7 +222,7 @@ def plan(*, slm_home: Path, db_path: Path | None, profile_id: str, session_id: s
         holdout_state=HOLDOUT_ON if randomised else HOLDOUT_OFF, epsilon=epsilon,
         key_id=hashlib.sha256(key).hexdigest()[:16],
         query_digest=digest(key, b"query:" + query.encode()) if query else None,
-        assignment=assignment, recall_query_id=recall_query_id or None)
+        assignment=assignment, recall_query_id=recall_query_id or None, swap=swap)
 
 
 def shown_in_text(text: str) -> frozenset[str]:
@@ -294,12 +297,13 @@ def _insert(conn: sqlite3.Connection, p: DeliveryPlan, delivered: frozenset[str]
         "INSERT INTO injection_deliveries (delivery_id, profile_id, session_id, client, path,"
         " design, holdout_state, epsilon, eligible_count, withhold_draw, pick_draw, key_id,"
         " query_digest, candidates, delivered_at, arm, arm_draw, dropped_channel, memory_share,"
-        " recall_query_id)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " recall_query_id, swap_draw, swap_share, swap_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (p.delivery_id, p.profile_id, p.session_id, p.client, p.path, randomiser.DESIGN,
          p.holdout_state, p.epsilon, a.eligible_count, a.withhold_draw, a.pick_draw, p.key_id,
          p.query_digest, len(a.choices), usage.stamp(at), t.arm, t.arm_draw, t.channel,
-         t.memory_share, p.recall_query_id))
+         t.memory_share, p.recall_query_id, getattr(p.swap, "draw", None),
+         getattr(p.swap, "share", None), getattr(p.swap, "at", None)))
     conn.executemany(
         "INSERT INTO injection_receipts (delivery_id, fact_id, profile_id, role, position,"
         " score, eligible, exclusion, propensity, included, delivered)"
@@ -327,6 +331,8 @@ class Pull:
     at: datetime = field(default_factory=lambda: datetime.now(UTC))
     #: The recall engine's id for this answer (envelope ``query_id``; W3-6c).
     recall_query_id: str | None = None
+    #: The logged adjacent swap applied to this answer (D-46), if any.
+    swap: object | None = None
 
 
 def record_pull(pull: Pull, *, flags=None) -> bool:
@@ -341,7 +347,8 @@ def record_pull(pull: Pull, *, flags=None) -> bool:
         plan_ = plan(slm_home=pull.slm_home, db_path=pull.db_path, profile_id=pull.profile_id,
                      session_id=pull.session_id, path=pull.path, query=pull.query,
                      candidates=candidates, client=pull.client, flags=flags,
-                     recall_query_id=pull.recall_query_id)
+                     recall_query_id=pull.recall_query_id,
+                     delivery_id=getattr(pull.swap, "delivery_id", None), swap=pull.swap)
         if plan_ is None:
             return False
         if plan_.withheld:  # a pull never withholds; refuse rather than misrecord
@@ -436,7 +443,7 @@ def engine_paths(engine) -> tuple[Path | None, Path | None]:
 
 def pull_from_results(engine, *, path: str, profile_id: str, session_id: str | None,
                       query: str, results, client: str | None = None,
-                      recall_query_id: str | None = None) -> Pull | None:
+                      recall_query_id: str | None = None, swap=None) -> Pull | None:
     """The receipt for a serialized recall answer, or None without a real store."""
     from superlocalmemory.core.session_identity import is_conversation
 
@@ -448,7 +455,8 @@ def pull_from_results(engine, *, path: str, profile_id: str, session_id: str | N
     sid = session_id if is_conversation(session_id, profile_id) else None
     return Pull(home, db_path, profile_id, sid, path, query or "",
                 tuple((f, s if isinstance(s, (int, float)) else None) for f, s in rows if f),
-                client or None, recall_query_id=str(recall_query_id or "") or None)
+                client or None, recall_query_id=str(recall_query_id or "") or None,
+                swap=swap)
 
 
 __all__ = ["HOLDOUT_OFF", "HOLDOUT_ON", "PULL_IDLE_S", "PULL_QUEUE_MAX", "PULL_WRITER", "WRITE_WAIT_S",

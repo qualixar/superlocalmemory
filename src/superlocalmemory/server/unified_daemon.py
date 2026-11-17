@@ -896,10 +896,28 @@ class EngineRecallAdapter:
         )
         with lease:
             out = self._recall(query, limit=limit, session_id=session_id)
-        self._receipt(query, session_id, out)
+        swap = self._swap(out)
+        if swap is not None and swap.at is not None:
+            from superlocalmemory.outcomes import swaps
+
+            out = {**out, "results": swaps.apply(out.get("results") or [], swap)}
+        self._receipt(query, session_id, out, swap)
         return out
 
-    def _receipt(self, query: str, session_id: str, out: dict) -> None:
+    def _swap(self, out: dict):
+        """D-46: this hook answer's logged adjacent swap, or None."""
+        try:
+            import uuid
+
+            from superlocalmemory.outcomes import receipts, swaps
+
+            return swaps.decide(receipts.engine_paths(self._engine)[0],
+                                f"dlv_{uuid.uuid4().hex}", len(out.get("results") or []))
+        except Exception as exc:
+            logger.info("hook recall swap skipped: %s", exc)
+            return None
+
+    def _receipt(self, query: str, session_id: str, out: dict, swap=None) -> None:
         """W3-1: the queue serves hooks only, so its answers are ``hook_recall``
         deliveries. Queued for the background writer; never raises."""
         try:
@@ -909,7 +927,7 @@ class EngineRecallAdapter:
                 self._engine, path="hook_recall",
                 profile_id=str(getattr(self._engine, "profile_id", "") or ""),
                 session_id=session_id, query=query, results=out.get("results"),
-                client="hook", recall_query_id=out.get("query_id"))
+                client="hook", recall_query_id=out.get("query_id"), swap=swap)
             if pull is not None:
                 receipts.submit_pull(pull)
         except Exception as exc:

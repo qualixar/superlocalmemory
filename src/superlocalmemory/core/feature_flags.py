@@ -83,6 +83,13 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Withhold each eligible delivered memory with a small logged probability "
          "(never pinned rules, explicit recall, cues or lease warnings)",
          shadowable=False),
+    # D-46 (Varun, 18 Nov): two neighbouring results of an agent's recall trade
+    # places in 5% of recalls, logged, to measure position attention for the
+    # ranker's offline gate. Same shipping rule as withholding (D-34).
+    Flag("outcomes.swaps", "WS-3", FlagState.OFF,
+         "Swap two neighbouring results in a small logged share of agents' recalls "
+         "(nothing withheld) to measure how much attention each position gets",
+         shadowable=False),
     Flag("delivery.need_gate", "WS-4", FlagState.OFF,
          "Decide per prompt whether memory is needed before recalling"),
     Flag("delivery.cues", "WS-4", FlagState.OFF,

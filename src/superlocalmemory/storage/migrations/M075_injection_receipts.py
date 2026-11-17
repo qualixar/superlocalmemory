@@ -30,6 +30,10 @@ engine's own id for the answer a pull delivered (the ``query_id`` on the
 recall envelope, the key the learning layer logs its features under), so a
 ranker can learn from what agents used of exactly that answer.
 
+The swap columns (W3-6d, D-46, also amended in place) record a pull's logged
+adjacent swap: the keyed draw, the share it was compared with, and ``swap_at``
+= k when positions k and k + 1 traded places (receipt positions are as shown).
+
 CHECKs hold invariants only (ranges, 0/1, cross-column rules), never lists of
 names, which SQLite could not extend after release (W0-29). Erasing a fact
 erases its receipts (I-11); a delivery row holds no fact id and stays.
@@ -66,6 +70,9 @@ CREATE TABLE IF NOT EXISTS injection_deliveries (
     dropped_channel TEXT,
     memory_share   REAL CHECK (memory_share IS NULL OR (memory_share > 0 AND memory_share <= 1)),
     recall_query_id TEXT,
+    swap_draw      REAL CHECK (swap_draw IS NULL OR (swap_draw >= 0 AND swap_draw < 1)),
+    swap_share     REAL CHECK (swap_share IS NULL OR (swap_share >= 0 AND swap_share <= 0.10)),
+    swap_at        INTEGER CHECK (swap_at IS NULL OR (swap_at >= 1 AND swap_draw IS NOT NULL)),
     CHECK ((withhold_draw IS NULL) = (pick_draw IS NULL)),
     CHECK (withhold_draw IS NULL OR key_id IS NOT NULL),
     CHECK (arm IS NULL OR withhold_draw IS NOT NULL),
@@ -140,6 +147,9 @@ _ARM_COLUMNS = (
     ("memory_share", "REAL CHECK (memory_share IS NULL OR (memory_share > 0 "
                      "AND memory_share <= 1))"),
     ("recall_query_id", "TEXT"),
+    ("swap_draw", "REAL CHECK (swap_draw IS NULL OR (swap_draw >= 0 AND swap_draw < 1))"),
+    ("swap_share", "REAL CHECK (swap_share IS NULL OR (swap_share >= 0 AND swap_share <= 0.10))"),
+    ("swap_at", "INTEGER CHECK (swap_at IS NULL OR (swap_at >= 1 AND swap_draw IS NOT NULL))"),
 )
 
 

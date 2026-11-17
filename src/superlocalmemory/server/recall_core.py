@@ -389,8 +389,31 @@ async def run_recall(engine: Any, call: RecallCall, *, app_state: Any) -> dict:
     envelope = await recall_cache.recall_once(
         call, call.profile_id or getattr(engine, "profile_id", ""),
         lambda: _run_recall(engine, call, app_state=app_state))
-    _receipt(engine, call, envelope)
+    envelope, swap = _swapped(engine, call, envelope)
+    _receipt(engine, call, envelope, swap)
     return envelope
+
+
+def _swapped(engine: Any, call: RecallCall, envelope: Any) -> tuple[Any, Any]:
+    """This caller's answer with its logged adjacent swap (D-46), as a new
+    envelope (a shared run's answer is never changed for another caller)."""
+    try:
+        if (not isinstance(envelope, dict) or not envelope.get("ok")
+                or receipt_path(call) is None):
+            return envelope, None
+        import uuid
+
+        from superlocalmemory.outcomes import receipts, swaps
+
+        results = list(envelope.get("results") or [])
+        swap = swaps.decide(receipts.engine_paths(engine)[0], f"dlv_{uuid.uuid4().hex}",
+                            len(results))
+        if swap is None or swap.at is None:
+            return envelope, swap
+        return {**envelope, "results": swaps.apply(results, swap)}, swap
+    except Exception as exc:  # a swap is never worth a failed recall
+        logger.info("recall swap skipped: %s", exc)
+        return envelope, None
 
 
 #: A fetch whose caller records its own delivery (session_init renders a subset
@@ -417,7 +440,7 @@ def receipt_path(call: RecallCall) -> str | None:
     return _VIA_PATHS.get(call.via, "http_recall")
 
 
-def _receipt(engine: Any, call: RecallCall, envelope: Any) -> None:
+def _receipt(engine: Any, call: RecallCall, envelope: Any, swap: Any = None) -> None:
     """Queue this answer's injection receipt: one per delivery, even when identical
     questions shared one run. Off the answer's path; never raises."""
     try:
@@ -434,7 +457,7 @@ def _receipt(engine: Any, call: RecallCall, envelope: Any) -> None:
                            or getattr(engine, "profile_id", "")),
             session_id=call.session_id, query=call.query,
             results=envelope.get("results"), client=call.agent_id,
-            recall_query_id=envelope.get("query_id"))
+            recall_query_id=envelope.get("query_id"), swap=swap)
         if pull is not None:
             receipts.submit_pull(pull)
     except Exception as exc:  # a receipt is never worth a failed recall
