@@ -5,6 +5,7 @@ the agent worse, with anytime-valid bounds and false-discovery control."""
 
 from __future__ import annotations
 
+import math
 import random
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -54,10 +55,33 @@ def test_reask_counts_the_other_way() -> None:
     assert t.uplift > 0 and t.p_value == 1.0
 
 
-def test_the_ipw_term_is_exactly_the_stated_formula() -> None:
+def test_the_contrast_is_exactly_the_stated_two_arm_hajek_formula() -> None:
     units = [(1, 0.8, "a", 1.0), (0, 0.8, "b", 1.0), (1, 0.8, "c", 0.0)]
-    t = hg.check_fact("f", effects.USED, units)
-    assert t.uplift == pytest.approx((1 / 0.8 - 1 / 0.2 + 0) / 3)
+    delta, _se, k_in, k_out = hg.contrast(units)
+    # included: weights 1.25, 1.25 -> mean (1.25 * 1 + 0) / 2.5 = 0.5; left out: weight 5 -> 1.0
+    assert delta == pytest.approx(0.5 - 1.0)
+    assert k_in == pytest.approx(2.0) and k_out == pytest.approx(1.0)
+    assert hg.contrast([(1, 0.8, "a", 1.0), (1, 0.8, "b", 0.0)]) is None   # one arm: no contrast
+
+
+def test_the_standard_error_is_the_stated_clustered_linearisation() -> None:
+    """Two sessions, each with one delivery with the fact and one without, so a session's
+    total mixes both arms (the sign of the left-out term matters), and unequal inclusion
+    probabilities in the left-out arm (its weights matter)."""
+    units = [(1, 0.8, "s1", 1.0), (0, 0.5, "s1", 1.0),
+             (1, 0.8, "s2", 0.0), (0, 0.9, "s2", 0.0)]
+    delta, se, k_in, k_out = hg.contrast(units)
+    a = [1.25, 0.0, 1.25, 0.0]
+    b = [0.0, 2.0, 0.0, 10.0]
+    mu1 = (1.25 * 1 + 1.25 * 0) / 2.5                                # 0.5
+    mu0 = (2.0 * 1 + 10.0 * 0) / 12.0                                # 1/6
+    assert delta == pytest.approx(mu1 - mu0)
+    y = [1.0, 1.0, 0.0, 0.0]
+    psi = [a[i] * (y[i] - mu1) / 2.5 - b[i] * (y[i] - mu0) / 12.0 for i in range(4)]
+    totals = [psi[0] + psi[1], psi[2] + psi[3]]
+    expected = math.sqrt(sum(t * t for t in totals) * 2 / (2 - 1))
+    assert se == pytest.approx(expected)
+    assert k_in == pytest.approx(2.0) and k_out == pytest.approx(144 / (4 + 100))
 
 
 def test_one_session_is_not_enough_to_test() -> None:
@@ -65,12 +89,29 @@ def test_one_session_is_not_enough_to_test() -> None:
     assert t.clusters == 1 and t.upper is None and t.p_value == 1.0
 
 
+def test_each_arm_needs_its_minimum_of_sessions() -> None:
+    n = hg.MIN_ARM_CLUSTERS
+    enough = [(i % 2, 0.5, f"s{i}", float(i % 3 == 0)) for i in range(4 * n)]
+    assert hg.check_fact("f", effects.USED, enough).upper is not None
+    short = [(0 if i < n - 1 else 1, 0.5, f"s{i}", float(i % 2)) for i in range(4 * n)]
+    short = short[:n - 1] + [(1, 0.5, f"t{i}", 1.0) for i in range(3 * n)]   # n - 1 left out
+    t = hg.check_fact("f", effects.USED, short)
+    assert t.upper is None and t.clusters_left_out == n - 1 and t.clusters_included == 3 * n
+    exact = [(0, 0.5, f"o{i}", float(i % 2)) for i in range(n)] + \
+        [(1, 0.5, f"t{i}", float(i % 3 == 0)) for i in range(n)]
+    assert hg.check_fact("f", effects.USED, exact).upper is not None     # exactly n each: tested
+
+
 def test_the_p_value_is_the_level_where_the_anytime_bound_crosses_zero() -> None:
-    t = hg.check_fact("f", effects.USED, _units(3000, p=0.5, harm=0.15))
-    phi_se = (t.upper - t.uplift) / effects.cs_multiplier(t.clusters, hg.TUNED_CLUSTERS,
-                                                           2 * hg.DELTA_H)
-    at = effects.cs_multiplier(t.clusters, hg.TUNED_CLUSTERS, 2 * t.p_value)
-    assert t.uplift + at * phi_se == pytest.approx(0, abs=1e-6)
+    units = _units(3000, p=0.5, harm=0.06)
+    t = hg.check_fact("f", effects.USED, units)
+    delta, se_plugin, k_in, k_out = hg.contrast(units)
+    se = max(se_plugin, effects.variance_floor(k_in, k_out))
+    n_eff = effects.VARIANCE_BOUND / se ** 2
+    assert t.upper == pytest.approx(t.uplift + effects.cs_multiplier(
+        n_eff, hg.TUNED_CLUSTERS, 2 * hg.DELTA_H) * se)
+    at = effects.cs_multiplier(n_eff, hg.TUNED_CLUSTERS, 2 * t.p_value)
+    assert t.uplift + at * se == pytest.approx(0, abs=1e-6)
 
 
 # -- false discovery across facts -----------------------------------------------------------------

@@ -29,7 +29,7 @@ def store(tmp_path):
 # -- rules and score ------------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("prompt", "expected"), [
-    ("", ng.RULE_EMPTY), ("  ", ng.RULE_EMPTY), ("yes", ng.RULE_ACK), ("ok go ahead", ng.RULE_ACK),
+    ("", ng.RULE_EMPTY), ("  ", ng.RULE_EMPTY), ("yes", ng.RULE_ACK), ("ok thanks", ng.RULE_ACK),
     ("Thanks!", ng.RULE_ACK), ("good morning", ng.RULE_GREETING), ("hi claude", ng.RULE_GREETING),
     ("2+2", ng.RULE_ARITHMETIC), ("what is 17 * 23?", ng.RULE_ARITHMETIC),
     ("translate 'where is the station' into Hindi", ng.RULE_TRANSLATION),
@@ -64,9 +64,13 @@ def _rows(spec):
 
 def test_with_too_few_labels_the_score_skips_nothing() -> None:
     assert ng.calibrate([]) is None
-    # (0 + 1) / (n + 1) <= 0.10 needs n >= 9 clean turns before anything is skipped
-    assert ng.calibrate(_rows([(0.2, False, 1.0, 8)])) is None
-    assert ng.calibrate(_rows([(0.2, False, 1.0, 9)])) == math.nextafter(0.2, math.inf)
+    # The bound is conditional on need (A-02): only turns that NEEDED memory count, and the
+    # unseen turn weighs W = 1 / EXPLORE = 20. W / (n + W) <= 0.10 needs n >= 180.
+    assert ng.calibrate(_rows([(0.2, False, 1.0, 5000)])) is None      # nobody needed memory
+    quiet = [ng.Labelled(None, 0.2, False, 1.0)]                       # one turn the score may skip
+    assert ng.calibrate(quiet + _rows([(0.6, True, 1.0, 179)])) is None
+    assert ng.calibrate(quiet + _rows([(0.6, True, 1.0, 180)])) == math.nextafter(0.2, math.inf)
+    assert ng.min_needed_weight() == pytest.approx(180.0)
 
 
 def test_the_threshold_stops_before_needed_turns_cost_more_than_alpha() -> None:
@@ -80,16 +84,19 @@ def test_the_threshold_stops_before_needed_turns_cost_more_than_alpha() -> None:
 
 def test_the_bound_is_exactly_the_weighted_conformal_formula() -> None:
     rows = _rows([(0.2, True, 20.0, 1), (0.2, False, 1.0, 100), (0.7, True, 1.0, 10)])
-    # skipping score 0.2: loss 20, total 130, w_max 20
-    assert ng.bound(rows, 0.3) == pytest.approx((20 + 20) / (130 + 20))
-    assert ng.bound(rows, None) == pytest.approx(20 / 150)
+    # needed turns only: weights 20 (score 0.2) and ten 1s (score 0.7), total 30; W = 20.
+    # skipping score 0.2: loss 20  ->  (20 + 20) / (30 + 20)
+    assert ng.bound(rows, 0.3) == pytest.approx(40 / 50)
+    assert ng.bound(rows, None) == pytest.approx(20 / 50)
+    assert ng.bound([], None) == 1.0
 
 
 def test_one_explored_miss_counts_as_much_as_it_stands_for() -> None:
-    clean = _rows([(0.2, False, 1.0, 200)])
-    assert ng.calibrate(clean) is not None
-    missed = clean + [ng.Labelled(None, 0.2, True, 1 / ng.EXPLORE)]
-    assert ng.calibrate(missed) is None
+    clean = _rows([(0.2, False, 1.0, 50), (0.6, True, 1.0, 400)])
+    assert ng.calibrate(clean) == math.nextafter(0.2, math.inf)
+    miss = ng.Labelled(None, 0.2, True, 1 / ng.EXPLORE)   # one explored needed turn: stands for 20
+    assert ng.calibrate(clean + [miss]) == math.nextafter(0.2, math.inf)   # (20+20)/(420+20) <= .1
+    assert ng.calibrate(clean + [miss] * 3) is None                         # (60+20)/(460+20) > .1
 
 
 def test_rules_that_miss_needed_turns_stop_the_score_from_skipping() -> None:

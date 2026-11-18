@@ -75,6 +75,14 @@ PLANNED_MDE = 0.10
 POWER = 0.80
 #: Largest variance of a 0/1 outcome, p(1 - p) <= 1/4: the plan assumes the worst.
 VARIANCE_BOUND = 0.25
+#: A-04: no claim until each arm holds this many independent sessions. Below it the
+#: plug-in standard error of the doubly robust contrast is not trustworthy (a few
+#: treated units that happen to share an outcome make it far too small), and the
+#: floor below, which is exact for bounded outcomes, is the only protection. Set
+#: by the null simulation in ``tests/test_outcomes/test_effects_null_claims.py``:
+#: the smallest arm size at which the false-claim rate stays at or under ``ALPHA``
+#: for base rates 0.1, 0.5 and 0.9 with the 10% withholding arm.
+MIN_ARM_CLUSTERS = 20
 
 USED = "used"
 REASK = "reask"
@@ -120,6 +128,8 @@ class Estimate:
     anytime: tuple[float, float] | None
     planned: int
     claim: str | None
+    clusters_treated: int = 0
+    clusters_control: int = 0
 
 
 # -- the power line -------------------------------------------------------------------------------
@@ -421,17 +431,55 @@ def _rows(units: Sequence[Unit], contrast: str) -> list[tuple[Unit, str, float, 
     return out
 
 
+def variance_floor(clusters_a: float, clusters_b: float,
+                   variance: float = VARIANCE_BOUND) -> float:
+    """Standard error of a difference of two arm means that no 0/1 outcome can beat.
+
+    Each arm's mean over independent clusters has variance at most
+    ``variance / clusters`` (a cluster's outcome lies in [0, 1], so its variance is
+    at most 1/4 whatever the rate or the correlation inside it). A plug-in standard
+    error below this has been fooled by a few units that happened to agree (A-04);
+    the interval and the claim use the larger of the two."""
+    if clusters_a < 1 or clusters_b < 1:
+        return math.inf
+    return math.sqrt(variance * (1.0 / clusters_a + 1.0 / clusters_b))
+
+
+def anytime_half_width(se: float, sigma2: float, planned: float,
+                       alpha: float = ALPHA) -> float:
+    """Half-width of the anytime interval for an estimate with standard error ``se``.
+
+    The mixture boundary is indexed by statistical information, n_eff = sigma2 /
+    se^2 (the number of units of per-unit variance ``sigma2`` that carry this
+    much information), so a standard error that the floor has enlarged is read at
+    the smaller information it really stands for."""
+    if not se > 0:
+        return math.inf
+    return cs_multiplier(sigma2 / (se * se), planned, alpha) * se
+
+
+def _sigma2(path: str, contrast: str) -> float:
+    """Per-delivery variance of the contrast under the design (the unit of ``planned``)."""
+    return contrast_variance(*design_probabilities(path, contrast))
+
+
 def estimate(units: Sequence[Unit], path: str, contrast: str, outcome: str) -> Estimate:
-    """IPW and doubly robust estimates of one contrast on one path, with intervals."""
+    """IPW and doubly robust estimates of one contrast on one path, with intervals.
+
+    A claim (helps / hurts) needs ``MIN_ARM_CLUSTERS`` sessions in each arm and the
+    anytime interval, built on the larger of the clustered and the bounded-outcome
+    standard error, to exclude 0 (A-04)."""
     planned = planned_for(path, contrast)
     rows = [r for r in _rows([u for u in units if u.path == path], contrast)
             if r[2] > 0 and r[3] > 0]
     n_t = sum(1 for r in rows if r[1] == "treated")
     n_c = len(rows) - n_t
     clusters = [r[0].cluster for r in rows]
+    s_t = len({r[0].cluster for r in rows if r[1] == "treated"})
+    s_c = len({r[0].cluster for r in rows if r[1] != "treated"})
     if not n_t or not n_c:
         return Estimate(path, contrast, outcome, len(rows), len(set(clusters)), n_t, n_c,
-                        None, None, None, None, None, None, planned, None)
+                        None, None, None, None, None, None, planned, None, s_t, s_c)
     # The effect of including: E[Y | control] - E[Y | treated (left out / off)].
     ipw_terms = [(-u.y / e_t if s == "treated" else u.y / e_c) for u, s, e_t, e_c in rows]
     fits = _cross_fit(rows, contrast)
@@ -445,11 +493,13 @@ def estimate(units: Sequence[Unit], path: str, contrast: str, outcome: str) -> E
     if aipw_se is not None:
         z = _z(1.0 - ALPHA / 2.0)
         interval = (aipw - z * aipw_se, aipw + z * aipw_se)
-        g = cs_multiplier(s, planned)
-        anytime = (aipw - g * aipw_se, aipw + g * aipw_se)
-        claim = _claim(anytime, OUTCOMES[outcome])
+        se = max(aipw_se, variance_floor(s_t, s_c))
+        half = anytime_half_width(se, _sigma2(path, contrast), planned)
+        anytime = (aipw - half, aipw + half)
+        if min(s_t, s_c) >= MIN_ARM_CLUSTERS:
+            claim = _claim(anytime, OUTCOMES[outcome])
     return Estimate(path, contrast, outcome, len(rows), s, n_t, n_c, ipw, ipw_se, aipw,
-                    aipw_se, interval, anytime, planned, claim)
+                    aipw_se, interval, anytime, planned, claim, s_t, s_c)
 
 
 def _claim(anytime: tuple[float, float], better: int) -> str | None:
@@ -479,8 +529,9 @@ def report(conn: sqlite3.Connection, profile_id: str, *,
     return out
 
 
-__all__ = ["ALPHA", "CHANNEL", "CONTROL", "MEMORY", "OUTCOMES", "OUTCOME_WINDOW_H",
-           "PLANNED_MDE", "POWER", "REASK", "USED", "USED_SIGNALS", "VARIANCE_BOUND",
-           "Estimate", "Unit", "contrast_variance", "contrasts", "cs_multiplier",
-           "design_probabilities", "estimate", "evidence_clause", "load_units", "mixture_x", "planned_deliveries",
-           "pilot_deliveries", "planned_for", "report"]
+__all__ = ["ALPHA", "CHANNEL", "CONTROL", "MEMORY", "MIN_ARM_CLUSTERS", "OUTCOMES",
+           "OUTCOME_WINDOW_H", "PLANNED_MDE", "POWER", "REASK", "USED", "USED_SIGNALS",
+           "VARIANCE_BOUND", "Estimate", "Unit", "anytime_half_width", "contrast_variance",
+           "contrasts", "cs_multiplier", "design_probabilities", "estimate", "evidence_clause",
+           "load_units", "mixture_x", "pilot_deliveries", "planned_deliveries", "planned_for",
+           "report", "variance_floor"]

@@ -198,6 +198,10 @@ def describe_effect(e: dict) -> str:
     lo, hi = e["anytime"] or (None, None)
     rng = "" if lo is None else f" (anytime-valid range {_signed(lo)} to {_signed(hi)})"
     verdict = {"helps": "it helps", "hurts": "it hurts"}.get(e["claim"], "no claim yet")
+    t, c = e.get("clusters_treated"), e.get("clusters_control")
+    if e["claim"] is None and t is not None and min(t, c) < effects.MIN_ARM_CLUSTERS:
+        verdict += (f" (a claim needs {effects.MIN_ARM_CLUSTERS} sessions in each arm; "
+                    f"has {t} and {c})")
     return (f"{head}: {_signed(e['aipw'])}{rng}; {verdict}; "
             f"{e['n']} of the {e['planned']} deliveries its plan needs")
 

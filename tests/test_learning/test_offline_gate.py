@@ -78,12 +78,16 @@ def test_the_four_cells_come_from_the_right_items() -> None:
             ("s", 1, 2, 1, 5), ("s", 1, 1, 1, 5),           # swapped at 1: orig 1 at 2, orig 2 at 1
             ("short", None, 2, 1, 2)]                       # control too short for pair 2
     cells = pb._cells(rows)
-    assert cells[1] == [[1, 1], [1, 1], [1, 2], [1, 1]]     # a_s, a_u, b_u, b_s
-    assert cells[2][1] == [0, 1]                            # only the long control's position 2
+    counts = lambda k: [(c.uses, c.shown) for c in cells[k]]  # noqa: E731
+    assert counts(1) == [(1, 1), (1, 1), (1, 2), (1, 1)]    # a_s, a_u, b_u, b_s
+    assert counts(2)[1] == (0, 1)                           # only the long control's position 2
+    # a swap at pair 1 of a five-long list stands for pairs(5) = 4 deliveries (A-20)
+    assert cells[1][0].w == 4.0 and cells[1][1].w == 1.0
 
 
 def test_a_ratio_never_exceeds_one() -> None:
-    r = pb._ratio(1, [[90, 100], [10, 100], [90, 100], [10, 100]], 2.0)
+    cells = [pb.Cell.of(90, 100), pb.Cell.of(10, 100), pb.Cell.of(90, 100), pb.Cell.of(10, 100)]
+    r = pb._ratio(1, cells, 2.0)
     assert r.estimate == r.high == 1.0
 
 
@@ -264,19 +268,27 @@ def test_the_interval_uses_the_joint_level_over_all_pairs() -> None:
     import math
     from statistics import NormalDist
 
-    c = [[30, 100], [50, 100], [40, 100], [45, 100]]
+    counts = [(30, 100), (50, 100), (40, 100), (45, 100)]
     z = NormalDist().inv_cdf(1.0 - pb.MODEL_ALPHA / (2.0 * 4))
-    r = pb._ratio(1, c, z)
-    rate = [u / n for u, n in c]
-    se = math.sqrt(0.25 * sum((1 - q) / (100 * q) for q in rate))
+    r = pb._ratio(1, [pb.Cell.of(u, n) for u, n in counts], z)
+    se2 = 0.0
+    for u, n in counts:                       # unit weights, one pseudo-observation (half a use)
+        q = (u + 0.5) / (n + 1)
+        var = (u * (1 - q) ** 2 + (n - u) * q ** 2 + 0.25 * ((1 - q) ** 2 + q ** 2)) / (n + 1) ** 2
+        se2 += var / q ** 2
+    se = 0.5 * math.sqrt(se2)
     assert math.log(r.estimate) - math.log(r.low) == pytest.approx(z * se)
-    model = pb.estimate(_store(random.Random(9), 3000), "default")
-    for ratio in model.ratios:   # same multiplier inside estimate()
-        rates = [u / n for u, n in ratio.cells]
-        se_k = math.sqrt(0.25 * sum((1 - q) / (n * q) for q, (_, n) in
-                                    zip(rates, ratio.cells, strict=True)))
-        if ratio.estimate < 1.0:
-            assert math.log(ratio.estimate) - math.log(ratio.low) == pytest.approx(z * se_k)
+    # the same multiplier inside estimate(): recompute one pair from the store's own rows
+    conn = _store(random.Random(9), 3000)
+    sql = pb._ROWS.format(signals=", ".join("?" * len(pb.effects.USED_SIGNALS)))
+    rows = conn.execute(sql, (*pb.effects.USED_SIGNALS, pb.effects.OUTCOME_WINDOW_H, "default",
+                              pb.SWAP_DEPTH, pb.effects.OUTCOME_WINDOW_H,
+                              pb.usage.stamp(datetime.now(UTC)))).fetchall()
+    model = pb.estimate(conn, "default")
+    again = pb._ratio(2, pb._cells(rows)[2], NormalDist().inv_cdf(1.0 - pb.MODEL_ALPHA / 8.0))
+    got = model.ratios[1]
+    assert (got.estimate, got.low, got.high) == pytest.approx(
+        (again.estimate, again.low, again.high))
 
 
 def test_one_unmeasured_pair_makes_the_curve_unusable() -> None:

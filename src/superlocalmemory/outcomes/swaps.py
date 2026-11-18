@@ -7,8 +7,10 @@ To tell the two apart, in a share ``SWAP_SHARE`` of explicit recalls two
 neighbouring results among the top ``SWAP_DEPTH`` trade places: positions k and
 k + 1, k drawn uniformly. Nothing is withheld or added. Both keyed draws and
 the result are logged on the pull receipt, so the attention ratio
-p(k + 1) / p(k) can be estimated without bias (``learning.position_bias``) and
-the ranker's offline gate can weight each use by 1 / attention (D-45).
+p(k + 1) / p(k) can be estimated (``learning.position_bias``: consistent under
+the examination model and the assumptions it states, weighted for the list-length
+dependence of the swap probability) and the ranker's offline gate can weight each
+use by 1 / attention (D-45).
 
 On by default, with withholding, now that the D-28 disclosure and off switch
 ship (D-34's rule, D-46; ``outcomes.switch`` turns both off). A person reading (the

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from pathlib import Path as _PathType
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +134,11 @@ def _count_informative_labels(rows: list[dict]) -> int:
     return seen
 
 def _offline_gate(booster, holdout_rows, feature_names, memory_db_path: str,
-                  profile_id: str) -> dict:
-    """The D-45 offline gate's verdict for this candidate (never raises)."""
+                  profile_id: str, ledger_dir: str | None = None) -> dict:
+    """The D-45 offline gate's verdict for this candidate (never raises).
+
+    ``ledger_dir`` holds the count of candidates already tested on the holdout, so
+    the level is spent across candidates (A-05b); without it nothing is certified."""
     import sqlite3 as _sqlite3
     from pathlib import Path as _Path
 
@@ -155,7 +159,13 @@ def _offline_gate(booster, holdout_rows, feature_names, memory_db_path: str,
                              for n in feature_names] for r in rows], dtype=np.float32)
             return booster.predict(x)
 
-        return offline_gate.evaluate(score, holdout_rows or [], model).as_dict()
+        if ledger_dir is None:
+            return offline_gate.Verdict(False, "candidate counter unavailable").as_dict()
+        index = offline_gate.next_index(_Path(ledger_dir), profile_id)
+        verdict = offline_gate.evaluate(score, holdout_rows or [], model, candidate_index=index)
+        if verdict.tested:  # a bound was computed: this candidate has spent its share
+            offline_gate.record_test(_Path(ledger_dir), profile_id, index)
+        return verdict.as_dict()
     except Exception as exc:  # noqa: BLE001 - no verdict means no certificate
         logger.warning("offline gate failed: %s", exc)
         return offline_gate.Verdict(False, f"gate error: {type(exc).__name__}").as_dict()
@@ -287,7 +297,8 @@ def _run_shadow_cycle(
     # the candidate and its verdict are recorded, and the next retrain replaces
     # an uncertified one.
     verdict = _offline_gate(booster, holdout_rows, feature_names,
-                            memory_db_path, profile_id)
+                            memory_db_path, profile_id,
+                            ledger_dir=str(_PathType(learning_db_path).resolve().parent))
     out["offline_gate"] = verdict
 
     try:
