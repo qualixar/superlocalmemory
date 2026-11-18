@@ -69,6 +69,8 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
         "scripts/postinstall/media-request.js",
         "scripts/postinstall/node-arch.js",
         "scripts/postinstall/engine-upgrade.js",
+        # D-28 (4.2.30): the "what SLM measures" notice shown at install.
+        "scripts/postinstall/measurement-notice.js",
         "scripts/preuninstall.js",
     }
     # 4.1.14 single-source (#134): the tarball carries NO Python sources —
