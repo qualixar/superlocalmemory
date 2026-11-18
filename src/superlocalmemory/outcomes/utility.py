@@ -152,30 +152,59 @@ def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
-def fit_prior(ns: list[float], us: list[float]) -> tuple[float, float] | None:
-    """(mu, concentration) by maximum marginal likelihood; None with fewer than two points."""
-    from scipy.optimize import minimize
+def _golden(f, lo: float, hi: float, tol: float = 1e-7) -> float:
+    """The minimiser of a unimodal ``f`` on [lo, hi] by golden-section search.
+    Pure Python, so no native optimiser runs (no LAPACK; see ``_solve`` notes in
+    ``effects``)."""
+    g = (math.sqrt(5.0) - 1.0) / 2.0
+    a, b = lo, hi
+    c, d = b - g * (b - a), a + g * (b - a)
+    fc, fd = f(c), f(d)
+    while b - a > tol:
+        if fc < fd:
+            b, d, fd = d, c, fc
+            c = b - g * (b - a)
+            fc = f(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + g * (b - a)
+            fd = f(d)
+    return (a + b) / 2.0
 
+
+#: Routing only: the search interval for the prior mean on the logit scale.
+_LOGIT_BOUNDS = (-12.0, 12.0)
+
+
+def fit_prior(ns: list[float], us: list[float]) -> tuple[float, float] | None:
+    """(mu, concentration) by maximum marginal likelihood; None with fewer than two points.
+
+    Profile likelihood: for each concentration the best mean is found by a
+    golden-section search, and the concentration by another one over that
+    profile (the log likelihood of a Beta-binomial is unimodal in each)."""
     pts = [(n, u) for n, u in zip(ns, us, strict=True) if n > 0]
     if len(pts) < 2:
         return None
     ns, us = [p[0] for p in pts], [p[1] for p in pts]
-    rate = min(max((sum(us) + 0.5) / (sum(ns) + 1.0), 1e-3), 1 - 1e-3)
     lo, hi = (math.log(b) for b in KAPPA_BOUNDS)
-    res = minimize(lambda x: -_loglik([_sigmoid(x[0])] * len(ns), math.exp(x[1]), ns, us),
-                   [math.log(rate / (1.0 - rate)), 0.0], method="L-BFGS-B",
-                   bounds=[(-12.0, 12.0), (lo, hi)])
-    return _sigmoid(res.x[0]), math.exp(res.x[1])
+
+    def best_logit(log_kappa: float) -> float:
+        kappa = math.exp(log_kappa)
+        return _golden(lambda t: -_loglik([_sigmoid(t)] * len(ns), kappa, ns, us),
+                       *_LOGIT_BOUNDS, tol=1e-6)
+
+    def profile(log_kappa: float) -> float:
+        t = best_logit(log_kappa)
+        return -_loglik([_sigmoid(t)] * len(ns), math.exp(log_kappa), ns, us)
+
+    log_kappa = _golden(profile, lo, hi, tol=1e-5)
+    return _sigmoid(best_logit(log_kappa)), math.exp(log_kappa)
 
 
 def fit_concentration(mus: list[float], ns: list[float], us: list[float]) -> float:
     """kappa by maximum marginal likelihood with each point's mean held fixed."""
-    from scipy.optimize import minimize_scalar
-
     lo, hi = (math.log(b) for b in KAPPA_BOUNDS)
-    res = minimize_scalar(lambda x: -_loglik(mus, math.exp(x), ns, us), bounds=(lo, hi),
-                          method="bounded")
-    return math.exp(res.x)
+    return math.exp(_golden(lambda x: -_loglik(mus, math.exp(x), ns, us), lo, hi, tol=1e-6))
 
 
 def _interval(a, b):

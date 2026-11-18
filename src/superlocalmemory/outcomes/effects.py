@@ -301,7 +301,41 @@ def _fit(xs: list[list[float]], ys: list[float]) -> np.ndarray | None:
         coef = np.zeros(x.shape[1])
         coef[0] = float(y.mean())
         return coef
-    return np.linalg.lstsq(x, y, rcond=None)[0]
+    return _solve_normal(x, y)
+
+
+#: Ridge added to the normal equations' diagonal: keeps a rank-deficient design
+#: solvable (routing only: far below any coefficient that matters).
+_RIDGE = 1e-9
+
+
+def _solve_normal(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Least squares by the normal equations, solved in Python with partial
+    pivoting. A handful of covariates, so this is exact enough and keeps the
+    estimate off native LAPACK (Accelerate has crashed this process on macOS;
+    ``tests/test_math/test_no_native_lapack_in_source.py``)."""
+    k = x.shape[1]
+    a = [[float(v) for v in row] for row in (x.T @ x)]
+    b = [float(v) for v in (x.T @ y)]
+    for i in range(k):
+        a[i][i] += _RIDGE
+    for col in range(k):
+        piv = max(range(col, k), key=lambda r: abs(a[r][col]))
+        a[col], a[piv] = a[piv], a[col]
+        b[col], b[piv] = b[piv], b[col]
+        if abs(a[col][col]) < 1e-300:
+            continue
+        for r in range(col + 1, k):
+            f = a[r][col] / a[col][col]
+            for c in range(col, k):
+                a[r][c] -= f * a[col][c]
+            b[r] -= f * b[col]
+    out = [0.0] * k
+    for i in range(k - 1, -1, -1):
+        if abs(a[i][i]) < 1e-300:
+            continue
+        out[i] = (b[i] - sum(a[i][j] * out[j] for j in range(i + 1, k))) / a[i][i]
+    return np.asarray(out)
 
 
 def _predict(coef: np.ndarray | None, x: list[float]) -> float:
