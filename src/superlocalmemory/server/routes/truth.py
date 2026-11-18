@@ -228,14 +228,19 @@ def truth_checks(request: Request, profile_id: str = ""):
         engine, target = m._authorize_review_read(request, profile)
         from superlocalmemory.core import judge_certificates as certs
         from superlocalmemory.core import shadow_escalation as shadow
+        from superlocalmemory.trust import overview, signing_key
 
         conn = _read(engine)
         try:
             results = invariants.check(conn)
             certificates = certs.records(conn, target)
             second = [s.as_dict() for s in shadow.disagreements(conn, target)]
+            # WS-5 (D-16): the daemon's own key (memory only, never the keychain), read-only.
+            signature = overview.signature_state(conn, signing_key.current(), signing_key.status())
         finally:
             conn.close()
+        audit_chain = overview.audit_state(engine._db.db_path.parent / "audit_chain.db",
+                                           signing_key.current())
         return {"success": True, "profile_id": target,
                 "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "results": [{"invariant": r.invariant, "title": r.title, "status": r.status,
@@ -244,7 +249,8 @@ def truth_checks(request: Request, profile_id: str = ""):
                                                    "regime", "n", "errors", "issued_at",
                                                    "voided_at", "void_reason")}
                                  for c in certificates],
-                "second_opinions": second}
+                "second_opinions": second,
+                "signatures": signature, "audit_chain": audit_chain}
     except HTTPException:
         raise
     except m._UnknownRoutedProfile as exc:

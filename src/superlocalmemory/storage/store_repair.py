@@ -243,6 +243,11 @@ def restore_blanked_text(
     for fact_id in fact_ids:
         execute("UPDATE atomic_facts SET content=? WHERE fact_id=? AND content=?",
                 (restored_fact, fact_id, expected_fact))
+    # The text was rewritten by SLM itself: its signature (D-16) would now read "modified".
+    # Dropping it lets the daemon sign the restored text; it is reported unsigned until then.
+    from superlocalmemory.trust.signatures import forget_signatures
+
+    forget_signatures(execute, fact_ids)
     return True
 
 

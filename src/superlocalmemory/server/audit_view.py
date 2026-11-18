@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from superlocalmemory.compliance.audit import HASH_VERSION
+from superlocalmemory.compliance.audit import FULL_VERSIONS
 
 
 def _metadata(event: dict) -> dict:
@@ -76,7 +76,7 @@ def present_event(event: dict) -> dict:
         "target": _target(event, meta),
         "result": str(outcome or "recorded"),
         "content_bound": bool(event.get("content_hash")),
-        "fully_covered": event.get("hash_version") == HASH_VERSION,
+        "fully_covered": event.get("hash_version") in FULL_VERSIONS,
     }
 
 

@@ -534,6 +534,13 @@ def _consolidate_cluster(
         # maintenance runs. The old code's reinforce-or-insert dance against
         # atomic_facts existed for the same reason and is no longer needed.
         _dates = [f["created_at"] for f in facts if f["created_at"]]
+        # A repeated pass rewrites the coverage of an existing summary: keep the
+        # row as it was first (WS-6, versions first), in this savepoint.
+        from superlocalmemory.compiler import versions
+
+        versions.keep_previous(
+            c, "consolidated_summary",
+            {"profile_id": profile_id, "entity_id": entity_id, "content": summary})
         c.execute("""
             INSERT INTO consolidated_summaries
             (summary_id, profile_id, entity_id, entity_name, content,

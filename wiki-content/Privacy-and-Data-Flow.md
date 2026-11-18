@@ -35,7 +35,7 @@ Code: `core/outbound_http.py`, `core/outbound_redaction.py`, `retrieval/hosted_r
 
 Every request that carries memory text to another host passes one outbound gate (`core/outbound_http.py`). A destination on this computer (loopback) gets the text as written, directly, never through a proxy. Any other destination gets every string passed through credential redaction first, which replaces API keys, tokens, passwords in connection URLs and values after credential labels with a bare `redacted` marker. Nothing about the original survives, not its length, prefix or type. Redirects are never followed.
 
-Two limits matter. The gate screens credential shapes only: it does **not** redact personal data such as email addresses or phone numbers, with one exception, the remote reranker, which also strips personal data. And it does not touch stored memories, results returned to a local caller, or memory text returned to a remote app. Stored memories keep credentials as you wrote them, and the opt-in `SLM_PII_REDACTION` is the control for personal data on disk.
+Two limits matter. The gate screens credential shapes only: it does **not** redact personal data such as email addresses or phone numbers, with one exception, the remote reranker, which also strips personal data. And it does not touch stored memories, results returned to a local caller, or memory text returned to a remote app. Stored memories keep credentials as you wrote them unless you turn on the secret screen (`trust.secret_screen`), which stores a detected credential as a typed placeholder and keeps no original; the opt-in `SLM_PII_REDACTION` is the control for personal data on disk.
 
 ## By feature
 

@@ -326,6 +326,22 @@ set `tags` to one or two relevant terms and `project` to the repo/product name.
 
 ---
 
+## Credentials are never stored (the secret screen, 4.2.30)
+
+Never put an API key, token, password or private key in a memory. With `trust.secret_screen`
+on, SLM replaces anything shaped like a credential by a typed placeholder before it is
+stored, in every door (`remember`, `observe`, the hooks, imports): `[REDACTED:GITHUB:ab12]`
+keeps the type and the last four characters of a long key, nothing else, and the original is
+kept nowhere (not the database, the search index, the journal or a log). A sentence such as
+"the wifi password is ..." is not a credential shape and is stored as written, so do not
+rely on the screen: leave the secret out and say where it lives ("in the keychain").
+`slm health --memory` counts the placeholders by type, never a value.
+
+Who saved it also decides what the memory may become. A save by an agent (MCP, or a shell with
+no terminal) is the agent's own words (`agent_inferred`), not the user's statement
+(`user_direct`): with `trust.taint` on, a rule or a pin made from it waits for the user's OK
+(`slm trust pending`). Do not save text copied from a web page or a tool's output as a rule.
+
 ## Deleting stale facts
 
 The MCP `forget(dry_run=True)` tool runs an Ebbinghaus decay cycle over the

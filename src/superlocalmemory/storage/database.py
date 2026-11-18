@@ -713,6 +713,15 @@ class DatabaseManager:
             self._txn_state.coordinator_bound = False
             _write_generation.bump()
 
+    def in_transaction(self) -> bool:
+        """True while this thread is inside ``transaction()`` or a bound coordinator.
+
+        Lets a writer that needs a copy and a write to commit together
+        (``compiler/versions.atomic``) join the open transaction instead of
+        opening a second one.
+        """
+        return getattr(self._txn_state, "conn", None) is not None
+
     @contextmanager
     def transaction(self) -> Generator[None, None, None]:
         """Atomic transaction. All writes commit or rollback together."""
@@ -2367,15 +2376,25 @@ class DatabaseManager:
         return allowed
 
     def store_entity_profile(self, ep: EntityProfile) -> str:
-        """Persist an entity profile. Returns profile_entry_id."""
-        self.execute(
-            """INSERT OR REPLACE INTO entity_profiles
-               (profile_entry_id, entity_id, profile_id,
-                knowledge_summary, fact_ids_json, last_updated)
-               VALUES (?,?,?,?,?,?)""",
-            (ep.profile_entry_id, ep.entity_id, ep.profile_id,
-             ep.knowledge_summary, json.dumps(ep.fact_ids), ep.last_updated),
-        )
+        """Persist an entity profile. Returns profile_entry_id.
+
+        The profile it replaces is kept as a version first (WS-6).
+        """
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self):
+            versions.keep_previous(
+                self, "entity_profile",
+                where="profile_entry_id = ? OR (entity_id = ? AND profile_id = ?)",
+                params=(ep.profile_entry_id, ep.entity_id, ep.profile_id))
+            self.execute(
+                """INSERT OR REPLACE INTO entity_profiles
+                   (profile_entry_id, entity_id, profile_id,
+                    knowledge_summary, fact_ids_json, last_updated)
+                   VALUES (?,?,?,?,?,?)""",
+                (ep.profile_entry_id, ep.entity_id, ep.profile_id,
+                 ep.knowledge_summary, json.dumps(ep.fact_ids), ep.last_updated),
+            )
         return ep.profile_entry_id
 
     def get_entity_profiles_by_entity(
@@ -2403,16 +2422,20 @@ class DatabaseManager:
         ]
 
     def store_scene(self, scene: MemoryScene) -> str:
-        """Persist a memory scene. Returns scene_id."""
-        self.execute(
-            """INSERT OR REPLACE INTO memory_scenes
-               (scene_id, profile_id, theme, fact_ids_json,
-                entity_ids_json, created_at, last_updated)
-               VALUES (?,?,?,?,?,?,?)""",
-            (scene.scene_id, scene.profile_id, scene.theme,
-             json.dumps(scene.fact_ids), json.dumps(scene.entity_ids),
-             scene.created_at, scene.last_updated),
-        )
+        """Persist a memory scene. Returns scene_id (the scene it replaces is kept as a version)."""
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self):
+            versions.keep_previous(self, "scene", {"scene_id": scene.scene_id})
+            self.execute(
+                """INSERT OR REPLACE INTO memory_scenes
+                   (scene_id, profile_id, theme, fact_ids_json,
+                    entity_ids_json, created_at, last_updated)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (scene.scene_id, scene.profile_id, scene.theme,
+                 json.dumps(scene.fact_ids), json.dumps(scene.entity_ids),
+                 scene.created_at, scene.last_updated),
+            )
         return scene.scene_id
 
     def _row_to_scene(self, row: sqlite3.Row) -> MemoryScene:
@@ -3519,16 +3542,24 @@ class DatabaseManager:
         """Store or replace a Core Memory block.
 
         Uses INSERT OR REPLACE on UNIQUE(profile_id, block_type)
-        to guarantee idempotency (L18).
+        to guarantee idempotency (L18). The block it replaces is kept as a
+        version first (WS-6).
         """
-        self.execute(
-            "INSERT OR REPLACE INTO core_memory_blocks "
-            "(block_id, profile_id, block_type, content, source_fact_ids, "
-            " char_count, version, compiled_by, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (block_id, profile_id, block_type, content,
-             source_fact_ids, char_count, version, compiled_by),
-        )
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self):
+            versions.keep_previous(
+                self, "core_block",
+                where="block_id = ? OR (profile_id = ? AND block_type = ?)",
+                params=(block_id, profile_id, block_type))
+            self.execute(
+                "INSERT OR REPLACE INTO core_memory_blocks "
+                "(block_id, profile_id, block_type, content, source_fact_ids, "
+                " char_count, version, compiled_by, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                (block_id, profile_id, block_type, content,
+                 source_fact_ids, char_count, version, compiled_by),
+            )
 
     def get_core_blocks(self, profile_id: str) -> list[dict]:
         """Get all Core Memory blocks for a profile."""
@@ -3549,11 +3580,15 @@ class DatabaseManager:
         return dict(rows[0]) if rows else None
 
     def delete_core_blocks(self, profile_id: str) -> None:
-        """Delete all Core Memory blocks for a profile."""
-        self.execute(
-            "DELETE FROM core_memory_blocks WHERE profile_id = ?",
-            (profile_id,),
-        )
+        """Delete all Core Memory blocks for a profile (kept as versions first, WS-6)."""
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self):
+            versions.keep_previous(self, "core_block", {"profile_id": profile_id})
+            self.execute(
+                "DELETE FROM core_memory_blocks WHERE profile_id = ?",
+                (profile_id,),
+            )
 
     # ------------------------------------------------------------------
     # Phase A: Fact Retention CRUD (Forgetting Brain)

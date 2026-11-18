@@ -294,6 +294,41 @@ class MaintenanceScheduler:
         except Exception as exc:  # noqa: BLE001
             self._record_step("trust pass", False, str(exc))
 
+    def _signing_pass(self) -> None:
+        """4.2.30 WS-5 (D-16): sign facts that have no signature, in bounded batches, and sign
+        again for their new profile those a fold moved. Only while the daemon holds the key
+        (read once at its start) and ``trust.signing`` is on or in shadow; otherwise a no-op
+        that never touches the keychain (trust/signatures.py)."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.trust import signatures
+
+            done = signatures.maintenance_step(self._db)
+            if done:
+                logger.info("Signing pass: %d facts signed", done)
+            self._record_step("signing pass", True)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("signing pass", False, str(exc))
+
+    def _dream_pass(self) -> None:
+        """4.2.30 WS-6: the dream cycle: lint the store and queue extractive pages and exact
+        duplicate merges for review (compiler/dream.py). Behind ``compiler.dream`` (off);
+        it asks no model, applies nothing, and writes only proposal tables in one short
+        transaction, so it never holds the writer lock across anything slow."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.compiler import dream
+
+            for done in dream.maintenance_step(self._db, self._profile_ids()):
+                if done.get("set_id"):
+                    logger.info("Dream cycle: %s proposals queued for review",
+                                done.get("proposals", 0))
+            self._record_step("dream cycle", True)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("dream cycle", False, str(exc))
+
     def _slot_pass(self) -> None:
         """4.2.30 truth layer: bind facts to slots, oldest first, behind the
         ``truth.slots`` flag (off by default; truth/slot_pass.py)."""
@@ -746,8 +781,10 @@ class MaintenanceScheduler:
         self._project_backfill()
         self._coverage_pass()
         self._trust_pass()  # classes first: the slot pass reads them (M-15)
+        self._signing_pass()
         self._slot_pass()
         self._cue_pass()
+        self._dream_pass()  # last: it reads what the passes above settled
 
         # Anything that has failed on several cycles running is not a blip.
         # Every step here logs and continues, which is right -- one broken step

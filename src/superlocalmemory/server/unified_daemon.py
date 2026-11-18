@@ -2277,6 +2277,16 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover - startup remains fail-soft
         logger.warning("install-token bootstrap failed: %s", exc)
 
+    # WS-5 (D-16): the fact-signing key is read from the OS keychain once, here, with a
+    # timeout, and held in memory. Never from a hook, never on the recall path. Only while
+    # `trust.signing` is on or in shadow; no keychain means no signing, never a key file.
+    try:
+        from superlocalmemory.trust import signing_key as _signing_key
+
+        await asyncio.to_thread(_signing_key.start_for_daemon)
+    except Exception as exc:  # pragma: no cover - startup remains fail-soft
+        logger.warning("signing key not loaded: %s", exc)
+
     # Pictures of a profile deleted in an earlier run that did not finish moving.
     try:
         from superlocalmemory.server.routes.helpers import DB_PATH as _memory_db
@@ -4921,6 +4931,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     for _mod_name in (
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
         "insights", "timeline", "abstraction", "integrity", "overtaken", "truth", "outcomes",
+        "proposals", "trust", "trust_why", "delivered", "trust_overview", "whatsnew", "wiki",
     ):
         try:
             _mod = __import__(
@@ -5723,9 +5734,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 meta.update(strip_reserved_metadata(extra))
             # Who saved it: the connection's agent when a capability holder
             # names it, else the claimed label, marked as claimed (L-15).
+            from superlocalmemory.core.agent_attribution import SHELL_HEADER, shell_signal
             from superlocalmemory.core.agent_attribution import bind as _bind_agent
 
-            meta = _bind_agent(meta, _trusted_connection_agent(request, trusted_actor_id))
+            meta = _bind_agent(
+                meta, _trusted_connection_agent(request, trusted_actor_id),
+                shell_signal(request.headers.get(SHELL_HEADER, ""), trusted_actor_id))
             from superlocalmemory.core.agent_attribution import write_speaker
 
             _write_speaker = write_speaker(req.speaker, meta)

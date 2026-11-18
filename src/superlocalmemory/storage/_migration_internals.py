@@ -264,6 +264,18 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M079_fact_trust as _M079,
 )
+from superlocalmemory.storage.migrations import (
+    M080_versions_and_proposals as _M080,
+)
+from superlocalmemory.storage.migrations import (
+    M081_trust_approvals as _M081,
+)
+from superlocalmemory.storage.migrations import (
+    M082_fact_signatures as _M082,
+)
+from superlocalmemory.storage.migrations import (
+    M083_compiled_pages as _M083,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -351,6 +363,10 @@ _MODULES = {
     _M077.NAME: _M077,
     _M078.NAME: _M078,
     _M079.NAME: _M079,
+    _M080.NAME: _M080,
+    _M081.NAME: _M081,
+    _M082.NAME: _M082,
+    _M083.NAME: _M083,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

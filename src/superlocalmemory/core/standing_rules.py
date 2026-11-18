@@ -200,6 +200,10 @@ def _confirmed_rows(db, profile_id, kind):
             " AND NOT EXISTS (SELECT 1 FROM fact_temporal_validity v "
             "WHERE v.fact_id = f.fact_id AND v.system_expired_at IS NOT NULL)"
         )
+    # WS-5: a rule or decision is an instruction; with trust.taint on only a memory whose
+    # taint is at least ``system`` (or one a person approved) may be one (trust/firewall.py).
+    from superlocalmemory.trust import firewall
+
     return db.execute(
         "SELECT f.fact_id, f.memory_id, f.content, f.importance, f.access_count, "
         "m.metadata_json, m.content AS memory_content "
@@ -210,6 +214,7 @@ def _confirmed_rows(db, profile_id, kind):
         "AND COALESCE(f.lifecycle, 'active') != 'archived' "
         "AND COALESCE(f.quarantined, 0) = 0"
         + replaced
+        + firewall.clause(db)
         + " ORDER BY f.created_at DESC, f.rowid DESC",
         (profile_id, kind.value, *sources),
     )

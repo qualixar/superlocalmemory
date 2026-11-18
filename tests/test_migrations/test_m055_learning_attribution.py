@@ -56,8 +56,8 @@ def test_registered_eager_on_learning_and_additive() -> None:
     assert _MODULES[M055.NAME] is M055
     # M055, WP-4b recall, M059 erasure visibility, M060 memory description, M061 hub baselines, M062 hook
     # bookkeeping, M063 blank temporal dates, M064 orphan index rows, M065 fabricated dates, M066 wrongly archived,
-    # M067 projection change trigger, M068 newer bookkeeping shapes, M069-M079 truth layer
-    assert sv.SUPPORTED_SCHEMA_VERSION == 79
+    # M067 projection change trigger, M068 newer bookkeeping shapes, M069-M083 truth layer
+    assert sv.SUPPORTED_SCHEMA_VERSION == 83
     assert M055.BREAKING_VERSION == 0 and M055.DOWNGRADE_FLOOR == 51
 
 

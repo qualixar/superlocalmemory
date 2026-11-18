@@ -25,7 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from superlocalmemory.compliance.audit import _GENESIS_HASH, HASH_VERSION, AuditChain
+from superlocalmemory.compliance.audit import _GENESIS_HASH, FULL_VERSIONS, AuditChain
+from superlocalmemory.compliance.audit_keyed import Tally
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class _State:
     seen_v2: bool
     full_at: float
     at: float
+    seen_keyed: bool = False
+    active_key: str | None = None
 
 
 _states: dict[str, _State] = {}
@@ -98,7 +101,19 @@ def _state_from(rows: list[dict], report: dict[str, Any]) -> _State:
         through_id=int(last["id"]) if last else 0,
         through_hash=last["event_hash"] if last else _GENESIS_HASH,
         seen_v2=any(r.get("hash_version", 1) >= 2 for r in rows),
-        full_at=now, at=now)
+        full_at=now, at=now, seen_keyed=_seen_keyed(rows), active_key=_active_key(rows))
+
+
+def _seen_keyed(rows: list[dict]) -> bool:
+    return any(r.get("hash_version") == 3 for r in rows)
+
+
+def _active_key(rows: list[dict]) -> str | None:
+    """The key id of the latest anchor: where a walk of the entries added later resumes."""
+    for r in reversed(rows):
+        if r.get("hash_version") == 3 and r.get("operation") == "key_anchor":
+            return r.get("key_id") or None
+    return None
 
 
 def _incremental(chain: AuditChain, key: str, state: _State) -> _State:
@@ -111,7 +126,7 @@ def _incremental(chain: AuditChain, key: str, state: _State) -> _State:
                 return _full(chain, key)
         added = [dict(r) for r in conn.execute(
             "SELECT id, timestamp, operation, agent_id, profile_id, content_hash, "
-            "prev_hash, event_hash, metadata, hash_version FROM audit_chain "
+            "prev_hash, event_hash, metadata, hash_version, key_id FROM audit_chain "
             "WHERE id > ? ORDER BY id", (state.through_id,)).fetchall()]
         total = int(conn.execute("SELECT COUNT(*) FROM audit_chain").fetchone()[0])
     finally:
@@ -119,20 +134,25 @@ def _incremental(chain: AuditChain, key: str, state: _State) -> _State:
     before = state.report["entries"]
     if total != before + len(added):
         return _full(chain, key)  # something earlier was removed: walk it all
-    failure, last_hash, seen_v2 = chain._link_walk(added, state.through_hash, state.seen_v2)
+    tally = Tally(seen_keyed=state.seen_keyed, active_key=state.active_key)
+    failure, last_hash, seen_v2 = chain._link_walk(
+        added, state.through_hash, state.seen_v2, chain._signer(), tally)
     if failure is None:
         failure = chain._anchor_failure_at(total, lambda n: _entry_at(chain, n), total > 0)
     report = dict(state.report)
     report["entries"] = total
     report["legacy"] += sum(1 for r in added if r.get("hash_version", 1) == 1)
-    report["fully_covered"] += sum(1 for r in added if r.get("hash_version") == HASH_VERSION)
+    report["fully_covered"] += sum(1 for r in added if r.get("hash_version") in FULL_VERSIONS)
+    for name, count in tally.as_report().items():
+        report[name] = report.get(name, 0) + count
     if failure is not None:
         report.update(ok=False, failed_at=failure[0], reason=failure[1])
         logger.warning("Audit chain verification failed at %s: %s", *failure)
     now = time.monotonic()
     result = _State(report=report,
                     through_id=int(added[-1]["id"]) if added else state.through_id,
-                    through_hash=last_hash, seen_v2=seen_v2, full_at=state.full_at, at=now)
+                    through_hash=last_hash, seen_v2=seen_v2, full_at=state.full_at, at=now,
+                    seen_keyed=tally.seen_keyed, active_key=tally.active_key)
     with _registry:
         _states[key] = result
     return result

@@ -108,8 +108,13 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
     Flag("compiler.auto_apply", "WS-6", FlagState.OFF,
          "Apply deterministic-safe compiler proposals without review",
          shadowable=False),
+    Flag("compiler.dream", "WS-6", FlagState.OFF,
+         "Dream cycle: in the background, lint the store and propose extractive pages and "
+         "duplicate merges to the review queue (nothing is applied)",
+         shadowable=False),
     Flag("compiler.wiki", "WS-6", FlagState.OFF,
-         "Project current-state pages to a Markdown wiki"),
+         "Project the compiled pages to a Markdown folder and read edits back as proposals "
+         "(shadow: show what would be written, write nothing)"),
     Flag("portability.importers", "WS-9", FlagState.OFF,
          "Offer importers for other memory products",
          shadowable=False),

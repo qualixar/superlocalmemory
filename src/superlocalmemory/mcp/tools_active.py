@@ -334,6 +334,24 @@ def _upcoming_scheduled_facts(
     return scheduled(engine, now, profile_id)
 
 
+def _pin_needs_approval(db, fact_id: str) -> dict | None:
+    """The instruction firewall at the pin door (WS-5): a memory whose taint is below
+    ``system`` is not pinned by an agent's call. The request is recorded so the user sees it
+    under "Waiting for your OK"; an agent cannot approve it. ``None``: pin as usual."""
+    from superlocalmemory.trust import firewall
+
+    verdict = firewall.check_promotion(db, fact_id, firewall.PIN)
+    if verdict.allowed:
+        return None
+    try:
+        with db.raw_connection() as conn:
+            firewall.request(conn, fact_id, firewall.PIN, by=_get_agent_id(), channel="mcp")
+    except Exception as exc:  # noqa: BLE001 - the refusal matters more than the note
+        logger.debug("pin request not recorded (%s)", type(exc).__name__)
+    return {"success": False, "needs_approval": True, "fact_id": fact_id,
+            "taint": verdict.taint, "error": verdict.reason}
+
+
 def _owns_fact(db, profile_id: str, fact_id: str) -> bool:
     """True when ``fact_id`` is a fact of the profile that this caller may act on.
 
@@ -713,6 +731,9 @@ def register_active_tools(server, get_engine: Callable) -> None:
                     return {"success": False, "error": "fact_id required for pin"}
                 if not _owns_fact(db, pid, fact_id):
                     return {"success": False, "error": f"Memory {fact_id} not found"}
+                held = _pin_needs_approval(db, fact_id)
+                if held is not None:
+                    return held
                 authorization = authorize_mcp_mutation(
                     engine,
                     "update",

@@ -192,7 +192,11 @@ import pytest
 #: 77 as of 4.2.30: +M077_judge_certificates (deferred, memory.db; additive), floor 51.
 #: 78 as of 4.2.30: +M078_memory_cues (deferred, memory.db; additive), floor 51.
 #: 79 as of 4.2.30: +M079_fact_trust (deferred, memory.db; additive), floor 51.
-_EXPECTED_SCHEMA_VERSION: int = 79
+#: 80 as of 4.2.30: +M080_versions_and_proposals (deferred, memory.db; additive), floor 51.
+#: 81 as of 4.2.30: +M081_trust_approvals (deferred, memory.db; additive), floor 51.
+#: 82 as of 4.2.30: +M082_fact_signatures (deferred, memory.db; additive), floor 51.
+#: 83 as of 4.2.30: +M083_compiled_pages (deferred, memory.db; additive), floor 51.
+_EXPECTED_SCHEMA_VERSION: int = 83
 
 #: Total migrations in the MIGRATIONS + DEFERRED_MIGRATIONS catalogue.
 #: M001–M043 with M008 absent = 42 total.
@@ -221,7 +225,7 @@ _EXPECTED_SCHEMA_VERSION: int = 79
 # 63 as of 4.2.8: +M064_orphan_index_rows_are_removed (deferred, memory.db).
 # 65 as of 4.2.8: +M065_fabricated_dates_are_removed,
 #                 +M066_wrongly_archived_memories_are_restored (deferred, memory.db).
-_EXPECTED_MIGRATION_COUNT: int = 78  # +M068 (4.2.16), +M069-M079 (4.2.30)
+_EXPECTED_MIGRATION_COUNT: int = 82  # +M068 (4.2.16), +M069-M083 (4.2.30)
 
 #: Path to an installed reference package's migrations directory, if one exists.
 #:

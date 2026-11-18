@@ -137,6 +137,8 @@ def test_backfill_marks_done_and_emits(started):
     svc.start()
     assert _wait(lambda: store.done == [1])
     assert store.failed == []
+    # The event follows mark_done; wait for it rather than racing the worker thread.
+    assert _wait(lambda: len(events) >= 1)
     assert events[0][1]["payload"]["path"] == "legacy_pending_backfill"
     assert events[0][1]["source_agent"] == "materializer"
 

@@ -590,6 +590,8 @@
       if (window.odMountMemoryHealth) window.odMountMemoryHealth(container);
       if (window.odMountTruthChecks) window.odMountTruthChecks(container);
       if (window.odMountMemoryOutcomes) window.odMountMemoryOutcomes(container);
+      if (window.odMountDelivered) window.odMountDelivered(container);
+      if (window.odMountTrustOverview) window.odMountTrustOverview(container);
 
     }).catch(function (err) {
       container.innerHTML =

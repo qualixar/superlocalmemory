@@ -72,28 +72,56 @@ class CommunitySummaryBuilder:
 
     def compute_and_store(self, profile_id: str) -> dict[str, int]:
         communities = EntityCommunityBuilder(self._db).get_communities(profile_id)
-        try:
-            self._db.execute(
-                "DELETE FROM community_summaries WHERE profile_id = ?",
-                (profile_id,),
-            )
-        except Exception as exc:
-            logger.debug("community_summaries clear failed: %s", exc)
+        # Build every row first: the summarizer may call a model, and no write
+        # transaction is held across that call.
+        rows = self._build_rows(profile_id, communities) if communities else []
+        written = self._replace(profile_id, rows)
         if not communities:
             return {"summaries_written": 0, "communities": 0}
+        return {"summaries_written": written, "communities": len(communities)}
 
+    def _replace(self, profile_id: str, rows: list[tuple]) -> int:
+        """Swap the profile's summaries for ``rows``, keeping the old ones as versions (WS-6)."""
+        from superlocalmemory.compiler import versions
+
+        written = 0
+        try:
+            with versions.atomic(self._db):
+                versions.keep_previous(self._db, "community_summary", {"profile_id": profile_id})
+                self._db.execute(
+                    "DELETE FROM community_summaries WHERE profile_id = ?",
+                    (profile_id,),
+                )
+                for params in rows:
+                    try:
+                        self._db.execute(
+                            "INSERT OR REPLACE INTO community_summaries "
+                            "(profile_id, community_id, summary, keywords, "
+                            " entity_ids_json, fact_ids_json, fact_count, computed_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                            params,
+                        )
+                        written += 1
+                    except Exception as exc:
+                        logger.debug("community_summaries write failed (%s): %s", params[1], exc)
+        except Exception as exc:
+            logger.debug("community_summaries replace failed: %s", exc)
+            return 0
+        return written
+
+    def _build_rows(self, profile_id: str, communities: dict[int, list[str]]) -> list[tuple]:
         entity_to_cid: dict[str, int] = {
             e: cid for cid, ents in communities.items() for e in ents
         }
         cid_facts = self._gather_facts(profile_id, entity_to_cid)
         name_map = self._entity_names(profile_id, communities)
 
-        written = 0
+        rows: list[tuple] = []
         ordered = sorted(
             cid_facts.items(), key=lambda kv: len(kv[1]), reverse=True,
         )
         for cid, facts in ordered:
-            if written >= self._max_communities:
+            if len(rows) >= self._max_communities:
                 break
             seen: set[str] = set()
             vf: list[tuple[str, str]] = []
@@ -111,24 +139,11 @@ class CommunitySummaryBuilder:
             entity_names = [name_map.get(e, e) for e in entity_ids]
             keywords = self._keywords(contents)
             summary = self._summary(contents, entity_names, keywords)
-
-            try:
-                self._db.execute(
-                    "INSERT OR REPLACE INTO community_summaries "
-                    "(profile_id, community_id, summary, keywords, "
-                    " entity_ids_json, fact_ids_json, fact_count, computed_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
-                    (
-                        profile_id, cid, summary, keywords,
-                        json.dumps(entity_ids), json.dumps(fact_ids),
-                        len(fact_ids),
-                    ),
-                )
-                written += 1
-            except Exception as exc:
-                logger.debug("community_summaries write failed (%s): %s", cid, exc)
-
-        return {"summaries_written": written, "communities": len(communities)}
+            rows.append((
+                profile_id, cid, summary, keywords,
+                json.dumps(entity_ids), json.dumps(fact_ids), len(fact_ids),
+            ))
+        return rows
 
     # ------------------------------------------------------------------
     # Read API

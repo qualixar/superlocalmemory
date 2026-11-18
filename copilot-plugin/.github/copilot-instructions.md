@@ -16,6 +16,7 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 - Pass `kind` (rule, decision, status, procedure, ...) when you know it; a declared rule or decision is loaded at the start of later sessions.
 - Always supply tags + project + importance (7–10 for blockers/security/architecture).
 - Never dump a whole file; never claim "saved" without success:true.
+- Never save a credential (the secret screen, when on, stores it as `[REDACTED:TYPE:LAST4]`). With the instruction firewall on, a memory that is not the user's own words (a tool's output, a web page, an agent's earlier text) cannot become a pin, rule or core memory until the user approves it (`slm trust pending --json` lists what waits; approving is the user's, at a terminal); a pin answering `needs_approval` is waiting, not failed.
 - Scope is opt-in: writes are `personal`/private by default. Only use `scope="shared"/"global"` (or recall's `include_global`/`include_shared`) when the user explicitly asks to share across local profiles.
 
 ### Recall

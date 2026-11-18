@@ -117,8 +117,14 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         # 4.2.30 truth layer, real top-level commands (slm <cmd> --help):
         "disputes",  # slm disputes list|settle|still-true
         "audit",     # slm audit [--count]: asks a person at a terminal
+        "proposals", # slm proposals list|show|apply|reject|rollback: apply, reject, rollback ask a person
+        "wiki",      # slm wiki status|diff|build|rebuild|sync|dir: rebuild and sync ask a person
         "consent",   # slm consent list|give|withdraw: give asks a person at a terminal
+        "why",       # slm why FACT_ID: everything that explains one memory (read-only, WS-5)
+        "signing",   # slm signing status|resign: signed memories; resign asks a person at a terminal
         "measurement",  # slm measurement status|on|off: what SLM measures, the off switch (D-28)
+        "trust",     # slm trust pending|status|approve: approve asks a person at a terminal (WS-5)
+        "health",    # slm health --memory: the Memory Health report (read-only, W3)
     }
 )
 

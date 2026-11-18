@@ -808,8 +808,13 @@ class CanonicalRememberRuntime:
         fisher_variance: list[float] | None = None,
         trusted_actor_id: str = "canonical-runtime",
         idempotency_key: str | None = None,
+        origin_channel: str | None = None,
     ) -> Mapping[str, Any]:
-        """Atomically create an immutable, review-required successor case."""
+        """Atomically create an immutable, review-required successor case.
+
+        ``origin_channel`` names where the new text came from when it is not a
+        plain correction (``external_edit``: a block edited in a Markdown file, D-17).
+        """
         return self._submit_mutation(
             CommandKind.PROPOSE_CORRECTION,
             profile_id,
@@ -821,6 +826,7 @@ class CanonicalRememberRuntime:
                 "fisher_mean": _json_roundtrip({"value": fisher_mean})["value"],
                 "fisher_variance": _json_roundtrip({"value": fisher_variance})["value"],
                 "trusted_actor_id": trusted_actor_id,
+                **({"origin_channel": origin_channel} if origin_channel else {}),
             },
             idempotency_key=idempotency_key,
         )
@@ -1422,8 +1428,9 @@ def _propose_correction_successor(
     )
     from superlocalmemory.storage import fact_origin
 
+    channel = "external_edit" if payload.get("origin_channel") == "external_edit" else "correction"
     with fact_origin.declare(fact_origin.Origin(
-            "correction", "verbatim", source_type="correction",
+            channel, "verbatim", source_type=channel,
             actor_id=str(payload.get("trusted_actor_id") or "") or None,
             parent_fact_id=str(source.get("fact_id") or "") or None)):
         persisted_id = db.insert_fact_immutable(successor)

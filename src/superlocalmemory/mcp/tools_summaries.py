@@ -41,7 +41,7 @@ from superlocalmemory.mcp.tool_hints import READ_ONLY
 logger = logging.getLogger("superlocalmemory.mcp.summaries")
 
 #: Accepted values for the ``kind`` argument.
-_KINDS = ("day", "project", "session", "community")
+_KINDS = ("day", "project", "session", "community", "page")
 
 #: Q9 (2026-10-06): a community can hold thousands of member ids. Explicit
 #: drill-down (this tool) may return them all, but a caller that passes no
@@ -131,6 +131,53 @@ def _community_drill_down(
     )
 
 
+def _compiled_page(engine: Any, profile_id: str, target: str, hidden_of: Any = None) -> Any | None:
+    """A compiled page (WS-6, D-18): every sentence a word-for-word span of a memory it cites
+    or a fixed template over slot values, re-checked now. With no ``target``, the list of pages.
+
+    ``None`` when there is no such page (or a remote caller may not see a memory it cites).
+    """
+    from superlocalmemory.compiler import pages
+    from superlocalmemory.summaries.base import (
+        COVERAGE_FULL,
+        COVERAGE_PARTIAL,
+        GENERATED_BY_EXTRACTIVE,
+        SummaryResult,
+    )
+
+    db = getattr(engine, "db", None) or getattr(engine, "_db", None)
+    if db is None:
+        return None
+    if not (target or "").strip():
+        listed = pages.list_pages(db, profile_id)
+        if hidden_of is not None:  # a remote caller is not shown titles of pages it cannot read
+            listed = []
+        lines = [f"{p['title']} ({p['kind'].replace('_', ' ')}, id {p['page_id']})" for p in listed]
+        return SummaryResult(
+            kind="page", profile_id=profile_id,
+            content="\n".join(lines) or "No compiled pages yet.", source_fact_ids=[],
+            coverage=COVERAGE_FULL, generated_by=GENERATED_BY_EXTRACTIVE,
+            metadata={"pages": listed, "next": "call again with target=<page id> to read one"})
+    page = pages.show_page(db, profile_id, target.strip())
+    if page is None:
+        return None
+    cited = sorted({c["fact_id"] for s in page["sentences"] for c in s["citations"]})
+    if hidden_of is not None and hidden_of(cited):
+        return None
+    text = "\n".join(s["text"] for s in page["sentences"])
+    if page["withheld"]["count"]:
+        text += f"\n({page['withheld']['count']} sentences withheld.)"
+    return SummaryResult(
+        kind="page", profile_id=profile_id, content=f"{page['title']}\n{text}",
+        source_fact_ids=cited,
+        coverage=COVERAGE_PARTIAL if page["withheld"]["count"] else COVERAGE_FULL,
+        generated_by=GENERATED_BY_EXTRACTIVE,
+        metadata={"page_id": page["page_id"], "page_kind": page["kind"], "origin": page["origin"],
+                  "stale": page["stale"], "withheld": page["withheld"], "notice": page["notice"],
+                  "sentences": [{"text": s["text"], "facts": [c["fact_id"] for c in s["citations"]],
+                                 "type": s["type"]} for s in page["sentences"]]})
+
+
 def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
     """Register the read-only summary tool."""
 
@@ -146,13 +193,14 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
         """Summarise your memories: a day, a project, a session, or a community.
 
         Args:
-            kind: "day", "project", "session", or "community".
+            kind: "day", "project", "session", "community", or "page".
             target: For "day", an ISO date, "today" or "yesterday" (default
                 today, in this computer's time zone). For "project", a directory
                 path (default: none — supply one). For "session", the session
                 id; leave it empty to get ``recent_sessions`` to choose from.
                 For "community", the ``community_id`` a recall or session_init
-                response gave you in ``thematic_context``.
+                response gave you in ``thematic_context``. For "page", a page
+                id (leave it empty to list the compiled pages).
             profile_id: The profile to summarise (empty = the active one).
             limit, offset: "community" only — page through
                 ``source_fact_ids`` when it is large (default: first 500).
@@ -162,6 +210,12 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
         not decoration: session data is sparse — roughly 4% of facts carry a
         session id — so a session summary is usually partial. Do not present a
         partial summary as a complete record of what happened.
+
+        "page" (4.2.30) reads a compiled page: a current-state, story or topic page
+        built only from word-for-word sentences of the memories it cites and fixed
+        templates over slot values, each sentence re-checked when you ask. It says
+        how many sentences it withheld and is never a memory itself; read it for
+        an overview, and use ``recall`` for a question.
 
         "community" is the drill-down for ``thematic_context``: a recall or
         session_init response carries only a small relevance-bounded SAMPLE of
@@ -199,6 +253,16 @@ def register_summary_tools(server: Any, get_engine: Callable[[], Any]) -> None:
         if current_view():
             def hidden_of(ids, _db=engine._db, _pid=profile_id):  # noqa: F811
                 return hidden_fact_ids(_db, _pid, list(ids))
+
+        if kind == "page":  # compiled pages (WS-6): read through the engine's db, like community
+            try:
+                result = _compiled_page(engine, profile_id, target, hidden_of)
+            except Exception as exc:
+                logger.warning("page read failed (%s): %s", target, exc)
+                return _error(f"page read failed: {exc}", kind=kind)
+            if result is None:
+                return _error(f"no page {(target or '').strip()!r} for this profile", kind=kind)
+            return _result_payload(result)
 
         # "community" reads through the live engine's own db handle (exactly
         # like session_init's community_context), not a path-opened

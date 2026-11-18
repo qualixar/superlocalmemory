@@ -60,6 +60,16 @@ def _invalidate_display_summaries(conn: object, profile_id: str, fact_id: str) -
     # both are cleared while the link still exists (storage/erasure_derived.py).
     erasure_derived.drop_personas_quoting(conn.execute, profile_id, fact_id)
     erasure_derived.retheme_scenes_quoting(conn.execute, profile_id, fact_id)
+    # Versions of derived text and proposals that name the fact go with it (I-11, WS-6).
+    # This step must never block an erasure: the delete triggers of M080 remove the same
+    # rows when the fact row itself is deleted, so a failure here is logged, not raised.
+    try:
+        from superlocalmemory.compiler.erasure import erase_for_fact
+
+        erase_for_fact(conn, profile_id, fact_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("versions and proposals of %s not cleared at tombstone time: %s",
+                       fact_id[:16], _err(exc))
 
 
 def write_tombstones_status(

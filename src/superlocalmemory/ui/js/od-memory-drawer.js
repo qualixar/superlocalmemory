@@ -81,6 +81,7 @@
         //       decomposition is not yet exposed by the daemon; show when available.
       '</div>' +
       '<div id="od-drawer-truth"></div>' +
+      '<div id="od-drawer-why"></div>' +
       '<h3 style="font-size:13px;margin:20px 0 8px">Atomic facts</h3>' +
       '<div id="od-drawer-facts" style="color:var(--fg-2);font-size:13px">Loading facts…</div>' +
       '<div id="od-drawer-code"></div>' +
@@ -117,6 +118,8 @@
     if (mem.id && window.SLMTruth && window.SLMTruth.detail) {
       window.SLMTruth.detail(mem.id, document.getElementById('od-drawer-truth'));
     }
+    // 4.2.30 WS-5: "Why was this shown?", read on request (od-why.js).
+    if (mem.id && window.SLMWhy) window.SLMWhy.mount(mem.id, document.getElementById('od-drawer-why'));
     drawer.querySelector('[data-od-act="close-drawer"]').focus();
   }
 

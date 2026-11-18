@@ -375,18 +375,22 @@ class SceneBuilder:
         return result
 
     def _save_scene(self, scene: MemoryScene) -> None:
-        """Upsert scene to DB."""
-        self._db.execute(
-            """INSERT OR REPLACE INTO memory_scenes
-               (scene_id, profile_id, theme, fact_ids_json, entity_ids_json,
-                created_at, last_updated)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                scene.scene_id, scene.profile_id, scene.theme,
-                json.dumps(scene.fact_ids), json.dumps(scene.entity_ids),
-                scene.created_at, scene.last_updated,
-            ),
-        )
+        """Upsert scene to DB (the scene it replaces is kept as a version, WS-6)."""
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self._db):
+            versions.keep_previous(self._db, "scene", {"scene_id": scene.scene_id})
+            self._db.execute(
+                """INSERT OR REPLACE INTO memory_scenes
+                   (scene_id, profile_id, theme, fact_ids_json, entity_ids_json,
+                    created_at, last_updated)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    scene.scene_id, scene.profile_id, scene.theme,
+                    json.dumps(scene.fact_ids), json.dumps(scene.entity_ids),
+                    scene.created_at, scene.last_updated,
+                ),
+            )
 
     @staticmethod
     def _row_to_scene(d: dict) -> MemoryScene:

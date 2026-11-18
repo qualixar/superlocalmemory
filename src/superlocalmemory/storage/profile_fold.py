@@ -52,26 +52,30 @@ MOVE    action_outcomes, association_edges, atomic_facts, bm25_tokens,
         embedding_metadata, embedding_quantization_metadata, enrichment_changes,
         entity_aliases,
         fact_access_log, fact_consolidations, fact_context, fact_hub_baseline, fact_origin,
-        fact_importance, fact_outcome_score, fact_retention, fact_temporal_validity, fact_trust,
+        fact_importance, fact_outcome_score, fact_retention, fact_signatures,
+        fact_temporal_validity, fact_trust,
         feedback_records, injection_deliveries, injection_receipts, injection_usage,
         judge_receipts,
         memories, memory_archive, memory_cues, memory_leases, need_turns,
         memory_kind_history, memory_merge_log, memory_scenes, pinned_facts,
         polar_embeddings, projection_obligations, projection_outbox,
         projection_tombstones, provenance, reembed_next_map, reembed_prev_map,
-        scene_fact_members, temporal_events, tool_events, vector_row_map
+        scene_fact_members, temporal_events, tool_events, trust_approvals, vector_row_map
 MERGE   consolidated_summaries, entity_profiles, fact_entity_associations,
         graph_edges, ingestion_log, trust_scores
 REKEY   correction_cases, ingestion_operations
 VEC     fact_embeddings, reembed_next_vec, reembed_prev_vec, reembed_trash_vec
 DELETE  activation_cache, backup_destinations, behavioral_assertions,
         behavioral_patterns, community_summaries, compliance_audit,
-        core_memory_blocks, cross_platform_sync_log, entity_communities,
+        artifact_versions, compiled_pages, core_memory_blocks, cross_platform_sync_log,
+        entity_communities,
         entity_link_repair_undo, graph_generation, judge_certificates, memory_kind_runs,
         memory_slots, mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state,
-        pending_outcomes, persona_summary, rbac_memberships, slot_disputes, slot_key_alias,
+        page_citations, pending_outcomes, persona_summary, proposal_sets, proposals,
+        rbac_memberships,
+        slot_disputes, slot_key_alias,
         slot_revisions,
-        soft_prompt_templates
+        soft_prompt_templates, wiki_edits, wiki_files
 KEEP    erasure_receipts, fact_search_changes, profiles, write_commits
 
 Canonical entities first MERGE by name (case-insensitive, the resolver's own
@@ -103,6 +107,22 @@ DECISIONS: dict[str, tuple[str, str]] = {
     # slot pass rebuilds for the target (it restarts when revisions vanish).
     "memory_leases": (MOVE, "source fingerprints of the moved facts"),
     "fact_trust": (MOVE, "class and taint go where the fact goes"),
+    "fact_signatures": (MOVE, "the signature goes where the fact goes; only profile_id changes, "
+                        "so signed_profile_id still names the profile the signature covers and "
+                        "the daemon signs again for the new one after verifying the old"),
+    "trust_approvals": (MOVE, "a person's approval and what was withheld go where the fact goes"),
+    "artifact_versions": (DELETE, "previous copies of derived rows that are deleted or rebuilt "
+                          "for the target profile; they quote the source profile's facts"),
+    "proposal_sets": (DELETE, "review items about the source profile's derived state; their "
+                      "inverses name rows that are deleted, so the compiler proposes again"),
+    "proposals": (DELETE, "members of the proposal sets deleted with the profile"),
+    "compiled_pages": (DELETE, "derived pages that quote the source profile's facts; the "
+                       "dream cycle compiles them again for the target profile"),
+    "page_citations": (DELETE, "the index of the pages deleted with the profile"),
+    "wiki_files": (DELETE, "hashes of the Markdown files written for the source profile; the "
+                   "projection writes the target's again"),
+    "wiki_edits": (DELETE, "edited blocks already proposed for the source profile; they name "
+                   "facts of a profile that is deleted"),
     "memory_cues": (MOVE, "cues of the moved facts (path, tool, error, repo, date)"),
     "memory_slots": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "slot_revisions": (DELETE, "derived by the slot pass, rebuilt for the target profile"),

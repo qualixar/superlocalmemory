@@ -157,9 +157,15 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     # memory (4.2.30, W3-5): ``health(memory=true)`` adds the Memory Health report of
     # the profile the call is routed to; selects no profile.
     "memory",
+    # why (4.2.30, WS-5): ``fetch(why=true)`` adds the read-only explanation of each memory
+    # fetched, inside the profile the call is routed to; selects no profile.
+    "why",
     # source_file (4.2.30, D-38): the local file a save was learned from; selects no
     # profile (and a remote caller is refused it at the door).
     "source_file",
+    # cues (4.2.30, W3-8): ``remember(cues=[...])`` binds reminders to the saved fact,
+    # inside the profile the call is routed to; selects no profile.
+    "cues",
     # speaker (4.2.7, #265): who "I" is in the saved text; selects no profile.
     "speaker", "tags", "tags_match",
     "target",

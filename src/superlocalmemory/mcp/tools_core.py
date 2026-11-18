@@ -1023,7 +1023,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
 
     @server.tool(title="Fetch Memories", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
-    async def fetch(fact_ids: "str | list[str]", profile_id: str = "") -> dict:
+    async def fetch(fact_ids: "str | list[str]", profile_id: str = "",
+                    why: bool = False) -> dict:
         """Fetch full details for specific fact IDs (comma-separated or a list).
 
         Reports every id it could not resolve. Before 4.1.15 an unmatched token
@@ -1035,6 +1036,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
         access sets it to the key's profile, whatever this computer is using.
         A name that is not an existing profile is refused, never silently
         treated as empty (4.1.22).
+
+        ``why=true`` (4.2.30, WS-5, at most 10 memories per call) adds to each result a
+        ``why`` report, the same one ``slm why`` prints: where the memory came from (class,
+        taint, the rule), whether the instruction firewall holds it back, its signature, its
+        disputes, and the last times it was shown to an agent with the reason in words.
+        Read-only; no new tool, so no tool caps change.
         """
         try:
             engine = get_engine()
@@ -1083,6 +1090,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     ),
                     "results": [], "count": 0, "not_found": not_found,
                 }
+            if why:
+                from superlocalmemory.trust import signing_key
+                from superlocalmemory.trust import why as why_report
+
+                items = why_report.attach(engine._db.db_path, pid, items,
+                                          signer=signing_key.current())
             return {
                 "success": True, "results": items, "count": len(items),
                 "not_found": not_found,

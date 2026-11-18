@@ -19,10 +19,20 @@ and their six fields are checked, their metadata is not, and they are never
 presented as fully verified. A version-1 entry after a version-2 one is a
 downgrade and fails verification.
 
-What this proves, and what it does not: the chain is plain SHA-256, not a keyed
-MAC, so someone who can rewrite this file can also recompute every hash. The
-external anchor (count + head hash in a sidecar file) catches truncation and a
-replaced tail; it does not stop an attacker who controls both files.
+**Hash version 3 (4.2.30, WS-5, D-16).** While the daemon holds the signing key
+from the OS keychain (``trust.signing`` on), each new link is an HMAC-SHA256 under
+that key instead of a plain hash (``compliance/audit_keyed.py``). An anchor entry
+is written before the first keyed link and whenever the key changes. Plain links
+written before, and by processes that do not hold the key, stay verifiable by
+their plain hash.
+
+What this proves, and what it does not: a plain link is SHA-256, not a keyed
+MAC, so someone who can rewrite this file can also recompute it; a keyed link
+cannot be recomputed without the keychain's key, so a copy of the file made
+without the user's login session cannot be rewritten and still verify (it does
+not stop a process running as the user). The external anchor (count + head hash
+in a sidecar file) catches truncation and a replaced tail; it does not stop an
+attacker who controls both files.
 
 The audit chain uses its OWN sqlite3 connection (not shared DB manager)
 for independence — audit must survive even if the main DB is corrupted.
@@ -38,6 +48,16 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
+
+from superlocalmemory.compliance.audit_keyed import (
+    ANCHOR_OPERATION,
+    KEYED_VERSION,
+    Tally,
+    anchor_metadata,
+    anchor_reason,
+    check_row,
+    keyed_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +77,8 @@ CREATE TABLE IF NOT EXISTS audit_chain (
     prev_hash TEXT DEFAULT '',
     event_hash TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
-    hash_version INTEGER NOT NULL DEFAULT 2
+    hash_version INTEGER NOT NULL DEFAULT 2,
+    key_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_chain_profile ON audit_chain(profile_id, id);
 CREATE TABLE IF NOT EXISTS audit_anchor_state (
@@ -111,6 +132,10 @@ def _compute_hash_v2(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+#: Versions whose entries cover every stored field (plain canonical JSON, or keyed).
+FULL_VERSIONS = (HASH_VERSION, KEYED_VERSION)
+
+
 def _entry_hash(row: dict) -> str:
     fields = (row["prev_hash"], row["operation"], row["agent_id"] or "",
               row["profile_id"] or "", row["content_hash"] or "", row["timestamp"])
@@ -128,7 +153,12 @@ class AuditChain:
     Uses its own SQLite connection for independence from main DB.
     """
 
-    def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(self, db_path: Optional[Union[str, Path]] = None, *,
+                 read_only: bool = False) -> None:
+        """``read_only`` opens an existing file with ``mode=ro`` and changes nothing (not the
+        schema, not the anchor, not permissions): for ``slm doctor``, which must not alter
+        what it checks. Only verification and queries work on such a chain."""
+        self._read_only = bool(read_only and db_path)
         self._db_path = str(db_path) if db_path else ":memory:"
         self._is_memory = self._db_path == ":memory:"
         # External truncation anchor: a sidecar file holding the current chain
@@ -143,7 +173,8 @@ class AuditChain:
         self._persistent_conn: Optional[sqlite3.Connection] = None
         if self._is_memory:
             self._persistent_conn = self._make_conn()
-        self._init_db()
+        if not self._read_only:
+            self._init_db()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -171,6 +202,10 @@ class AuditChain:
 
     def _make_conn(self) -> sqlite3.Connection:
         """Create a new configured connection to the audit database."""
+        if self._read_only:
+            conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            return conn
         return self._make_conn_from_path(self._db_path)
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -203,6 +238,10 @@ class AuditChain:
                     "ALTER TABLE audit_chain ADD COLUMN hash_version "
                     "INTEGER NOT NULL DEFAULT 1"
                 )
+            if "key_id" not in columns:
+                conn.execute(
+                    "ALTER TABLE audit_chain ADD COLUMN key_id TEXT NOT NULL DEFAULT ''"
+                )
             conn.commit()
             self._upgrade_anchor(conn)
         finally:
@@ -229,7 +268,8 @@ class AuditChain:
                     head = self._append_event(conn, "anchor_initialized_on_upgrade", "system", "",
                                               "", {"previous_entries": len(rows)})
                     self._record_anchor_created(conn)
-                    self._write_anchor(len(rows) + 1, head)
+                    self._write_anchor(
+                        int(conn.execute("SELECT COUNT(*) FROM audit_chain").fetchone()[0]), head)
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -244,18 +284,55 @@ class AuditChain:
         conn.execute("INSERT OR IGNORE INTO audit_anchor_state VALUES (1, ?)",
                      (datetime.now(timezone.utc).isoformat(),))
 
+    @staticmethod
+    def _signer() -> Any:
+        """The signing key this process holds (the daemon, key loaded at its start), else None.
+
+        Memory only: never asks the keychain, so logging an event never waits on it.
+        """
+        try:
+            from superlocalmemory.trust import signing_key
+
+            return signing_key.current()
+        except Exception:  # noqa: BLE001 - an unkeyed link is still a valid link
+            return None
+
     def _append_event(self, conn, operation, agent_id, profile_id, content_hash, metadata):
+        signer = self._signer()
+        if signer is not None:
+            self._ensure_anchor(conn, signer)
+        return self._insert_link(conn, operation, agent_id, profile_id, content_hash,
+                                 metadata, signer)
+
+    def _ensure_anchor(self, conn, signer) -> None:
+        """Write the anchor entry the next keyed link needs: the first one, or after a key change."""
+        row = conn.execute("SELECT key_id FROM audit_chain WHERE hash_version = ? "
+                           "ORDER BY id DESC LIMIT 1", (KEYED_VERSION,)).fetchone()
+        last = row[0] if row else None
+        empty = conn.execute("SELECT 1 FROM audit_chain LIMIT 1").fetchone() is None
+        reason = anchor_reason(last, signer, empty)
+        if reason:
+            self._insert_link(conn, ANCHOR_OPERATION, "system", "", "",
+                              anchor_metadata(reason, signer, last), signer)
+
+    def _insert_link(self, conn, operation, agent_id, profile_id, content_hash, metadata, signer):
         ts = datetime.now(timezone.utc).isoformat()
         metadata_str = json.dumps(metadata or {}, sort_keys=True, default=str)
         prev_hash = self._get_last_hash(conn)
-        event_hash = _compute_hash_v2(prev_hash, operation, agent_id or "", profile_id or "",
-                                      content_hash or "", ts, metadata_str)
+        if signer is not None:
+            version, key_id = KEYED_VERSION, signer.key_id
+            event_hash = keyed_hash(signer, prev_hash, operation, agent_id or "",
+                                    profile_id or "", content_hash or "", ts, metadata_str)
+        else:
+            version, key_id = HASH_VERSION, ""
+            event_hash = _compute_hash_v2(prev_hash, operation, agent_id or "", profile_id or "",
+                                          content_hash or "", ts, metadata_str)
         conn.execute(
             "INSERT INTO audit_chain (timestamp, operation, agent_id, profile_id, "
-            "content_hash, prev_hash, event_hash, metadata, hash_version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "content_hash, prev_hash, event_hash, metadata, hash_version, key_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (ts, operation, agent_id or "", profile_id or "", content_hash or "",
-             prev_hash, event_hash, metadata_str, HASH_VERSION))
+             prev_hash, event_hash, metadata_str, version, key_id))
         return event_hash
 
     def _get_last_hash(self, conn: sqlite3.Connection) -> str:
@@ -375,7 +452,7 @@ class AuditChain:
         where, params = self._filters(profile_id, agent_id, operation, start_date, end_date)
         sql = (
             f"SELECT id, timestamp, operation, agent_id, profile_id, "
-            f"content_hash, prev_hash, event_hash, metadata, hash_version "
+            f"content_hash, prev_hash, event_hash, metadata, hash_version, key_id "
             f"FROM audit_chain {where} "
             f"ORDER BY id DESC LIMIT ? OFFSET ?"
         )
@@ -439,37 +516,44 @@ class AuditChain:
         """True when the whole chain verifies (see :meth:`verify_report`)."""
         return bool(self.verify_report()["ok"])
 
-    def verify_report(self) -> dict[str, Any]:
+    def verify_report(self, signer: Any = None) -> dict[str, Any]:
         """Walk the chain and say exactly what was verified.
 
-        Returns ``ok``, ``entries``, ``fully_covered`` (version-2 entries:
-        every field, metadata included), ``legacy`` (version-1 entries: order
-        and six fields only, metadata NOT covered), ``failed_at`` (entry id or
-        None) and ``reason``.
+        Returns ``ok``, ``entries``, ``fully_covered`` (version-2 and keyed
+        entries: every field, metadata included), ``legacy`` (version-1
+        entries: order and six fields only, metadata NOT covered), ``keyed``
+        (keyed links whose HMAC was checked), ``keyed_unverified`` (keyed under
+        a key this process does not hold; order still checked),
+        ``plain_after_keyed`` (plain links after the first keyed one),
+        ``anchors``, ``failed_at`` (entry id or None) and ``reason``.
+        ``signer`` is the key to check keyed links with; default: the one this
+        process holds.
         """
-        return self.verify_loaded(self.load_rows())
+        return self.verify_loaded(self.load_rows(), signer)
 
     def load_rows(self) -> list[dict]:
         """Every entry, oldest first (what a full walk of the chain reads)."""
         conn = self._get_conn()
         try:
+            # ``*``: a chain written before 4.2.30 has no key_id column until it is next opened.
             return [dict(r) for r in conn.execute(
-                "SELECT id, timestamp, operation, agent_id, profile_id, "
-                "content_hash, prev_hash, event_hash, metadata, hash_version "
-                "FROM audit_chain ORDER BY id"
-            ).fetchall()]
+                "SELECT * FROM audit_chain ORDER BY id").fetchall()]
         finally:
             self._release_conn(conn)
 
-    def verify_loaded(self, rows: list[dict]) -> dict[str, Any]:
+    def verify_loaded(self, rows: list[dict], signer: Any = None) -> dict[str, Any]:
         """The :meth:`verify_report` answer for entries already read."""
+        signer = signer if signer is not None else self._signer()
         legacy = sum(1 for r in rows if r.get("hash_version", 1) == 1)
-        covered = sum(1 for r in rows if r.get("hash_version") == HASH_VERSION)
+        covered = sum(1 for r in rows if r.get("hash_version") in FULL_VERSIONS)
+        tally = Tally()
         report: dict[str, Any] = {
             "ok": True, "entries": len(rows), "fully_covered": covered,
             "legacy": legacy, "failed_at": None, "reason": "",
         }
-        failure = self._anchor_failure(rows) or self._link_failure(rows)
+        failure = (self._anchor_failure(rows)
+                   or self._link_walk(rows, _GENESIS_HASH, False, signer, tally)[0])
+        report.update(tally.as_report())
         if failure is not None:
             report.update(ok=False, failed_at=failure[0], reason=failure[1])
             logger.warning("Audit chain verification failed at %s: %s", *failure)
@@ -495,7 +579,10 @@ class AuditChain:
         if anchor is None:
             conn = self._get_conn()
             try:
-                recorded = conn.execute("SELECT 1 FROM audit_anchor_state").fetchone()
+                try:
+                    recorded = conn.execute("SELECT 1 FROM audit_anchor_state").fetchone()
+                except sqlite3.OperationalError:  # a chain older than the anchor table (read-only)
+                    recorded = None
             finally:
                 self._release_conn(conn)
             if problem and (has_rows or recorded):
@@ -516,11 +603,16 @@ class AuditChain:
 
     @staticmethod
     def _link_walk(rows: list[dict], expected_prev: str, seen_v2: bool,
+                   signer: Any = None, tally: Optional[Tally] = None,
                    ) -> tuple[Optional[tuple[Optional[int], str]], str, bool]:
-        """Check ``rows`` from a known start; returns ``(failure, last hash, seen v2)``."""
+        """Check ``rows`` from a known start; returns ``(failure, last hash, seen v2)``.
+
+        Keyed links are checked by HMAC when ``signer`` holds their key; counts go to ``tally``.
+        """
+        tally = tally if tally is not None else Tally()
         for row in rows:
             version = row.get("hash_version", 1)
-            if version not in (1, HASH_VERSION):
+            if version not in (1, HASH_VERSION, KEYED_VERSION):
                 return (row["id"], "unsupported hash version"), expected_prev, seen_v2
             if version < 2 and seen_v2:
                 return ((row["id"], "a version-1 entry follows a version-2 entry (downgrade)"),
@@ -528,9 +620,16 @@ class AuditChain:
             seen_v2 = seen_v2 or version >= 2
             if row["prev_hash"] != expected_prev:
                 return (row["id"], "the link to the previous entry is broken"), expected_prev, seen_v2
-            if _entry_hash(row) != row["event_hash"]:
-                return ((row["id"], "the entry's fields do not match its hash"),
-                        expected_prev, seen_v2)
+            if version == KEYED_VERSION:
+                problem = check_row(row, signer, tally)
+                if problem:
+                    return (row["id"], problem), expected_prev, seen_v2
+            else:
+                if tally.seen_keyed and version == HASH_VERSION:
+                    tally.plain_after_keyed += 1
+                if _entry_hash(row) != row["event_hash"]:
+                    return ((row["id"], "the entry's fields do not match its hash"),
+                            expected_prev, seen_v2)
             expected_prev = row["event_hash"]
         return None, expected_prev, seen_v2
 

@@ -743,9 +743,12 @@ def daemon_request(
         # The connection's agent name (SLM_AGENT_ID, or an /mcp/<agent> name
         # vouched by the capability; a bare URL name is only a claim). The
         # daemon believes it only alongside the capability (L-15).
-        from superlocalmemory.core.agent_attribution import forwarded_headers
+        from superlocalmemory.core.agent_attribution import forwarded_headers, shell_headers
 
         headers.update(forwarded_headers(capability))
+        # Whether this process sat at a terminal (WS-5): a save with no agent and no
+        # terminal is not the user's own statement (trust/origin_class).
+        headers.update(shell_headers(capability))
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         from superlocalmemory.core import outbound_http  # never via a proxy
         resp = outbound_http.urlopen(req, timeout=timeout_seconds)

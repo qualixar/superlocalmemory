@@ -60,29 +60,38 @@ class ProgressiveAbstraction:
     # ------------------------------------------------------------------
 
     def compute_and_store(self, profile_id: str) -> dict[str, Any]:
+        from superlocalmemory.compiler import versions
+
         summaries = CommunitySummaryBuilder(self._db).get_summaries(profile_id)
-        try:
-            self._db.execute(
-                "DELETE FROM persona_summary WHERE profile_id = ?",
-                (profile_id,),
+        # Build the text first: the summarizer may call a model, and no write
+        # transaction is held across that call.
+        row: tuple | None = None
+        top: list[dict] = []
+        if summaries:
+            top = summaries[: self._max_communities]
+            row = (
+                profile_id, self._persona_summary(top), self._merge_keywords(top),
+                json.dumps([int(s["community_id"]) for s in top]),
             )
-        except Exception as exc:
-            logger.debug("persona_summary clear failed: %s", exc)
-        if not summaries:
-            return {"built": False, "communities_in_persona": 0}
-
-        top = summaries[: self._max_communities]
-        summary = self._persona_summary(top)
-        keywords = self._merge_keywords(top)
-        community_ids = [int(s["community_id"]) for s in top]
-
         try:
-            self._db.execute(
-                "INSERT OR REPLACE INTO persona_summary "
-                "(profile_id, summary, keywords, community_ids_json, computed_at) "
-                "VALUES (?, ?, ?, ?, datetime('now'))",
-                (profile_id, summary, keywords, json.dumps(community_ids)),
-            )
+            # The previous persona is kept as a version before it is replaced (WS-6).
+            with versions.atomic(self._db):
+                versions.keep_previous(self._db, "persona", {"profile_id": profile_id})
+                try:
+                    self._db.execute(
+                        "DELETE FROM persona_summary WHERE profile_id = ?",
+                        (profile_id,),
+                    )
+                except Exception as exc:
+                    logger.debug("persona_summary clear failed: %s", exc)
+                if row is None:
+                    return {"built": False, "communities_in_persona": 0}
+                self._db.execute(
+                    "INSERT OR REPLACE INTO persona_summary "
+                    "(profile_id, summary, keywords, community_ids_json, computed_at) "
+                    "VALUES (?, ?, ?, ?, datetime('now'))",
+                    row,
+                )
         except Exception as exc:
             logger.debug("persona_summary write failed: %s", exc)
             return {"built": False, "communities_in_persona": 0}

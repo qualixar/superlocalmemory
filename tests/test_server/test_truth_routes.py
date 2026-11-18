@@ -136,6 +136,15 @@ def test_the_truth_checks_report_every_invariant_in_order(disputed) -> None:
     assert body["second_opinions"] == []
 
 
+def test_the_truth_checks_also_report_signatures_and_the_audit_log_in_words(disputed) -> None:
+    client, _app, _old, _new = disputed
+    body = client.get("/api/truth/checks").json()
+    sig, audit = body["signatures"], body["audit_chain"]
+    assert sig["facts"] >= 2 and sig["signed"] == 0 and sig["words"]
+    assert audit["present"] in (True, False) and audit["words"]
+    assert "content" not in sig and "modified_ids" in sig
+
+
 def test_a_remote_app_cannot_open_the_truth_view_of_a_memory_it_may_not_see(disputed) -> None:
     client, app, old, _new = disputed
     app.state.engine._db.execute(

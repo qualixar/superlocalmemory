@@ -137,6 +137,7 @@ class TestAssignToExistingScene:
             ],
             [],
             [],
+            [],  # saving a scene first looks for the scene it would replace (versions first)
         ]
         incoming = _make_fact("incoming", "Bound mature scene selection")
         incoming.embedding = [1.0, 0.0, 0.0]

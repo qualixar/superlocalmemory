@@ -65,6 +65,11 @@ and `stop_outcome` notice which recalled memories were actually used and settle 
 outcome. `user_prompt_rehash` treats the same question asked again within a minute as a sign
 the last answer missed, and `topic_shift` reminds the agent to recall when you change subject.
 `before_web` runs a recall before a web search or fetch. `stop` saves a session summary.
+Everything a hook saves goes through the same save step as a typed memory, and the hook
+spool screens what a tool printed, so with `trust.secret_screen` on a credential in a tool's
+output or a saved summary is stored as a `[REDACTED:TYPE:LAST4]` placeholder; the hooks'
+memories are a tool's output or an agent's words, so with `trust.taint` on they cannot become
+pins, rules or core memory until you approve them ([Configuration](configuration.md)).
 Codex, Copilot and Antigravity carry the subset their host can fire (Copilot's hooks are a
 preview in VS Code); the Cursor-format plugin ships none, and Hermes does its lifecycle observation inside the plugin. Per-prompt recall
 and the session summary can be switched off in the rules in `config.json`

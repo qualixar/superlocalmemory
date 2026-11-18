@@ -139,6 +139,7 @@ def build(conn: sqlite3.Connection, profile_id: str, *, as_of: datetime | None =
         "learning": _learning(conn, profile_id, slm_home),
         "need_gate": _need_gate(conn, profile_id, when),
         "harm_gate": _harm_gate(conn, profile_id, when, slm_home),
+        "trust": _trust(conn, profile_id, slm_home),
     }
 
 
@@ -154,6 +155,13 @@ def _harm_gate(conn: sqlite3.Connection, profile_id: str, when: datetime,
     except Exception:  # noqa: BLE001 - this section never breaks the report
         logger.debug("harm gate unreadable", exc_info=True)
         return {}
+
+
+def _trust(conn: sqlite3.Connection, profile_id: str, slm_home: Path | None) -> dict:
+    """WS-5: origins, what waits for a person, credentials held as placeholders (counts only)."""
+    from superlocalmemory.trust import report
+
+    return report.build(conn, profile_id, slm_home=slm_home)  # fail-open inside
 
 
 def _need_gate(conn: sqlite3.Connection, profile_id: str, when: datetime) -> dict:
@@ -236,6 +244,9 @@ def describe(report: dict) -> list[str]:
     from superlocalmemory.core import harm_gate
 
     lines.extend("  " + line for line in harm_gate.describe(report.get("harm_gate") or {}))
+    from superlocalmemory.trust import report as trust_report
+
+    lines.extend("  " + line for line in trust_report.describe(report.get("trust") or {}))
     return lines
 
 

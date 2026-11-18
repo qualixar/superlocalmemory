@@ -30,6 +30,12 @@ from __future__ import annotations
 from typing import Any
 
 CONNECTION_HEADER = "X-SLM-Connection-Agent"
+#: Whether the client process sat at an interactive terminal (WS-5, instruction
+#: firewall): ``tty`` or ``no_tty``. Believed only from a capability holder, like
+#: the connection name, and used only when the save names no agent at all.
+SHELL_HEADER = "X-SLM-Client-Shell"
+SHELL_TTY = "shell:tty"
+SHELL_NO_TTY = "shell:no_tty"
 #: Not a connection: the stdio sentinel when no agent was configured.
 UNNAMED = "mcp_client"
 
@@ -58,8 +64,43 @@ def forwarded_headers(capability: str | None) -> dict[str, str]:
     return {CONNECTION_HEADER: agent} if agent and capability is not None else {}
 
 
-def bind(metadata: dict[str, Any], connection: str) -> dict[str, Any]:
-    """``metadata`` with the agent fields set from ``connection`` (may be ``""``)."""
+def shell_headers(capability: str | None) -> dict[str, str]:
+    """The terminal header a daemon request carries (only with the capability).
+
+    ``tty`` when this process's standard input and output are an interactive
+    terminal, ``no_tty`` otherwise (a script, a hook, an agent's shell tool, the
+    daemon itself). A closed or odd stream counts as no terminal.
+    """
+    if capability is None:
+        return {}
+    import sys
+
+    try:
+        tty = bool(sys.stdin is not None and sys.stdin.isatty()
+                   and sys.stdout is not None and sys.stdout.isatty())
+    except (ValueError, OSError):
+        tty = False
+    return {SHELL_HEADER: "tty" if tty else "no_tty"}
+
+
+def shell_signal(value: str, trusted_actor_id: str) -> str | None:
+    """``shell:tty`` / ``shell:no_tty`` from a request's header, or ``None``.
+
+    Believed only from a daemon-capability caller; anything else (the dashboard,
+    a remote app, a forged header) says nothing, so the save is judged as before.
+    """
+    if not str(trusted_actor_id or "").startswith("daemon-capability:"):
+        return None
+    return {"tty": SHELL_TTY, "no_tty": SHELL_NO_TTY}.get((value or "").strip().lower())
+
+
+def bind(metadata: dict[str, Any], connection: str, shell: str | None = None) -> dict[str, Any]:
+    """``metadata`` with the agent fields set from ``connection`` (may be ``""``).
+
+    ``shell`` (``shell_signal``) is recorded as ``agent_id_source`` only when the
+    save names no agent at all: it is the one thing left to say how the saver
+    identified itself (``trust/origin_class``, row ``remember.shell_no_tty``).
+    """
     out = dict(metadata)
     # A caller cannot set these itself: they say how far the name is believed.
     out.pop("agent_id_source", None)
@@ -72,6 +113,8 @@ def bind(metadata: dict[str, Any], connection: str) -> dict[str, Any]:
             out["claimed_agent_id"] = claimed
     elif claimed:
         out["agent_id_source"] = "claimed"
+    elif shell:
+        out["agent_id_source"] = shell
     return out
 
 
@@ -115,6 +158,7 @@ def write_speaker(explicit: str, metadata: dict[str, Any] | None) -> tuple[str, 
 
 
 __all__ = [
-    "CONNECTION_HEADER", "UNNAMED", "audit_fields", "bind", "connection_agent",
-    "forwarded_headers", "write_speaker",
+    "CONNECTION_HEADER", "SHELL_HEADER", "SHELL_NO_TTY", "SHELL_TTY", "UNNAMED", "audit_fields",
+    "bind", "connection_agent", "forwarded_headers", "shell_headers", "shell_signal",
+    "write_speaker",
 ]

@@ -46,7 +46,7 @@ CONFIRMED = "confirmed"
 Query = Callable[[str, tuple], Sequence[Sequence[Any]]]
 
 _ORIGIN = ("SELECT f.memory_id, o.channel, o.transform, o.source_type, o.agent_id, o.speaker, "
-           "o.role, o.parent_memory_id, o.parent_fact_id "
+           "o.role, o.parent_memory_id, o.parent_fact_id, o.agent_id_source "
            "FROM atomic_facts f LEFT JOIN fact_origin o ON o.fact_id = f.fact_id "
            "WHERE f.fact_id = ?")
 _MEMORY_SOURCES = ("SELECT f.fact_id FROM atomic_facts f JOIN fact_origin o ON "
@@ -72,13 +72,14 @@ def _node(query: Query, fact_id: str) -> tuple[Trust, list[str]] | None:
     rows = query(_ORIGIN, (fact_id,))
     if not rows:
         return None
-    memory_id, channel, transform, source_type, agent_id, speaker, role, p_mem, p_fact = rows[0]
+    (memory_id, channel, transform, source_type, agent_id, speaker, role, p_mem, p_fact,
+     id_source) = rows[0]
     if channel is None:  # no origin row: saved before 4.2.30
         own = oc.Classified(oc.UNKNOWN, f"{oc.VERSION}:no_origin_row")
     else:
         own = oc.classify(oc.Signals(channel=channel, transform=transform or "unknown",
                                      source_type=source_type, agent_id=agent_id,
-                                     speaker=speaker, role=role))
+                                     speaker=speaker, role=role, agent_id_source=id_source))
     parents: list[str] = [p_fact] if p_fact else []
     if p_mem and (channel == "derived" or p_mem != memory_id):
         parents += [r[0] for r in query(_MEMORY_SOURCES, (p_mem, fact_id, MAX_PARENT_FACTS))]

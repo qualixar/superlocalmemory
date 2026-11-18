@@ -675,10 +675,12 @@ def update_fact_authorized(
     canonical_runtime: Any | None = None,
     idempotency_key: str | None = None,
     profile_id: str | None = None,
+    origin_channel: str | None = None,
 ) -> dict[str, Any]:
     """Create a review-required correction successor without rewriting history.
 
     ``profile_id`` is the profile the fact belongs to; ``None`` = the active one.
+    ``origin_channel`` is ``external_edit`` for text read back from a Markdown file (D-17).
     """
     if not content or not content.strip():
         return {"ok": False, "error": "content cannot be empty"}
@@ -744,6 +746,7 @@ def update_fact_authorized(
         fisher_variance=fisher_variance,
         trusted_actor_id=trusted_actor_id,
         idempotency_key=request_key,
+        origin_channel=origin_channel,
     ))
     if not result.get("ok"):
         return {"ok": False, "error": f"Memory {fact_id} not found"}

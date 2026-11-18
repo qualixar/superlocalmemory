@@ -30,7 +30,7 @@
     <!-- Connected apps pane + MCP & Tools pointer card (4.1.23) -->
     <link rel="stylesheet" href="static/css/od-apps.css?v=7600a0ed">
     <!-- Website palette, responsive fixes, dashboard home, help UI (loaded last) -->
-    <link rel="stylesheet" href="static/css/theme-slm.css?v=d3ad14e6">
+    <link rel="stylesheet" href="static/css/theme-slm.css?v=797ef654">
     <link rel="stylesheet" href="static/css/od-star-ask.css?v=da9c16a1">
 </head>
 <body>
@@ -289,6 +289,36 @@
                     <div class="card-pad" id="dash-audit-body"></div>
                   </div>
 
+                  <!-- 4.2.30 WS-6: changes SuperLocalMemory proposes (apply, reject, undo), filled by od-proposals.js; hidden when none -->
+                  <div class="card" id="dash-proposals-card" hidden>
+                    <div class="card-head">
+                      <h3>Proposed changes</h3>
+                      <span class="chip-pill violet" id="dash-proposals-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-proposals-body"></div>
+                  </div>
+
+                  <!-- 4.2.30 WS-6: pages compiled from memory, every sentence cited; Rebuild and Read my edits, filled by od-wiki.js; hidden when there are no pages and the Markdown wiki is off -->
+                  <div class="card" id="dash-wiki-card" hidden>
+                    <div class="card-head">
+                      <h3>Living wiki</h3>
+                      <span class="chip-pill violet" id="dash-wiki-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-wiki-body"></div>
+                  </div>
+
+                  <!-- 4.2.30 WS-5: memories waiting for the person's OK before they can be instructions, filled by od-trust.js; hidden unless the firewall is on or in shadow -->
+                  <div class="card" id="dash-trust-card" hidden>
+                    <div class="card-head">
+                      <h3>Waiting for your OK</h3>
+                      <span class="chip-pill violet" id="dash-trust-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-trust-body"></div>
+                  </div>
+
                   <div class="card" id="dash-health-card">
                     <div class="card-head">
                       <h3>Memory health</h3>
@@ -309,6 +339,9 @@
 
                   <!-- 4.1.25: dismissible what's-new card, filled by od-features.js -->
                   <div id="od-whatsnew"></div>
+
+                  <!-- 4.2.30 (§8.10.3 l): one line for each new feature not yet turned on, filled by od-whatsnew-4230.js -->
+                  <div id="od-whatsnew-4230"></div>
 
                   <div class="card">
                     <div class="card-head">
@@ -1661,7 +1694,7 @@
     <script src="static/js/od-components.js?v=8b3b1808"></script>
     <script src="static/js/od-daemon-controls.js?v=b75baad5"></script>
     <script src="static/js/od-memory-health.js?v=95b80236"></script>
-    <script src="static/js/od-health.js?v=620fe368"></script>
+    <script src="static/js/od-health.js?v=83ebeeeb"></script>
     <script src="static/js/od-operations-layout.js?v=3e8b2913"></script>
     <script src="static/js/od-operations-compliance.js?v=0f54bafb"></script>
     <script src="static/js/od-operations.js?v=998c5ca8"></script>
@@ -1675,7 +1708,7 @@
     <script src="static/js/od-views.js?v=7b7b2e67"></script>
     <script src="static/js/od-daily.js?v=a46ef439"></script>
     <script src="static/js/od-memory-knowledge.js?v=f9ea0505"></script>
-    <script src="static/js/od-memory-drawer.js?v=c7e6b0c3"></script>
+    <script src="static/js/od-memory-drawer.js?v=aaab5f65"></script>
     <script src="static/js/od-memory-events.js?v=acb0b1ce"></script>
     <script src="static/js/od-memories.js?v=3368eb25"></script>
     <script src="static/js/od-entities.js?v=a3c36da4"></script>
@@ -1715,8 +1748,15 @@
     <script src="static/js/od-media-find.js?v=10cc0e63"></script>
     <script src="static/js/od-media.js?v=4171a7af"></script>
     <script src="static/js/od-dash-home.js?v=aa602e3d"></script>
-    <script src="static/js/od-truth.js?v=78622a4b"></script>
+    <script src="static/js/od-truth.js?v=b7afdf97"></script>
+    <script src="static/js/od-why.js?v=016b454e"></script>
+    <script src="static/js/od-proposals.js?v=ad33f9c4"></script>
+    <script src="static/js/od-wiki.js?v=134c8743"></script>
+    <script src="static/js/od-trust.js?v=cdac5794"></script>
     <script src="static/js/od-outcomes.js?v=2313c886"></script>
+    <script src="static/js/od-delivered.js?v=db827e8c"></script>
+    <script src="static/js/od-trust-overview.js?v=148381a4"></script>
+    <script src="static/js/od-whatsnew-4230.js?v=f3fcaa5a"></script>
     <script src="static/js/od-measurement.js?v=962d4334"></script>
     <script src="static/js/od-help.js?v=e06df0d4"></script>
     <script src="static/js/od-polish.js?v=0ca34b74"></script>

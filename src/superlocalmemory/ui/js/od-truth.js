@@ -276,6 +276,27 @@
         words[0] + (r.status === 'violated' && r.count ? ' (' + r.count + ')' : '')));
       list.appendChild(row);
     });
+    // 4.2.30 WS-5 (D-16): signed memories and the audit log, in words (older servers send neither).
+    var sig = data.signatures, audit = data.audit_chain;
+    if (sig || audit) {
+      list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'Signed memories and the audit log'));
+    }
+    if (sig) {
+      if (sig.modified) bad++;
+      var sw = sig.modified ? ['Problem found', 'tone-warn'] : sig.ok ? ['OK', 'tone-ok'] : ['Not checked', ''];
+      var srow = el('div', 'list-row');
+      srow.appendChild(el('span', 'truth-check-text', sig.words || ''));
+      srow.appendChild(el('span', 'truth-check-status ' + sw[1], sw[0]));
+      list.appendChild(srow);
+    }
+    if (audit) {
+      if (audit.ok === false) bad++;
+      var aw = audit.ok === false ? ['Problem found', 'tone-warn'] : audit.ok ? ['OK', 'tone-ok'] : ['Not used here', ''];
+      var arow = el('div', 'list-row');
+      arow.appendChild(el('span', 'truth-check-text', audit.words || ''));
+      arow.appendChild(el('span', 'truth-check-status ' + aw[1], aw[0]));
+      list.appendChild(arow);
+    }
     var certs = data.certificates || [];
     var live = certs.filter(function (c) { return !c.voided_at; });
     list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'Judges allowed to act on their own'));

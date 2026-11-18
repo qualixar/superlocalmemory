@@ -244,6 +244,18 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M079_fact_trust as _M079,
 )
+from superlocalmemory.storage.migrations import (
+    M080_versions_and_proposals as _M080,
+)
+from superlocalmemory.storage.migrations import (
+    M081_trust_approvals as _M081,
+)
+from superlocalmemory.storage.migrations import (
+    M082_fact_signatures as _M082,
+)
+from superlocalmemory.storage.migrations import (
+    M083_compiled_pages as _M083,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -524,4 +536,20 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # trigger is built on atomic_facts, and it is computed from M074's fact_origin.
     Migration(name=_M079.NAME, db_target="memory", ddl=_M079.DDL,
               dependencies=(_M078.NAME,)),
+    # M080 keeps previous versions of derived artifacts and the ProposalSets that change
+    # them (WS-6, I-10, I-11). Deferred: its erase triggers are built on atomic_facts.
+    Migration(name=_M080.NAME, db_target="memory", ddl=_M080.DDL,
+              dependencies=(_M079.NAME,)),
+    # M081 records what the instruction firewall withheld and who approved it (WS-5, D-37).
+    # Deferred: its erase trigger is built on atomic_facts, and it follows M079's classes.
+    Migration(name=_M081.NAME, db_target="memory", ddl=_M081.DDL,
+              dependencies=(_M080.NAME,)),
+    # M082 keeps one HMAC per fact, made with a key from the OS keychain (WS-5, D-16).
+    # Deferred: its erase trigger is built on atomic_facts.
+    Migration(name=_M082.NAME, db_target="memory", ddl=_M082.DDL,
+              dependencies=(_M081.NAME,)),
+    # M083 keeps compiled pages, their citations and the Markdown projection's records
+    # (WS-6, D-17, D-18). Deferred: its erase triggers are built on atomic_facts.
+    Migration(name=_M083.NAME, db_target="memory", ddl=_M083.DDL,
+              dependencies=(_M082.NAME,)),
 ]

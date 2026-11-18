@@ -36,6 +36,7 @@ def cmd_doctor_truth(args: Namespace) -> None:
         else:
             print(message, file=sys.stderr)
         sys.exit(2)
+    from superlocalmemory.cli import doctor_trust
     from superlocalmemory.core import judge_certificates as certs
     from superlocalmemory.core import shadow_escalation as shadow
 
@@ -44,15 +45,20 @@ def cmd_doctor_truth(args: Namespace) -> None:
         results = inv.check(conn)
         certificates = certs.records(conn, None)
         second = [s.as_dict() for s in shadow.disagreements(conn, None)]
+        # WS-5 (D-16): one keychain read by this command, then signatures and the audit chain.
+        loaded = doctor_trust.read_key()
+        sig = doctor_trust.signatures_section(
+            conn, loaded, all_facts=bool(getattr(args, "signatures_all", False)))
     finally:
         conn.close()
+    audit = doctor_trust.audit_section(path.parent / "audit_chain.db", loaded)
     violated = [r for r in results if r.status == inv.VIOLATED]
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         json_print("doctor", data={"store": str(path), "truth": [
             {"invariant": r.invariant, "title": r.title, "status": r.status, "count": r.count,
              "sample": list(r.sample)} for r in results], "certificates": certificates,
-            "second_opinions": second})
+            "second_opinions": second, "signatures": sig, "audit_chain": audit})
     else:
         print(f"Truth invariants on {path} (read-only)")
         for r in results:
@@ -74,7 +80,9 @@ def cmd_doctor_truth(args: Namespace) -> None:
             print(f"  {s['lower_tier']}/{s['lower_model']} -> {s['upper_tier']}/{s['upper_model']}: "
                   f"sure of something else on {s['disagreed']} of {s['pairs']} pairs "
                   f"(95% bounds {s['rate_lower']:.2f}-{s['rate_upper']:.2f})")
-    if violated:
+        for line in doctor_trust.lines(sig, audit):
+            print(line)
+    if violated or doctor_trust.failed(sig, audit):
         sys.exit(1)
 
 

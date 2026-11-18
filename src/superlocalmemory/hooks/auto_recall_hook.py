@@ -238,6 +238,9 @@ def _format_envelope(results: list[dict], response: dict | None = None) -> dict:
                 source_type=str(r.get("source_type", "recall")),
                 source_id=str(r.get("source_id", "auto-recall-hook")),
                 support_tier=str(r.get("tier", "") or ""),
+                # WS-5: the recall result's own origin (``why.origin``), so an untrusted
+                # memory is never crowned core by the renderer.
+                taint=str(((r.get("why") or {}).get("origin") or {}).get("taint", "") or ""),
             )
             for r in results
         ]

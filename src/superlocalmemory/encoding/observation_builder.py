@@ -123,21 +123,28 @@ class ObservationBuilder:
         )
 
     def _save_profile(self, profile: EntityProfile) -> None:
-        """Upsert entity profile to DB."""
-        self._db.execute(
-            """INSERT OR REPLACE INTO entity_profiles
-               (profile_entry_id, entity_id, profile_id,
-                knowledge_summary, fact_ids_json, last_updated)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                profile.profile_entry_id,
-                profile.entity_id,
-                profile.profile_id,
-                profile.knowledge_summary,
-                json.dumps(profile.fact_ids),
-                profile.last_updated,
-            ),
-        )
+        """Upsert entity profile to DB (the profile it replaces is kept as a version, WS-6)."""
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(self._db):
+            versions.keep_previous(
+                self._db, "entity_profile",
+                where="profile_entry_id = ? OR (entity_id = ? AND profile_id = ?)",
+                params=(profile.profile_entry_id, profile.entity_id, profile.profile_id))
+            self._db.execute(
+                """INSERT OR REPLACE INTO entity_profiles
+                   (profile_entry_id, entity_id, profile_id,
+                    knowledge_summary, fact_ids_json, last_updated)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    profile.profile_entry_id,
+                    profile.entity_id,
+                    profile.profile_id,
+                    profile.knowledge_summary,
+                    json.dumps(profile.fact_ids),
+                    profile.last_updated,
+                ),
+            )
 
     # V3.4.40 (2026-05-09): bounded summary to prevent unbounded growth.
     # Pre-V3.4.40 builds concatenated full fact content. Hubs accumulated

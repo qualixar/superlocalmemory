@@ -11,7 +11,8 @@ import pytest
 from superlocalmemory.compliance.audit import AuditChain
 
 
-@pytest.mark.parametrize("version", [3, 4, -1, 0, "unknown"])
+# 3 is the keyed version since 4.2.30 (compliance/audit_keyed.py); see test_keyed_audit_chain.
+@pytest.mark.parametrize("version", [5, 4, -1, 0, "unknown"])
 def test_an_unknown_hash_version_is_reported_as_unverified(tmp_path, version):
     path = tmp_path / "audit_chain.db"
     chain = AuditChain(path)
@@ -26,7 +27,8 @@ def test_an_unknown_hash_version_is_reported_as_unverified(tmp_path, version):
     assert chain.verify_integrity() is False
 
 
-@pytest.mark.parametrize("version", [3, 4, -1, 0, "unknown"])
+# 3 is the keyed version since 4.2.30 (compliance/audit_keyed.py); see test_keyed_audit_chain.
+@pytest.mark.parametrize("version", [5, 4, -1, 0, "unknown"])
 def test_unknown_versions_never_receive_a_covered_badge(version):
     from superlocalmemory.server.audit_view import present_event
 

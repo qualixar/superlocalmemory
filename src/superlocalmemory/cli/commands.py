@@ -578,6 +578,36 @@ def _cmd_audit_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_proposals_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-6: proposed changes to memory, decided by a person (cli/proposals_cmd.py)."""
+    from superlocalmemory.cli.proposals_cmd import run
+    run(args)
+
+
+def _cmd_wiki_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-6: compiled pages and the Markdown wiki (cli/wiki_cmd.py)."""
+    from superlocalmemory.cli.wiki_cmd import run
+    run(args)
+
+
+def _cmd_trust_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-5: memories waiting for a person's OK before they can be instructions."""
+    from superlocalmemory.cli.trust_cmd import run
+    run(args)
+
+
+def _cmd_why_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-5: everything that explains one memory (cli/why_cmd.py)."""
+    from superlocalmemory.cli.why_cmd import run
+    run(args)
+
+
+def _cmd_signing_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-5 (D-16): signed memories and the keyed audit chain (cli/signing_cmd.py)."""
+    from superlocalmemory.cli.signing_cmd import run
+    run(args)
+
+
 def _cmd_consent_dispatch(args: Namespace) -> None:
     """4.2.30 W2: consents to send memory text off the machine (cli/consent_cmd.py)."""
     from superlocalmemory.cli.consent_cmd import run
@@ -780,6 +810,11 @@ def dispatch(args: Namespace) -> None:
         "corrections": _cmd_corrections_dispatch,
         "disputes": _cmd_disputes_dispatch,
         "audit": _cmd_audit_dispatch,
+        "proposals": _cmd_proposals_dispatch,
+        "wiki": _cmd_wiki_dispatch,
+        "trust": _cmd_trust_dispatch,
+        "why": _cmd_why_dispatch,
+        "signing": _cmd_signing_dispatch,
         "consent": _cmd_consent_dispatch,
         "measurement": _cmd_measurement_dispatch,
         "cues": _cmd_cues_dispatch,
@@ -1964,6 +1999,13 @@ def _cli_remember_idempotency_key(body: dict) -> str:
     import json as _json
 
     material = _json.dumps(body, sort_keys=True, ensure_ascii=False, default=str)
+    # The save records whether a terminal was behind it (WS-5, origin class), and the
+    # journal hashes that with the request: the same words typed at a terminal and sent
+    # by a script are two requests. A terminal keeps the key it always had.
+    from superlocalmemory.core.agent_attribution import SHELL_HEADER, shell_headers
+
+    if shell_headers("cli").get(SHELL_HEADER) == "no_tty":
+        material += "\x00no_tty"
     return "cli:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -3122,6 +3164,11 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("corrections", "Corrections your own delete, replace or edit closed"),
         ("disputes", "What needs your answer: disputed values, changed source files"),
         ("audit", "Answer a few questions so SuperLocalMemory's judges can earn trust"),
+        ("proposals", "Changes proposed to your memory: review, apply, decline, undo"),
+        ("wiki", "Your memories as Markdown pages; your edits become proposals: status, diff, build, sync"),
+        ("trust", "Memories waiting for your OK before they can be rules or pins: pending, approve"),
+        ("why", "Everything that explains one memory: where it came from, why it was shown"),
+        ("signing", "Signed memories and the keyed audit chain: status, resign"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
         ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
         ("cues", "List the cues that bring memories back at the right step (slm cues list)"),
@@ -5299,6 +5346,7 @@ def cmd_session_context(args: Namespace) -> None:
 
         def _render(kept: list[tuple[str, InjectableMemory]]) -> str:
             mems = core_mems + [m for _, m in kept] + soft_mems
+            mems = _stamp_taint(mems, db_path)  # WS-5: the renderer keeps untrusted out of core
             return render_context(mems, mode=mode, cfg=cfg_inj, wrap=True, notes=project_notes)
 
         context = _session_context_delivery(
@@ -5318,6 +5366,21 @@ def cmd_session_context(args: Namespace) -> None:
 
     except Exception as exc:
         logger.debug("session-context (fast) failed: %s", exc)
+
+
+def _stamp_taint(mems: list, db_path: object) -> list:
+    """The memories with their taint class (``trust.taint`` acting only; else unchanged)."""
+    from superlocalmemory.trust import firewall
+
+    if not firewall.active():
+        return mems
+    try:
+        from superlocalmemory.storage.memory_write import memory_read
+
+        with memory_read(db_path) as conn:
+            return firewall.stamp(mems, conn)
+    except Exception:  # noqa: BLE001 - unstamped is not core-eligible: closed
+        return mems
 
 
 def _session_project_part(args, db_path, pid) -> tuple[object, tuple[str, ...], list]:

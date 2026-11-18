@@ -186,7 +186,42 @@ def _spooled_bytes(root: Path, stem: str) -> int:
     return total
 
 
+#: The free-text fields of a tool event: what a tool was given and what it printed.
+_TOOL_TEXT = ("input_summary", "output_summary")
+
+
+def _screened(event: Mapping) -> Mapping | None:
+    """The event with credentials in a tool's text replaced by typed placeholders.
+
+    Only while ``trust.secret_screen`` is on (WS-5): a command's output can print a key,
+    and this file is written before anything else sees the text. ``None`` when the screen
+    is on and cannot run: the event is counted as dropped, never spooled in clear.
+    """
+    if event.get("kind") != "tool_event":
+        return event
+    try:
+        from superlocalmemory.core.feature_flags import FlagState
+        from superlocalmemory.trust import secret_screen
+
+        acting = secret_screen.state() is FlagState.ON
+    except Exception:  # noqa: BLE001 - the flag cannot be read: the screen is off, as before
+        return event
+    if not acting:
+        return event
+    try:
+        out = dict(event)
+        for name in _TOOL_TEXT:
+            if isinstance(out.get(name), str):
+                out[name] = secret_screen.screen(out[name]).text
+        return out
+    except Exception:  # noqa: BLE001 - on and unable to screen: refuse the event, keep no clear text
+        return None
+
+
 def _encode(event: Mapping) -> bytes | None:
+    event = _screened(event)
+    if event is None:
+        return None
     try:
         line = json.dumps(dict(event), separators=(",", ":"), ensure_ascii=True,
                           default=str).encode("ascii") + b"\n"
@@ -210,12 +245,14 @@ def append_events(
     base = spool_root(root)
     cap = max_bytes if max_bytes is not None else _max_bytes_default()
     stem = profile_stem(profile)
+    # Encode (and screen) before taking the lock: the screen reads the flag file and
+    # runs its patterns, and every other hook process waits while the lock is held.
+    lines = [_encode(event) for event in events]
     with spool_lock(base):
         size = _spooled_bytes(base, stem)
         accepted: list[bytes] = []
         dropped = 0
-        for event in events:
-            line = _encode(event)
+        for line in lines:
             if line is None or size + len(line) > cap:
                 dropped += 1
                 continue

@@ -234,6 +234,12 @@ class EntityCompiler:
                 timeline = timeline[-_MAX_TIMELINE_ENTRIES:]
 
             if existing:
+                # The compiled view it replaces is kept as a version first (WS-6).
+                from superlocalmemory.compiler import versions
+
+                versions.keep_previous(
+                    conn, "entity_profile",
+                    {"profile_entry_id": existing["profile_entry_id"]})
                 conn.execute("""
                     UPDATE entity_profiles SET
                         compiled_truth = ?, timeline = ?, fact_ids_json = ?,

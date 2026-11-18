@@ -246,9 +246,12 @@ the memory-engine upgrade is pending.
 ```bash
 slm doctor --truth [--json] [--db <path>]   # read-only; exits 1 when an invariant is violated
 slm audit --count [--json]                  # how many audit questions wait for a person
+slm signing status [--all] [--json]         # signed memories and the keyed audit chain (trust.signing)
+slm proposals list [--json]                 # changes SLM proposes to memory, waiting for a person
+slm wiki status [--json]                    # compiled pages, the Markdown folder, edits waiting
 ```
 
-`slm doctor --truth` reports three things, counts and ids only:
+`slm doctor --truth` reports five things, counts and ids only:
 
 - **Invariants** (I-01 ... I-16): whether the current values and their history
   are consistent. `FAIL` lines name the invariant and a few ids.
@@ -257,6 +260,18 @@ slm audit --count [--json]                  # how many audit questions wait for 
   support it; `drift`: its recent scores changed). None is normal on a new store.
 - **Second opinions**: how often a stronger judge, asked in the background
   about 1 in 20 confident answers, was sure of something else, with 95% bounds.
+- **Signatures** (`signatures` in `--json`; `trust.signing`): how many memories
+  are signed, how many not yet, and a random sample of 500 verified (`--signatures-all`
+  checks every one): `modified` (by id), `signed_under_another_key` (a lost key; cannot
+  be checked, nothing deleted) and `moved_by_a_fold`. The key is in the user's OS
+  keychain; with none, signing is "unavailable" and counts are all that is reported.
+  It detects a change made by something that has the files but not the user's login
+  session; it does not stop a process running as the user.
+- **Audit chain** (`audit_chain`): the audit trail's links verified, including HMAC
+  links keyed with the same key; `plain_after_keyed` counts plain links after keying
+  began (a command run while the daemon was down, or a downgrade). Exit 1 on a modified
+  memory or a broken link. `slm signing resign` (a person, at a terminal, daemon stopped)
+  signs again what a lost key signed: never run it unasked.
 
 ```bash
 slm health --memory [--json] [--db <path>]   # read-only Memory Health report
@@ -282,6 +297,35 @@ agent may report the count (`slm audit --count --json` → `data.count`) and
 suggest the user runs `slm audit` or opens the dashboard card. Never answer an
 audit question for the user: those answers are what let a judge earn trust.
 
+**Proposed changes are the user's too.** SLM can propose a unit of changes to
+memory (retire an older memory, merge copies, rewrite a derived summary). Each
+set is applied all-or-nothing, undone exactly with `rollback`, and every
+derived summary, persona, entity profile or core block keeps its previous
+version before it is rewritten. `slm proposals list --json` shows what waits
+(`data.count`, and per set its plain-words proposals); `slm proposals show
+SET_ID --json` shows one. `apply`, `reject` and `rollback` ask a person at a
+terminal and refuse to run without one, and the dashboard's **Proposed
+changes** card has **Apply**, **Reject** and **Undo**; there is no MCP tool
+and an agent must not decide a set. Report what is waiting and suggest the
+user runs `slm proposals` or opens the card.
+
+**The living wiki** (4.2.30, WS-6) is pages compiled from memory: current state per
+subject, the story of a family of decisions, a topic. Every sentence is a
+word-for-word piece of a memory it cites or a fixed template over slot values,
+checked again whenever the page is read; no model writes any of it, and each page
+says how many sentences it withheld. A page is never a memory. `slm wiki status
+--json` shows the pages and the Markdown folder; `slm wiki diff --json` shows what
+a build would change and which files hold the user's edits; `slm wiki build` writes
+the approved pages (needs `slm flags set compiler.wiki on`; `shadow` only reports).
+`slm wiki rebuild` (compile and approve the pages) and `slm wiki sync` (read the
+user's edits to the Markdown back as proposals) ask a person at a terminal: you
+cannot run them, and an edit is only ever a proposal reviewed with `slm proposals`.
+A deleted line in a file forgets nothing, and erasing a memory removes it from the
+pages and the files. `compiler.dream` (off) lets the background cycle queue pages
+and exact-duplicate merges for review; it applies nothing. The dashboard's **Living
+wiki** card lists the pages, shows each sentence with the memory it comes from, and
+has **Rebuild pages** and **Read my edits**.
+
 `slm consent [--json]` lists what may leave this computer. The background
 judges may ask the online Jev judge about pairs of memories only with the
 user's consent (`judge_ladder_hosted`), given in the dashboard or with
@@ -303,6 +347,26 @@ and swapping; add `--receipts` to stop the receipts too) or the dashboard's
 Settings card "Help SLM measure what works". Never switch it off on your own
 initiative, even to make a test or a measurement tidier. Run it only when the
 user asks, and when `pending` is true, pass the notice on to the user.
+
+## Trust: the instruction firewall and the secret screen (4.2.30)
+
+```bash
+slm trust status [--json]     # is the firewall acting; how many memories wait; how many unclassified
+slm trust pending [--json]    # the memories waiting for the user's OK, with where each came from
+slm health --memory --json    # `trust`: origins, waiting_items, credentials held as placeholders (counts by type)
+```
+
+A memory is data until SLM puts it where an agent obeys it: a pin, a standing rule or decision,
+core memory, the session-start sections. With `trust.taint` on, a memory whose taint is below
+`system` (a tool's output, a web page, a peer's message, an import, a model's text, an agent's
+own words, or anything saved before 4.2.30) waits for a person first. Report what waits and
+why (`slm trust pending --json` → `data.items[].origin`, `wanted_words`); the user approves
+with `slm trust approve FACT_ID` at a terminal or the dashboard's **Waiting for your OK** card
+(**Approve**, **Approve all**). An agent must not approve: the command refuses without a
+terminal, and the server refuses a call that says it had none. `data.unclassified` is the
+number of memories not yet given an origin class; they wait until the background batch runs.
+`trust.secret_screen` is separate: it stores a detected credential as `[REDACTED:TYPE:LAST4]`,
+and `data.trust.secrets_held_back.by_type` counts them (never a value).
 
 ## Recommended Health Workflow
 

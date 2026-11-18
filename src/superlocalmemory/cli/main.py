@@ -774,6 +774,10 @@ def main() -> None:
              "use --db to point it at a copy of the store",
     )
     doctor_p.add_argument("--db", default=None, help="Store file for --truth (default: yours)")
+    doctor_p.add_argument(
+        "--signatures-all", action="store_true",
+        help="With --truth: verify every signed memory, not a sample of 500",
+    )
 
     repair_speaker_p = sub.add_parser(
         "repair-speaker",
@@ -1311,6 +1315,16 @@ def main() -> None:
     register_disputes_parsers(sub)  # 4.2.30: what needs your answer (D-37..D-39)
     from superlocalmemory.cli.audit_cmd import register_audit_parsers
     register_audit_parsers(sub)  # 4.2.30 W2: blind audit answers from a person (R-16)
+    from superlocalmemory.cli.proposals_cmd import register_proposals_parsers
+    register_proposals_parsers(sub)  # 4.2.30 WS-6: proposed changes, applied by a person (I-10)
+    from superlocalmemory.cli.wiki_cmd import register_wiki_parsers
+    register_wiki_parsers(sub)  # 4.2.30 WS-6: pages compiled from memory, Markdown both ways
+    from superlocalmemory.cli.trust_cmd import register_trust_parsers
+    register_trust_parsers(sub)  # 4.2.30 WS-5: memories waiting for your OK (instruction firewall)
+    from superlocalmemory.cli.why_cmd import register_why_parsers
+    register_why_parsers(sub)  # 4.2.30 WS-5: everything that explains one memory
+    from superlocalmemory.cli.signing_cmd import register_signing_parsers
+    register_signing_parsers(sub)  # 4.2.30 WS-5 (D-16): signed memories, keyed audit chain
     from superlocalmemory.cli.consent_cmd import register_consent_parsers
     register_consent_parsers(sub)  # 4.2.30 W2: consents to send memory text off the machine
     from superlocalmemory.cli.measurement_cmd import register_measurement_parsers

@@ -83,7 +83,11 @@ from pathlib import Path
 #: M077 (judge certificates, I-14) is additive, floor 51.
 #: M078 (memory cues, W3-8) is additive, floor 51.
 #: M079 (fact trust: origin class and taint, WS-5) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 79
+#: M080 (artifact versions and ProposalSets, WS-6) is additive, floor 51.
+#: M081 (trust approvals: what the instruction firewall withheld, WS-5) is additive, floor 51.
+#: M082 (fact signatures: one keychain-keyed HMAC per fact, WS-5, D-16) is additive, floor 51.
+#: M083 (compiled pages, citations and the Markdown projection's records, WS-6) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 83
 
 
 class SchemaVersionError(RuntimeError):

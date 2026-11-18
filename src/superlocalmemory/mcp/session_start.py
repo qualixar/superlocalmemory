@@ -82,6 +82,7 @@ def _priority_facts(engine, pid, project_path, response=None):
         pins = engine.db.get_pinned(pid)
     except Exception:
         pins = []
+    pins = _firewalled(engine, pins)  # WS-5: a pin is an instruction
     standing = []
     try:
         if standing_rules.enabled(getattr(engine, "config", None)):
@@ -106,6 +107,20 @@ def _priority_facts(engine, pid, project_path, response=None):
         standing = [f for f in standing if f.fact_id not in hidden]
         upcoming = [e for e in upcoming if e["fact_id"] not in hidden]
     return pins, standing, upcoming
+
+
+def _firewalled(engine, pins):
+    """Pins whose taint is at least ``system``; every pin while the firewall is not acting."""
+    from superlocalmemory.trust import firewall
+
+    if not pins or not firewall.active():
+        return pins
+    try:
+        held = firewall.withheld(engine.db, [f.fact_id for f in pins])
+    except Exception as exc:  # fail closed: a pin that cannot be vouched for is not shown
+        shared.logger.debug("pin firewall unavailable (%s): no pins", type(exc).__name__)
+        return []
+    return [f for f in pins if f.fact_id not in held]
 
 
 def _jev_ordered(engine, query, relevant):
@@ -155,6 +170,7 @@ def _context(engine, named, response, memories, cfg):
         memories = annotate(memories, db_path, named, slm_home=home)
     except Exception as exc:  # presentation only: never fail a session start
         shared.logger.debug("session_init standing skipped: %s", exc)
+    memories = _stamped(engine, memories)
     try:
         context = render_context(
             memories, mode=str(getattr(engine, "mode", "B")).upper(), cfg=cfg, wrap=True
@@ -169,6 +185,18 @@ def _context(engine, named, response, memories, cfg):
         shared.logger.warning("session_init soft-prompt injection failed: %s", exc)
     check = shared._answer_check_prefix(response)
     return f"{check}\n\n{context}" if check and context else check or context
+
+
+def _stamped(engine, memories):
+    """Each memory's taint, so the renderer can keep an untrusted one out of core (WS-5)."""
+    from superlocalmemory.trust import firewall
+
+    if not firewall.active():
+        return memories
+    try:
+        return firewall.stamp(memories, engine.db)
+    except Exception:  # noqa: BLE001 - unstamped means not core-eligible: closed
+        return memories
 
 
 def _memory_rows(memories, relevant, max_results, cfg):

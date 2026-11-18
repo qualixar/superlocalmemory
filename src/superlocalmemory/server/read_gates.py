@@ -61,6 +61,8 @@ _SENSITIVE_READ_PREFIXES = (
     # 4.2.30 D-28: whether the store is measuring and what the notice says;
     # in company mode a person signs in first (the POSTs have their own gate).
     "/api/outcomes/measurement",
+    # 4.2.30 W4 F: which features are on (the What's new card); a person signs in first.
+    "/api/whatsnew/state",
 )
 _SENSITIVE_READ_EXACT_PATHS = (
     "/api/search", "/api/v3/recall/trace", "/api/patterns",

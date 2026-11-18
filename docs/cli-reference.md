@@ -396,6 +396,40 @@ slm hide --undo <fact_id>
 The memories stay stored, listed and counted. Ids from another profile are
 reported as not found; the command exits 1 only when none of the ids matched.
 
+### `slm trust pending|status|approve`
+
+Memories that wait for your OK before they can be instructions (the instruction firewall, `trust.taint`; see [Configuration](configuration.md#the-instruction-firewall-trusttaint-on)).
+
+```bash
+slm trust pending [--json] [--limit N]   # what waits, and where each memory came from (anyone, including an agent)
+slm trust status [--json]                # is the firewall acting; how many wait; how many have no class yet
+slm trust approve FACT_ID [FACT_ID...]   # you, at an interactive terminal
+slm trust approve --all                  # everything `pending` lists, one answer (you, at a terminal)
+```
+
+`approve` shows each memory and asks `[y/N]`; it refuses to run without a terminal, so a script or an agent cannot approve in your place (the same rule as `slm audit`). The approval is recorded with who, when and that it came from the terminal. `--profile` selects a profile; `--json` prints the machine-readable result.
+
+### `slm why FACT_ID`
+
+Everything that explains one memory: where it came from, whether the firewall holds it back, its signature, disputes, derived work, and the last times it was shown to an agent with the reason for each. Read-only on the store, no daemon needed. See [Signed memories, the keyed audit chain and `slm why`](signed-memories.md).
+
+```bash
+slm why FACT_ID [--json] [--verify] [--deliveries N] [--profile P] [--db FILE]
+```
+
+`--verify` reads the signing key from your keychain once and checks the signature; without it the signature shows as signed or unsigned. `--deliveries` lists 1-50 recent deliveries (default 10). Exit 1 when no such memory exists (in `--profile` when given).
+
+### `slm signing status|resign`
+
+Signed memories (`trust.signing`, D-16).
+
+```bash
+slm signing status [--all] [--json] [--db FILE]   # is signing available; how many memories are signed; the audit chain
+slm signing resign [--yes]                         # sign again what a lost key signed (you, at a terminal; stop the daemon first)
+```
+
+`status` reads the keychain once and the store read-only; `--all` checks every signed memory instead of a sample of 500. `resign` asks a person: it refuses without an interactive terminal and while the daemon runs, never creates a key, and only touches memories signed under a key this computer no longer holds.
+
 ### `slm cues list [--json]`
 
 Lists the cues of the active profile, newest first: the kind and pattern, whether
@@ -606,6 +640,8 @@ slm doctor --json
 slm doctor --refile-hidden         # list memories hidden although scored to keep (dry run)
 slm doctor --refile-hidden --yes   # re-file exactly those
 ```
+
+`slm doctor --truth [--db FILE] [--signatures-all] [--json]` checks the truth layer's invariants read-only (use `--db` on a copy of the store), then the signatures (a random sample of 500 memories, or every one with `--signatures-all`) and the audit chain's links, including the keyed ones; it reads the signing key from the keychain once and exits 1 on a modified memory or a broken link. See [Signed memories](signed-memories.md).
 
 `--refile-hidden` lists memories whose lifecycle zone is archive or forgotten
 although their retention score is above 0.8, with their id and the first 80
@@ -1497,6 +1533,33 @@ See [Scale engine](scale-engine.md).
 `slm disputes` lists what needs your answer: two memories that state different values of the same thing, and memories whose source file changed. `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated` answers one; `slm disputes still-true FACT_ID` says a changed file still supports its memory.
 
 `slm audit` asks you, at a terminal, the questions SuperLocalMemory's judges were asked, without their answers, so a judge can earn permission to act on its own. It refuses to run without a terminal, so a script or an agent cannot answer for you; `slm audit --count` says how many are waiting and works anywhere.
+
+### `slm proposals` (4.2.30)
+
+```bash
+slm proposals [list] [--state proposed|applied|rolled_back|rejected|all] [--limit N] [--profile P] [--json]
+slm proposals show SET_ID [--json]
+slm proposals apply SET_ID       # you, at a terminal
+slm proposals reject SET_ID      # you, at a terminal
+slm proposals rollback SET_ID    # you, at a terminal
+```
+
+SuperLocalMemory can propose changes to your memory: retire an older memory in favour of a newer one, merge copies, rewrite a derived summary. A set is decided as one unit: nothing in it touches your memory until you `apply` it, applying is all-or-nothing, and `rollback` puts back exactly what it replaced. Applying needs a basis: your approval at a terminal or on the dashboard (recorded with the door you used), or, only while `compiler.auto_apply` is on, an open certificate that covers that kind of change. `apply`, `reject` and `rollback` refuse to run without an interactive terminal, so a script or an agent cannot decide for you; `list` and `show` work anywhere and `--json` is for agents. Erasing a memory removes the proposals and previous versions that name it.
+
+Before any derived summary, persona, entity profile, scene or core memory block is rewritten, its previous row is kept as a version (the last five per item; three for scenes). The dashboard's **Proposed changes** card shows the same sets with **Apply**, **Reject** and **Undo**.
+
+### `slm wiki` (4.2.30)
+
+```bash
+slm wiki [status] [--json]      # compiled pages, the Markdown folder, edits waiting
+slm wiki diff [--json]          # what a build would change; files holding your edits
+slm wiki build [--json]         # write the approved pages to the folder (needs compiler.wiki)
+slm wiki rebuild                # you, at a terminal: compile the pages again and approve them
+slm wiki sync                   # you, at a terminal: read your edits back as proposals
+slm wiki dir [PATH|--default]   # show or choose the folder
+```
+
+SuperLocalMemory compiles pages from your memories: the current state of a subject, the story of a family of decisions, a topic. Every sentence is a word-for-word piece of a memory it cites or a fixed template over slot values, re-checked whenever the page is read; no model writes any of it, and each page says how many sentences it withheld. A page is never a memory. `build` writes the approved pages to a Markdown folder and needs `slm flags set compiler.wiki on` (`shadow` only reports what it would write); it never overwrites a file you edited. `rebuild` compiles the pages and approves them as you; `sync` reads edited blocks back as proposals (reviewed with `slm proposals`, applied by compare-and-swap on the slot version, a dispute if the slot moved on), and deleting a line forgets nothing. `rebuild` and `sync` refuse to run without an interactive terminal; `status`, `diff` and `build` work anywhere. Details: [The living wiki](living-wiki.md).
 
 ### `slm consent` (4.2.30)
 

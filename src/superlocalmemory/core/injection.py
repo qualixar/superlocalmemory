@@ -216,6 +216,10 @@ class InjectableMemory:
     #: The memory's kind ("opinion", "rule", ...); "" when unknown. An opinion
     #: is labelled as a view, not a checked fact (the sycophancy rule, WS-4).
     memory_kind: str = ""
+    #: The taint class of the memory (``trust/fact_trust``, M-15), set by a surface that
+    #: looked it up; "" when it was not told. With ``trust.taint`` on, a memory whose taint
+    #: is below ``system`` or not known is never promoted to the core block (WS-5).
+    taint: str = ""
 
 
 #: The only support label that may enter an agent's context unasked.
@@ -322,6 +326,7 @@ def select_core_block(mems: list[InjectableMemory], cfg) -> list[InjectableMemor
             or m.access_count >= min_acc
         )
     ]
+    cands = _firewall_core(cands)
     # pinned first (True>False), then importance, access, score.
     cands.sort(key=lambda m: (m.pinned, m.importance, m.access_count, m.score), reverse=True)
 
@@ -336,6 +341,17 @@ def select_core_block(mems: list[InjectableMemory], cfg) -> list[InjectableMemor
         out.append(m)
         used += t
     return out
+
+
+def _firewall_core(cands: list[InjectableMemory]) -> list[InjectableMemory]:
+    """The instruction firewall (WS-5): a memory is core only if its taint is at least
+    ``system``. Not acting (flag off or shadow): all candidates. A memory with no fact id (a
+    compiled block, a soft prompt) is not a fact and is gated where it is compiled."""
+    from superlocalmemory.trust import firewall
+
+    if not cands or not firewall.active():
+        return cands
+    return [m for m in cands if not m.fact_id or firewall.is_trusted_taint(m.taint)]
 
 
 def edge_order(mems: list[InjectableMemory], cfg) -> list[InjectableMemory]:

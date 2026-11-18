@@ -27,16 +27,29 @@ signals; then the ``transform`` may only lower it (a model that rewrote the
 text can no longer vouch for who said it). Every row says why in its
 ``why``. Nothing here reads a database or memory text.
 
-Known limit, stated plainly: the command line and the dashboard carry no agent
-id, and neither does an agent that runs ``slm remember`` through the shell, so
-the second is indistinguishable from a person typing it. Both are
-``user_direct``. Closing that needs a caller identity that does not exist yet.
+The shell door (package B): the command line carries no agent id, and neither
+does an agent that runs ``slm remember`` through a shell. What tells them apart
+is whether the caller sat at an interactive terminal: the client sends that
+fact with every daemon request (``agent_attribution.SHELL_HEADER``) and the
+daemon records it as the raw signal ``agent_id_source`` = ``shell:tty`` or
+``shell:no_tty``. A save with no agent id, role ``user`` and ``shell:no_tty`` is
+not a person's statement (row ``remember.shell_no_tty``, ``agent_inferred``).
+``shell:tty`` and a save with no shell signal (the dashboard, a browser) stay
+``user_direct``. Honest limits: a terminal is evidence, not proof (an agent that
+allocates a pseudo-terminal looks like a person), and facts saved before this
+change carry no such signal and are not reclassified: they keep the class they
+were computed with, and a store that has not computed one yet reads them with the
+mapping as it is now.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+
+#: The raw signals the shell door records (``agent_id_source``), see the module text.
+SHELL_TTY = "shell:tty"
+SHELL_NO_TTY = "shell:no_tty"
 
 USER_DIRECT = "user_direct"
 USER_CONFIRMED = "user_confirmed"
@@ -71,7 +84,7 @@ LABELS: Mapping[str, str] = {
 
 #: The mapping version, the prefix of every ``basis``. A change to :data:`ROWS`
 #: or to the caps bumps it, and the background batch recomputes older rows.
-VERSION = "v1"
+VERSION = "v2"
 
 
 def rank_of(name: str) -> int | None:
@@ -115,6 +128,9 @@ class Signals:
     agent_id: str | None = None
     speaker: str | None = None
     role: str | None = None
+    #: How the saver identified itself (``fact_origin.agent_id_source``): ``connection``,
+    #: ``claimed``, or, for a save with no agent at all, ``shell:tty`` / ``shell:no_tty``.
+    agent_id_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +157,11 @@ def _a_person(s: Signals) -> bool:
     return not s.agent_id and not s.speaker and (s.role or "").lower() == "user"
 
 
+def _from_a_shell_without_a_terminal(s: Signals) -> bool:
+    """A save through the command line (or any daemon client) that had no terminal."""
+    return not s.agent_id and (s.agent_id_source or "") == SHELL_NO_TTY
+
+
 def _source_has(*words: str) -> Callable[[Signals], bool]:
     """Channel not named by the save path (unknown or derived), source type says what it is."""
     return lambda s: (s.channel in ("unknown", "derived")
@@ -155,11 +176,16 @@ ROWS: tuple[Row, ...] = (
         "text taken from a web page is whatever the page said, however it got here"),
     Row("source.tool", _source_has("tool", "bash", "shell", "command", "exec"), TOOL_OUTPUT,
         "the output of a command or tool is data the tool returned, not a statement"),
+    Row("remember.shell_no_tty", lambda s: s.channel in ("remember_http", "python_api")
+        and _from_a_shell_without_a_terminal(s), AGENT_INFERRED,
+        "a save through the command line whose standard input was not an interactive "
+        "terminal: a script, a hook or an agent's shell tool typed it, not the user (a "
+        "person at a terminal is `shell:tty`; the dashboard sends no shell signal)"),
     Row("remember.person", lambda s: s.channel in ("remember_http", "python_api")
         and _a_person(s), USER_DIRECT,
-        "a save with no agent id and role user is the user's own statement: the command "
-        "line, the dashboard and hooks carry no agent id (limit: an agent using the shell "
-        "looks the same)"),
+        "a save with no agent id and role user, from a terminal or the dashboard, is the "
+        "user's own statement (a terminal is evidence, not proof: an agent that allocates "
+        "a pseudo-terminal looks the same)"),
     Row("remember.agent", _in("remember_http", "python_api"), AGENT_INFERRED,
         "a save that names an agent, a non-human speaker or no role is the agent's own "
         "words: it may restate the user, or a tool, or guess"),
@@ -184,6 +210,12 @@ ROWS: tuple[Row, ...] = (
     Row("correction.proposal", _in("correction"), AGENT_INFERRED,
         "a corrected statement is written by whoever called remember with replaces: a "
         "person or an agent, not told apart here (it also inherits its parent's taint)"),
+    Row("edit.external", _in("external_edit"), AGENT_INFERRED,
+        "text read back from a Markdown file of the living wiki (D-17). A person editing a file on "
+        "their own disk is close to user_direct, but nothing tells that person from a tool or an "
+        "agent that wrote the same file (no terminal, no agent id, a watcher reads it later), so "
+        "the base class is the one a save with no proof of a person gets. A person's approval of "
+        "the proposal that admits it is what makes it user_confirmed (trust/fact_trust.mark_confirmed)"),
     Row("derived.mechanical", _in("derived"), SYSTEM,
         "cut or built by SuperLocalMemory from other memories: the class comes from what "
         "it was cut from (taint), and a model's rewrite is capped below"),
@@ -221,6 +253,7 @@ def classify(signals: Signals) -> Classified:
 
 
 __all__ = ["AGENT_INFERRED", "CLASSES", "Classified", "IMPORTED_FILE", "LABELS", "MESH_PEER",
-           "MODEL_GENERATED", "ORDER", "ROWS", "Row", "SYSTEM", "Signals", "TOOL_OUTPUT",
+           "MODEL_GENERATED", "ORDER", "ROWS", "Row", "SHELL_NO_TTY", "SHELL_TTY", "SYSTEM",
+           "Signals", "TOOL_OUTPUT",
            "UNKNOWN", "USER_CONFIRMED", "USER_DIRECT", "VERSION", "WEB", "at_least", "classify",
            "join", "join_all", "label", "rank_of"]

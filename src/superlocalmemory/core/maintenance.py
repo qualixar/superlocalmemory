@@ -619,16 +619,23 @@ def run_maintenance(
     # drops bloat. Future writes go through ObservationBuilder.SUMMARY_*
     # bounds and stay clean.
     try:
-        db.execute(
-            """
-            UPDATE entity_profiles
-               SET knowledge_summary = SUBSTR(knowledge_summary, 1, 2047) || '…',
-                   last_updated = datetime('now')
-             WHERE LENGTH(knowledge_summary) > 2048
-               AND profile_id = ?
-            """,
-            (profile_id,),
-        )
+        from superlocalmemory.compiler import versions
+
+        with versions.atomic(db):
+            # The full text is kept as a version before it is cut (WS-6).
+            versions.keep_previous(
+                db, "entity_profile", {"profile_id": profile_id},
+                where="LENGTH(knowledge_summary) > 2048")
+            db.execute(
+                """
+                UPDATE entity_profiles
+                   SET knowledge_summary = SUBSTR(knowledge_summary, 1, 2047) || '…',
+                       last_updated = datetime('now')
+                 WHERE LENGTH(knowledge_summary) > 2048
+                   AND profile_id = ?
+                """,
+                (profile_id,),
+            )
         # SQLite doesn't return rowcount via execute() wrapper consistently.
         # Re-count instead — fast on the small subset.
         rows = db.execute(

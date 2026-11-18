@@ -59,7 +59,13 @@ def source_filter(store: Any) -> tuple[str, tuple[str, ...]]:
     ``store`` is the DatabaseManager or sqlite3 connection the query runs on;
     it decides whether the retirement check can be applied.
     """
-    return " AND NOT " + _NOT_A_SOURCE + _not_retired(store), (REQUEST_SOURCE,)
+    # WS-5: with trust.taint on, only memories whose taint is at least ``system`` (the
+    # instruction firewall, trust/firewall.py): a core block and the session start are
+    # instructions to an agent, so a tool's output or a web page is not a source.
+    from superlocalmemory.trust import firewall
+
+    return (" AND NOT " + _NOT_A_SOURCE + _not_retired(store) + firewall.clause(store),
+            (REQUEST_SOURCE,))
 
 
 def current_filter(store: Any) -> str:
@@ -106,8 +112,10 @@ def not_sources(conn: Any, fact_ids: Iterable[str]) -> set[str]:
         f"SELECT f.fact_id, f.content, {_NOT_A_SOURCE} AS excluded, "
         f"({current}) AS is_current "
         f"FROM atomic_facts f WHERE f.fact_id IN ({marks})", (REQUEST_SOURCE, *ids))
-    return {str(r[0]) for r in rows
-            if r[2] or not r[3] or is_stub(str(r[1] or ""))}
+    bad = {str(r[0]) for r in rows if r[2] or not r[3] or is_stub(str(r[1] or ""))}
+    from superlocalmemory.trust import firewall
+
+    return bad | firewall.withheld(conn, ids)
 
 
 def _content(row: Any) -> Any:

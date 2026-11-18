@@ -6,8 +6,10 @@
 Two kinds of text reach a write door:
 
 * ``USER_TEXT`` is what a person typed or imported. It is stored as written;
-  the only change is personal-data redaction, and only when the operator turned
-  it on. With redaction off the bytes pass through untouched.
+  the only changes are personal-data redaction, when the operator turned it on,
+  and the secret screen (``trust.secret_screen``, WS-5), which replaces a
+  credential with a typed placeholder. With both off the bytes pass through
+  untouched.
 * ``DERIVED_TEXT`` is text SLM produced (extracted, summarised, transcribed).
   It is Unicode-normalised and always has credentials stripped.
 
@@ -45,6 +47,8 @@ class PreparedContent:
     pii_count: int
     secret_count: int
     content_sha256: str
+    #: Credentials the secret screen replaced, by type (counts only; ``()`` when it did not run).
+    secret_types: tuple[tuple[str, int], ...] = ()
 
 
 def pii_redaction_enabled(config: object | None) -> bool:
@@ -115,6 +119,21 @@ def scan_sensitive(text: str) -> SensitiveScan:
     return SensitiveScan(pii, max(0, len(_SECRET_MARKER.findall(redacted)) - before))
 
 
+def _screen_user_text(text: str) -> tuple[str, tuple[tuple[str, int], ...]]:
+    """The secret screen for a person's or an agent's own text (``trust.secret_screen``)."""
+    from superlocalmemory.core.feature_flags import FlagState
+    from superlocalmemory.trust import secret_screen
+
+    mode = secret_screen.state()
+    if mode is FlagState.OFF:
+        return text, ()
+    got = secret_screen.screen(text)
+    secret_screen.note(got.counts, acting=mode is FlagState.ON)
+    if mode is FlagState.ON:
+        return got.text, tuple(sorted(got.counts.items()))
+    return text, ()
+
+
 def prepare_for_save(
     text: str, *, origin: ContentOrigin, pii_redaction: bool,
 ) -> PreparedContent:
@@ -123,16 +142,20 @@ def prepare_for_save(
         raise TypeError("prepare_for_save expects str")
     pii_count = 0
     secret_count = 0
+    secret_types: tuple[tuple[str, int], ...] = ()
     if text:
         if origin is ContentOrigin.DERIVED_TEXT:
             text = unicodedata.normalize("NFC", text)
             before = len(_SECRET_MARKER.findall(text))
             text = redact_secrets(text, aggression="high")
             secret_count = max(0, len(_SECRET_MARKER.findall(text)) - before)
+        else:
+            text, secret_types = _screen_user_text(text)
+            secret_count = sum(n for _kind, n in secret_types)
         if pii_redaction:
             text, pii_count = redact_pii(text)
     logger.debug("prepared content: pii=%d secrets=%d", pii_count, secret_count)
-    return PreparedContent(text, pii_count, secret_count, _digest(text))
+    return PreparedContent(text, pii_count, secret_count, _digest(text), secret_types)
 
 
 def prepare_user_text(config: object | None, text: str) -> PreparedContent:
@@ -151,26 +174,44 @@ def prepare_user_text(config: object | None, text: str) -> PreparedContent:
 def prepare_metadata(value: Any, *, pii_redaction: bool) -> tuple[Any, int]:
     """Redact every string in dicts, lists and tuples (keys too); never mutates.
 
-    Non-string leaves are returned as they are. Off, the input comes back as is.
+    Non-string leaves are returned as they are. With personal-data redaction off and the
+    secret screen off, the input comes back as is; with the screen on, credentials in any
+    string become typed placeholders first (``trust.secret_screen``).
     """
+    value = _screen_metadata(value)
     if not pii_redaction:
         return value, 0
+    return _redact_tree(value)
+
+
+def _redact_tree(value: Any) -> tuple[Any, int]:
     if isinstance(value, str):
         return redact_pii(value)
     if isinstance(value, dict):
         out: dict = {}
         total = 0
         for key, item in value.items():
-            new_key, k_count = prepare_metadata(key, pii_redaction=True)
-            new_item, v_count = prepare_metadata(item, pii_redaction=True)
+            new_key, k_count = _redact_tree(key)
+            new_item, v_count = _redact_tree(item)
             out[new_key] = new_item
             total += k_count + v_count
         return out, total
     if isinstance(value, (list, tuple)):
-        pairs = [prepare_metadata(item, pii_redaction=True) for item in value]
+        pairs = [_redact_tree(item) for item in value]
         items = [p[0] for p in pairs]
         return (tuple(items) if isinstance(value, tuple) else items), sum(p[1] for p in pairs)
     return value, 0
+
+
+def _screen_metadata(value: Any) -> Any:
+    from superlocalmemory.core.feature_flags import FlagState
+    from superlocalmemory.trust import secret_screen
+
+    if secret_screen.state() is not FlagState.ON:
+        return value
+    screened, counts = secret_screen.screen_tree(value)
+    secret_screen.note(counts, acting=True)
+    return screened
 
 
 def prepare_key(key: str, *, pii_redaction: bool) -> str:

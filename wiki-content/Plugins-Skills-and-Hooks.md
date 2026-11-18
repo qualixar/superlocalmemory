@@ -107,7 +107,7 @@ In Hermes, 26 commands are marked high-impact in the inventory (for example `for
 
 ## Hooks
 
-A hook is a command the host runs at a fixed moment. Every hook the plugins install is built to fail open: its output is advisory text or nothing, errors are swallowed, and none of them blocks your work. They all run as `slm hook <action>`, handled in `src/superlocalmemory/hooks/hook_handlers.py` and the modules beside it.
+A hook is a command the host runs at a fixed moment. What a hook saves (a "file changed" note, a session summary, a captured observation) passes the same save step as a typed memory, and the hook event spool screens what a tool printed: with the secret screen on (`trust.secret_screen`), a credential is stored as a `[REDACTED:TYPE:LAST4]` placeholder and never written in clear. With the instruction firewall on (`trust.taint`) such memories are a tool's output or an agent's words, so they cannot become pins, standing rules or core memory until you approve them. Every hook the plugins install is built to fail open: its output is advisory text or nothing, errors are swallowed, and none of them blocks your work. They all run as `slm hook <action>`, handled in `src/superlocalmemory/hooks/hook_handlers.py` and the modules beside it.
 
 | Action | What it does in plain words |
 |---|---|

@@ -36,7 +36,7 @@ CHANNELS = frozenset({
     "remember_http", "hook_file_change", "hook_session_summary", "observe", "cli_observe",
     "ingest_adapter", "import", "folder", "document", "media", "python_api", "mcp_offline",
     "legacy_replay", "restore", "loop_ledger", "derived", "correction", "repair", "bundle",
-    "unknown"})
+    "external_edit", "unknown"})
 #: How the stored text relates to what came in.
 TRANSFORMS = frozenset({
     "verbatim", "excerpt", "split", "rule_extracted", "model_rewritten", "system_built",
@@ -197,6 +197,10 @@ def record(db: Any, fact: Any) -> None:
     from superlocalmemory.trust import fact_trust
 
     fact_trust.admit(db, fact)  # never raises
+    # WS-5 (D-16): signed when this process holds the key (the daemon); never raises.
+    from superlocalmemory.trust import signatures
+
+    signatures.admit(db, fact)
 
 
 __all__ = ["CHANNELS", "Origin", "TRANSFORMS", "UNKNOWN", "channel_for", "current", "declare",

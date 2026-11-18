@@ -2468,6 +2468,11 @@ async def update_core_memory_block(block_id: str, request: Request):
                 raise HTTPException(status_code=404, detail=f"Block {block_id} not found")
 
             new_version = dict(existing)["version"] + 1
+            # The text a person is replacing is kept as a version first (WS-6).
+            from superlocalmemory.compiler import versions
+
+            versions.keep_previous(
+                conn, "core_block", {"block_id": block_id, "profile_id": pid})
             conn.execute(
                 "UPDATE core_memory_blocks SET content = ?, char_count = ?, "
                 "version = ?, compiled_by = 'manual', updated_at = ? "
