@@ -206,8 +206,15 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
     binding = slot_store.bind(conn, profile_id=profile_id, scope=scope, fact_id=fact_id,
                               key=key, valid_from=valid_from)
     origin = None
-    if taint != "off" and binding.outcome == slot_store.DISPUTE and binding.dispute_id \
-            and binding.other_fact_id:
+    disputed = (binding.outcome == slot_store.DISPUTE and binding.dispute_id
+                and binding.other_fact_id)
+    if disputed:
+        # WS-9: a fact an import saved never displaces a head, whichever way trust.taint is set.
+        from superlocalmemory.portability import guards
+
+        origin = guards.hold(conn, fact_id=fact_id, dispute_id=binding.dispute_id,
+                             older_reasons=slot_store.OLDER_REASONS)
+    if origin is None and taint != "off" and disputed:
         origin = _origin_check(conn, binding, fact_id, enforce=taint == "on")
     return Resolution(fact_id, True, binding.outcome, binding.slot_id, origin=origin)
 

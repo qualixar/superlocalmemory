@@ -37,11 +37,15 @@ PROMOTION, PROPOSAL, DISPUTE, LABEL = "promotion", "proposal", "dispute", "label
 #: text, origin or delivery, only integrity marks, and the marks it replaces could no longer be
 #: checked; so it is recorded (who, channel, counts) but has no undo.
 SIGNING = "signing"
-KINDS: tuple[str, ...] = (PROMOTION, PROPOSAL, DISPUTE, LABEL, SIGNING)
+#: Bringing a file of memories or conversations in from another app (WS-9, D-19). The run is one
+#: unit; undoing it rolls the whole run back exactly (``portability/rollback``). Recorded when the
+#: run starts, by whoever started it, through any door; the rollback is recorded too.
+IMPORT = "import"
+KINDS: tuple[str, ...] = (PROMOTION, PROPOSAL, DISPUTE, LABEL, SIGNING, IMPORT)
 #: Actions a caller can take back, by kind (a rejection or a rollback is not undone again).
 UNDOABLE: dict[str, frozenset[str]] = {
     PROMOTION: frozenset({"promote"}), PROPOSAL: frozenset({"apply"}),
-    DISPUTE: frozenset({"settle"}), LABEL: frozenset({"label"}),
+    DISPUTE: frozenset({"settle"}), LABEL: frozenset({"label"}), IMPORT: frozenset({"run"}),
 }
 DEFAULT_ACTOR = "client:local"
 MAX_ACTOR = 80
@@ -179,6 +183,6 @@ def counts(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
     return {"total": int(total), "undone": int(undone), "open": int(total) - int(undone)}
 
 
-__all__ = ["CHANNELS", "DEFAULT_ACTOR", "DISPUTE", "Decider", "KINDS", "LABEL", "PROMOTION",
+__all__ = ["CHANNELS", "DEFAULT_ACTOR", "DISPUTE", "Decider", "IMPORT", "KINDS", "LABEL", "PROMOTION",
            "PROPOSAL", "SIGNING", "UNDOABLE", "clean_actor", "clean_channel", "counts", "get", "log",
            "mark_undone", "open_decision", "recent"]

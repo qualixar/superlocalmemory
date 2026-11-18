@@ -53,6 +53,11 @@ class SaveRequest:
     trusted_metadata: Mapping[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
     session_date: str = ""
+    #: A conversation import keeps who spoke and which conversation it was (WS-9); every
+    #: other caller leaves these as they were.
+    session_id: str = ""
+    speaker: str = ""
+    role: str = "user"
     #: ``None`` takes the configured default scope, as typed text does.
     scope: str | None = None
     shared_with: tuple[str, ...] = ()
@@ -129,6 +134,7 @@ def submit_memory(
         idempotency_key=key, metadata=meta, scope=scope,
         shared_with=tuple(request.shared_with),
         trusted_actor_id=request.trusted_actor_id, session_date=request.session_date,
+        session_id=request.session_id, speaker=request.speaker, role=request.role,
     )
     actor = Actor(principal_id=request.trusted_actor_id,
                   allowed_profiles=frozenset({request.profile_id}),

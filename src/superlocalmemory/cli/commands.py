@@ -584,6 +584,12 @@ def _cmd_proposals_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_import_dispatch(args: Namespace) -> None:
+    """4.2.30 WS-9: bring memories in from other apps (cli/import_cmd.py)."""
+    from superlocalmemory.cli.import_cmd import run
+    run(args)
+
+
 def _cmd_wiki_dispatch(args: Namespace) -> None:
     """4.2.30 WS-6: compiled pages and the Markdown wiki (cli/wiki_cmd.py)."""
     from superlocalmemory.cli.wiki_cmd import run
@@ -812,6 +818,7 @@ def dispatch(args: Namespace) -> None:
         "audit": _cmd_audit_dispatch,
         "proposals": _cmd_proposals_dispatch,
         "wiki": _cmd_wiki_dispatch,
+        "import": _cmd_import_dispatch,
         "trust": _cmd_trust_dispatch,
         "why": _cmd_why_dispatch,
         "signing": _cmd_signing_dispatch,
@@ -3159,6 +3166,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("audit", "Give blind labels so SuperLocalMemory's judges can earn trust (any caller; recorded)"),
         ("proposals", "Changes proposed to your memory: review, apply, decline, undo"),
         ("wiki", "Your memories as Markdown pages; your edits become proposals: status, diff, build, sync"),
+        ("import", "Bring memories in from ChatGPT, Claude, Mem0, Letta, OKF or Markdown: preview, run, undo"),
         ("trust", "Memories held back from being rules or pins until promoted: pending, promote, withdraw"),
         ("why", "Everything that explains one memory: where it came from, why it was shown"),
         ("signing", "Signed memories and the keyed audit chain: status, resign"),

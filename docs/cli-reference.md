@@ -1562,6 +1562,27 @@ slm wiki dir [PATH|--default]   # show or choose the folder
 
 SuperLocalMemory compiles pages from your memories: the current state of a subject, the story of a family of decisions, a topic. Every sentence is a word-for-word piece of a memory it cites or a fixed template over slot values, re-checked whenever the page is read; no model writes any of it, and each page says how many sentences it withheld. A page is never a memory. `build` writes the approved pages to a Markdown folder and needs `slm flags set compiler.wiki on` (`shadow` only reports what it would write); it never overwrites a file you edited. `rebuild` compiles the pages and approves them as you; `sync` reads edited blocks back as proposals (reviewed with `slm proposals`, applied by compare-and-swap on the slot version, a dispute if the slot moved on), and deleting a line forgets nothing. `rebuild` and `sync` refuse to run without an interactive terminal; `status`, `diff` and `build` work anywhere. Details: [The living wiki](living-wiki.md).
 
+### `slm import` (4.2.30)
+
+```bash
+slm import preview FILE [--format F] [--profile P] [--json]     # what the file holds; nothing is saved
+slm import run FILE [--format F] [--profile P] [--wait [S]]     # import in the background (any caller; recorded)
+slm import status [RUN_ID] [--json]                             # progress (the latest run without an id)
+slm import list [--json]                                        # recent imports
+slm import cancel RUN_ID                                        # stop; what was saved is kept
+slm import undo RUN_ID [--wait [S]]                             # take the whole run back, exactly
+```
+
+Brings memories and conversations in from ChatGPT (`conversations.json`, the numbered files, the zip), Claude
+(`conversations.json`, `memories.json`, or text copied from its memory settings), Mem0 (`get_all` output in any of
+its shapes), Letta (`.af`), OKF and Markdown (`AGENTS.md`, `CLAUDE.md`, `MEMORY.md` and topic files). `FILE` is a
+file or a folder on this computer. Off until `slm flags set portability.import on`; every command says so when it
+is off. Imported text has origin `imported_file`: it never replaces a memory you already have, never moves a slot
+head (a contradiction waits as a question, at most 50 per run, and no judge is asked), and the whole run can be
+undone exactly. Any caller may start or undo an import (D-49); each is recorded with who and the channel and listed
+under **Recent decisions by your agents**. MCP has no import tool; an agent runs this command. `--json` is for
+agents. Full guide: [Importing from other apps](importing.md).
+
 ### `slm consent` (4.2.30)
 
 `slm consent` lists what may leave this computer and whether you agreed. Today there is one purpose, `judge_ladder_hosted`: the background judges send pairs of your memories to the online Jev judge, one pair per request, to ask whether the newer one replaces the older one (passwords and keys removed first). `slm consent give judge_ladder_hosted` shows the notice and asks you to type `yes`; it needs a terminal and the online answer check with Jev turned on, because it uses the same connection. `slm consent withdraw judge_ladder_hosted` stops it at once and works anywhere. The consent names its provider: if the answer check moves to another provider, the judges stop asking Jev until you agree again. Each change is written to the audit chain first. The dashboard offers the same under Settings, Answer check, Online with Jev, Background judges. While the judges only watch (see `slm flags`), they do not ask Jev.

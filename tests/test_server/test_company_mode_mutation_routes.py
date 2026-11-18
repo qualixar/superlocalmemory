@@ -70,6 +70,7 @@ VIEWER_MAY = {
     ("POST", "/api/v3/chat/stream"): "memory chat answers from memory; the read gate enforces READ",
     ("POST", "/api/v3/recall/trace"): "explains a recall; READ is enforced by the route",
     ("POST", "/session/open"): "warms recall context and changes no memory; READ",
+    ("POST", "/api/import/preview"): "reads a file and says what is in it, saves no memory (WS-9); READ",
 }
 
 

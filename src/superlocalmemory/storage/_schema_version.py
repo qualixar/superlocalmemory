@@ -88,7 +88,8 @@ from pathlib import Path
 #: M082 (fact signatures: one keychain-keyed HMAC per fact, WS-5, D-16) is additive, floor 51.
 #: M083 (compiled pages, citations and the Markdown projection's records, WS-6) is additive, floor 51.
 #: M084 (decision log: who decided what, through which channel, and the undo, D-49) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 84
+#: M085 (import runs: one row per file brought in, and the memories it saved, WS-9) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 85
 
 
 class SchemaVersionError(RuntimeError):

@@ -121,8 +121,12 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
     Flag("compiler.wiki", "WS-6", FlagState.OFF,
          "Project the compiled pages to a Markdown folder and read edits back as proposals "
          "(shadow: show what would be written, write nothing)"),
-    Flag("portability.importers", "WS-9", FlagState.OFF,
-         "Offer importers for other memory products",
+    # D-19: the portability pack is optional and ships dark. On, a caller may preview, run and
+    # undo an import of a ChatGPT, Claude, Mem0, Letta, OKF or Markdown export (WS-9). Nothing
+    # runs in shadow: an import either happens or it does not.
+    Flag("portability.import", "WS-9", FlagState.OFF,
+         "Import memories and conversations from ChatGPT, Claude, Mem0, Letta, OKF and "
+         "Markdown files (preview, run in the background, undo the whole run)",
          shadowable=False),
 )}
 

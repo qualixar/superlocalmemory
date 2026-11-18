@@ -1324,6 +1324,8 @@ def main() -> None:
     register_proposals_parsers(sub)  # 4.2.30 WS-6: proposed changes, applied by a person (I-10)
     from superlocalmemory.cli.wiki_cmd import register_wiki_parsers
     register_wiki_parsers(sub)  # 4.2.30 WS-6: pages compiled from memory, Markdown both ways
+    from superlocalmemory.cli.import_cmd import register_import_parsers
+    register_import_parsers(sub)  # 4.2.30 WS-9: bring memories in from other apps (preview, run, undo)
     from superlocalmemory.cli.trust_cmd import register_trust_parsers
     register_trust_parsers(sub)  # 4.2.30 WS-5: memories held back until promoted (instruction firewall, D-49)
     from superlocalmemory.cli.why_cmd import register_why_parsers

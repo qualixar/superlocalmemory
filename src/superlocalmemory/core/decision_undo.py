@@ -22,9 +22,11 @@ class UndoRefused(ValueError):
 
 
 def undo(conn: sqlite3.Connection, *, profile_id: str, decision_id: str,
-         decider: decisions.Decider) -> dict:
+         decider: decisions.Decider, engine: object | None = None,
+         runtime: object | None = None) -> dict:
     """Reverse one logged decision. ``LookupError`` if there is no such decision in the profile,
-    :class:`UndoRefused` if it cannot be undone now."""
+    :class:`UndoRefused` if it cannot be undone now. ``engine`` and ``runtime`` are the daemon's,
+    needed only by an import, whose rollback is a background job that removes memories."""
     found = decisions.get(conn, profile_id, decision_id)
     if found is None:
         raise LookupError(f"no decision {decision_id}")
@@ -50,6 +52,8 @@ def undo(conn: sqlite3.Connection, *, profile_id: str, decision_id: str,
 
             done = disputes.reopen(conn, profile_id=profile_id, dispute_id=subject,
                                    channel=decider.channel, actor=decider.actor)
+        elif kind == decisions.IMPORT:
+            done = _undo_import(engine, runtime, profile_id, subject, decider)
         elif kind == decisions.LABEL:
             from superlocalmemory.core import audit_review
 
@@ -62,6 +66,21 @@ def undo(conn: sqlite3.Connection, *, profile_id: str, decision_id: str,
     except ValueError as exc:  # StateRefused / ReopenRefused / ProposalError subclass it
         raise UndoRefused(str(exc)) from None
     return {"decision_id": decision_id, "kind": kind, "undone": True, **_plain(done)}
+
+
+def _undo_import(engine: object | None, runtime: object | None, profile_id: str, run_id: str,
+                 decider: decisions.Decider) -> dict:
+    """Roll the whole import run back in the background (it can take a while for a big run)."""
+    from superlocalmemory.portability import service
+
+    if engine is None:
+        raise UndoRefused("An import can only be undone through the running daemon.")
+    try:
+        run = service.start_undo(engine, runtime, profile_id=profile_id, run_id=run_id,
+                                 decider=decider)
+    except service.ImportRefused as exc:
+        raise UndoRefused(str(exc)) from None
+    return {"state": run["state"], "run_id": run_id}
 
 
 def _plain(done: object) -> dict:

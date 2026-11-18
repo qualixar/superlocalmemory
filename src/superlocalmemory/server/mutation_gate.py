@@ -95,6 +95,8 @@ _EXACT: dict[str, Rule] = {
     "/api/v3/chat/stream": _READ,
     "/api/v3/recall/trace": _READ,
     "/session/open": _READ,
+    # WS-9: a preview reads a file and writes no memory (the staged copy is private and temporary).
+    "/api/import/preview": _READ,
     # Installation-wide state: one setting for every workspace.
     **{path: _GLOBAL for path in (
         "/api/rbac/policy",
@@ -126,6 +128,7 @@ _EXACT: dict[str, Rule] = {
         "/api/v3/ratelimit",
         "/api/v3/features/media/enable",
         "/api/v3/features/media/disable",
+        "/api/import/switch",
         "/api/v3/answer-check/mode",
         "/api/v3/answer-check/save",
         "/api/evolution/enable",

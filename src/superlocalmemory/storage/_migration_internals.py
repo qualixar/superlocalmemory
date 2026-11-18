@@ -279,6 +279,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M084_decision_log as _M084,
 )
+from superlocalmemory.storage.migrations import (
+    M085_import_runs as _M085,
+)
 
 # Emit under the runner's logger name so operational log filters that key on
 # "superlocalmemory.storage.migration_runner" keep matching after this split.
@@ -371,6 +374,7 @@ _MODULES = {
     _M082.NAME: _M082,
     _M083.NAME: _M083,
     _M084.NAME: _M084,
+    _M085.NAME: _M085,
 }
 
 # Exact historical DDL fingerprints whose resulting schema is intentionally

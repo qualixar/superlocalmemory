@@ -13,6 +13,7 @@ of the data folder after an erasure, to still hold what the person wrote:
   committed, the instruction to write it again;
 * ``recall_queue.db``: the prompts the per-prompt hook queued and, for up to an
   hour after each, the memories recalled for them;
+* ``import-staging/``: files uploaded for an import preview and not yet imported (WS-9);
 * ``hook_spool/``: tool events and reward signals hooks handed to the daemon
   that it has not written yet (4.2.8), with their tool summaries;
 * ``write_commits``: the receipt ledger, protected from ordinary deletes;
@@ -158,7 +159,15 @@ def erase_profile_sidecars(
             raise RuntimeError("the workspace entry is still in profiles.json")
         counts["profile_registry"] = 1
 
+    def import_staging() -> None:
+        # Files uploaded for an import preview and not yet imported (WS-9). They name no
+        # profile, so, like the recall queue, all of them go: choosing the file again is cheap.
+        from superlocalmemory.portability import staging
+
+        counts["import_staging"] = staging.drop_all(root)
+
     _step(counts, "pending_memories", pending)
+    _step(counts, "import_staging", import_staging)
     _step(counts, "admission_journal", journal)
     _step(counts, "recall_queue", recall_queue)
     _step(counts, "hook_spool", hook_spool)

@@ -259,6 +259,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M084_decision_log as _M084,
 )
+from superlocalmemory.storage.migrations import (
+    M085_import_runs as _M085,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -559,4 +562,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # undo. Deferred: its erase trigger is built on atomic_facts.
     Migration(name=_M084.NAME, db_target="memory", ddl=_M084.DDL,
               dependencies=(_M083.NAME,)),
+    # M085 keeps one row per import run and one per memory the run saved, so a run rolls back
+    # exactly (WS-9, D-19). Deferred: its erase trigger is built on memories.
+    Migration(name=_M085.NAME, db_target="memory", ddl=_M085.DDL,
+              dependencies=(_M084.NAME,)),
 ]

@@ -101,8 +101,9 @@ def undo_decision(request: Request, decision_id: str, body: UndoRequest | None =
         who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
         try:
             with engine._db.raw_connection() as conn:
-                done = decision_undo.undo(conn, profile_id=target, decision_id=decision_id,
-                                          decider=who)
+                done = decision_undo.undo(
+                    conn, profile_id=target, decision_id=decision_id, decider=who, engine=engine,
+                    runtime=getattr(request.app.state, "canonical_remember_runtime", None))
         except LookupError:
             raise HTTPException(404, detail="No such decision") from None
         except decision_undo.UndoRefused as exc:
@@ -118,3 +119,10 @@ def undo_decision(request: Request, decision_id: str, body: UndoRequest | None =
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Decision undo error")
+
+
+# WS-9: an import is a decision (kind ``import``), so its routes live beside the decision log's and
+# ride on this module's registration in the daemon. Nothing else here depends on them.
+from superlocalmemory.server.routes.portability import router as _import_router  # noqa: E402
+
+router.include_router(_import_router)

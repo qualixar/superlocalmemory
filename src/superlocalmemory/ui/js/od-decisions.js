@@ -19,11 +19,12 @@
 
   var KIND = {
     promotion: 'Memory promoted', proposal: 'Proposed changes', dispute: 'Dispute',
-    label: 'Audit label', signing: 'Memories signed again'
+    label: 'Audit label', signing: 'Memories signed again', import: 'Memories imported'
   };
   var CHANNEL = { mcp: 'over MCP', cli: 'from the command line', http: 'over HTTP',
                   dashboard: 'on the dashboard' };
-  var UNDONE = { promote: 'Withdrawn', apply: 'Rolled back', settle: 'Reopened', label: 'Retracted' };
+  var UNDONE = { promote: 'Withdrawn', apply: 'Rolled back', settle: 'Reopened', label: 'Retracted',
+                 run: 'Taken back' };
   var rows = [];
   var counts = { total: 0, undone: 0, open: 0 };
 
@@ -67,7 +68,10 @@
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok || !j.success) throw new Error(detailOf(j, 'That did not work (HTTP ' + r.status + ').'));
         row.textContent = '';
-        row.appendChild(el('p', 'dash-card-meta tone-ok', 'Undone. It is recorded below.'));
+        // An import is taken back in the background: say so, it can take a minute.
+        row.appendChild(el('p', 'dash-card-meta tone-ok', d.kind === 'import'
+          ? 'Taking it back now. A big import can take a minute. It is recorded below.'
+          : 'Undone. It is recorded below.'));
         setTimeout(load, 900);
       });
     }).catch(function (e) {

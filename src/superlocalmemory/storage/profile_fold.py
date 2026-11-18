@@ -54,8 +54,8 @@ MOVE    action_outcomes, association_edges, atomic_facts, bm25_tokens,
         fact_access_log, fact_consolidations, fact_context, fact_hub_baseline, fact_origin,
         fact_importance, fact_outcome_score, fact_retention, fact_signatures,
         fact_temporal_validity, fact_trust,
-        feedback_records, injection_deliveries, injection_receipts, injection_usage,
-        judge_receipts,
+        feedback_records, import_run_items, import_runs, injection_deliveries,
+        injection_receipts, injection_usage, judge_receipts,
         memories, memory_archive, memory_cues, memory_leases, need_turns,
         memory_kind_history, memory_merge_log, memory_scenes, pinned_facts,
         polar_embeddings, projection_obligations, projection_outbox,
@@ -128,6 +128,10 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "wiki_edits": (DELETE, "edited blocks already proposed for the source profile; they name "
                    "facts of a profile that is deleted"),
     "decision_log": (MOVE, "who decided what about the moved memories, and the undo of it"),
+    "import_runs": (MOVE, "the files brought in from other apps: the moved memories stay "
+                    "one unit that can still be rolled back, under the target profile"),
+    "import_run_items": (MOVE, "which memories each run saved, so a rolled-back run still "
+                         "removes exactly its own"),
     "memory_cues": (MOVE, "cues of the moved facts (path, tool, error, repo, date)"),
     "memory_slots": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "slot_revisions": (DELETE, "derived by the slot pass, rebuilt for the target profile"),

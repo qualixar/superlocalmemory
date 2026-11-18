@@ -125,6 +125,8 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "measurement",  # slm measurement status|on|off: what SLM measures, the off switch (D-28)
         "trust",     # slm trust pending|status|approve: approve asks a person at a terminal (WS-5)
         "health",    # slm health --memory: the Memory Health report (read-only, W3)
+        "flags",     # slm flags [set FLAG on|off]: the 4.2.30 switches and the kill switch
+        "import",    # slm import preview|run|status|list|cancel|undo: other apps' exports (WS-9)
     }
 )
 
