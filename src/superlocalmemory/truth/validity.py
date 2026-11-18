@@ -15,6 +15,13 @@ applied. Evidence that would end the interval at or before the predecessor
 began is skipped (typically a date-only value on the same day, coarser than
 the timestamps after it); when every candidate would, the interval stays open,
 because an inverted interval is worse than an open one.
+
+A date-only value is an interval, not a point (M-10): the day [00:00, next day 00:00).
+An end is *stored* as a timestamp, its lower bound (midnight UTC), so a candidate is
+skipped when its lower bound is not after the predecessor's start (storing it would
+invert the span). When two ends are compared to keep the earlier, the day's upper
+bound is used: one end is earlier only if all of it precedes the other (``hi(a) <=
+lo(b)``), else the recorded end stands (``closing_time_interval``, ``retire_until_sourced``).
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ def normalise(value: object) -> str | None:
 
 
 #: Where a ``valid_until`` came from (I-12, R-11), stored as
-#: ``fact_temporal_validity.valid_until_source`` (M074). ``stated``: the memory or
+#: ``fact_temporal_validity.valid_until_source`` (M073). ``stated``: the memory or
 #: its writer gave the end. ``reviewer``: a person gave it. ``successor_validity`` /
 #: ``successor_fact``: when the replacing memory became true. ``successor_saved`` /
 #: ``applied``: system time only (when SLM learned), so an UPPER BOUND on when the
@@ -75,6 +82,29 @@ def closing_time_sourced(
     predecessor_valid_from: object = None,
 ) -> tuple[str | None, str | None]:
     """(the predecessor's ``valid_until``, its source), or (None, None)."""
+    close, source, _upper = closing_time_interval(
+        event_valid_until=event_valid_until, successor_validity_from=successor_validity_from,
+        successor_fact_valid_from=successor_fact_valid_from,
+        successor_created_at=successor_created_at, applied_at=applied_at,
+        predecessor_valid_from=predecessor_valid_from)
+    return close, source
+
+
+def closing_time_interval(
+    *,
+    event_valid_until: object = None,
+    successor_validity_from: object = None,
+    successor_fact_valid_from: object = None,
+    successor_created_at: object = None,
+    applied_at: object = None,
+    predecessor_valid_from: object = None,
+) -> tuple[str | None, str | None, str | None]:
+    """``closing_time_sourced`` plus the end's upper bound (W0-23, M-10).
+
+    The end is stored as ``close``, its lower bound. ``upper`` is the same instant for a
+    timestamp, and the start of the next day for a date-only value, so a caller that
+    orders two ends can tell when this one might be the later.
+    """
     start = normalise(predecessor_valid_from)
     for source, candidate in (("reviewer", event_valid_until),
                               ("successor_validity", successor_validity_from),
@@ -88,8 +118,10 @@ def closing_time_sourced(
             # Often a date-only value on the predecessor's own day ("2026-10-06"
             # vs "2026-10-06"): coarser than the timestamps after it, so try those.
             continue
-        return close, source
-    return None, None
+        day_only = isinstance(candidate, str) and bool(_DATE_ONLY.match(candidate.strip()))
+        upper = (_instant(close) + timedelta(days=1)).isoformat() if day_only else close
+        return close, source, upper
+    return None, None, None
 
 
 def closing_time(**kwargs: object) -> str | None:
@@ -159,16 +191,28 @@ def retire_until(*, reviewer: object, existing: object, derived: object,
                                 predecessor_valid_from=predecessor_valid_from)[0]
 
 
+def _end_is_earlier(end: object, upper: object, other: object) -> bool:
+    """Whether the end ``end`` (a day, when ``upper`` is later) is certainly before ``other``:
+    hi(end) <= lo(other), else they cannot be ordered (M-10)."""
+    if upper is None or upper == end:
+        return order(end, other) == BEFORE
+    hi, lo = span(upper), span(other)
+    return hi is not None and lo is not None and hi[1] <= lo[0]
+
+
 def retire_until_sourced(*, reviewer: object, existing: object, derived: object,
                          predecessor_valid_from: object, existing_source: str | None = None,
-                         derived_source: str | None = None) -> tuple[str | None, str | None]:
+                         derived_source: str | None = None,
+                         derived_upper: object = None) -> tuple[str | None, str | None]:
     """The ``valid_until`` to store when a memory is retired.
 
     A reviewer's time wins, and is refused (``ValueError``) when it is not after
     the memory began: a person's input is never silently replaced. Otherwise
     the earlier of an end already recorded and the successor's takeover: a
     future expiry set before must not outlive the supersession that ended it
-    sooner. When the two cannot be ordered, the recorded one is kept.
+    sooner. When the two cannot be ordered, the recorded one is kept. ``derived_upper``
+    is the derived end's upper bound (a date-only end is a day, M-10): it is the earlier
+    only when all of it precedes the recorded end.
     """
     if reviewer is not None:
         when = normalise(reviewer)
@@ -181,7 +225,7 @@ def retire_until_sourced(*, reviewer: object, existing: object, derived: object,
     kept = (str(existing), existing_source or "recorded") if existing is not None else None
     if not isinstance(derived, str):
         return kept if kept is not None else (None, None)
-    if kept is None or order(derived, existing) == BEFORE:
+    if kept is None or _end_is_earlier(derived, derived_upper, existing):
         return derived, derived_source
     return kept
 
@@ -201,6 +245,17 @@ def successor_takeover_sourced(
     predecessor_valid_from: object, occurred_at: str,
 ) -> tuple[str | None, str | None]:
     """``successor_takeover`` with the source of the time it found."""
+    close, source, _upper = successor_takeover_interval(
+        conn, successor_fact_id, predecessor_valid_from=predecessor_valid_from,
+        occurred_at=occurred_at)
+    return close, source
+
+
+def successor_takeover_interval(
+    conn: sqlite3.Connection, successor_fact_id: str, *,
+    predecessor_valid_from: object, occurred_at: str,
+) -> tuple[str | None, str | None, str | None]:
+    """``successor_takeover_sourced`` with the end's upper bound (W0-23)."""
     row_tv = conn.execute("SELECT valid_from FROM fact_temporal_validity WHERE fact_id=?",
                           (successor_fact_id,)).fetchone()
     try:
@@ -208,7 +263,7 @@ def successor_takeover_sourced(
                            (successor_fact_id,)).fetchone()
     except sqlite3.OperationalError:  # a minimal fact table without the time columns
         row = None
-    return closing_time_sourced(
+    return closing_time_interval(
         successor_validity_from=row_tv[0] if row_tv is not None else None,
         successor_fact_valid_from=row[0] if row is not None else None,
         successor_created_at=row[1] if row is not None else None,
@@ -218,5 +273,7 @@ def successor_takeover_sourced(
 
 
 __all__ = ["AFTER", "BEFORE", "INCOMPARABLE", "SAME", "SOURCES", "UPPER_BOUND_SOURCES",
-           "closing_time", "closing_time_sourced", "earlier", "normalise", "order", "retire_until",
-           "retire_until_sourced", "span", "successor_takeover", "successor_takeover_sourced"]
+           "closing_time", "closing_time_interval", "closing_time_sourced", "earlier", "normalise",
+           "order", "retire_until",
+           "retire_until_sourced", "span", "successor_takeover", "successor_takeover_interval",
+           "successor_takeover_sourced"]

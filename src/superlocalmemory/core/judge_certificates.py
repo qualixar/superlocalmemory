@@ -87,6 +87,36 @@ def labels_since(conn: sqlite3.Connection, cell: Cell) -> str:
     return row[0] or ""
 
 
+def _starts(conn: sqlite3.Connection) -> bool:
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                             "AND name='judge_certificate_starts'").fetchone())
+
+
+def start_of(conn: sqlite3.Connection, cell: Cell) -> float | None:
+    """The threshold the cell's fixed sequence begins at, once it has been fixed (W0-11)."""
+    if not _starts(conn):
+        return None
+    row = conn.execute(f"SELECT start_threshold FROM judge_certificate_starts WHERE {_KEY}",  # noqa: S608
+                       cell.args()).fetchone()
+    return None if row is None else float(row[0])
+
+
+def fix_start(conn: sqlite3.Connection, cell: Cell, start: float) -> float:
+    """Store the cell's start the first time it is tested; returns the start that stands.
+
+    The first claim wins and a trigger refuses any later change, so the start depends on
+    the scores at the first test and never moves with later scores or labels.
+    """
+    if not _starts(conn):
+        return start
+    conn.execute("INSERT OR IGNORE INTO judge_certificate_starts (profile_id, question_id, "
+                 "question_version, tier, model, verdict, population, regime, start_threshold, "
+                 "fixed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (*cell.args(), float(start), _now()))
+    stored = start_of(conn, cell)
+    return start if stored is None else stored
+
+
 def _void(conn: sqlite3.Connection, cert_id: str, reason: str) -> None:
     conn.execute("UPDATE judge_certificates SET voided_at = ?, void_reason = ? "
                  "WHERE cert_id = ? AND voided_at IS NULL", (_now(), reason, cert_id))
@@ -200,5 +230,5 @@ def records(conn: sqlite3.Connection, profile_id: str | None, limit: int = 100) 
 
 
 __all__ = ["Cell", "DRIFT", "DRIFT_LEVEL", "DriftResult", "LABELS", "MIN_RECENT", "check_drift",
-           "ks_pvalue", "ks_statistic", "label_set_hash", "labels_since", "open_record",
-           "reconcile", "records", "void_for_drift"]
+           "fix_start", "ks_pvalue", "ks_statistic", "label_set_hash", "labels_since", "open_record",
+           "reconcile", "records", "start_of", "void_for_drift"]

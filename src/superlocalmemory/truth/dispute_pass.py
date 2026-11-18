@@ -82,6 +82,8 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
  WHERE d.state = 'open' AND d.reason_code NOT IN ('rolled_back', 'origin_below_head')
  ORDER BY d.opened_at
 """
+_OPEN_ONE = _OPEN.replace("ORDER BY d.opened_at", "AND d.dispute_id = ?")
+
 #: A dispute the ledger reopened by rolling a retirement back is a person's to
 #: settle (R-09): no judge answers it, so the same judge cannot act on it again.
 #: The same holds for one the origin lattice refused (``origin_below_head``, M-15).
@@ -119,7 +121,7 @@ class DisputePass:
         decided = {**reused, **dict(zip(ask, fresh))}
         with self._db.raw_connection() as conn:  # 3. one short write
             write_receipts(conn, receipts)
-            self._apply(conn, [(rows[i], decided[i]) for i in sorted(decided)])
+            self._apply(conn, [(rows[i], decided[i], hashes[i][1]) for i in sorted(decided)])
         logger.info("Dispute pass: %s", dict(self.counts))
         return dict(self.counts)
 
@@ -127,25 +129,38 @@ class DisputePass:
         acting = self._flags.enabled("judge.ladder")
         auto_apply = auto_apply_allowed(self._flags)
         gates: dict[str, ActingGate] = {}
-        for row, decision in pairs:
+        for row, decision, judged in pairs:
             self.counts[f"{decision.tier}:{decision.verdict}"] += 1
             if not acting or decision.abstained:
+                continue
+            if not self._unchanged(conn, row[0], judged):
+                self.counts["changed_during_judge"] += 1  # I-13: it stays open for the next pass
                 continue
             gate = gates.setdefault(row[1], ActingGate(
                 conn, profile_id=row[1], question_id=SLOT_RELATION.question_id,
                 version=SLOT_RELATION.version))
             # Rules too: closing a dispute is a memory change, and a rule acts only
             # on an audit of its own decisions (I-10, M-18), like any judge.
-            if not gate.allows(decision.tier, decision.model, decision.verdict,
-                               decision.confidence, population=SUBJECT_KIND,
-                               regime=decision.regime,
-                               routing_threshold=decision.routing_threshold):
+            permit = gate.permit(decision.tier, decision.model, decision.verdict,
+                                 decision.confidence, population=SUBJECT_KIND,
+                                 regime=decision.regime,
+                                 routing_threshold=decision.routing_threshold)
+            if permit is None:
                 self.counts["held_uncalibrated"] += 1
                 continue
             if (decision.verdict == "replaces" and self._flags.enabled("trust.taint")
                     and self._origin_held(conn, row)):
                 continue
-            self._act(conn, row, decision, auto_apply)
+            self._act(conn, row, decision, auto_apply, permit.cert_id)
+
+    def _unchanged(self, conn: Any, dispute_id: str, judged: str) -> bool:
+        """I-13, in the write step (W0-24): the pair the verdict was computed on is still the
+        pair. Both sides are read again and hashed as the judge saw them; an edit made during
+        the judge call, or a dispute that is no longer open, means the verdict is not acted on."""
+        row = conn.execute(_OPEN_ONE, (dispute_id,)).fetchone()
+        if row is None:
+            return False
+        return inputs_hash(SLOT_RELATION, _item(row), self._key) == judged
 
     def _origin_held(self, conn: Any, row: tuple) -> bool:
         """M-15: a judge may retire a memory only for one whose origin is at least its own.
@@ -169,7 +184,8 @@ class DisputePass:
                          "AND state = 'open'", (supersession.ORIGIN_BELOW_HEAD, dispute_id))
         return True
 
-    def _act(self, conn: Any, row: tuple, decision: Decision, auto_apply: bool) -> None:
+    def _act(self, conn: Any, row: tuple, decision: Decision, auto_apply: bool,
+             cert_id: str) -> None:
         dispute_id, profile_id, _older, _a, _newer, _b, scope, basis = row
         verdict = decision.verdict
         if verdict == "replaces" and not auto_apply:
@@ -185,7 +201,7 @@ class DisputePass:
                                                  predecessor=loser, successor=successor)
                 if ledger != "applied":
                     raise _NotApplied(ledger)
-            self._mark(conn, decision, f"resolved_{verdict}", dispute_id)
+            self._mark(conn, decision, f"resolved_{verdict}", dispute_id, cert_id)
             self.counts[f"resolved_{verdict}"] += 1
         except slot_store.StaleDisputeError:
             conn.execute("ROLLBACK TO dispute")  # undo anything done before the check
@@ -204,10 +220,11 @@ class DisputePass:
             conn.execute("RELEASE dispute")
 
     @staticmethod
-    def _mark(conn: Any, decision: Decision, action: str, dispute_id: str | None = None) -> None:
-        if decision.receipts:
-            conn.execute("UPDATE judge_receipts SET action_taken = ? WHERE receipt_id = ?",
-                         (action, decision.receipts[-1]))
+    def _mark(conn: Any, decision: Decision, action: str, dispute_id: str | None = None,
+              cert_id: str | None = None) -> None:
+        if decision.receipts:  # I-10: the receipt that acted names the certificate it relied on
+            conn.execute("UPDATE judge_receipts SET action_taken = ?, action_ref = ? "
+                         "WHERE receipt_id = ?", (action, cert_id, decision.receipts[-1]))
             if dispute_id is not None:  # R-09: the revision the decision changed names it
                 conn.execute("UPDATE slot_revisions SET receipt_id = ? WHERE revision_id = "
                              "(SELECT revision_b FROM slot_disputes WHERE dispute_id = ?)",

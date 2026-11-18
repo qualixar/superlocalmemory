@@ -114,6 +114,11 @@ def test_the_report_reads_randomised_receipts_and_writes_nothing(store) -> None:
     now = datetime(2026, 11, 18, 12, tzinfo=UTC)
     rng = random.Random(7)
     conn = sqlite3.connect(str(store.db_path))
+    conn.execute(  # W0-17b: evidence starts at the profile's first pull delivery
+        "INSERT INTO injection_deliveries (delivery_id, profile_id, session_id, client, path,"
+        " design, holdout_state, epsilon, eligible_count, candidates, delivered_at) VALUES"
+        " ('first-pull', 'default', 'boot', 'mcp', 'mcp_recall', 'one-out-v2', 'off', 0.0, 0, 0,"
+        " ?)", ((now - timedelta(days=30)).isoformat(),))
     for i in range(600):
         at = now - timedelta(days=3, minutes=i)
         inc = int(rng.random() < 0.5)

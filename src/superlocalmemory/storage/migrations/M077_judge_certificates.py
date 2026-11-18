@@ -11,6 +11,13 @@ population, batching regime), the method, alpha, delta, the labels it rests on
 voided, with why (``labels``: new labels no longer support it; ``drift``: the
 judge's recent scores no longer look like the audited ones, M-07).
 
+Each cell also has one stored **start** (``judge_certificate_starts``): the strictest
+grid threshold that had enough items the first time the cell was tested. The fixed
+sequence over the thresholds always begins there (W0-11, M-03), so the family-wise error
+stays at delta however the counts grow, and a certificate at a loose threshold is not
+voided when a stricter one later becomes testable. It is chosen from scores, never from
+labels, and a trigger refuses to change it once stored.
+
 At most one open certificate per key. Counts and ids only, never memory text,
 so erasing a memory has nothing to erase here; the labels it rests on are
 erased with their receipts (I-11) and the next check voids it.
@@ -48,23 +55,48 @@ CREATE TABLE IF NOT EXISTS judge_certificates (
     void_reason      TEXT,
     CHECK ((voided_at IS NULL) = (void_reason IS NULL))
 );
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_judge_certificates_open
     ON judge_certificates (profile_id, question_id, question_version, tier, model, verdict,
                            population, regime) WHERE voided_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_judge_certificates_profile
-    ON judge_certificates (profile_id, issued_at)
+    ON judge_certificates (profile_id, issued_at);
+
+CREATE TABLE IF NOT EXISTS judge_certificate_starts (
+    profile_id       TEXT NOT NULL,
+    question_id      TEXT NOT NULL,
+    question_version TEXT NOT NULL,
+    tier             TEXT NOT NULL,
+    model            TEXT NOT NULL,
+    verdict          TEXT NOT NULL,
+    population       TEXT NOT NULL,
+    regime           TEXT NOT NULL,
+    start_threshold  REAL NOT NULL,
+    fixed_at         TEXT NOT NULL,
+    PRIMARY KEY (profile_id, question_id, question_version, tier, model, verdict,
+                 population, regime)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_judge_certificate_starts_fixed
+    BEFORE UPDATE ON judge_certificate_starts
+BEGIN
+    SELECT RAISE(ABORT, 'a certificate start is fixed once stored (W0-11)');
+END
 """
 
 
 def apply(conn: sqlite3.Connection) -> None:
-    for statement in DDL.split(";"):
+    # Statements are split on a blank line: the trigger's body holds its own ";".
+    for statement in DDL.split(";\n\n"):
         if statement.strip():
             conn.execute(statement)
 
 
 def verify(conn: sqlite3.Connection) -> bool:
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-    return {"judge_certificates", "uq_judge_certificates_open"} <= names
+    return {"judge_certificates", "uq_judge_certificates_open", "judge_certificate_starts",
+            "trg_judge_certificate_starts_fixed"} <= names
 
 
 def repair(conn: sqlite3.Connection) -> None:

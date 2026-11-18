@@ -69,7 +69,8 @@ DELETE  activation_cache, backup_destinations, behavioral_assertions,
         behavioral_patterns, community_summaries, compliance_audit,
         artifact_versions, compiled_pages, core_memory_blocks, cross_platform_sync_log,
         entity_communities,
-        entity_link_repair_undo, graph_generation, judge_certificates, memory_kind_runs,
+        entity_link_repair_undo, graph_generation, judge_certificate_starts,
+        judge_certificates, memory_kind_runs,
         memory_slots, mesh_events, mesh_locks, mesh_messages, mesh_peers, mesh_state,
         page_citations, pending_outcomes, persona_summary, proposal_sets, proposals,
         rbac_memberships,
@@ -91,6 +92,8 @@ import sqlite3
 from typing import Any
 
 MOVE, MERGE, REKEY, VEC, DELETE, KEEP = "move", "merge", "rekey", "vec", "delete", "keep"
+#: The population of judge receipts moved by a fold (W0-28); no certificate cell reads it.
+FOLDED_POPULATION = "folded"
 
 #: table -> (decision, why). Every discovered profile-scoped table must be here.
 DECISIONS: dict[str, tuple[str, str]] = {
@@ -102,9 +105,10 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "data_repair_undo": (MOVE, "undo record of an automatic data repair; it names the "
                                "moved facts by id, so it still applies after the move"),
     "dead_letter_operations": (MOVE, "writes that failed and can still be retried"),
-    # 4.2.30 truth layer. Leases are per fact and move with it. Slot ids are
-    # derived from the profile, so slots cannot move; they are derived state the
-    # slot pass rebuilds for the target (it restarts when revisions vanish).
+    # 4.2.30 truth layer. Leases are per fact and move with it. Slots are derived
+    # state keyed to the profile (their ids are opaque since R-12, but each slot
+    # belongs to one profile's facts), so they are deleted and the slot pass
+    # rebuilds them for the target (it restarts when revisions vanish).
     "memory_leases": (MOVE, "source fingerprints of the moved facts"),
     "fact_trust": (MOVE, "class and taint go where the fact goes"),
     "fact_signatures": (MOVE, "the signature goes where the fact goes; only profile_id changes, "
@@ -133,10 +137,15 @@ DECISIONS: dict[str, tuple[str, str]] = {
     "injection_usage": (MOVE, "usage signals of those deliveries, with the facts"),
     "need_turns": (MOVE, "the need gate's ids-only log of prompts in the moved profile"),
     "slot_disputes": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
-    "judge_receipts": (MOVE, "ids-only receipts of judge decisions on the moved memories"),
+    "judge_receipts": (MOVE, "ids-only receipts of judge decisions on the moved memories; "
+                       "marked population 'folded' first, so no certificate cell of the target "
+                       "reads labels earned on the source's population (W0-28), and they and "
+                       "their labels stay as evidence"),
     "judge_certificates": (DELETE, "a statement about the source profile's own labels; the "
                            "labels move with their receipts and the target earns its "
                            "certificate again from the combined set"),
+    "judge_certificate_starts": (DELETE, "where the source profile's cells began their fixed "
+                                 "sequence; the target's cells keep their own starts"),
     # search indexes and vectors
     "bm25_tokens": (MOVE, "keyword index"),
     "fact_embeddings": (VEC, "vectors (partition per profile)"),
@@ -390,8 +399,8 @@ def _requeue_projection(conn: Any, tables: set[str], target: str) -> None:
 def _requeue_slots(conn: Any) -> None:
     """The slot pass binds each moved fact again, under its new profile (R-38).
 
-    The source's slots are deleted (their ids name the profile) and the moved
-    facts sit behind the slot pass's cursor, so without this they would never
+    The source's slots are deleted (derived state of the source profile) and the
+    moved facts sit behind the slot pass's cursor, so without this they would never
     get a slot in the target profile.
     """
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
@@ -424,6 +433,12 @@ def fold_profile(conn: Any, source: str, target: str = "default") -> dict[str, A
     merged = _merge_entities(conn, present, source, target)
     order = [t for t in _FIRST if t in present] + [t for t in tables if t not in _FIRST]
     counts: dict[str, Any] = {}
+    if "judge_receipts" in present:
+        # W0-28: certificate cells are keyed by population and no cell reads FOLDED, so the
+        # target neither inherits a certificate earned on the source's labels nor has its own
+        # spoiled by them. Done before the move, while the source's rows can still be told apart.
+        conn.execute("UPDATE judge_receipts SET population = ? WHERE profile_id = ?",
+                     (FOLDED_POPULATION, source))
     for table in order:  # every move before any delete: move triggers write state rows
         action = DECISIONS[table][0]
         if action not in (KEEP, DELETE):
@@ -439,5 +454,6 @@ def fold_profile(conn: Any, source: str, target: str = "default") -> dict[str, A
     return counts
 
 
-__all__ = ["DECISIONS", "DELETE", "KEEP", "MERGE", "MOVE", "REKEY", "VEC", "ProfileFoldError",
+__all__ = ["DECISIONS", "DELETE", "FOLDED_POPULATION", "KEEP", "MERGE", "MOVE", "REKEY", "VEC",
+           "ProfileFoldError",
            "fold_profile", "profile_scoped_tables"]

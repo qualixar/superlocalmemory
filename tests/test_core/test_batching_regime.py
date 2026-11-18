@@ -26,6 +26,7 @@ from superlocalmemory.core.judge_ladder import (
 )
 from superlocalmemory.core.judge_questions import SLOT_RELATION
 from superlocalmemory.storage.migrations import M072_judge_receipts as M072
+from superlocalmemory.storage.migrations import M077_judge_certificates as M077
 from tests.test_core.test_audit_sampler import KEY, Fixed, _items
 
 
@@ -58,9 +59,34 @@ def test_every_receipt_and_decision_carries_its_regime(tier, n, regime) -> None:
     assert {d.regime for d in decisions} == {regime}
 
 
-def test_a_lone_tail_after_full_batches_is_single() -> None:
-    _, rows = _decide(Fixed, MAX_BATCH + 1)
-    assert [r.batching_regime for r in rows].count("single") == 1
+@pytest.mark.parametrize("n", [MAX_BATCH + 1, 2 * MAX_BATCH + 1, 3 * MAX_BATCH + 1, 50])
+def test_no_item_is_left_alone_by_the_arithmetic_of_the_batches(n) -> None:
+    # W0-25: 17 items were a batch of 16 and a batch of 1, so one item's regime (single, the
+    # certifiable one) came from the remainder. The batches are now balanced: 9 + 8.
+    _, rows = _decide(Fixed, n)
+    assert {r.batching_regime for r in rows} == {"batched"}
+    sizes = sorted({r.batch_size for r in rows})
+    assert sizes[0] >= 2 and sizes[-1] <= MAX_BATCH and sizes[-1] - sizes[0] <= 1
+    assert sum(1 for _ in rows) == n
+
+
+def test_a_lone_item_with_no_peers_is_still_single() -> None:
+    _, rows = _decide(Fixed, 1)
+    assert [r.batching_regime for r in rows] == ["single"]
+
+
+def test_a_tier_that_asks_one_at_a_time_stays_single_at_any_count() -> None:
+    class OneAtATime(Fixed):
+        def batch_limit(self, question):
+            return 1
+
+    _, rows = _decide(OneAtATime, 5)
+    assert {r.batching_regime for r in rows} == {"single"}
+
+
+def test_a_rule_is_never_batched_whatever_the_count() -> None:
+    _, rows = _decide(Rule, MAX_BATCH + 1)
+    assert {r.batching_regime for r in rows} == {"unbatched"}
 
 
 def _gate(conn) -> ActingGate:
@@ -88,6 +114,7 @@ def _label_all(conn, rows, label):
 def test_a_batched_cell_never_acts_and_never_certifies_a_single_ask() -> None:
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
+    M077.apply(conn)
     _, rows = _decide(Fixed, 112, conn)  # seven full batches of sixteen
     _, inbox = _decide(Fixed, 304, conn, model="m2", verdict="replaces", conf=0.6)
     _label_all(conn, inbox, "replaces")  # real replacements in the tier's inbox (M-02)
@@ -101,6 +128,7 @@ def test_a_batched_cell_never_acts_and_never_certifies_a_single_ask() -> None:
 def test_a_single_ask_cell_certifies_on_its_own_labels() -> None:
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
+    M077.apply(conn)
     rows = _decide_alone(112, conn)
     inbox = _decide_alone(300, conn, model="m2", verdict="replaces", conf=0.6)
     _label_all(conn, inbox, "replaces")
@@ -114,5 +142,21 @@ def test_a_single_ask_cell_certifies_on_its_own_labels() -> None:
 def test_the_regime_is_a_required_part_of_the_gate_key() -> None:
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
+    M077.apply(conn)
     with pytest.raises(TypeError):
         _gate(conn).allows("laya", "m", "same", 0.95, population="slot_dispute")
+
+
+def test_balanced_batches_keep_order_respect_the_limit_and_leave_no_remainder() -> None:
+    from superlocalmemory.core.judge_ladder import balanced_batches
+
+    assert balanced_batches([], 16) == []
+    assert balanced_batches([7], 16) == [[7]]
+    assert balanced_batches(list(range(16)), 16) == [list(range(16))]
+    assert [len(b) for b in balanced_batches(list(range(33)), 32)] == [17, 16]
+    assert [len(b) for b in balanced_batches(list(range(17)), 16)] == [9, 8]
+    assert [len(b) for b in balanced_batches(list(range(5)), 1)] == [1] * 5
+    for n, limit in ((100, 16), (31, 16), (49, 16), (2, 16)):
+        batches = balanced_batches(list(range(n)), limit)
+        assert [i for b in batches for i in b] == list(range(n))
+        assert max(map(len, batches)) <= limit and min(map(len, batches)) >= 2

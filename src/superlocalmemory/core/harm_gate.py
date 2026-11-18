@@ -69,6 +69,7 @@ SELECT r.fact_id, r.included, r.propensity, d.session_id, d.delivery_id, {outcom
  WHERE d.profile_id = ? AND d.path IN ({paths}) AND r.eligible = 1
    AND r.propensity < 1
    AND julianday(d.delivered_at) + ? / 24.0 <= julianday(?)
+   AND {evidence}
 """
 
 
@@ -88,11 +89,12 @@ def _units(conn: sqlite3.Connection, profile_id: str, outcome: str,
            as_of: datetime) -> dict[str, list[tuple[int, float, str, float]]]:
     expr, params = effects._outcome_sql(outcome)  # noqa: SLF001 - the one outcome definition
     paths = sorted(rz.RANDOMISED_PATHS)
-    sql = _UNITS.format(outcome=expr, paths=", ".join("?" * len(paths)))
+    clause, pulls = effects.evidence_clause()  # W0-17b: pilot deliveries are not evidence
+    sql = _UNITS.format(outcome=expr, paths=", ".join("?" * len(paths)), evidence=clause)
     out: dict[str, list[tuple[int, float, str, float]]] = defaultdict(list)
     try:
         rows = conn.execute(sql, [*params, profile_id, *paths, effects.OUTCOME_WINDOW_H,
-                                  usage.stamp(as_of)])
+                                  usage.stamp(as_of), *pulls])
     except sqlite3.OperationalError:
         return {}
     for fact, included, p, session, did, y in rows:

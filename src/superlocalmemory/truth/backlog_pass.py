@@ -64,6 +64,7 @@ SELECT c.case_id, c.profile_id, c.predecessor_fact_id, p.content, c.successor_fa
    AND c.reason_code IN ({reasons})
  ORDER BY c.created_at, c.case_id
 """
+_PENDING_ONE = _PENDING.replace("ORDER BY c.created_at, c.case_id", "AND c.case_id = ?")
 
 
 def _item(row: tuple) -> Item:
@@ -114,14 +115,14 @@ class BacklogPass:
         decided = {**reused, **dict(zip(ask, fresh))}
         with self._db.raw_connection() as conn:  # 3. one short write
             write_receipts(conn, receipts)
-            self._apply(conn, [(items[i], decided[i]) for i in sorted(decided)])
+            self._apply(conn, [(items[i], decided[i], keys[i][1]) for i in sorted(decided)])
         logger.info("Backlog pass: %s", dict(self.counts))
         return dict(self.counts)
 
-    def _apply(self, conn: Any, pairs: list[tuple[Item, Decision]]) -> None:
+    def _apply(self, conn: Any, pairs: list[tuple[Item, Decision, str]]) -> None:
         acting = self._flags.enabled("judge.ladder")
         gates: dict[str, ActingGate] = {}
-        for item, decision in pairs:
+        for item, decision, judged in pairs:
             self.counts[f"{decision.tier}:{decision.verdict}"] += 1
             if decision.abstained:
                 continue
@@ -130,18 +131,31 @@ class BacklogPass:
                 continue
             if not acting:
                 continue
+            if not self._unchanged(conn, item.subject_id, judged):
+                self.counts["changed_during_judge"] += 1  # I-13: it stays for the next pass
+                continue
             gate = gates.setdefault(item.profile_id, ActingGate(
                 conn, profile_id=item.profile_id, question_id=SLOT_RELATION.question_id,
                 version=SLOT_RELATION.version))
-            if not gate.allows(decision.tier, decision.model, decision.verdict,
-                               decision.confidence, population=POPULATION,
-                               regime=decision.regime,
-                               routing_threshold=decision.routing_threshold):
+            permit = gate.permit(decision.tier, decision.model, decision.verdict,
+                                 decision.confidence, population=POPULATION,
+                                 regime=decision.regime,
+                                 routing_threshold=decision.routing_threshold)
+            if permit is None:
                 self.counts["held_uncalibrated"] += 1
                 continue
-            self._close(conn, item, decision)
+            self._close(conn, item, decision, permit.cert_id)
 
-    def _close(self, conn: Any, item: Item, decision: Decision) -> None:
+    def _unchanged(self, conn: Any, case_id: str, judged: str) -> bool:
+        """I-13 in the write step (W0-24): the case is still pending and its two texts hash as
+        the judge saw them. An edit made during the judge call, or a case settled meanwhile,
+        means the verdict is not acted on."""
+        reasons = sorted(ot.MACHINE_REASONS)
+        row = conn.execute(_PENDING_ONE.format(reasons=",".join("?" * len(reasons))),
+                           (ot.MACHINE_ACTOR_KIND, *reasons, case_id)).fetchone()
+        return row is not None and inputs_hash(SLOT_RELATION, _item(row), self._key) == judged
+
+    def _close(self, conn: Any, item: Item, decision: Decision, cert_id: str) -> None:
         conn.execute("SAVEPOINT backlog_case")
         try:
             cur = conn.execute("SELECT * FROM correction_cases WHERE case_id = ?",
@@ -153,8 +167,9 @@ class BacklogPass:
                                  closed_reason=f"closed by a certified judge ({decision.tier}): "
                                                f"{decision.verdict}")
             if closed and decision.receipts:
-                conn.execute("UPDATE judge_receipts SET action_taken = ? WHERE receipt_id = ?",
-                             (f"closed_{decision.verdict}", decision.receipts[-1]))
+                conn.execute("UPDATE judge_receipts SET action_taken = ?, action_ref = ? "
+                             "WHERE receipt_id = ?",
+                             (f"closed_{decision.verdict}", cert_id, decision.receipts[-1]))
             self.counts["closed" if closed else "already_reviewed"] += 1
         except ot.OvertakeRaced:
             conn.execute("ROLLBACK TO backlog_case")

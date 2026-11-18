@@ -180,6 +180,8 @@ class Certificate:
     #: deterministic rule's closing verdict (D-35) do not need it; a rule's miss
     #: rate is still reported in false_keep_upper.
     base_rate_required: bool = False
+    #: The grid threshold the fixed sequence began at (W0-11); None when none was testable.
+    start: float | None = None
 
     @property
     def beats_base_rate(self) -> bool:
@@ -212,8 +214,25 @@ def _holds_now(errors: Sequence[bool], log_error: float, log_clean: float, goal:
     return sum(log_error if w else log_clean for w in errors) >= goal
 
 
+def first_testable_start(scores: Sequence[float], *, alpha: float, delta: float,
+                         grid: Sequence[float] = GRID) -> float | None:
+    """The strictest grid threshold that selects enough items for a clean run to certify.
+
+    A threshold selecting fewer items than a clean run needs can never certify, and
+    testing it first would stop the sequence at once. The choice depends on the scores
+    only, never the labels. The gate stores it at the cell's first test (W0-11).
+    """
+    p1 = alpha / 5.0
+    floor = math.ceil(math.log(1.0 / delta) / math.log((1 - p1) / (1 - alpha)))
+    for t in sorted(set(grid), reverse=True):
+        if sum(1 for s in scores if s >= t) >= floor:
+            return t
+    return None
+
+
 def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alpha: float,
-                         delta: float, grid: Sequence[float] = GRID) -> Certificate:
+                         delta: float, grid: Sequence[float] = GRID,
+                         start: float | None = None) -> Certificate:
     """Anytime-valid certificate that the error rate at a threshold is below alpha.
 
     ``scores``/``wrong`` must be in the order the labels arrived. For each grid
@@ -226,9 +245,15 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
     certified while E_n stands at or above 1/delta after the latest label (not
     "ever reached it", W0-12), with no penalty for looking after every label. At
     alpha = delta = 0.05 a clean run needs 73 labels, 112 with one early error,
-    151 with two. Fixed-sequence testing across the grid. Revocation: on the
-    labels after the first crossing, a second e-process for "error rate <= alpha"
-    against 2*alpha; reaching 1/delta revokes it for good.
+    151 with two. Fixed-sequence testing across the grid: the sequence begins at
+    ``start`` and goes to ever looser thresholds, stopping at the first that is not
+    certified. ``start`` is fixed once per cell, from the scores at its first test
+    (``first_testable_start``; None here means "choose it now"), so the first test
+    never moves as counts grow and the family-wise error stays at delta (W0-11); a
+    stricter threshold that becomes testable later is never added in front, so a
+    certificate at a looser one does not flap. Revocation: on the labels after the
+    first crossing, a second e-process for "error rate <= alpha" against 2*alpha;
+    reaching 1/delta revokes it for good.
     """
     if len(scores) != len(wrong):
         raise ValueError("scores and wrong must align")
@@ -238,15 +263,13 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
     goal = math.log(1.0 / delta)
     up = (math.log(p1 / alpha), math.log((1 - p1) / (1 - alpha)))
     down = (math.log(2.0), math.log((1 - 2 * alpha) / (1 - alpha)))
-    # A threshold selecting fewer items than a clean run needs can never certify;
-    # testing it first would stop the sequence at once. Skipping it depends on the
-    # scores only, never the labels, so the test stays valid.
-    floor = math.ceil(goal / up[1])
+    if start is None:
+        start = first_testable_start(scores, alpha=alpha, delta=delta, grid=grid)
+    if start is None:
+        return Certificate(None, alpha, delta, None, False, ())
     chosen, at, revoked, tested = None, None, False, []
-    for t in sorted(set(grid), reverse=True):
+    for t in (g for g in sorted(set(grid), reverse=True) if g <= start):
         seq = [bool(w) for s, w in zip(scores, wrong) if s >= t]
-        if len(seq) < floor and chosen is None:
-            continue
         cross = _crossing(seq, up[0], up[1], goal)
         if cross is not None and _crossing(seq[cross:], down[0], down[1], goal) is not None:
             revoked, cross = True, None
@@ -256,7 +279,7 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
         if cross is None:
             break
         chosen, at = t, cross
-    return Certificate(chosen, alpha, delta, at, revoked, tuple(tested))
+    return Certificate(chosen, alpha, delta, at, revoked, tuple(tested), start=start)
 
 
 #: The tier's inbox: every pair drawn for the inbox sample (one keyed draw per
@@ -275,7 +298,7 @@ SELECT r.inputs_hash, l.label FROM judge_receipts r
 #: audit labels if any (W0-03). The labeller's order and choice never matter:
 #: the gate reads the drawn sequence and stops at the first unlabelled receipt.
 _DRAWN = """
-SELECT r.receipt_id, r.confidence, l.label FROM judge_receipts r
+SELECT r.receipt_id, r.confidence, l.label, r.inputs_hash FROM judge_receipts r
   LEFT JOIN judge_labels l ON l.receipt_id = r.receipt_id
        AND l.source = 'audit' AND l.blind = 1
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
@@ -291,12 +314,20 @@ CANNOT_TELL = "cannot_tell"
 CERTIFIABLE_REGIMES = frozenset({"single", "unbatched"})
 
 
+def _first_per_pair(rows: list[tuple]) -> list[tuple]:
+    """One drawn receipt per pair in the cell: the first (W0-26). A pair re-asked because a
+    tier became available gets new receipts at tiers that already answered; each is a fresh
+    audit candidate, but the pair is one trial, so only its first drawn receipt counts."""
+    first: dict[str, str] = {}
+    return [row for row in rows if first.setdefault(row[3], row[0]) == row[0]]
+
+
 def _drawn_prefix(rows: list[tuple]) -> list[tuple[float, frozenset[str]]]:
     """(score, labels) per drawn receipt, in decision order, up to the first
     receipt with no label yet."""
     out: list[tuple[float, set[str]]] = []
     index: dict[str, int] = {}
-    for rid, conf, label in rows:
+    for rid, conf, label, _pair in rows:
         if rid not in index:
             index[rid] = len(out)
             out.append((_score(conf), set()))
@@ -313,6 +344,13 @@ def _drawn_prefix(rows: list[tuple]) -> list[tuple[float, frozenset[str]]]:
 def _score(confidence: float | None) -> float:
     """A deterministic tier's decisions (no score) sit at the upper bound."""
     return 1.0 if confidence is None else float(confidence)
+
+
+@dataclass(frozen=True)
+class Permit:
+    """A decision the gate lets act, and the stored certificate it relied on."""
+
+    cert_id: str
 
 
 class ActingGate:
@@ -351,19 +389,21 @@ class ActingGate:
             rows = self._conn.execute(_DRAWN, (self._profile, self._question, self._version,
                                                tier, model, verdict, population,
                                                regime, since)).fetchall()
+            rows = _first_per_pair(rows)  # W0-26
             drawn = _drawn_prefix(rows)
             self._drawn_ids[key] = list(dict.fromkeys(r[0] for r in rows))[:len(drawn)]
             scores = [score for score, _ in drawn]
             # Disagreeing labellers or "cannot tell" count as an error (conservative).
             wrong = [len(labels) > 1 or CANNOT_TELL in labels
                      or is_wrong(verdict, next(iter(labels))) for _, labels in drawn]
+            start = records.start_of(self._conn, self._cell(*key))  # W0-11
             if verdict == RETIRING:
                 cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
-                                            delta=self._delta)
+                                            delta=self._delta, start=start)
             elif regime == "unbatched":
-                cert = self._rule_closing(scores, wrong, verdict)
+                cert = self._rule_closing(scores, wrong, verdict, start)
             else:
-                cert = self._closing(scores, wrong, verdict, tier, model, population)
+                cert = self._closing(scores, wrong, verdict, tier, model, population, start)
             self._cache[key] = cert
         return self._cache[key]
 
@@ -391,6 +431,9 @@ class ActingGate:
             return cert
         self._recorded.add(key)
         cell = self._cell(*key)
+        if cert.start is not None and records.fix_start(self._conn, cell, cert.start) != cert.start:
+            self._cache.pop(key, None)  # another writer fixed the start first: it stands
+            cert = self.certificate(*key)
         records.reconcile(self._conn, cell, cert, method=self._method(verdict, regime),
                           receipt_ids=self._drawn_ids.get(key, []))
         if cert.acts:
@@ -404,24 +447,25 @@ class ActingGate:
                 cert = self.certificate(*key)  # only labels since the void count now
         return cert
 
-    def _rule_closing(self, scores: list[float], wrong: list[bool], verdict: str) -> Certificate:
+    def _rule_closing(self, scores: list[float], wrong: list[bool], verdict: str,
+                      start: float | None = None) -> Certificate:
         """D-35: a deterministic rule closes on the e-process at alpha_close over its
         own drawn decisions; its miss rate is reported beside it, not compared."""
         cert = eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
-                                    delta=self._delta)
+                                    delta=self._delta, start=start)
         upper = (clopper_pearson_upper(sum(wrong), len(wrong), self._delta)
                  if wrong else None)
         return replace(cert, false_keep_upper=upper)
 
     def _closing(self, scores: list[float], wrong: list[bool], verdict: str, tier: str,
-                 model: str, population: str) -> Certificate:
+                 model: str, population: str, start: float | None = None) -> Certificate:
         """M-02 for a model tier: a closing verdict must also keep fewer replacements
         than closing everything would. The e-process and the two bounds each get
         delta/3, so the whole statement holds at 1 - delta (W0-07; U and L are
         fixed-n bounds, so they are valid at a stated check, not under every look)."""
         third = self._delta / 3
         cert = replace(eprocess_certificate(scores, wrong, alpha=self._alpha_for(verdict),
-                                            delta=third), base_rate_required=True)
+                                            delta=third, start=start), base_rate_required=True)
         if cert.threshold is None:
             return cert
         picked = [w for s, w in zip(scores, wrong) if s >= cert.threshold]
@@ -438,21 +482,37 @@ class ActingGate:
         replaced = sum(1 for got in labels.values() if got == {RETIRING})
         return clopper_pearson_lower(replaced, len(labels), delta)
 
-    def allows(self, tier: str, model: str, verdict: str, confidence: float | None, *,
-               population: str, regime: str, routing_threshold: float | None = None) -> bool:
+    def permit(self, tier: str, model: str, verdict: str, confidence: float | None, *,
+               population: str, regime: str,
+               routing_threshold: float | None = None) -> Permit | None:
+        """The open certificate this decision may act on, or None (I-10, I-14, W0-13).
+
+        The caller puts ``Permit.cert_id`` in the acted receipt's ``action_ref``. No open
+        certificate row for the cell (a store without the table, or a record that was
+        not written) is no permission, whatever the labels say.
+        """
+        from superlocalmemory.core import judge_certificates as records
+
         if regime not in CERTIFIABLE_REGIMES:
-            return False  # W0-04: batched labels are not independent trials
+            return None  # W0-04: batched labels are not independent trials
         cert = self._record(tier, model, verdict, population, regime)
         if not (cert.acts and _score(confidence) >= cert.threshold):
-            return False
+            return None
         # W0-10: the acted set is {score >= max(t*, r)}; it is bounded only when r
         # is at or below t* or is itself a threshold the certified chain passed.
-        if routing_threshold is not None and routing_threshold > cert.threshold:
-            return routing_threshold in {t for t, _n, _e, ok in cert.tested if ok}
-        return True
+        if (routing_threshold is not None and routing_threshold > cert.threshold
+                and routing_threshold not in {t for t, _n, _e, ok in cert.tested if ok}):
+            return None
+        row = records.open_record(self._conn, self._cell(tier, model, verdict, population, regime))
+        return None if row is None else Permit(str(row[0]))
+
+    def allows(self, tier: str, model: str, verdict: str, confidence: float | None, *,
+               population: str, regime: str, routing_threshold: float | None = None) -> bool:
+        return self.permit(tier, model, verdict, confidence, population=population,
+                           regime=regime, routing_threshold=routing_threshold) is not None
 
 
 __all__ = ["ActingGate", "CANNOT_TELL", "CERTIFIABLE_REGIMES", "Certificate", "GRID", "RETIRING",
-           "Selection", "ThresholdTest", "binom_cdf",
+           "Permit", "Selection", "ThresholdTest", "binom_cdf",
            "clean_decisions_needed", "clopper_pearson_lower", "clopper_pearson_upper", "cohen_kappa",
-           "eprocess_certificate", "is_wrong", "select_threshold"]
+           "eprocess_certificate", "first_testable_start", "is_wrong", "select_threshold"]

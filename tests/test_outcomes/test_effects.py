@@ -225,6 +225,9 @@ def test_a_channel_contrast_never_adjusts_for_what_the_drop_changed() -> None:
 def conn():
     c = sqlite3.connect(":memory:")
     M075.apply(c)
+    # W0-17b: deliveries before the profile's first pull delivery are pilot data, so the
+    # ledger starts with a pull long before the deliveries these tests score.
+    _delivery(c, "first-pull", session="boot", path="mcp_recall", u=None, at=T0 - timedelta(days=5))
     yield c
     c.close()
 
@@ -347,6 +350,11 @@ def test_the_estimator_reads_what_the_real_receipt_writer_stores(tmp_path, monke
     store = _db(tmp_path / "memory.db")
     ids = [_fact(store, f"memory number {i}") for i in range(4)]
     withheld = {}
+    pull = receipts.plan(slm_home=tmp_path, db_path=store.db_path, profile_id="default",
+                         session_id="conv-pull", path="mcp_recall", query="q",
+                         candidates=[Candidate(f, "recall", 0.5) for f in ids])
+    receipts.deliver(pull, store.db_path, ids, fact_id=lambda f: f, render=_render,
+                     shown=receipts.shown_in_text)  # W0-17b: evidence starts at the first pull
     for i in range(80):
         plan = receipts.plan(slm_home=tmp_path, db_path=store.db_path, profile_id="default",
                              session_id=f"conv-{i}", path="session_context", query="q",

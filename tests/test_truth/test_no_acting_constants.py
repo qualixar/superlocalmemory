@@ -75,8 +75,12 @@ ALLOWED = {
     ("utility.py", 0.01): "method: lower bound of the fitted concentration (optimiser only)",
     ("utility.py", 10000.0): "method: upper bound of the fitted concentration (optimiser only)",
     ("utility.py", 12.0): "method: bound of the fitted logit mean (optimiser only)",
-    ("utility.py", 0.5): "method: optimiser start, a half count added to the pooled rate",
-    ("utility.py", 0.001): "method: optimiser start clipped inside (0, 1)",
+    ("utility.py", 5.0): "method: sqrt(5) in the golden ratio of golden-section search",
+    ("utility.py", 1e-07): "method: golden-section search tolerance (optimiser only)",
+    ("utility.py", 1e-06): "method: golden-section search tolerance (optimiser only)",
+    ("utility.py", 1e-05): "method: golden-section search tolerance (optimiser only)",
+    ("effects.py", 1e-09): "method: ridge on the normal equations' diagonal (solver only)",
+    ("effects.py", 1e-300): "method: a zero pivot in the normal-equations solve (solver only)",
 }
 
 

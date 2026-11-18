@@ -133,6 +133,7 @@ def build(conn: sqlite3.Connection, profile_id: str, *, as_of: datetime | None =
         "alpha": effects.ALPHA,
         "ledger": _ledger(conn, profile_id, when, slm_home),
         "effects": [_effect(e) for e in effects.report(conn, profile_id, as_of=when)],
+        "pilot_deliveries_excluded": effects.pilot_deliveries(conn, profile_id),
         "use": _use(utility.measure(conn, profile_id, as_of=when)),
         "certificates": certificates,
         "second_opinions": second,
@@ -223,6 +224,8 @@ def describe(report: dict) -> list[str]:
                      f"{f['uses']}/{f['deliveries']}")
     lines.append("  Does memory help? (randomised; a claim needs the anytime-valid range "
                  "to exclude 0)")
+    lines.append(f"    pilot deliveries excluded: {report.get('pilot_deliveries_excluded') or 0} "
+                 "(recorded before every recall path carried receipts; not evidence, M-12)")
     for e in report["effects"]:
         if e["contrast"] in ("memory", "channel") or e["aipw"] is not None:
             lines.append("    " + describe_effect(e))

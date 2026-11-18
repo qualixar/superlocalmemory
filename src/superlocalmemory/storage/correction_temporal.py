@@ -93,7 +93,7 @@ def _retirement_end(conn: sqlite3.Connection, case: CorrectionCase, prior: tuple
     SLM's knowledge. A reviewer's time wins, then a close already recorded, then
     the best evidence of when the successor took over (truth/validity), each
     with the source it came from (R-11)."""
-    from superlocalmemory.truth.validity import retire_until_sourced, successor_takeover_sourced
+    from superlocalmemory.truth.validity import retire_until_sourced, successor_takeover_interval
 
     existing_source = None
     if sourced:
@@ -103,13 +103,14 @@ def _retirement_end(conn: sqlite3.Connection, case: CorrectionCase, prior: tuple
                            (case.predecessor_fact_id, case.profile_id)).fetchone()
         existing_source = got[0] if got is not None else None
     start = prior[0] if prior is not None else None
-    derived_until, derived_source = successor_takeover_sourced(
+    derived_until, derived_source, derived_upper = successor_takeover_interval(
         conn, case.successor_fact_id, predecessor_valid_from=start, occurred_at=occurred_at)
     try:
         return retire_until_sourced(
             reviewer=case.event_valid_until, existing=prior[1] if prior is not None else None,
             derived=derived_until, predecessor_valid_from=start,
-            existing_source=existing_source, derived_source=derived_source)
+            existing_source=existing_source, derived_source=derived_source,
+            derived_upper=derived_upper)
     except ValueError as exc:
         raise CorrectionCaseError(str(exc)) from exc
 

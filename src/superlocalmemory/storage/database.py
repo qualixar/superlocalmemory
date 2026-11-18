@@ -2811,11 +2811,15 @@ class DatabaseManager:
 
         ``fill_only`` is the fact writer's default event-time start (WP-19 A1):
         it fills an empty ``valid_from`` and never replaces one a correction,
-        a replacement or an extraction already set.
+        a replacement or an extraction already set. It never writes an end on an
+        existing record either, so it never stamps that end's source (W0-22).
         """
         from datetime import UTC
         from datetime import datetime as _dt
         system_created_at = _dt.now(UTC).isoformat()
+        existed = bool(self.execute(
+            "SELECT fact_id FROM fact_temporal_validity WHERE fact_id = ? AND profile_id = ?",
+            (fact_id, profile_id)))
         self.execute(
             "INSERT OR IGNORE INTO fact_temporal_validity "
             "(fact_id, profile_id, valid_from, valid_until, system_created_at) "
@@ -2841,7 +2845,9 @@ class DatabaseManager:
                 "WHERE fact_id = ? AND profile_id = ?",
                 (valid_from, valid_until, fact_id, profile_id),
             )
-        if valid_until is not None:
+        # W0-22: stamp the source only when this call wrote the end: a new record carries
+        # it from the insert, and ``fill_only`` never writes an end on an existing one.
+        if valid_until is not None and (not existed or not fill_only):
             self._source_until(fact_id, "stated", profile_id=profile_id)
 
         from superlocalmemory.storage.event_time import mirror

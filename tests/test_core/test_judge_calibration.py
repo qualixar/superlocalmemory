@@ -96,9 +96,11 @@ def _gate_store(n, verdict="same", label=None, model="m", conf=0.9, population="
     import sqlite3
 
     from superlocalmemory.storage.migrations import M072_judge_receipts as M072
+    from superlocalmemory.storage.migrations import M077_judge_certificates as M077
 
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
+    M077.apply(conn)
     for i in range(n):
         conn.execute("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, "
                      "question_version, subject_kind, subject_id, population, tier, model, verdict, "

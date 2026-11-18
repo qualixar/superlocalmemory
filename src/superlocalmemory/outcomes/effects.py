@@ -201,6 +201,20 @@ SELECT d.delivery_id, d.session_id, d.path, d.epsilon, d.eligible_count, d.candi
   FROM injection_deliveries d
  WHERE d.profile_id = ? AND d.path IN ({paths}) AND d.withhold_draw IS NOT NULL
    AND julianday(d.delivered_at) + ? / 24.0 <= julianday(?)
+   AND {evidence}
+"""
+
+#: W0-17b (M-12): a delivery is evidence only from the profile's first pull delivery on.
+#: Before every recall path carried receipts the re-ask outcome could not be seen, so
+#: those deliveries are pilot data. With no pull delivery yet the minimum is NULL and
+#: nothing is evidence. ``d`` is the delivery row; the placeholders are the pull paths.
+EVIDENCE_SQL = """julianday(d.delivered_at) >= (SELECT MIN(julianday(p.delivered_at))
+ FROM injection_deliveries p WHERE p.profile_id = d.profile_id AND p.path IN ({pulls}))"""
+
+_PILOT = """
+SELECT COUNT(*) FROM injection_deliveries d
+ WHERE d.profile_id = ? AND d.path IN ({paths}) AND d.withhold_draw IS NOT NULL
+   AND NOT COALESCE({evidence}, 0)
 """
 
 _USED = """EXISTS (SELECT 1 FROM injection_usage u
@@ -236,15 +250,37 @@ def _arm(withhold_draw: float, epsilon: float, arm: str | None, channel: str | N
     return MEMORY
 
 
+def evidence_clause() -> tuple[str, list[str]]:
+    """The SQL condition and parameters that keep only evidence deliveries (W0-17b)."""
+    pulls = sorted(rz.PULL_PATHS)
+    return EVIDENCE_SQL.format(pulls=_marks(len(pulls))), pulls
+
+
+def pilot_deliveries(conn: sqlite3.Connection, profile_id: str) -> int:
+    """Randomised deliveries left out as pilot data: delivered before the first pull
+    delivery, or all of them while there is none (W0-17b)."""
+    clause, pulls = evidence_clause()
+    paths = sorted(rz.RANDOMISED_PATHS)
+    sql = _PILOT.format(paths=_marks(len(paths)), evidence=clause)
+    try:
+        return int(conn.execute(sql, [profile_id, *paths, *pulls]).fetchone()[0])
+    except sqlite3.OperationalError:
+        return 0
+
+
 def load_units(conn: sqlite3.Connection, profile_id: str, outcome: str, *,
                as_of: datetime | None = None) -> list[Unit]:
-    """Every randomised delivery whose outcome window has closed, with its outcome."""
+    """Every randomised delivery whose outcome window has closed, with its outcome.
+
+    Pilot deliveries (before the profile's first pull delivery) are not evidence (W0-17b).
+    """
     expr, params = _outcome_sql(outcome)
     paths = sorted(rz.RANDOMISED_PATHS)
-    sql = _UNITS.format(outcome=expr, paths=_marks(len(paths)))
+    clause, pulls = evidence_clause()
+    sql = _UNITS.format(outcome=expr, paths=_marks(len(paths)), evidence=clause)
     when = usage.stamp(as_of or datetime.now(UTC))
     try:
-        rows = conn.execute(sql, [*params, profile_id, *paths, OUTCOME_WINDOW_H, when])
+        rows = conn.execute(sql, [*params, profile_id, *paths, OUTCOME_WINDOW_H, when, *pulls])
     except sqlite3.OperationalError:
         return []
     units = []
@@ -446,5 +482,5 @@ def report(conn: sqlite3.Connection, profile_id: str, *,
 __all__ = ["ALPHA", "CHANNEL", "CONTROL", "MEMORY", "OUTCOMES", "OUTCOME_WINDOW_H",
            "PLANNED_MDE", "POWER", "REASK", "USED", "USED_SIGNALS", "VARIANCE_BOUND",
            "Estimate", "Unit", "contrast_variance", "contrasts", "cs_multiplier",
-           "design_probabilities", "estimate", "load_units", "mixture_x", "planned_deliveries",
-           "planned_for", "report"]
+           "design_probabilities", "estimate", "evidence_clause", "load_units", "mixture_x", "planned_deliveries",
+           "pilot_deliveries", "planned_for", "report"]

@@ -14,7 +14,8 @@ ids, labels, numbers and a hash of the inputs, never the text. Receipts make a
 decision auditable and are what personal calibration learns from.
 
 Items go in batches (a tier sees up to ``MAX_BATCH`` at once, or fewer when it
-says so through ``batch_limit``); a tier answers the whole batch or nothing, so
+says so through ``batch_limit``), balanced so no batch is a lone remainder
+(``balanced_batches``); a tier answers the whole batch or nothing, so
 an answer can never pair with the wrong item.
 
 A tier that cannot be asked here (not installed, a question it was never
@@ -193,6 +194,23 @@ def batching_regime(batch_size: int, *, model: bool, per_item: bool = False) -> 
     if not model:
         return "unbatched"
     return "single" if batch_size == 1 or per_item else "batched"
+
+
+def balanced_batches(pending: Sequence[int], limit: int) -> list[list[int]]:
+    """``pending`` in order, cut into the fewest batches of at most ``limit``, as equal as
+    possible (W0-25): 17 items at a limit of 16 are 9 and 8, never 16 and a batch of one,
+    whose regime (``single``, the certifiable one) would come from the remainder. A batch
+    of one is left only when the whole run is one item, which really has no peers."""
+    if not pending:
+        return []
+    count = -(-len(pending) // max(1, limit))
+    base, extra = divmod(len(pending), count)
+    out, at = [], 0
+    for k in range(count):
+        take = base + (1 if k < extra else 0)
+        out.append(list(pending[at:at + take]))
+        at += take
+    return out
 
 
 def batch_limit(tier: object, question: Question) -> int:
@@ -406,8 +424,7 @@ class JudgeLadder:
         log_misses = getattr(tier, "log_abstentions", True)
         size = batch_limit(tier, question)
         per_item = getattr(tier, "per_item", False) is True
-        for start in range(0, len(pending), size):
-            batch = pending[start:start + size]
+        for batch in balanced_batches(pending, size):
             peers = hashlib.sha256("\0".join(sorted(items[i].subject_id for i in batch))
                                    .encode()).hexdigest()[:32]
             answers, failure, ref = self._answers(tier, question, [items[i] for i in batch])
@@ -543,7 +560,8 @@ class RulesTier:
 
 __all__ = ["ABSTAIN", "BATCHING_REGIMES", "EXPLICIT_OLDER_VALUE", "EXPLICIT_RULE", "EXPLICIT_VALUE_CHANGED",
            "batching_regime",
-           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH", "SHADOW_SUFFIX", "batch_limit",
+           "Context", "Decision", "FAILURE_KINDS", "Item", "JudgeLadder", "MAX_BATCH", "SHADOW_SUFFIX",
+           "balanced_batches", "batch_limit",
            "MAX_TEXT_CHARS", "NO_ANSWER", "ReceiptRow", "RulesTier", "TIER_FAILED", "Tier",
            "TierAnswer", "TierFailure", "inputs_hash", "is_model_tier", "tier_available",
            "write_receipts"]

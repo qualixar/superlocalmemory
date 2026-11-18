@@ -396,6 +396,11 @@ _KNOWN_EQUIVALENT_DDL_HASHES: dict[str, frozenset[str]] = {
         # stage columns. M053.repair() adds them; no released build ran M053.
         "3ff0b2d15dd73eb00ffae2347386234f015032e6889391924aa34ed9b8bb89e9",
     }),
+    _M077.NAME: frozenset({
+        # Unreleased 4.2.30 development table set before the per-cell start (W0-11).
+        # M077.repair() creates judge_certificate_starts; no released build ran M077.
+        "e63eec887f8b8025de4702031abce29ecb25813dc9857dc33d01a72029f0ee22",
+    }),
 }
 
 

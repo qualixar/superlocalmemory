@@ -69,6 +69,13 @@ _SQL: dict[str, tuple[str, str]] = {
           JOIN memory_slots s ON s.head_revision_id = r.revision_id
           JOIN correction_cases c ON c.case_id = r.case_id
          WHERE c.status = 'rolled_back'"""),
+    "I-10": ("A judge decision that changed memory names a certificate, or a person", """
+        SELECT r.receipt_id FROM judge_receipts r
+         WHERE r.action_taken IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM judge_certificates c
+                            WHERE c.cert_id = r.action_ref AND c.profile_id = r.profile_id)
+           AND NOT (COALESCE(r.action_ref, '') GLOB '?*@cli'
+                    OR COALESCE(r.action_ref, '') GLOB '?*@dashboard')"""),
     "I-16": ("A current slot has a head and no open dispute", """
         SELECT s.slot_id FROM memory_slots s
          WHERE s.state = 'current' AND (s.head_revision_id IS NULL OR EXISTS (
@@ -78,11 +85,11 @@ _SQL: dict[str, tuple[str, str]] = {
 #: Needed by each query beyond the slot tables; a store without one skips the check.
 _NEEDS = {"I-01": ("atomic_facts", "fact_temporal_validity"),
           "I-06": ("fact_temporal_validity", "correction_cases"),
-          "I-07": ("correction_cases",), "I-08": ("correction_cases",)}
+          "I-07": ("correction_cases",), "I-08": ("correction_cases",),
+          "I-10": ("judge_receipts", "judge_certificates")}
 
 NOT_CHECKED_HERE = {
     "I-09": "every model-tier ask has a receipt (checked by the ladder's tests, not the store)",
-    "I-10": "no memory change without a certificate or approval (a property of the code paths)",
     "I-11": "erasure removes everything derived (checked by the erasure suite)",
     "I-13": "a verdict acts only on the pair it was computed on (checked at action time)",
     "I-14": "every certificate has a stored record (WS-2)",

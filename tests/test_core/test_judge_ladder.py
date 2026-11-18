@@ -87,7 +87,7 @@ def test_batches_are_split_and_answers_stay_with_their_items(conn) -> None:
         TierAnswer("same" if it.subject_id.endswith(("0", "2", "4", "6", "8")) else "both_true",
                    0.9) for it in items], calls)
     decisions = JudgeLadder([tier]).decide_and_record(conn, SLOT_RELATION, _items(20))
-    assert calls == [16, 4]
+    assert calls == [10, 10]  # balanced (W0-25): 20 items are two tens, never 16 and 4
     assert [d.verdict for d in decisions[:4]] == ["same", "both_true", "same", "both_true"]
 
 

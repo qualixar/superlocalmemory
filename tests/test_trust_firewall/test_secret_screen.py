@@ -79,7 +79,7 @@ def test_a_placeholder_already_in_the_text_is_not_counted_as_new(monkeypatch) ->
 def test_ordinary_text_is_kept_byte_for_byte(monkeypatch) -> None:
     _on(monkeypatch)
     plain = ("The commit 9f2c1ab7e4d3b5a60718c9d2e3f4a5b6c7d8e9f0 fixed the cache; "
-             "sha256 of the file is " + "ab12" * 16 + ". See /Users/dev/Documents/work/project/"
+             "sha256 of the file is " + "ab12" * 16 + ". See /Users/alice/Documents/work/project/"
              "docs/CHANGELOG.md and https://example.com/a/very/long/path/segment/index.html. "
              "My wifi password is hunter2 and the printer is at 192.168.1.20.")
     got = prepare_user_text(None, plain)

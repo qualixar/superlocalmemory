@@ -61,7 +61,7 @@ def test_the_ladder_honours_a_tier_s_limit_and_receipts_single() -> None:
 def test_a_tier_without_a_limit_keeps_full_batches() -> None:
     tier = Recorder()
     JudgeLadder([tier]).decide(SLOT_RELATION, _items(MAX_BATCH + 3), CTX)
-    assert tier.sizes == [MAX_BATCH, 3]
+    assert tier.sizes == [10, 9]  # balanced (W0-25), none above MAX_BATCH, no lone remainder
 
 
 def test_laya_keeps_its_batches_and_its_receipts_are_single() -> None:

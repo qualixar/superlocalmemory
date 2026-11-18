@@ -14,6 +14,7 @@ from superlocalmemory.core import audit_sampler as audit
 from superlocalmemory.core.judge_ladder import Context, Item, JudgeLadder, TierAnswer, write_receipts
 from superlocalmemory.core.judge_questions import SLOT_RELATION
 from superlocalmemory.storage.migrations import M072_judge_receipts as M072
+from superlocalmemory.storage.migrations import M077_judge_certificates as M077
 
 KEY = b"k" * 32
 
@@ -32,6 +33,7 @@ class Fixed:
 def conn():
     c = sqlite3.connect(":memory:")
     M072.apply(c)
+    M077.apply(c)
     return c
 
 

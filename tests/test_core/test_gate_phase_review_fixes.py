@@ -10,6 +10,7 @@ import pytest
 
 from superlocalmemory.core.judge_calibration import CANNOT_TELL, ActingGate, eprocess_certificate
 from superlocalmemory.storage.migrations import M072_judge_receipts as M072
+from superlocalmemory.storage.migrations import M077_judge_certificates as M077
 
 _INSERT = ("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, question_version,"
            " subject_kind, subject_id, population, tier, model, verdict, confidence, threshold,"
@@ -22,6 +23,7 @@ _INSERT = ("INSERT INTO judge_receipts (receipt_id, profile_id, question_id, que
 def _store() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     M072.apply(conn)
+    M077.apply(conn)
     return conn
 
 

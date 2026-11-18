@@ -5344,7 +5344,10 @@ def cmd_session_context(args: Namespace) -> None:
         cfg_inj = getattr(config, "injection", None)
         mode = config.mode.value.upper()
 
+        rendered = {"facts": len(fact_mems)}  # the facts the last rendering carried (W0-27)
+
         def _render(kept: list[tuple[str, InjectableMemory]]) -> str:
+            rendered["facts"] = len(kept)
             mems = core_mems + [m for _, m in kept] + soft_mems
             mems = _stamp_taint(mems, db_path)  # WS-5: the renderer keeps untrusted out of core
             return render_context(mems, mode=mode, cfg=cfg_inj, wrap=True, notes=project_notes)
@@ -5356,7 +5359,8 @@ def cmd_session_context(args: Namespace) -> None:
                 from superlocalmemory.cli.json_output import json_print
                 json_print("session-context", data={
                     "context": context,
-                    "memory_count": len(core_mems) + len(fact_mems) + len(soft_mems),
+                    # what was rendered, not what was withheld (W0-27)
+                    "memory_count": len(core_mems) + rendered["facts"] + len(soft_mems),
                     "mode": config.mode.value,
                 }, next_actions=[
                     {"command": "slm recall --json <query>", "description": "Search memories"},
