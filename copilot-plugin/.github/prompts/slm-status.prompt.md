@@ -288,6 +288,22 @@ user's consent (`judge_ladder_hosted`), given in the dashboard or with
 `slm consent give` at a terminal. Never give it for the user; withdrawing
 (`slm consent withdraw judge_ladder_hosted`) is fine when they ask.
 
+`slm measurement status [--json]` shows what SLM measures about its own
+deliveries and each measure's state. By default it writes a receipt for every
+delivery (ids, ranks, scores, the logged chance of each choice; this computer
+only), in about 1 in 10 session starts leaves one eligible memory out or
+switches off one way of searching (by a logged random draw, never pinned rules,
+standing rules, core blocks, explicit recall, cues or lease warnings), and in
+about 1 in 20 of an agent's recalls swaps two neighbouring results. That is how
+`slm health --memory` can say whether memory helps. The JSON carries
+`measuring`, `kill_switch`, each flag's `state`, `pending` (the user has not yet
+seen the notice) and the `notice` text; reading it never marks the notice as
+seen. Turning it off is the user's choice: `slm measurement off` (withholding
+and swapping; add `--receipts` to stop the receipts too) or the dashboard's
+Settings card "Help SLM measure what works". Never switch it off on your own
+initiative, even to make a test or a measurement tidier. Run it only when the
+user asks, and when `pending` is true, pass the notice on to the user.
+
 ## Recommended Health Workflow
 
 1. Run `slm doctor --json` at session start to confirm all subsystems are up.

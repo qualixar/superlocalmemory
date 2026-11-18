@@ -299,6 +299,7 @@ class DaemonPoolProxy:
         slot = meta.pop("slot", None)  # D-36: request fields, never memory metadata
         slot_value = meta.pop("slot_value", None)
         source_file = meta.pop("source_file", None)  # D-38: a request field too
+        cues = meta.pop("cues", None)  # W3-8: so are cues, never memory metadata
         tags = meta.get("tags", "")
         if isinstance(tags, (list, tuple, set)):
             tags = ",".join(str(tag) for tag in tags)
@@ -327,6 +328,8 @@ class DaemonPoolProxy:
                 body["slot_value"] = slot_value
         if source_file:
             body["source_file"] = source_file
+        if cues:
+            body["cues"] = cues
         from superlocalmemory.mcp._remember_kind import with_declared_kind
 
         body, flags = with_declared_kind(body, flags, (kind or "").strip())

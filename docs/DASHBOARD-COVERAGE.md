@@ -13,7 +13,7 @@ The sidebar groups the panes as follows.
 | Workspace | Product surface | What to verify separately |
 |---|---|---|
 | Answer Check | which check runs, a Try it panel, how often recall said it did not have the answer, timings, recent checks. See [Answer check](answer-check.md) | `slm recall` output and the response fields |
-| Dashboard | runtime summary, daemon identity, storage and runtime health, diagnostics and recent activity, a **Needs your answer** card (disputed values with one-click answers, memories whose source file changed; hidden when empty), a **Help it get things right** card (blind audit questions, one at a time, never showing the judge's answer; hidden when none), and a dismissible **What's new** card that shows only what is not yet on | `slm status`, `slm doctor`, `slm disputes` |
+| Dashboard | runtime summary, daemon identity, storage and runtime health, diagnostics and recent activity, a **Needs your answer** card (disputed values with one-click answers, memories whose source file changed; hidden when empty), a **Help it get things right** card (blind audit questions, one at a time, never showing the judge's answer; hidden when none), a dismissible banner about what SLM measures (**Learn more**, **Turn off**, **OK**; shown until the notice is acknowledged), and a dismissible **What's new** card that shows only what is not yet on | `slm status`, `slm doctor`, `slm disputes`, `slm measurement status` |
 | Brain | consolidation, behavioral patterns, feedback and outcomes, reward and soft-prompt state | mode and configuration, and the underlying data |
 
 ### Memory group
@@ -54,7 +54,7 @@ The sidebar groups the panes as follows.
 
 | Workspace | Product surface | What to verify separately |
 |---|---|---|
-| Settings | mode, provider, answer check (including **Calibrate on my store** and, under Online with Jev, **Background judges**: the owner agrees once to let the background judges ask Jev, or stops it; `slm consent`), auto-capture and auto-recall, scope defaults and other product configuration | effective configuration and secret management |
+| Settings | mode, provider, answer check (including **Calibrate on my store** and, under Online with Jev, **Background judges**: the owner agrees once to let the background judges ask Jev, or stops it; `slm consent`), the **Help SLM measure what works** card (the notice in plain words and one On/Off switch for withholding and swapping; `slm measurement`), auto-capture and auto-recall, scope defaults and other product configuration | effective configuration and secret management |
 | Cloud Backup | backup destinations, schedule status, last backup time, manual trigger, encryption | actual backup file presence and restore path |
 
 ## Data and trust boundary

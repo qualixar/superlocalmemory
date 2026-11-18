@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from superlocalmemory.core.feature_flags import FLAGS, FeatureFlags, FlagState
+from superlocalmemory.core.feature_flags import FLAGS, FeatureFlags, FlagState, write_flag
 from superlocalmemory.outcomes import receipts, swaps
 from superlocalmemory.storage.migrations import M075_injection_receipts as M075
 
@@ -22,15 +22,23 @@ def on(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_swaps_are_off_by_default_like_withholding() -> None:
-    assert FLAGS["outcomes.swaps"].default is FlagState.OFF
+def test_swaps_are_on_by_default_like_withholding() -> None:
+    assert FLAGS["outcomes.swaps"].default is FlagState.ON
     assert not FLAGS["outcomes.swaps"].shadowable
 
 
 def test_nothing_is_drawn_while_swaps_are_off(tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("SLM_FEATURE_OUTCOMES_SWAPS", raising=False)
+    monkeypatch.setenv("SLM_FEATURE_OUTCOMES_SWAPS", "off")
     assert swaps.decide(tmp_path, "d1", 10) is None
     assert swaps.decide(None, "d1", 10) is None
+
+
+def test_swaps_run_on_a_fresh_store_and_a_person_can_turn_them_off(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SLM_FEATURE_OUTCOMES_SWAPS", raising=False)  # the shipped default
+    monkeypatch.delenv("SLM_4230_OFF", raising=False)
+    assert any(swaps.decide(tmp_path, f"d{i}", 10) is not None for i in range(400))
+    write_flag(tmp_path, "outcomes.swaps", FlagState.OFF)
+    assert all(swaps.decide(tmp_path, f"d{i}", 10) is None for i in range(400))
 
 
 def test_the_kill_switch_and_receipts_off_stop_swaps(on, monkeypatch) -> None:

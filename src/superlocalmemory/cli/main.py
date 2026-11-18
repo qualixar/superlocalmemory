@@ -78,7 +78,7 @@ documentation:
 
 _NO_DAEMON_COMMANDS = {
     "setup", "mode", "provider", "connect", "upgrade-hosts", "migrate", "mcp", "tools", "warmup", "hooks", "codex",
-    "flags",
+    "flags", "measurement", "cues",
     "config", "evolve", "db",
     # v3.4.22 escape hatches — never auto-start the daemon on these.
     "disable", "enable", "clear-cache", "reconfigure", "benchmark",
@@ -533,6 +533,13 @@ def main() -> None:
         "--source-file", dest="source_file", default=None,
         help="The file this memory was learned from; recall then says when that file "
              "changed or went missing, so the memory is checked again",
+    )
+    remember_p.add_argument(
+        "--cue", dest="cues", action="append", default=None, metavar="KIND:PATTERN",
+        help="Bring this memory back at the right step; repeatable. Kinds: path "
+             "(path:src/**/schema.py), tool (tool:Bash:git push), error "
+             "(error:database is locked), repo (repo:superlocalmemory), date "
+             "(date:2026-11-20). Shown when the delivery.cues setting is on.",
     )
     remember_p.add_argument(
         "--slot-value", dest="slot_value", default=None,
@@ -1306,6 +1313,10 @@ def main() -> None:
     register_audit_parsers(sub)  # 4.2.30 W2: blind audit answers from a person (R-16)
     from superlocalmemory.cli.consent_cmd import register_consent_parsers
     register_consent_parsers(sub)  # 4.2.30 W2: consents to send memory text off the machine
+    from superlocalmemory.cli.measurement_cmd import register_measurement_parsers
+    register_measurement_parsers(sub)  # 4.2.30 D-28: what SLM measures and the off switch
+    from superlocalmemory.cli.cues_cmd import register_cue_parsers
+    register_cue_parsers(sub)  # 4.2.30 W3-8: cues that bring memories back
     from superlocalmemory.cli.outcome_cmd import register_outcome_parser
     register_outcome_parser(sub)  # 4.1.25: report whether recalled memories helped
     from superlocalmemory.cli.hide_cmd import register_hide_parser

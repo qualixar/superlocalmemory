@@ -584,6 +584,18 @@ def _cmd_consent_dispatch(args: Namespace) -> None:
     run(args)
 
 
+def _cmd_cues_dispatch(args: Namespace) -> None:
+    """4.2.30 W3-8: cues that bring memories back (cli/cues_cmd.py)."""
+    from superlocalmemory.cli.cues_cmd import run
+    run(args)
+
+
+def _cmd_measurement_dispatch(args: Namespace) -> None:
+    """4.2.30 D-28: what SLM measures and the switch to turn it off (cli/measurement_cmd.py)."""
+    from superlocalmemory.cli.measurement_cmd import run
+    run(args)
+
+
 def _cmd_disputes_dispatch(args: Namespace) -> None:
     """4.2.30: disputed values and changed source files (cli/disputes_cmd.py)."""
     from superlocalmemory.cli.disputes_cmd import run
@@ -769,6 +781,8 @@ def dispatch(args: Namespace) -> None:
         "disputes": _cmd_disputes_dispatch,
         "audit": _cmd_audit_dispatch,
         "consent": _cmd_consent_dispatch,
+        "measurement": _cmd_measurement_dispatch,
+        "cues": _cmd_cues_dispatch,
         "outcome": _cmd_outcome_dispatch,
         "hide": _cmd_hide_dispatch,
         "models": _cmd_models_dispatch,
@@ -1631,6 +1645,8 @@ def cmd_setup(args: Namespace) -> None:
     from superlocalmemory.cli.setup_wizard import run_wizard
 
     run_wizard(auto=getattr(args, "auto", False), no_laya=getattr(args, "no_laya", False))
+    from superlocalmemory.cli.measurement_cmd import announce_if_pending
+    announce_if_pending()  # 4.2.30 D-28: the measurement notice, once, no prompt
     sys.exit(0)  # Force clean exit (background threads from imports may linger)
 
 
@@ -2020,6 +2036,17 @@ def cmd_remember(args: Namespace) -> None:
             else:
                 print(str(exc), file=sys.stderr)
             sys.exit(2)
+        from superlocalmemory.core.cue_triggers import CueError, parse_cues
+
+        try:  # W3-8: a bad cue is refused before the daemon is asked
+            cue_specs = [c.spec for c in parse_cues(getattr(args, "cues", None))]
+        except CueError as exc:
+            if use_json:
+                from superlocalmemory.cli.json_output import json_print
+                json_print("remember", error={"code": "INVALID_CUE", "message": str(exc)})
+            else:
+                print(str(exc), file=sys.stderr)
+            sys.exit(2)
         if not (is_daemon_running() or ensure_daemon()):
             _daemon_unavailable("remember", use_json)
         path = "/remember?wait=true" if sync_mode else "/remember"
@@ -2043,6 +2070,8 @@ def cmd_remember(args: Namespace) -> None:
                 body["slot_value"] = slot_claim[1]
         if getattr(args, "source_file", None):  # D-38: made absolute here, checked by the daemon
             body["source_file"] = str(Path(args.source_file).expanduser().resolve())
+        if cue_specs:
+            body["cues"] = cue_specs
         body["idempotency_key"] = _cli_remember_idempotency_key(body)
         try:
             result = daemon_request("POST", path, body,
@@ -3095,6 +3124,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("audit", "Answer a few questions so SuperLocalMemory's judges can earn trust"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),
         ("hide", "Keep memories out of answers and session starts (--undo to show again)"),
+        ("cues", "List the cues that bring memories back at the right step (slm cues list)"),
     ]),
     ("Privacy & compliance", [
         # gdpr shipped in 4.0.6 but was never listed here, so `slm help` did not
@@ -3171,6 +3201,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Learning switches", [
         ("flags", "What SLM learns from: slm flags | set <flag> on|shadow|off | kill on|off"),
+        ("measurement", "What SLM measures, and the off switch: slm measurement status|on|off"),
     ]),
     ("Help", [
         ("help", "This overview. Try: slm help config | modes | self-heal"),

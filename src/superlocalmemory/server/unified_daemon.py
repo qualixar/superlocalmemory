@@ -766,6 +766,10 @@ class RememberRequest(BaseModel):
     #: The absolute path of the local file this memory was learned from (D-38,
     #: ``truth/leases.py``): fingerprinted here, before the file can change.
     source_file: str | None = None
+    #: Cues that bring this memory back: ``kind:pattern`` strings (path, tool,
+    #: error, repo, date; ``core/cue_triggers.py``). A bad one is refused with
+    #: 422 before anything is saved.
+    cues: list[str] | None = None
 
     @field_validator("session_date")
     @classmethod
@@ -5637,6 +5641,17 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 raise HTTPException(
                     422, detail={"code": "INVALID_SLOT", "message": str(exc)}) from exc
 
+        # Cues (W3-8): checked here, refused before anything is journaled.
+        cue_specs = None
+        if req.cues:
+            from superlocalmemory.core.cue_triggers import CueError, parse_cues
+
+            try:
+                cue_specs = [c.spec for c in parse_cues(req.cues)]
+            except CueError as exc:
+                raise HTTPException(
+                    422, detail={"code": "INVALID_CUE", "message": str(exc)}) from exc
+
         # A source file (D-38): fingerprinted now, refused before anything is
         # journaled when it is not a local file this machine can read. A remote
         # app never names one: it would probe this machine's files.
@@ -5732,6 +5747,10 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 from superlocalmemory.truth.leases import METADATA_KEY as LEASE_KEY
 
                 meta[LEASE_KEY] = lease_meta
+            if cue_specs:  # reserved key: set only here, after stripping; bound by core/cue_binding
+                from superlocalmemory.core.cue_binding import METADATA_KEY as CUES_KEY
+
+                meta[CUES_KEY] = cue_specs
 
             from superlocalmemory.memory_core import (
                 pii_redaction_enabled,

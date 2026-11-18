@@ -358,7 +358,9 @@ Nothing leaves your computer unless you turn on a feature that sends it, and eac
 | Mesh messages | You configure mesh peers, or allow a web app to message your bots |
 | Tool calls from web apps | You turn on Web access and add an app; the database stays on your computer |
 
-Pictures, documents, Laya and Mode A never send anything. Secrets in memory text are redacted on every outbound path. [Security policy](https://github.com/qualixar/superlocalmemory/blob/main/SECURITY.md)
+Pictures, documents, Laya and Mode A never send anything. Secrets in memory text are redacted on every outbound path.
+
+**What SLM measures.** To find out whether memory really helps your agents, SLM keeps a receipt on your computer each time it hands them memories: ids, rank, score and the logged chance of each choice, never your text, and SLM sends none of it anywhere. By default, in about 1 in 10 session starts it leaves one memory out at random (never pinned or standing rules, core blocks, explicit recall, cues or lease warnings), and in about 1 in 20 of an agent's recalls it swaps two neighbouring results. Turn the withholding and swapping off with `slm measurement off` or in the dashboard under Settings, "Help SLM measure what works"; `slm measurement status` shows the details. [Security policy](https://github.com/qualixar/superlocalmemory/blob/main/SECURITY.md)
 
 ## Benchmarks
 

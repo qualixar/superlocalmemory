@@ -328,6 +328,20 @@ The provider key is never stored in any of these files; it lives in its own
 owner-only key store. Hand-editing `answer_check.json` works but is
 unsupported — use the dashboard. A damaged file is read as "no consent".
 
+## What SLM measures
+
+SLM measures whether memory helps your agents, locally and as ids and numbers only. These settings live in `features.json` in the data folder (not `config.json`), changed with `slm measurement` or `slm flags set <flag> on|off`, or by the dashboard's Settings card "Help SLM measure what works". An environment variable `SLM_FEATURE_<FLAG>` (dots become underscores, upper case, for example `SLM_FEATURE_OUTCOMES_HOLDOUT=off`) overrides the file.
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `outcomes.receipts` | on | Writes a receipt each time SLM hands memories to an agent: memory ids, rank, score and the logged probability of each choice |
+| `outcomes.holdout` | on | In about 1 in 10 session starts, leaves out one eligible memory or switches off one retrieval channel for that fetch (MCP session start only), by a logged random draw. Never pinned rules, standing rules, core blocks, explicit recall, cues or lease warnings |
+| `outcomes.swaps` | on | In about 1 in 20 of an agent's explicit recalls, two neighbouring results trade places. Nothing is left out or added |
+| `outcomes.usage` | off | Compares an agent's last reply with the memories it was given to see which were used; ids and scores only |
+| `delivery.need_gate` | off | Decides per prompt whether memory is needed; logs each prompt's rule, score and a keyed digest (never the prompt text), and recalls 5% of the prompts it would skip to measure its own misses |
+
+`slm measurement off` turns `outcomes.holdout` and `outcomes.swaps` off together; add `--receipts` to turn `outcomes.receipts` off as well. `slm flags kill on` (or `SLM_4230_OFF=1`) turns every 4.2.30 setting off at once. The notice, the version of it you acknowledged and each on/off change are kept in `disclosures.json` in the data folder.
+
 ## Consistency Checking at Store Time
 
 The optional consistency check that runs when a memory is stored

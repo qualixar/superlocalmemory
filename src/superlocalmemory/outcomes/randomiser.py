@@ -24,8 +24,9 @@ The design, explicitly:
 * ``EPSILON`` never exceeds ``EPSILON_MAX`` (the schema checks it too).
 
 ``EPSILON`` is a design constant of the experiment, not a threshold deciding a
-memory change from data (D-33, Varun 16 Nov). Withholding is off by default
-until D-28's shipping conditions exist (D-34).
+memory change from data (D-33, Varun 16 Nov). Withholding is on by default,
+with the install/upgrade disclosure and the off switch that D-28's shipping
+conditions require (``outcomes.disclosure``, ``outcomes.switch``; D-34).
 
 **Two arms share the one budget (D-44, Varun 16 Nov; ``one-out-v2``).** A
 treated delivery (withhold draw < EPSILON) gets exactly one change: either one
@@ -68,11 +69,16 @@ EPSILON = 0.10
 RANDOMISED_PATHS = frozenset({"session_init", "session_context"})
 #: Pull paths (W3-1): an agent asked, so nothing is withheld (each candidate is
 #: logged at propensity 1, ``path_not_randomised``), but every answer is on record.
+#: ``cue`` (W3-8) is the cue hook's delivery: a memory fired by a file, command, error,
+#: repository or date, and a lease warning on an edit. D-28: never withheld.
 PULL_PATHS = frozenset({"mcp_recall", "cli_recall", "http_recall", "hook_recall",
-                        "view_recall"})
+                        "view_recall", "cue"})
 #: Delivery paths that write receipts: every surface that puts memories in an
 #: agent's context (D-22). A person reading the dashboard is not a delivery.
 PATHS = RANDOMISED_PATHS | PULL_PATHS
+#: The pulls an agent chose to make. A cue delivery is pushed by a hook, so it is
+#: not evidence that an earlier delivery fell short (the re-ask outcome reads this).
+ASKED_PATHS = PULL_PATHS - {"cue"}
 
 #: Candidate roles, and the reason a role is never withheld.
 ELIGIBLE_ROLES = frozenset({"recall", "recent", "session_summary"})
@@ -222,7 +228,7 @@ def choose(key: bytes, delivery_id: str, path: str, candidates: Iterable[Candida
     return Assignment(choices, k, treatment.withhold_draw, treatment.pick_draw, treatment)
 
 
-__all__ = ["ARMS", "CHANNEL_ARM", "DROPPABLE_CHANNELS", "MEMORY_ARM", "UNTREATED", "Treatment",
+__all__ = ["ARMS", "ASKED_PATHS", "CHANNEL_ARM", "DROPPABLE_CHANNELS", "MEMORY_ARM", "UNTREATED", "Treatment",
            "channel_drop_probability", "treat",
            "DESIGN", "ELIGIBLE_ROLES", "EPSILON", "EPSILON_MAX", "HOLDOUT_OFF",
            "NEVER_WITHHELD", "NOT_RANDOMISED_PATH", "PATHS", "PULL_PATHS", "RANDOMISED_PATHS",

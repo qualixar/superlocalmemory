@@ -261,6 +261,23 @@ class MaintenanceScheduler:
         except Exception as exc:  # noqa: BLE001
             self._record_step("coverage backfill", False, str(exc))
 
+    def _cue_pass(self) -> None:
+        """4.2.30 W3-8: bind cues given on saves, and file paths named in plans, to
+        facts (core/cue_binding.py). Always runs: it is bounded and resumable, and the
+        ``delivery.cues`` flag only decides whether cues are shown."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.core import cue_binding
+            from superlocalmemory.infra.data_root import state_path
+
+            bound = cue_binding.run(self._db, state_path("backfill"))
+            if bound:
+                logger.info("Cue pass: %d cues bound", bound)
+            self._record_step("cue pass", True)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("cue pass", False, str(exc))
+
     def _slot_pass(self) -> None:
         """4.2.30 truth layer: bind facts to slots, oldest first, behind the
         ``truth.slots`` flag (off by default; truth/slot_pass.py)."""
@@ -713,6 +730,7 @@ class MaintenanceScheduler:
         self._project_backfill()
         self._coverage_pass()
         self._slot_pass()
+        self._cue_pass()
 
         # Anything that has failed on several cycles running is not a blip.
         # Every step here logs and continues, which is right -- one broken step

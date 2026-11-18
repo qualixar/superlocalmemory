@@ -223,12 +223,16 @@ def test_no_plan_when_receipts_are_off_or_the_kill_switch_is_set(tmp_path, monke
     assert _plan(fresh, [Candidate("a", "recall")]) is None
 
 
-def test_withholding_is_off_by_default_until_its_shipping_conditions_exist(
+def test_withholding_is_on_by_default_and_a_person_can_turn_it_off(
         store, tmp_path, monkeypatch) -> None:
-    monkeypatch.delenv("SLM_FEATURE_OUTCOMES_HOLDOUT", raising=False)  # the shipped default
+    monkeypatch.delenv("SLM_FEATURE_OUTCOMES_HOLDOUT", raising=False)  # the shipped default (D-28)
     ids = [_fact(store, f"default memory {i}") for i in range(10)]
+    candidates = [Candidate(f, "recall") for f in ids]
+    plans = [_plan(tmp_path, candidates, db_path=store.db_path) for _ in range(50)]
+    assert all(p.holdout_state == "on" for p in plans)
+    write_flag(tmp_path, "outcomes.holdout", FlagState.OFF)  # the off switch
     for _ in range(50):
-        plan = _plan(tmp_path, [Candidate(f, "recall") for f in ids], db_path=store.db_path)
+        plan = _plan(tmp_path, candidates, db_path=store.db_path)
         assert plan.holdout_state == "off" and plan.withheld == frozenset()
 
 

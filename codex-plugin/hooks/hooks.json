@@ -30,6 +30,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "slm hook cue 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -39,6 +49,16 @@
           {
             "type": "command",
             "command": "slm hook post_tool_outcome 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "slm hook cue 2>/dev/null || true",
             "timeout": 5
           }
         ]

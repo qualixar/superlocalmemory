@@ -238,6 +238,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M077_judge_certificates as _M077,
 )
+from superlocalmemory.storage.migrations import (
+    M078_memory_cues as _M078,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -510,4 +513,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # Deferred like M072, whose receipts and labels they rest on.
     Migration(name=_M077.NAME, db_target="memory", ddl=_M077.DDL,
               dependencies=(_M072.NAME,)),
+    # M078 binds cues (path, tool, error, repo, date) to prospective memories (W3-8).
+    # Deferred: its erase trigger is built on atomic_facts, like M070's.
+    Migration(name=_M078.NAME, db_target="memory", ddl=_M078.DDL,
+              dependencies=(_M077.NAME,)),
 ]

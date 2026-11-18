@@ -140,6 +140,7 @@ remember(
   slot: str = "",      # "subject/relation[/qualifier]": the one thing this states a value of
   slot_value: str = "",# that value in a few words; the same value later changes nothing
   source_file: str = "",# absolute path of the file this was learned from (recall flags changes)
+  cues: list = None,   # when to bring it back: ["path:src/**/schema.py", "tool:Bash:git push"]
   profile_id: str = "",# write to another existing profile; "" = the active one
   agent_id: str = "mcp_client", # attribution; resolved from the connection when left alone
 )
@@ -287,6 +288,29 @@ path. SuperLocalMemory fingerprints the file at once; a later recall marks the
 memory `source: changed` or `missing` when the file changes or goes, so the
 next agent reads it again before relying on it. CLI: `--slot`, `--slot-value`,
 `--source-file`.
+
+### 6c. Cues: bring a memory back at the step where it matters
+
+Most memories are best found by asking. A plan or a warning that matters at one
+exact step is different: nobody will ask for it before the step, so attach a cue
+and SuperLocalMemory shows it when the step arrives.
+
+```
+remember(content="Run the schema migration check before pushing",
+         kind="prospective", project="superlocalmemory",
+         cues=["path:src/**/schema.py", "tool:Bash:git push"])
+```
+
+Add a cue when the memory is a to-do or a warning tied to a file (`path:`), a
+command (`tool:Bash:git push`), an error you have seen before (`error:database
+is locked`), a repository (`repo:superlocalmemory`) or a date (`date:2026-11-20`,
+from that day on). Pick the narrowest cue that still catches the step: a broad
+one such as `repo:` or an early `date:` brings the memory back in every session,
+which is noise. Do not add cues to ordinary facts, preferences or rules; those are
+already loaded or recalled. At most 8 cues, `kind:pattern` each; a malformed one
+is refused before anything is saved. Each memory comes back once per session, and
+only while the user has the `delivery.cues` setting on. CLI: `--cue KIND:PATTERN`
+(repeatable). `slm cues list` shows them.
 
 ### 7. One fact per call
 

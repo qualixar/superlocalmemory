@@ -88,6 +88,7 @@
     "scripts/postinstall-interactive.js",
     "scripts/postinstall/validation.js",
     "scripts/postinstall/media-request.js",
+    "scripts/postinstall/measurement-notice.js",
     "scripts/postinstall/node-arch.js",
     "scripts/postinstall/engine-upgrade.js",
     "scripts/preuninstall.js",

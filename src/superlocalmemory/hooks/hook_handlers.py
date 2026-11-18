@@ -145,6 +145,7 @@ PER_PROMPT_ACTIONS = frozenset({
 INJECTING_ACTIONS = {
     **{action: "every_prompt" for action in PER_PROMPT_ACTIONS},
     "before_web": "before_web",
+    "cue": "cue",  # W3-8: honours injection.enabled and auto_recall.enabled
 }
 
 
@@ -196,6 +197,9 @@ def handle_hook(action: str) -> None:
         sys.exit(_main())
     if action == "before_web":
         from superlocalmemory.hooks.before_web_hook import main as _main
+        sys.exit(_main())
+    if action == "cue":  # W3-8: cue triggers and lease re-check on tool events
+        from superlocalmemory.hooks.cue_hook import main as _main
         sys.exit(_main())
     if action == "codex-start":
         _hook_codex_start()

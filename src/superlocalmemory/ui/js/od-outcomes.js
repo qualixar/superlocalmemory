@@ -76,8 +76,8 @@
     list.appendChild(el('p', 'dash-card-meta', led.withholding === 'on'
       ? 'Measuring is on: one session start in ten leaves out one memory, or one way of searching, ' +
         'chosen at random and recorded, so SuperLocalMemory can tell whether memory helps.'
-      : 'Measuring is off, so whether memory helps cannot be estimated yet. Turn it on with ' +
-        'slm flags (outcomes.holdout).'));
+      : 'Measuring is off, so whether memory helps cannot be estimated yet. Turn it on in ' +
+        'Settings (Help SLM measure what works) or with slm measurement on.'));
 
     var use = d.use || {};
     list.appendChild(el('p', 'dash-card-lead truth-certs-title', 'How often memories are used'));

@@ -19,12 +19,13 @@ from superlocalmemory.core.feature_flags import (
     write_flag,
 )
 
-#: D-22: injection receipts (measurement only) are on by default; D-34 keeps
-#: withholding off until its shipping conditions exist.
-DEFAULT_ON = frozenset({"outcomes.receipts"})
+#: What 4.2.30 measures by default: injection receipts (D-22), randomised
+#: withholding (D-28, D-34) and logged adjacent swaps (D-46). Everything else
+#: ships dark.
+DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout", "outcomes.swaps"})
 
 
-def test_every_flag_defaults_off_so_4230_ships_dark_except_receipts() -> None:
+def test_4230_measures_by_default_and_every_other_flag_ships_dark() -> None:
     assert FLAGS
     assert {f.flag_id for f in FLAGS.values() if f.default is not FlagState.OFF} == DEFAULT_ON
     assert all(FLAGS[fid].default is FlagState.ON for fid in DEFAULT_ON)
@@ -42,9 +43,10 @@ _SHIPPING_CONDITIONS = ("superlocalmemory.outcomes.disclosure",
 def test_withholding_defaults_on_only_once_its_shipping_conditions_exist() -> None:
     import importlib.util
 
-    if FLAGS["outcomes.holdout"].default is FlagState.ON:  # the RC gate (D-34)
-        missing = [m for m in _SHIPPING_CONDITIONS if importlib.util.find_spec(m) is None]
-        assert not missing, f"withholding is default-on without {missing}"
+    for flag_id in ("outcomes.holdout", "outcomes.swaps"):  # the RC gate (D-34, D-46)
+        if FLAGS[flag_id].default is FlagState.ON:
+            missing = [m for m in _SHIPPING_CONDITIONS if importlib.util.find_spec(m) is None]
+            assert not missing, f"{flag_id} is default-on without {missing}"
 
 
 def test_the_outcome_ledger_has_an_off_switch_and_the_kill_switch_stops_it(tmp_path) -> None:
@@ -53,9 +55,9 @@ def test_the_outcome_ledger_has_an_off_switch_and_the_kill_switch_stops_it(tmp_p
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     assert FeatureFlags(fresh, environ={}).enabled("outcomes.receipts")
+    assert FeatureFlags(fresh, environ={}).enabled("outcomes.holdout")  # D-28: on for everyone
+    write_flag(fresh, "outcomes.holdout", FlagState.OFF)  # a person's off switch
     assert not FeatureFlags(fresh, environ={}).enabled("outcomes.holdout")
-    write_flag(fresh, "outcomes.holdout", FlagState.ON)  # the maintainer's store
-    assert FeatureFlags(fresh, environ={}).enabled("outcomes.holdout")
     assert not FeatureFlags(fresh, environ={KILL_ENV: "1"}).observing("outcomes.receipts")
 
 

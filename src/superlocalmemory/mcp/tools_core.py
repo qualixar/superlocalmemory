@@ -181,6 +181,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
         slot: str = "",
         slot_value: str = "",
         source_file: str = "",
+        cues: list[str] | None = None,
     ) -> dict:
         """Store content to memory with intelligent indexing.
 
@@ -242,6 +243,15 @@ def register_core_tools(server, get_engine: Callable) -> None:
         the file's fingerprint now, and a later recall marks the memory
         ``source: changed`` or ``missing`` when the file changes or goes, so you
         know to read it again. Leave it empty when the memory came from no file.
+
+        ``cues`` bring the memory back at the right moment. Each is
+        ``kind:pattern``: ``path:src/**/schema.py`` (when that file is edited),
+        ``tool:Bash:git push`` (a tool, then part of the command),
+        ``error:database is locked`` (a phrase in a tool's output),
+        ``repo:superlocalmemory`` (working in that folder) or ``date:2026-11-20``
+        (from that day on). Use them for a plan or a warning that matters only
+        at one step; a bad cue is refused before anything is saved. Shown once
+        per session, only when the ``delivery.cues`` setting is on.
         """
         # v3.6.10: resolve "mcp_client" sentinel → URL path (HTTP) or env var (stdio)
         if agent_id == "mcp_client":
@@ -293,6 +303,14 @@ def register_core_tools(server, get_engine: Callable) -> None:
         if source_file and not source_file.startswith(("/", "~")) and ":\\" not in source_file[:3]:
             return {"success": False, "code": "INVALID_SOURCE_FILE", "retryable": False,
                     "error": "source_file must be an absolute path to a file"}
+        # W3-8: a malformed cue is refused here, before anything is sent.
+        from superlocalmemory.core.cue_triggers import CueError, parse_cues
+
+        try:
+            cue_specs = [c.spec for c in parse_cues(cues)]
+        except CueError as exc:
+            return {"success": False, "code": "INVALID_CUE", "retryable": False,
+                    "error": str(exc)}
         replaces_id = None
         if replaces is not None:
             from superlocalmemory.core.replaces_input import (
@@ -322,6 +340,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 replaces_part += f"\0slot={slot_claim[0]}\0slot_value={slot_claim[1] or ''}"
             if source_file:  # and the source file (D-38)
                 replaces_part += f"\0source_file={source_file}"
+            if cue_specs:  # and the cues
+                replaces_part += "\0cues=" + "\0".join(cue_specs)
             if session_id:
                 material = (
                     f"{agent_id}\0{session_id}\0{scope or ''}\0{shared_with}\0{content}"
@@ -391,6 +411,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                             body["slot_value"] = slot_claim[1]
                     if source_file:
                         body["source_file"] = source_file
+                    if cue_specs:
+                        body["cues"] = cue_specs
                     body, request_flags = rk.with_declared_kind(body, request_flags, declared_kind)
                     resp = None
                     try:
@@ -531,6 +553,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     worker_meta["slot_value"] = slot_claim[1]
             if source_file:
                 worker_meta["source_file"] = source_file
+            if cue_specs:  # lifted into the request's ``cues`` field by the proxy
+                worker_meta["cues"] = cue_specs
 
             def _store_via_daemon_pool():
                 pool = choose_pool()

@@ -90,6 +90,7 @@ result for retrieval.
 | `slot` | string | No | The one thing this memory states the current value of, as `subject/relation` or `subject/relation/qualifier` (for example `SLM/release cadence`) |
 | `slot_value` | string | No | That value in a few words (`monthly`). The same value later is a restatement; a different one opens a dispute |
 | `source_file` | string | No | Absolute path of the local file this memory was learned from. Recall marks the memory when that file changes or goes |
+| `cues` | list of strings | No | When to bring this memory back, each as `kind:pattern`. See below |
 
 The result is a receipt with `fact_ids`, `count`, `operation_id`,
 `materialization_state` and `pending`. A normal call returns once the memory is
@@ -104,6 +105,29 @@ returning it, nothing is deleted, and the response's `replaced` says what was
 retired or why nothing was. The new memory is saved either way. An unknown id,
 or another profile's memory, is refused before anything is saved. Undo with
 `review_correction(case_id, "rollback", version)`.
+
+`cues` attach a memory to the step where it matters, so a plan or a warning
+comes back at that step instead of at the start of every session. Each cue is
+`kind:pattern`:
+
+| Cue | Fires when | Example |
+|-----|------------|---------|
+| `path:GLOB` | a file matching the glob is edited or read, by its full path or the path under the working folder. `**/` may match no folder | `path:src/**/schema.py` |
+| `tool:NAME[:TEXT]` | that tool is used (any letter case). `TEXT` is a case-insensitive piece of the Bash command, never a regular expression | `tool:Bash:git push` |
+| `error:TEXT` | a tool's output (the first 8 KB, after the tool ran) contains the text, in any letter case | `error:database is locked` |
+| `repo:NAME` | a folder in the working directory's path is called `NAME` | `repo:superlocalmemory` |
+| `date:YYYY-MM-DD` | today (UTC) is that day or later | `date:2026-11-20` |
+
+At most 8 cues per memory, 200 characters each, one line each. A malformed cue is
+refused with `INVALID_CUE` before anything is saved. Cues bind to the memory's
+first fact within one maintenance cycle. A plan saved with `kind="prospective"`
+whose text names a file path (a folder, then a file name with an extension, up to
+three) also gets an `extracted` path cue for each. The memory comes back through
+`slm hook cue` on PreToolUse and PostToolUse, once per session and only while the
+`delivery.cues` setting is on (off by default; see `slm flags`). After an agent
+edits a file, memories saved from that file with `source_file` are shown too,
+with a note that they may be out of date. Cue deliveries are logged like other
+deliveries and are never withheld. List cues with `slm cues list`.
 
 ### `recall`
 

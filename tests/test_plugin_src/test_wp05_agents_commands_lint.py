@@ -118,6 +118,7 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "disputes",  # slm disputes list|settle|still-true
         "audit",     # slm audit [--count]: asks a person at a terminal
         "consent",   # slm consent list|give|withdraw: give asks a person at a terminal
+        "measurement",  # slm measurement status|on|off: what SLM measures, the off switch (D-28)
     }
 )
 

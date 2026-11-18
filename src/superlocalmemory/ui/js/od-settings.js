@@ -305,6 +305,18 @@
     return g;
   }
 
+  // 4.2.30 D-28: what SLM measures, in plain words, with one switch (od-measurement.js).
+  function buildMeasurement() {
+    var mount = el('div', { 'data-set':'', 'data-txt':'measure measurement withholding swaps receipts help slm what works' },
+      { padding:'16px 20px' });
+    var g = makeGrp('Help SLM measure what works', 'shield', [mount]);
+    g.id = 'settings-measurement';  // deep-link target of the dashboard banner
+    if (window.SLMMeasurement && typeof window.SLMMeasurement.renderInto === 'function') {
+      window.SLMMeasurement.renderInto(mount);
+    }
+    return g;
+  }
+
   /* ═══════════════════════════════════════════════════════════
      Filter + Load all
   ═══════════════════════════════════════════════════════════ */
@@ -361,7 +373,7 @@
     hub.appendChild(sWrap);
 
     var frag = document.createDocumentFragment();
-    [buildMode(), buildAnswerCheck(), buildEmb(), buildStorage(), buildScope(), buildRuntime(),
+    [buildMode(), buildAnswerCheck(), buildMeasurement(), buildEmb(), buildStorage(), buildScope(), buildRuntime(),
      buildCapture(), buildRecall(), buildInvoke(), buildForgetting(),
      buildEvolution(), buildBackup(), buildMesh(), buildTrust(),
      buildRateLimit(), buildDaemon()

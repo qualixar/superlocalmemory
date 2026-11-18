@@ -47,6 +47,9 @@ For a task with a checkable gate (tests/schema/lint), run a bounded loop: iterat
 - A pile of unreviewed machine correction proposals: `slm corrections dismiss` (dry run; `--apply` backs up; undo with `slm corrections restore-overtaken <case_id>`). Never reject cases in bulk: a rejected case blocks deleting its memories for good.
 - Mode B/C model cost: `slm config set temporal_validator.max_llm_checks 0` and `slm config set encoding.context_generation_llm false`, then `slm restart`. See slm-status.
 
+### Measurement
+- SLM measures whether memory helps (receipts; one memory left out in a small share of session starts; two neighbouring results swapped in a few recalls; ids and numbers, this computer only). Read it with `slm measurement status --json`. Turn it off (`slm measurement off`) only when the user asks, never on your own.
+
 ### Session end
 `close_session(session_id)` when work is meaningfully complete.
 

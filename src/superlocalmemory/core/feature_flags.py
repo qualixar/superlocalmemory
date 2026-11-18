@@ -69,31 +69,34 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Record source fingerprints and flag facts whose source changed"),
     Flag("judge.ladder", "WS-2", FlagState.OFF,
          "Route typed memory questions through the judge ladder"),
-    # D-22: measurement starts at W0, on by default (ids only, local). The only
-    # flag whose default is not "off".
+    # D-22: measurement starts at W0, on by default (ids only, local). With
+    # withholding and swaps (below) these are the only flags not "off".
     Flag("outcomes.receipts", "WS-3", FlagState.ON,
          "Write an injection receipt for every delivery (ids only, local)"),
     Flag("outcomes.usage", "WS-3", FlagState.OFF,
          "Detect whether delivered memories were used (local, ids only)"),
-    # D-34 (Varun, 16 Nov): withholding stays off by default until D-28's
-    # shipping conditions exist (disclosure, the off switch in CLI, dashboard
-    # and plugin, usage detection; W3); the maintainer turns it on. The default
-    # flips to on in the commit that lands them (an RC gate test holds this).
-    Flag("outcomes.holdout", "WS-3", FlagState.OFF,
+    # D-28 + D-34 (Varun, 15-16 Nov): withholding is on by default for every
+    # user, with a clear switch to turn it off. The default flipped in the commit
+    # that landed D-28's shipping conditions: the install/upgrade disclosure
+    # (outcomes.disclosure), the one off switch every surface calls
+    # (outcomes.switch; slm measurement, the dashboard, plugin settings) and usage
+    # detection (outcomes.usage). An RC gate test holds this.
+    Flag("outcomes.holdout", "WS-3", FlagState.ON,
          "Withhold each eligible delivered memory with a small logged probability "
          "(never pinned rules, explicit recall, cues or lease warnings)",
          shadowable=False),
     # D-46 (Varun, 18 Nov): two neighbouring results of an agent's recall trade
     # places in 5% of recalls, logged, to measure position attention for the
-    # ranker's offline gate. Same shipping rule as withholding (D-34).
-    Flag("outcomes.swaps", "WS-3", FlagState.OFF,
+    # ranker's offline gate. Same shipping rule as withholding (D-34): on by
+    # default with the same disclosure and off switch.
+    Flag("outcomes.swaps", "WS-3", FlagState.ON,
          "Swap two neighbouring results in a small logged share of agents' recalls "
          "(nothing withheld) to measure how much attention each position gets",
          shadowable=False),
     Flag("delivery.need_gate", "WS-4", FlagState.OFF,
          "Decide per prompt whether memory is needed before recalling"),
     Flag("delivery.cues", "WS-4", FlagState.OFF,
-         "Fire prospective memories on cues (file, command, topic)"),
+         "Fire prospective memories on cues (file path, tool, error, repository, date)"),
     Flag("delivery.harm_gate", "WS-4", FlagState.OFF,
          "Withhold memories whose expected value is negative"),
     Flag("trust.taint", "WS-5", FlagState.OFF,

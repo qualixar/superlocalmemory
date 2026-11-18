@@ -47,6 +47,8 @@ def cmd_upgrade_hosts(args: Namespace) -> None:
         _report_reconnect_apps([])
         return
 
+    from superlocalmemory.cli.measurement_cmd import announce_if_pending
+    announce_if_pending()  # 4.2.30 D-28: an upgrade shows the measurement notice once
     operation = "Applying" if apply else "Previewing"
     print(f"{operation} SLM host upgrades: {', '.join(targets)}")
     if not apply:

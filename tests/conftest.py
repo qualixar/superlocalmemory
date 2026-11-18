@@ -201,10 +201,14 @@ def _machine_not_pressed_unless_a_test_says_so(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _withholding_off_unless_a_test_turns_it_on(monkeypatch):
-    """4.2.30 D-28 withholds delivered memories at random by design, so a test
-    that checks what a session start delivers would fail one run in ten. Tests
-    of the randomiser itself turn it on (``SLM_FEATURE_OUTCOMES_HOLDOUT=on``)."""
+    """4.2.30 D-28 withholds delivered memories at random by design (on by
+    default for users), so a test that checks what a session start delivers or
+    the order of a recall would fail one run in ten or twenty. Tests of the
+    randomiser itself turn it on (``SLM_FEATURE_OUTCOMES_HOLDOUT=on``,
+    ``SLM_FEATURE_OUTCOMES_SWAPS=on``) or delete the variable to see the shipped
+    default."""
     monkeypatch.setenv("SLM_FEATURE_OUTCOMES_HOLDOUT", "off")
+    monkeypatch.setenv("SLM_FEATURE_OUTCOMES_SWAPS", "off")
 
 
 @pytest.fixture(autouse=True)

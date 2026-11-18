@@ -139,6 +139,7 @@ slm remember "Always run migrations before deploy" --kind rule
 slm remember "Staging moved to Postgres 17" --replaces <fact_id>
 slm remember "Maria owns the auth service" --scope shared --shared-with team-a
 slm remember "Wait for all enrichment" --sync --json
+slm remember "Run the schema check first" --kind prospective --cue path:src/**/schema.py --cue "tool:Bash:git push"
 ```
 
 | Option | Description |
@@ -148,6 +149,7 @@ slm remember "Wait for all enrichment" --sync --json
 | `--replaces ID` | Id of an earlier memory this one replaces. The old one stops being returned; undo with `slm review-correction` |
 | `--scope` | `personal`, `shared` or `global`. Unset uses the configured default, which is `personal` |
 | `--shared-with` | Comma-separated profile ids for shared scope |
+| `--cue KIND:PATTERN` | Bring this memory back at the right step. Repeat for more than one. Kinds: `path`, `tool`, `error`, `repo`, `date`; see [the `cues` parameter](mcp-tools.md#remember). A bad cue is refused before anything is saved |
 | `--sync` | Wait until enrichment finishes instead of returning when the memory is queryable |
 | `--json` | Emit the operation receipt and materialization state |
 
@@ -393,6 +395,19 @@ slm hide --undo <fact_id>
 
 The memories stay stored, listed and counted. Ids from another profile are
 reported as not found; the command exits 1 only when none of the ids matched.
+
+### `slm cues list [--json]`
+
+Lists the cues of the active profile, newest first: the kind and pattern, whether
+you gave it (`explicit`) or SLM found a file path in a plan (`extracted`), and the
+start of the memory it belongs to. It reads the store directly and does not need
+the daemon. Cues bring a memory back on the step they name, through the `cue` hook,
+while the `delivery.cues` setting is on (off by default; see `slm flags`).
+
+```bash
+slm cues list
+slm cues list --json
+```
 
 ### `slm health`
 
@@ -1486,3 +1501,13 @@ See [Scale engine](scale-engine.md).
 ### `slm consent` (4.2.30)
 
 `slm consent` lists what may leave this computer and whether you agreed. Today there is one purpose, `judge_ladder_hosted`: the background judges send pairs of your memories to the online Jev judge, one pair per request, to ask whether the newer one replaces the older one (passwords and keys removed first). `slm consent give judge_ladder_hosted` shows the notice and asks you to type `yes`; it needs a terminal and the online answer check with Jev turned on, because it uses the same connection. `slm consent withdraw judge_ladder_hosted` stops it at once and works anywhere. The consent names its provider: if the answer check moves to another provider, the judges stop asking Jev until you agree again. Each change is written to the audit chain first. The dashboard offers the same under Settings, Answer check, Online with Jev, Background judges. While the judges only watch (see `slm flags`), they do not ask Jev.
+
+### `slm measurement [status|on|off] [--receipts] [--json]` (4.2.30)
+
+SLM measures whether memory actually helps your agents, and this is the one switch for it. `slm measurement status` (the default) prints the notice the first time you run it, then each measure in plain words: receipts, withholding, swaps, the usage check and the need check, each on or off. It needs no daemon.
+
+By default SLM writes a receipt each time it hands memories to an agent (which memory ids, their rank and score, and the logged chance of each choice; ids and numbers only, on this computer). In about 1 in 10 session starts it changes one thing by a logged random draw: one eligible memory is left out, or, when an agent opens a session through MCP, one way of searching is switched off for that fetch. Pinned rules, standing rules, core blocks, explicit recall, cues and lease warnings are never left out. In about 1 in 20 of an agent's own recalls, two neighbouring results trade places; nothing is left out or added.
+
+`slm measurement off` turns the withholding and the swapping off together (`outcomes.holdout` and `outcomes.swaps`). Receipts stay on unless you add `--receipts`. `slm measurement on` turns them back on. A change takes effect at the next session start. The usage check (`outcomes.usage`) and the need check (`delivery.need_gate`) are off unless you turn them on with `slm flags set`; this command never changes them. `slm flags kill on` still turns every 4.2.30 measure off at once.
+
+`--json` returns `measuring`, `kill_switch`, each measure's `state`, `pending` (the notice has not been acknowledged yet) and the `notice` text. Reading it as JSON does not count as having seen the notice; running `status` yourself does. The same switch is in the dashboard under Settings, "Help SLM measure what works", and a banner on the dashboard home shows the notice until you press OK. `slm setup` and `slm upgrade-hosts` print the notice once, and so does the npm install. An agent turns this off only when you ask it to. Every change is recorded with its time and surface in `disclosures.json` in the SLM data folder.

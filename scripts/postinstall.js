@@ -18,6 +18,7 @@ const path = require('path');
 const os = require('os');
 const { printWhatsNew, runMediaStep } = require('./postinstall/media-request.js');
 const { nodeRunsTranslated } = require('./postinstall/node-arch.js');
+const { printMeasurementNotice } = require('./postinstall/measurement-notice.js');
 
 const MIN_PYTHON = Object.freeze([3, 12]);
 const MAX_PYTHON_EXCLUSIVE = Object.freeze([3, 15]);
@@ -494,6 +495,7 @@ function main(argv = process.argv.slice(2)) {
   console.log('');
   console.log('  Prefer to tune performance profiles? Use:  slm reconfigure');
   printWhatsNew();
+  printMeasurementNotice(runtimePython);  // 4.2.30 D-28: stderr, never blocks
   console.log('');
   return 0;
 }

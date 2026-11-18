@@ -223,7 +223,7 @@ def _outcome_sql(outcome: str) -> tuple[str, list]:
         return _USED.format(signals=_marks(len(USED_SIGNALS))), [*USED_SIGNALS,
                                                                   OUTCOME_WINDOW_H]
     if outcome == REASK:
-        pulls = sorted(rz.PULL_PATHS)
+        pulls = sorted(rz.ASKED_PATHS)
         return _REASK.format(pulls=_marks(len(pulls))), [*pulls, OUTCOME_WINDOW_H]
     raise ValueError(f"unknown outcome: {outcome!r}")
 
