@@ -73,6 +73,20 @@ describe('Waiting for your OK card', () => {
     assert.equal(buttons(d, 'Approve').length, 3); // two rows and "Approve all 2"
   });
 
+  it('reads as a sentence for the origins whose label does not follow "From" (browser check, 18 Nov)', async () => {
+    const items = [
+      ITEM('m1', { origin: 'written by a model', origin_class: 'model_generated' }),
+      ITEM('m2', { origin: 'unknown (saved before 4.2.30)', origin_class: 'unknown' }),
+    ];
+    const d = page({ items }, []);
+    await d.window.SLMTrust.reload(); await flush();
+    const text = d.window.document.body.textContent;
+    assert.doesNotMatch(text, /From written by a model/);
+    assert.doesNotMatch(text, /From unknown \(/);
+    assert.match(text, /From text a model wrote\./);
+    assert.match(text, /From a memory saved before 4\.2\.30, with no record of where it came from\./);
+  });
+
   it('in shadow it says nothing is held back yet', async () => {
     const d = page({ state: 'shadow' }, []);
     await d.window.SLMTrust.reload(); await flush();

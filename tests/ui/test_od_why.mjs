@@ -45,6 +45,12 @@ describe('Memory detail: Why was this shown?', () => {
     assert.equal(box.querySelectorAll('button').length, 1);
   });
 
+  it('sizes its heading like the drawer sections around it (the theme styles a bare h3 at 1.25rem)', async () => {
+    const { d, box } = bare(() => reply(200, REPORT));
+    await d.window.SLMWhy.mount('f1', box);
+    assert.equal(box.querySelector('h3').style.fontSize, '13px');
+  });
+
   it('shows the origin, the firewall, the signature and each delivery in words', async () => {
     const { calls, d, box } = bare(() => reply(200, REPORT));
     await d.window.SLMWhy.mount('f1', box);

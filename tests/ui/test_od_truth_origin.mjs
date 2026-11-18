@@ -43,6 +43,12 @@ describe('Memory detail: Where this came from', () => {
     assert.equal(box.querySelector('[data-origin]').getAttribute('data-origin'), 'user_direct');
   });
 
+  it('sizes its heading like the drawer sections around it (the theme styles a bare h3 at 1.25rem)', async () => {
+    const box = await show(origin({ class: 'user_direct', taint: 'user_direct', label: 'you said this',
+                                    taint_label: 'you said this' }));
+    assert.equal(box.querySelector('h3').style.fontSize, '13px');
+  });
+
   it('adds a note when the memory was built from something less trusted', async () => {
     const box = await show(origin({ class: 'system', taint: 'web', label: 'built by SuperLocalMemory',
                                     taint_label: 'a web page' }));

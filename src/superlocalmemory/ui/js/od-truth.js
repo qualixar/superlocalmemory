@@ -222,6 +222,13 @@
     return box;
   }
 
+  // The theme styles a bare h3 at 1.25rem and outranks the class rule; the drawer's own headings are inline 13px.
+  function heading(text) {
+    var h = el('h3', 'truth-detail-title', text);
+    h.style.fontSize = '13px';
+    return h;
+  }
+
   function detail(factId, container) {
     if (!container || !factId) return Promise.resolve();
     container.textContent = '';
@@ -232,11 +239,11 @@
         var stale = src && src.state !== 'fresh';
         container.textContent = '';
         if (d.origin && d.origin['class']) {
-          container.appendChild(el('h3', 'truth-detail-title', 'Where this came from'));
+          container.appendChild(heading('Where this came from'));
           container.appendChild(originBlock(d.origin));
         }
         if (!slots.length && !open.length && !stale) return;
-        container.appendChild(el('h3', 'truth-detail-title', 'When it was true'));
+        container.appendChild(heading('When it was true'));
         open.forEach(function (dsp) {
           var row = disputeRow(dsp);
           container.appendChild(row);

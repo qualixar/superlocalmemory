@@ -66,13 +66,19 @@
     setTimeout(load, 1200);
   }
 
+  // "From " + the class label reads badly for these two ("From written by a model."), so say them as a phrase.
+  var FROM_WORDS = {
+    model_generated: 'text a model wrote',
+    unknown: 'a memory saved before 4.2.30, with no record of where it came from'
+  };
+
   function itemRow(item) {
     var row = el('div', 'truth-item');
     row.setAttribute('data-fact', item.fact_id);
     row.appendChild(el('p', 'dash-card-lead', item.preview || ''));
     var words = (item.wanted_words || []).join('; ');
     row.appendChild(el('p', 'dash-card-meta',
-      'From ' + (item.origin || 'an unknown source') +
+      'From ' + (FROM_WORDS[item.origin_class] || item.origin || 'an unknown source') +
       (words ? '. This memory ' + words + '.' : '.') +
       ' Until you approve it, agents are not told to follow it.'));
     var actions = el('div', 'truth-actions');

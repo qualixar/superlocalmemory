@@ -94,7 +94,9 @@
   function mount(factId, container) {
     if (!container || !factId) return Promise.resolve();
     container.textContent = '';
-    container.appendChild(el('h3', 'truth-detail-title', 'Why was this shown?'));
+    var title = el('h3', 'truth-detail-title', 'Why was this shown?');
+    title.style.fontSize = '13px'; // the theme's `.ng-dark h3` (1.25rem) outranks the class rule
+    container.appendChild(title);
     var body = el('div', 'truth-why-body');
     var btn = el('button', 'btn sm ghost', 'Show where it came from and when agents saw it');
     btn.type = 'button';
