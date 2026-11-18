@@ -340,6 +340,17 @@ SLM measures whether memory helps your agents, locally and as ids and numbers on
 | `outcomes.usage` | off | Compares an agent's last reply with the memories it was given to see which were used; ids and scores only |
 | `delivery.need_gate` | off | Decides per prompt whether memory is needed; logs each prompt's rule, score and a keyed digest (never the prompt text), and recalls 5% of the prompts it would skip to measure its own misses |
 
+### Memory on every prompt, and reminders on cues
+
+Two delivery features are off by default and turned on with `slm flags set <flag> on`:
+
+- **`delivery.need_gate`: memory on every prompt.** When on, the UserPromptSubmit hook (`slm hook auto_recall`, registered in the Claude Code family of plugins and in Codex) asks memory before the agent answers, but only when the prompt needs it. Fixed rules skip the obvious prompts (an acknowledgement such as "yes" or "go ahead", a greeting, pure arithmetic, a translation request, a slash command). The rest are ranked by a simple score, and prompts under a threshold are skipped too. The threshold is never chosen by hand: it is set from your own logged prompts so that at most 10% of the prompts that needed memory are skipped (conformal risk control), and until enough prompts have a known outcome the score skips nothing. "Needed" means an agent used a memory delivered for that prompt within 24 hours, or asked memory itself before the next prompt; use detection finds some uses, not all, so this is a lower bound. A memory the conversation already got is never shown again. The hook answers within 7 seconds or adds nothing. `shadow` logs the threshold it would use without applying it. `slm health --memory` shows how many prompts were skipped and the bound.
+- **`delivery.cues`: reminders when the agent touches something.** A memory saved with cues (`remember(cues=["path:src/**/schema.py", "tool:Bash:git push", "error:database is locked", "repo:myproject", "date:2026-12-01"])`, or `slm remember --cue path:...`) comes back right before or after the matching step: editing a matching file, running a matching command, a tool output with that error, working in that repository, or on or after that date. Plans that name a file get a path cue automatically. Editing a file that memories were saved from also brings a note that those memories may now be out of date. Each memory fires at most once per conversation. `slm cues list` shows them.
+
+**Harm gate (shadow only).** `slm health --memory` also reports which memories, if any, measurably make the agent worse when included (from the randomised withholding above, with an anytime-valid bound per memory and false-discovery control across memories). In this release it only reports: it never removes a memory from what an agent sees.
+
+**Opinions are labelled.** A remembered opinion or preference is shown to agents as "a view or preference someone stated, not a checked fact", so a model does not agree with it just because it was remembered.
+
 `slm measurement off` turns `outcomes.holdout` and `outcomes.swaps` off together; add `--receipts` to turn `outcomes.receipts` off as well. `slm flags kill on` (or `SLM_4230_OFF=1`) turns every 4.2.30 setting off at once. The notice, the version of it you acknowledged and each on/off change are kept in `disclosures.json` in the data folder.
 
 ## Consistency Checking at Store Time

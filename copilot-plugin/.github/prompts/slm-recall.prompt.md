@@ -396,6 +396,18 @@ this?": `found_by` (the channels that found it), `answer_check` (`supported`,
 handle `disputed` and `source ...` as above, and weigh an old `said` against
 anything that may have changed since.
 
+**Memories that arrive on their own.** When the user has switched them on, SLM
+adds memories to your context without being asked: before you answer a prompt
+that seems to need them (per-prompt recall; obvious prompts such as "yes" are
+skipped), and as a reminder right before or after a step that matches a saved
+cue (a file, a command, an error, a repository, a date), including a note that
+memories saved from a file you just edited may be out of date. They come inside
+the same untrusted-evidence frame and carry the same labels. You will not be
+shown the same memory twice in one conversation, so if you need one again,
+recall it. A memory labelled "a view or preference someone stated, not a checked
+fact" records what someone thinks: take it into account, but do not agree with
+it, or with the user, just because it was remembered.
+
 ### 9. Close the loop — say which memories helped
 
 Whether a memory has been useful is evidence SLM records only if you supply it.
