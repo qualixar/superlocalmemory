@@ -13,7 +13,10 @@ should I rely on this? ``why`` answers it in four keys, from those same fields
   ran, ``not_checked`` when it did not;
 * ``standing``: ``current``, ``disputed`` (two memories disagree: ask which is
   true now) or ``source changed`` / ``source missing`` (re-read the file);
-* ``said``: how long ago it was saved ("" when undated).
+* ``said``: how long ago it was saved ("" when undated);
+* ``origin`` (only while ``trust.taint`` is on or in shadow, WS-5): ``class``, ``taint``
+  and ``label`` of where it came from, copied from the result's ``origin``, which the
+  truth notes fill from one batched read (never a read per result here).
 """
 
 from __future__ import annotations
@@ -39,10 +42,14 @@ def why(item: dict, found_by: tuple[str, ...] = ()) -> dict:
     check = str(item.get("tier") or "not_checked")
     if item.get("weak") and check == "supported":
         check = "weak"  # below the answer check's threshold though labelled supported
-    return {"found_by": [k for k, _v in found[:TOP_CHANNELS]] or list(found_by),
-            "answer_check": check,
-            "standing": standing,
-            "said": str(item.get("age_label") or "")}
+    block = {"found_by": [k for k, _v in found[:TOP_CHANNELS]] or list(found_by),
+             "answer_check": check,
+             "standing": standing,
+             "said": str(item.get("age_label") or "")}
+    origin = item.get("origin")
+    if isinstance(origin, dict) and origin.get("class"):  # filled by truth/recall_notes
+        block["origin"] = {k: str(origin[k]) for k in ("class", "taint", "label") if k in origin}
+    return block
 
 
 def with_why(results: list[dict], *, found_by: tuple[str, ...] = ()) -> list[dict]:

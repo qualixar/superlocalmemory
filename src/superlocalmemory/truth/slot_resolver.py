@@ -76,6 +76,9 @@ class Resolution:
     slot_id: str | None = None
     ledger: str | None = None
     case_id: str | None = None
+    #: ``held`` when ``trust.taint`` is on and the lattice refused the newer value
+    #: (the dispute is relabelled ``origin_below_head``); ``would_hold`` in shadow.
+    origin: str | None = None
 
 
 def _case_id(profile_id: str, predecessor: str, successor: str) -> str:
@@ -147,20 +150,26 @@ SELECT n.revision_id, r.profile_id, s.scope, r.fact_id, n.fact_id, n.case_id
 """
 
 
-def reconcile_ledger(conn: sqlite3.Connection, *, auto_apply: bool,
-                     limit: int = 200) -> Counter[str]:
+def reconcile_ledger(conn: sqlite3.Connection, *, auto_apply: bool, limit: int = 200,
+                     origin_gate: Callable[[sqlite3.Connection, str, str], bool] | None = None
+                     ) -> Counter[str]:
     """Bring unsettled supersede decisions into the ledger (call only with slots on).
 
     Each revision in its own savepoint; a ledger refusal leaves it as it was.
+    ``origin_gate(conn, winner, loser)`` (``trust.taint`` on, M-15) False means the
+    winner's origin is below the loser's: the case is proposed for a person, never applied.
     """
     counts: Counter[str] = Counter()
     for rev, profile, scope, predecessor, successor, linked in conn.execute(
             _UNSETTLED, (limit,)).fetchall():
         conn.execute("SAVEPOINT slot_reconcile")
         try:
+            held = origin_gate is not None and not origin_gate(conn, successor, predecessor)
+            if held:
+                counts["origin_below_head"] += 1
             status, case_id = retire_superseded(
                 conn, profile_id=profile, scope=scope, predecessor=predecessor,
-                successor=successor, apply=auto_apply)
+                successor=successor, apply=auto_apply and not held)
         except (CorrectionCaseError, ValueError):
             conn.execute("ROLLBACK TO slot_reconcile")
             conn.execute("RELEASE slot_reconcile")
@@ -177,11 +186,18 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
                  content: str, valid_from: str | None,
                  resolve_subject: Callable[[str], str | None] | None = None,
                  explicit_key: str | None = None,
-                 explicit_value: str | None = None) -> Resolution:
+                 explicit_value: str | None = None,
+                 taint: str = "off") -> Resolution:
     """Key and bind one fact. Never raises for a bad key, and never retires.
 
     What a binding decides is recorded on the slot; a retirement only ever
     comes from a settled dispute (``truth.dispute_pass``, D-36, I-10).
+
+    ``taint`` is the ``trust.taint`` state (``off``, ``shadow``, ``on``, M-15). On,
+    a dispute against a head the new fact's origin does not reach (or either
+    side ``unknown``) is relabelled ``origin_below_head``: no judge answers it
+    and only a person settles it. Shadow only reports what it would have done.
+    Off, nothing changes.
     """
     key = slot_keys.extract(content, resolve_subject=resolve_subject, explicit=explicit_key,
                             explicit_value=explicit_value)
@@ -189,7 +205,33 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
         return Resolution(fact_id=fact_id, keyed=False)
     binding = slot_store.bind(conn, profile_id=profile_id, scope=scope, fact_id=fact_id,
                               key=key, valid_from=valid_from)
-    return Resolution(fact_id, True, binding.outcome, binding.slot_id)
+    origin = None
+    if taint != "off" and binding.outcome == slot_store.DISPUTE and binding.dispute_id \
+            and binding.other_fact_id:
+        origin = _origin_check(conn, binding, fact_id, enforce=taint == "on")
+    return Resolution(fact_id, True, binding.outcome, binding.slot_id, origin=origin)
+
+
+def _origin_check(conn: sqlite3.Connection, binding: slot_store.Binding, fact_id: str, *,
+                  enforce: bool) -> str | None:
+    """``held`` / ``would_hold`` when the new value's origin is below the head's.
+
+    A value older than the head leaves the head in place (the judge may retire
+    the newcomer), so it is checked when the judge answers, not here.
+    """
+    from superlocalmemory.trust import supersession
+
+    reason = conn.execute("SELECT reason_code FROM slot_disputes WHERE dispute_id = ?",
+                          (binding.dispute_id,)).fetchone()[0]
+    if reason in slot_store.OLDER_REASONS:
+        return None
+    if supersession.allows(conn, fact_id, binding.other_fact_id):
+        return None
+    if not enforce:
+        return "would_hold"
+    conn.execute("UPDATE slot_disputes SET reason_code = ? WHERE dispute_id = ? "
+                 "AND state = 'open'", (supersession.ORIGIN_BELOW_HEAD, binding.dispute_id))
+    return "held"
 
 
 def rollback_slot_cases(conn: sqlite3.Connection, *, profile_id: str | None = None

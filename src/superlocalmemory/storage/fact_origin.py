@@ -192,6 +192,11 @@ def record(db: Any, fact: Any) -> None:
                    f"VALUES ({', '.join('?' * len(_COLUMNS))})", values)
     except Exception as exc:  # noqa: BLE001 - origin is evidence, never a reason to lose a save
         logger.warning("fact origin not recorded for %s (%s)", fact.fact_id, type(exc).__name__)
+        return
+    # WS-5: the class and taint, computed from the row just written, while the flag observes.
+    from superlocalmemory.trust import fact_trust
+
+    fact_trust.admit(db, fact)  # never raises
 
 
 __all__ = ["CHANNELS", "Origin", "TRANSFORMS", "UNKNOWN", "channel_for", "current", "declare",

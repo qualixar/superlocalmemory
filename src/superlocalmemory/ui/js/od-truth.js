@@ -12,8 +12,9 @@
 // Memory text is only ever set with textContent. The card hides itself when
 // nothing needs an answer.
 //
-// Also: the memory detail's "When it was true" section (SLMTruth.detail) and
-// the Health page's "Truth checks" card (odMountTruthChecks), both read-only.
+// Also: the memory detail's "Where this came from" and "When it was true" sections
+// (SLMTruth.detail) and the Health page's "Truth checks" card (odMountTruthChecks),
+// all read-only.
 (function () {
   'use strict';
 
@@ -104,7 +105,9 @@
     row.setAttribute('data-dispute', d.dispute_id);
     row.appendChild(el('p', 'dash-card-lead',
       d.reason === 'rolled_back' ? 'A change was undone between these two. Which is true now?'
-                                 : 'These two memories disagree. Which is true now?'));
+      : d.reason === 'origin_below_head'
+        ? 'One of these came from a source SuperLocalMemory trusts less, so it will not choose. Which is true now?'
+        : 'These two memories disagree. Which is true now?'));
     (d.sides || []).forEach(function (s) { row.appendChild(side(row, d, s)); });
     var more = el('div', 'truth-actions');
     more.appendChild(button('Both are true', 'ghost', function () { settle(row, d, 'both'); }));
@@ -197,6 +200,28 @@
     return box;
   }
 
+  // ----- memory detail: "Where this came from" (WS-5, §8.10.3 h) -----
+  // The class arrives with its plain-words label from the server; nothing is parsed.
+  function sentence(text) {
+    var s = String(text || '');
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) + '.' : '';
+  }
+
+  function originBlock(o) {
+    var box = el('div', 'truth-item');
+    box.setAttribute('data-origin', o['class'] || '');
+    box.appendChild(el('p', 'dash-card-lead', sentence(o.label)));
+    if (o.taint && o.taint !== o['class'] && o.taint !== 'unknown') {
+      box.appendChild(el('p', 'dash-card-meta',
+        'It was built from something less trusted: ' + o.taint_label + '.'));
+    }
+    if (o['class'] === 'unknown') {
+      box.appendChild(el('p', 'dash-card-meta',
+        'SuperLocalMemory did not record where this came from, so it cannot say how far to trust it.'));
+    }
+    return box;
+  }
+
   function detail(factId, container) {
     if (!container || !factId) return Promise.resolve();
     container.textContent = '';
@@ -206,6 +231,10 @@
         var slots = d.slots || [], open = d.disputes || [], src = d.source;
         var stale = src && src.state !== 'fresh';
         container.textContent = '';
+        if (d.origin && d.origin['class']) {
+          container.appendChild(el('h3', 'truth-detail-title', 'Where this came from'));
+          container.appendChild(originBlock(d.origin));
+        }
         if (!slots.length && !open.length && !stale) return;
         container.appendChild(el('h3', 'truth-detail-title', 'When it was true'));
         open.forEach(function (dsp) {

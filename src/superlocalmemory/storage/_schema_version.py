@@ -82,7 +82,8 @@ from pathlib import Path
 #: M076 runs M062's stub pass again for session-end stamps (data only), floor 51.
 #: M077 (judge certificates, I-14) is additive, floor 51.
 #: M078 (memory cues, W3-8) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 78
+#: M079 (fact trust: origin class and taint, WS-5) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 79
 
 
 class SchemaVersionError(RuntimeError):

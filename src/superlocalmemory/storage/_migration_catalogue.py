@@ -241,6 +241,9 @@ from superlocalmemory.storage.migrations import (
 from superlocalmemory.storage.migrations import (
     M078_memory_cues as _M078,
 )
+from superlocalmemory.storage.migrations import (
+    M079_fact_trust as _M079,
+)
 
 # Order matters: M003 creates the log table. The runner handles M003's own
 # bootstrap (it can't record itself before it exists).
@@ -517,4 +520,8 @@ DEFERRED_MIGRATIONS: list[Migration] = [
     # Deferred: its erase trigger is built on atomic_facts, like M070's.
     Migration(name=_M078.NAME, db_target="memory", ddl=_M078.DDL,
               dependencies=(_M077.NAME,)),
+    # M079 keeps each fact's origin class and taint (WS-5, M-15). Deferred: its erase
+    # trigger is built on atomic_facts, and it is computed from M074's fact_origin.
+    Migration(name=_M079.NAME, db_target="memory", ddl=_M079.DDL,
+              dependencies=(_M078.NAME,)),
 ]

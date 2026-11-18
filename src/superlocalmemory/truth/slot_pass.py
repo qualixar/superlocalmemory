@@ -187,6 +187,10 @@ class SlotPass:
             (fact_id, attempts, _retry_at(attempts, now), self._last_error, now.isoformat()))
         self.counts["queued_retry"] += 1
 
+    def _taint_state(self) -> str:
+        """The ``trust.taint`` state a binding follows (``on`` enforces, ``shadow`` reports)."""
+        return self._flags.state("trust.taint").value
+
     def _one_fact(self, conn: Any, row: Any, auto_apply: bool) -> bool:
         """One fact in its own savepoint: a failure undoes only that fact."""
         conn.execute("SAVEPOINT slot_fact")
@@ -195,7 +199,7 @@ class SlotPass:
             result = resolve_fact(
                 conn, fact_id=row[1], profile_id=row[2], scope=row[3], content=row[4],
                 valid_from=row[5], explicit_key=claim[0] if claim else None,
-                explicit_value=claim[1] if claim else None)
+                explicit_value=claim[1] if claim else None, taint=self._taint_state())
         except Exception as exc:  # noqa: BLE001 - one bad fact must not stall the pass
             conn.execute("ROLLBACK TO slot_fact")
             conn.execute("RELEASE slot_fact")
@@ -209,6 +213,8 @@ class SlotPass:
         self.counts["keyed" if result.keyed else "unkeyed"] += 1
         if result.outcome:
             self.counts[result.outcome] += 1
+        if result.origin:
+            self.counts[f"origin_{result.origin}"] += 1
         if result.ledger:
             self.counts[f"ledger_{result.ledger}"] += 1
         return True
@@ -249,11 +255,13 @@ class SlotPass:
         if self._flags.enabled("truth.slots") and not self._stop.is_set():
             # Decisions made in shadow or with auto_apply off reach the ledger (R-07).
             # Never in shadow: shadow writes only the truth layer's own tables.
+            from superlocalmemory.trust import supersession
             from superlocalmemory.truth.slot_resolver import reconcile_ledger
 
+            gate = supersession.allows if self._flags.enabled("trust.taint") else None
             with self._db.raw_connection() as conn:
                 self.counts.update(reconcile_ledger(conn, auto_apply=auto_apply,
-                                                    limit=self._batch))
+                                                    limit=self._batch, origin_gate=gate))
         if self.counts:
             logger.info("Slot pass: %s", dict(self.counts))
         return dict(self.counts)

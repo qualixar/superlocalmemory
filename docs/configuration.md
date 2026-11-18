@@ -353,6 +353,15 @@ Two delivery features are off by default and turned on with `slm flags set <flag
 
 `slm measurement off` turns `outcomes.holdout` and `outcomes.swaps` off together; add `--receipts` to turn `outcomes.receipts` off as well. `slm flags kill on` (or `SLM_4230_OFF=1`) turns every 4.2.30 setting off at once. The notice, the version of it you acknowledged and each on/off change are kept in `disclosures.json` in the data folder.
 
+### Where a memory came from, and what may replace it (`trust.taint`)
+
+Off by default (`slm flags set trust.taint shadow|on`). Every memory records how it arrived (typed by you, saved by an agent, a tool's output, a web page or mail, an imported file, built by a model) and SLM turns that into one of ten classes, best first: `user_direct`, `user_confirmed`, `system`, `agent_inferred`, `tool_output`, `mesh_peer`, `web`, `imported_file`, `model_generated`, plus `unknown` for memories saved before 4.2.30 or whose source was not kept. A memory's **taint** is the lowest class among it and everything it was built from, so a note cut from a web page is never trusted more than the page. Text a model rewrote is capped at `model_generated`, because a model can no longer vouch for who said it. The mapping is one table with a reason on each row (`trust/origin_class.py`).
+
+- **`shadow`** computes and stores each memory's class and taint (table `fact_trust`, filled at save time and in small batches by the maintenance cycle, never on a read) and adds `origin` to what recall and the dashboard show; it changes nothing else. The slot pass counts how many replacements the rule below would have held.
+- **`on`** adds the supersession rule: nothing replaces a memory automatically unless the newer one's class is at least as trusted as the older one's. A web page cannot overwrite something you said, and a tool's output cannot overwrite an agent's own words. When the rule refuses, the two memories stay and SLM asks you which is true now (reason `origin_below_head`; no judge answers it). `unknown` on either side always asks. Your own answer, in the dashboard or with `slm disputes settle`, always counts.
+
+One limit, plainly: the command line and the dashboard carry no agent id, and neither does an agent that runs `slm remember` through the shell, so that agent looks like you and its memory is `user_direct`.
+
 ## Consistency Checking at Store Time
 
 The optional consistency check that runs when a memory is stored

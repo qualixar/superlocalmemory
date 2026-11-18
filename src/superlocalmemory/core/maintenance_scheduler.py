@@ -278,6 +278,22 @@ class MaintenanceScheduler:
         except Exception as exc:  # noqa: BLE001
             self._record_step("cue pass", False, str(exc))
 
+    def _trust_pass(self) -> None:
+        """4.2.30 WS-5: origin class and taint for facts that have none yet, in bounded
+        batches (trust/fact_trust.py). Only while ``trust.taint`` is on or in shadow;
+        reads never write, so this is the only place a class is computed after admission."""
+        if not self._running:
+            return
+        try:
+            from superlocalmemory.trust import fact_trust
+
+            done = fact_trust.maintenance_step(self._db)
+            if done:
+                logger.info("Trust pass: %d facts classified", done)
+            self._record_step("trust pass", True)
+        except Exception as exc:  # noqa: BLE001
+            self._record_step("trust pass", False, str(exc))
+
     def _slot_pass(self) -> None:
         """4.2.30 truth layer: bind facts to slots, oldest first, behind the
         ``truth.slots`` flag (off by default; truth/slot_pass.py)."""
@@ -729,6 +745,7 @@ class MaintenanceScheduler:
         # its own profile); batched, so the write lock is held per batch.
         self._project_backfill()
         self._coverage_pass()
+        self._trust_pass()  # classes first: the slot pass reads them (M-15)
         self._slot_pass()
         self._cue_pass()
 

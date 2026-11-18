@@ -79,11 +79,12 @@ SELECT d.dispute_id, d.profile_id, fa.fact_id, fa.content, fb.fact_id, fb.conten
   JOIN slot_revisions rb ON rb.revision_id = d.revision_b
   JOIN atomic_facts fa ON fa.fact_id = ra.fact_id
   JOIN atomic_facts fb ON fb.fact_id = rb.fact_id
- WHERE d.state = 'open' AND d.reason_code != 'rolled_back'
+ WHERE d.state = 'open' AND d.reason_code NOT IN ('rolled_back', 'origin_below_head')
  ORDER BY d.opened_at
 """
 #: A dispute the ledger reopened by rolling a retirement back is a person's to
 #: settle (R-09): no judge answers it, so the same judge cannot act on it again.
+#: The same holds for one the origin lattice refused (``origin_below_head``, M-15).
 
 class DisputePass:
     def __init__(self, db: Any, flags: FeatureFlags, ladder: JudgeLadder, *,
@@ -141,7 +142,32 @@ class DisputePass:
                                routing_threshold=decision.routing_threshold):
                 self.counts["held_uncalibrated"] += 1
                 continue
+            if (decision.verdict == "replaces" and self._flags.enabled("trust.taint")
+                    and self._origin_held(conn, row)):
+                continue
             self._act(conn, row, decision, auto_apply)
+
+    def _origin_held(self, conn: Any, row: tuple) -> bool:
+        """M-15: a judge may retire a memory only for one whose origin is at least its own.
+
+        ``replaces`` retires the older text: the newer when the challenger is the
+        newer value, the challenger when it is the older one (the head stays). If the
+        winner's origin does not reach the loser's, or either is ``unknown``, nothing
+        is retired and the dispute waits for a person (relabelled so no judge asks again;
+        an older-value dispute keeps its reason, which its settling needs).
+        """
+        from superlocalmemory.trust import supersession
+
+        dispute_id, _p, head, _a, challenger, _b, _scope, basis = row
+        older = (basis or "") in slot_store.OLDER_REASONS
+        winner, loser = (head, challenger) if older else (challenger, head)
+        if supersession.allows(conn, winner, loser):
+            return False
+        self.counts["origin_below_head"] += 1
+        if not older:
+            conn.execute("UPDATE slot_disputes SET reason_code = ? WHERE dispute_id = ? "
+                         "AND state = 'open'", (supersession.ORIGIN_BELOW_HEAD, dispute_id))
+        return True
 
     def _act(self, conn: Any, row: tuple, decision: Decision, auto_apply: bool) -> None:
         dispute_id, profile_id, _older, _a, _newer, _b, scope, basis = row

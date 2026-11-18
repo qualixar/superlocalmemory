@@ -5,7 +5,8 @@
 For a fact: each slot it fills (what it states a value of, or "a correction"
 for a private legacy slot), that slot's values over time newest first with
 when each began and whether it is the value shown now, its open disputes and
-the state of the file it came from. Read-only, and another value's text passes
+the state of the file it came from, and where the memory came from (its origin class,
+WS-5). Read-only, and another value's text passes
 the caller's visibility filter like any recall result.
 """
 
@@ -14,6 +15,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
+from superlocalmemory.trust import fact_trust
 from superlocalmemory.truth import disputes, leases
 from superlocalmemory.truth.legacy_cases import KEY_SOURCE as LEGACY
 
@@ -67,7 +69,18 @@ def for_fact(conn: sqlite3.Connection, profile_id: str, fact_id: str, *,
     slots = [_slot_view(conn, r, fact_id, hidden) for r in rows]
     open_disputes = disputes.for_facts(conn, profile_id, [fact_id], hidden=hidden).get(fact_id, [])
     source = leases.check_for_facts(conn, [fact_id]).get(fact_id)
-    return {"fact_id": fact_id, "slots": slots, "disputes": open_disputes, "source": source}
+    return {"fact_id": fact_id, "slots": slots, "disputes": open_disputes, "source": source,
+            "origin": _origin(conn, fact_id)}
+
+
+def _origin(conn: sqlite3.Connection, fact_id: str) -> dict | None:
+    """Where the memory came from, in ids and words (WS-5): the stored class, else computed
+    from the raw signals now; never written here. ``None`` when it cannot be read."""
+    try:
+        found = fact_trust.origin_of(conn, fact_id)
+    except sqlite3.Error:
+        return None
+    return {k: v for k, v in found.items() if k != "basis"} if found else None
 
 
 __all__ = ["for_fact"]

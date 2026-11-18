@@ -25,6 +25,7 @@ import sqlite3
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
+from superlocalmemory.trust.supersession import ORIGIN_BELOW_HEAD
 from superlocalmemory.truth import slot_store
 from superlocalmemory.truth.slot_repair import ROLLED_BACK
 from superlocalmemory.truth.slot_resolver import APPLIED, retire_superseded
@@ -46,6 +47,10 @@ STALE_MESSAGE = ("The value changed since this question was asked, so it was clo
 QUESTION = "Which is true now?"
 ROLLED_BACK_QUESTION = ("SuperLocalMemory undid an earlier change between these two. "
                         "Which is true now?")
+#: The newer memory comes from a source SuperLocalMemory trusts less than the one it
+#: disagrees with (or the source of one is unknown): it will not choose between them.
+ORIGIN_QUESTION = ("One of these came from a source SuperLocalMemory trusts less, so it "
+                   "will not choose between them. Which is true now?")
 HOW_TO_SETTLE = ("settle_dispute(dispute_id, keep=<fact_id of the side that is true now> | "
                  "'both' | 'unrelated')")
 
@@ -129,7 +134,8 @@ def _view(row: _Row, details: dict[str, dict], hidden: set[str]) -> dict:
     sides.sort(key=lambda s: s["said_at"] or "", reverse=True)  # newest first (D-39)
     return {"dispute_id": row.dispute_id, "state": "disputed", "reason": row.reason,
             "opened_at": row.opened_at,
-            "question": ROLLED_BACK_QUESTION if row.reason == ROLLED_BACK else QUESTION,
+            "question": (ROLLED_BACK_QUESTION if row.reason == ROLLED_BACK
+                         else ORIGIN_QUESTION if row.reason == ORIGIN_BELOW_HEAD else QUESTION),
             "next": ASK_USER, "how_to_settle": HOW_TO_SETTLE, "sides": sides}
 
 

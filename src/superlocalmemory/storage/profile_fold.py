@@ -52,7 +52,7 @@ MOVE    action_outcomes, association_edges, atomic_facts, bm25_tokens,
         embedding_metadata, embedding_quantization_metadata, enrichment_changes,
         entity_aliases,
         fact_access_log, fact_consolidations, fact_context, fact_hub_baseline, fact_origin,
-        fact_importance, fact_outcome_score, fact_retention, fact_temporal_validity,
+        fact_importance, fact_outcome_score, fact_retention, fact_temporal_validity, fact_trust,
         feedback_records, injection_deliveries, injection_receipts, injection_usage,
         judge_receipts,
         memories, memory_archive, memory_cues, memory_leases, need_turns,
@@ -102,6 +102,7 @@ DECISIONS: dict[str, tuple[str, str]] = {
     # derived from the profile, so slots cannot move; they are derived state the
     # slot pass rebuilds for the target (it restarts when revisions vanish).
     "memory_leases": (MOVE, "source fingerprints of the moved facts"),
+    "fact_trust": (MOVE, "class and taint go where the fact goes"),
     "memory_cues": (MOVE, "cues of the moved facts (path, tool, error, repo, date)"),
     "memory_slots": (DELETE, "derived by the slot pass, rebuilt for the target profile"),
     "slot_revisions": (DELETE, "derived by the slot pass, rebuilt for the target profile"),

@@ -43,4 +43,4 @@ def test_a_value_the_caller_may_not_see_keeps_its_place_but_not_its_text(pair) -
 def test_a_store_without_slot_tables_has_an_empty_view() -> None:
     conn = sqlite3.connect(":memory:")
     assert for_fact(conn, "default", "f") == {"fact_id": "f", "slots": [], "disputes": [],
-                                              "source": None}
+                                              "source": None, "origin": None}
