@@ -21,8 +21,8 @@
     promotion: 'Memory promoted', proposal: 'Proposed changes', dispute: 'Dispute',
     label: 'Audit label', signing: 'Memories signed again'
   };
-  var CHANNEL = { mcp: 'an agent over MCP', cli: 'the command line', http: 'HTTP',
-                  dashboard: 'the dashboard' };
+  var CHANNEL = { mcp: 'over MCP', cli: 'from the command line', http: 'over HTTP',
+                  dashboard: 'on the dashboard' };
   var UNDONE = { promote: 'Withdrawn', apply: 'Rolled back', settle: 'Reopened', label: 'Retracted' };
   var rows = [];
   var counts = { total: 0, undone: 0, open: 0 };
@@ -45,10 +45,18 @@
     return d ? String(d) : fallback;
   }
 
-  function who(d) {
-    return (d.actor === 'dashboard' ? 'You (on the dashboard)' : d.actor) +
-      ' through ' + (CHANNEL[d.channel] || d.channel);
+  // Plain words for who decided: most people read this card, not the raw ids (agent:codex-7).
+  function person(actor, channel) {
+    var a = String(actor || '');
+    if (a === 'dashboard' || channel === 'dashboard') return 'You, on the dashboard';
+    var name;
+    if (a.indexOf('agent:') === 0) name = 'Agent ' + a.slice(6);
+    else if (a.indexOf('api-key:') === 0) name = 'A connected app (key ' + a.slice(8) + ')';
+    else if (a === 'client:local' || !a) name = 'A program on this computer';
+    else name = a;
+    return name + ', ' + (CHANNEL[channel] || channel);
   }
+  function who(d) { return person(d.actor, d.channel); }
 
   function undo(row, d, btn) {
     btn.disabled = true;
@@ -78,7 +86,7 @@
     row.appendChild(el('p', 'dash-card-meta', who(d) + ' · ' + when(d.decided_at)));
     if (d.undone) {
       row.appendChild(el('p', 'dash-card-meta tone-ok', (UNDONE[d.action] || 'Undone') + ' by ' +
-        d.undone_by + ' through ' + (CHANNEL[d.undone_channel] || d.undone_channel) + ' · ' +
+        person(d.undone_by, d.undone_channel).replace(/^You,/, 'you,') + ' · ' +
         when(d.undone_at)));
     } else if (d.can_undo) {
       var actions = el('div', 'truth-actions');

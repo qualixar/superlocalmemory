@@ -62,10 +62,25 @@ describe('Recent decisions by your agents card', () => {
     await d.window.SLMDecisions.reload(); await flush();
     const text = d.window.document.body.textContent;
     assert.equal(d.window.document.getElementById('dash-decisions-card').hidden, false);
-    assert.match(text, /agent:claude-code through an agent over MCP/);
-    assert.match(text, /client:local through HTTP/);
+    assert.match(text, /Agent claude-code, over MCP/);
+    assert.match(text, /A program on this computer, over HTTP/);
+    assert.doesNotMatch(text, /agent:claude-code|client:local/);
     assert.match(text, /nothing here is waiting for you/);
     assert.equal(d.window.document.getElementById('dash-decisions-count').textContent, '2');
+  });
+
+  it('says plainly when the person did it on the dashboard, and who undid what', async () => {
+    const d = page({ rows: [ROW('d3', { actor: 'dashboard', channel: 'dashboard', undone: true,
+                                        can_undo: false, undone_by: 'dashboard',
+                                        undone_channel: 'dashboard',
+                                        undone_at: '2026-11-18T11:00:00+00:00' }),
+                            ROW('d4', { actor: 'api-key:3f9a2c', channel: 'http' })] }, []);
+    await d.window.SLMDecisions.reload(); await flush();
+    const text = d.window.document.body.textContent;
+    assert.match(text, /You, on the dashboard ·/);
+    assert.match(text, /Withdrawn by you, on the dashboard ·/);
+    assert.match(text, /A connected app \(key 3f9a2c\), over HTTP/);
+    assert.doesNotMatch(text, /through the dashboard|You \(on the dashboard\)/);
   });
 
   it('never parses a memory preview as HTML', async () => {
@@ -90,7 +105,7 @@ describe('Recent decisions by your agents card', () => {
                                         undone_channel: 'dashboard', undone_at: '2026-11-18T11:00:00+00:00' })] }, []);
     await d.window.SLMDecisions.reload(); await flush();
     assert.equal(undoButtons(d).length, 0);
-    assert.match(d.window.document.body.textContent, /Withdrawn by dashboard through the dashboard/);
+    assert.match(d.window.document.body.textContent, /Withdrawn by you, on the dashboard/);
   });
 
   it('a decision that cannot be undone (a rollback is itself an undo) has no button', async () => {

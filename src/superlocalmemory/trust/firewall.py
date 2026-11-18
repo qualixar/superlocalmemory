@@ -302,6 +302,21 @@ def request(conn: sqlite3.Connection, fact_id: str, wanted: str, *, by: str,
         logger.warning("approval request for %s not recorded (%s)", fact_id, type(exc).__name__)
 
 
+#: Where a promoted memory came from, as a person reads it on the dashboard's decisions card.
+_CAME_FROM: dict[str, str] = {
+    oc.USER_DIRECT: "your own words", oc.USER_CONFIRMED: "something you confirmed",
+    oc.SYSTEM: "made by SuperLocalMemory", oc.AGENT_INFERRED: "an agent's own words",
+    oc.TOOL_OUTPUT: "from a tool's output", oc.MESH_PEER: "from another agent's message",
+    oc.WEB: "from a web page", oc.IMPORTED_FILE: "from an imported file",
+    oc.MODEL_GENERATED: "written by a model",
+    oc.UNKNOWN: "saved before 4.2.30, so its source was not recorded",
+}
+
+
+def _came_from(taint: str) -> str:
+    return _CAME_FROM.get(taint, _CAME_FROM[oc.UNKNOWN])
+
+
 def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) -> dict:
     """One explicit promotion of one memory by any caller (D-49). Recorded and reversible.
 
@@ -341,7 +356,7 @@ def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) ->
     decisions.log(
         conn, profile_id=profile, kind=decisions.PROMOTION, subject_id=fact_id, action="promote",
         decider=decisions.Decider(who, channel),
-        summary=f"Promoted a memory that was {oc.label(before['taint'])}",
+        summary=f"Promoted a memory so agents may follow it ({_came_from(before['taint'])})",
         detail={"was_origin": before["class"], "was_taint": before["taint"],
                 "was_basis": before["basis"], "applied": applied, "wanted": waiting})
     return {"fact_id": fact_id, "was": before["taint"], "now": oc.USER_CONFIRMED,
