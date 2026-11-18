@@ -147,7 +147,7 @@ def test_i10_a_certificate_a_rule_certificate_or_a_person_is_a_lawful_basis(disp
     db, _old, _new = disputed
     _cert(db, "cert_1")
     _cert(db, "cert_old", voided=True)  # voided later: it held when the receipt acted
-    for i, ref in enumerate(["cert_1", "cert_old", "varun@cli", "varun@dashboard"]):
+    for i, ref in enumerate(["cert_1", "cert_old", "alice@cli", "alice@dashboard"]):
         _acted(db, f"ok{i}", ref)
     _acted(db, "noact", None, action=None)  # never acted: needs nothing
     assert "I-10" not in _violated(db)

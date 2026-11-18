@@ -58,7 +58,7 @@ def test_erasing_a_fact_erases_its_approval_rows(db) -> None:
     page = save(db, "A page.", WEB)
     with db.raw_connection() as conn:
         firewall.request(conn, page, "pin", by="claude", channel="mcp")
-        firewall.approve(conn, page, by="varun", channel="cli")
+        firewall.approve(conn, page, by="alice", channel="cli")
     assert db.execute("SELECT COUNT(*) AS n FROM trust_approvals")[0]["n"] == 1
     db.execute("DELETE FROM atomic_facts WHERE fact_id = ?", (page,))
     assert db.execute("SELECT COUNT(*) AS n FROM trust_approvals")[0]["n"] == 0
@@ -146,23 +146,23 @@ def test_approval_raises_the_memory_and_records_who_when_and_how(db, monkeypatch
     monkeypatch.setenv(TAINT, "on")
     evil = save(db, EVIL, TOOL, kind="rule")
     with db.raw_connection() as conn:
-        done = firewall.approve(conn, evil, by="varun", channel="dashboard")
+        done = firewall.approve(conn, evil, by="alice", channel="dashboard")
     assert done["now"] == "user_confirmed" and done["was"] == "tool_output"
     with connect(db) as conn:
         assert fact_trust.origin_of(conn, evil)["taint"] == "user_confirmed"
         row = conn.execute("SELECT * FROM trust_approvals WHERE fact_id = ?", (evil,)).fetchone()
         assert firewall.pending(conn, "default")["count"] == 0
     assert (row["state"], row["wanted"], row["decided_by"], row["decided_channel"]) == (
-        "approved", "any", "varun", "dashboard") and row["decided_at"]
+        "approved", "any", "alice", "dashboard") and row["decided_at"]
     basis = db.execute("SELECT basis FROM fact_trust WHERE fact_id = ?", (evil,))[0]["basis"]
-    assert basis == "confirmed:dashboard:varun"
+    assert basis == "confirmed:dashboard:alice"
 
 
 def test_an_approved_memory_is_never_recomputed_downward(db, monkeypatch) -> None:
     monkeypatch.setenv(TAINT, "on")
     evil = save(db, EVIL, TOOL)
     with db.raw_connection() as conn:
-        firewall.approve(conn, evil, by="varun", channel="cli")
+        firewall.approve(conn, evil, by="alice", channel="cli")
     db.execute("UPDATE fact_trust SET computed_at = '2000-01-01' WHERE fact_id = ?", (evil,))
     classify_all(db)
     assert db.execute("SELECT taint_class FROM fact_trust WHERE fact_id = ?",
@@ -184,7 +184,7 @@ def test_an_agent_has_no_door(db, monkeypatch, door) -> None:
 def test_approving_a_memory_that_does_not_exist(db) -> None:
     with db.raw_connection() as conn:
         with pytest.raises(LookupError):
-            firewall.approve(conn, "ghost", by="varun", channel="cli")
+            firewall.approve(conn, "ghost", by="alice", channel="cli")
 
 
 def test_a_refused_pin_is_applied_when_the_person_approves(db, monkeypatch) -> None:
@@ -195,7 +195,7 @@ def test_a_refused_pin_is_applied_when_the_person_approves(db, monkeypatch) -> N
     assert _pin_needs_approval(db, page)["needs_approval"]
     assert [f.fact_id for f in db.get_pinned("default")] == []
     with db.raw_connection() as conn:
-        done = firewall.approve(conn, page, by="varun", channel="cli")
+        done = firewall.approve(conn, page, by="alice", channel="cli")
     assert done["applied"] == ["pin"] and done["wanted"] == ["pin"]
     assert [f.fact_id for f in db.get_pinned("default")] == [page]
     assert _pin_needs_approval(db, page) is None  # and the door now lets it through
@@ -207,7 +207,7 @@ def test_approve_all_clears_what_is_listed(db, monkeypatch) -> None:
     b = save(db, "Pinned from a page.", WEB, pinned=True)
     save(db, "Just a memory nobody wants as an instruction.", WEB)
     with db.raw_connection() as conn:
-        out = firewall.approve_all(conn, "default", by="varun", channel="cli")
+        out = firewall.approve_all(conn, "default", by="alice", channel="cli")
     assert out["approved"] == 2 and set(out["fact_ids"]) == {a, b}
     with connect(db) as conn:
         assert firewall.pending(conn, "default")["count"] == 0

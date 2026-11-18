@@ -153,7 +153,7 @@ def test_an_approved_rule_stands_again(db, monkeypatch) -> None:
     monkeypatch.setenv(TAINT, "on")
     assert _rules(db) == []
     with db.raw_connection() as conn:
-        firewall.approve(conn, rule, by="varun", channel="cli")
+        firewall.approve(conn, rule, by="alice", channel="cli")
     assert _rules(db) == [rule]
 
 

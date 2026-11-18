@@ -187,7 +187,7 @@ def test_a_person_approving_it_is_the_only_way_in(armed) -> None:
         pending = firewall.pending(conn, PID)
     assert {i["fact_id"] for i in pending["items"]} >= {w.evil_rule, w.evil_pin}
     with db.raw_connection() as conn:
-        firewall.approve(conn, w.evil_rule, by="varun", channel="cli")
+        firewall.approve(conn, w.evil_rule, by="alice", channel="cli")
     assert w.evil_rule in {f.fact_id for f in standing_rules.standing_facts(db, PID)}
     assert w.evil_pin not in _sources(_session(db))  # one approval approves one memory
 
@@ -207,5 +207,5 @@ def test_a_memory_saved_before_4_2_30_waits_until_it_is_approved(db, monkeypatch
     assert standing_rules.standing_facts(db, PID) == []
     with db.raw_connection() as conn:
         assert firewall.pending(conn, PID)["items"][0]["origin_class"] == "unknown"
-        firewall.approve_all(conn, PID, by="varun", channel="cli")
+        firewall.approve_all(conn, PID, by="alice", channel="cli")
     assert [f.fact_id for f in standing_rules.standing_facts(db, PID)] == [old]

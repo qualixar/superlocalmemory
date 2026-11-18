@@ -211,7 +211,7 @@ def test_a_person_can_settle_a_held_dispute_either_way(tmp_path) -> None:
         assert view["question"] == disputes.ORIGIN_QUESTION and view["next"] == disputes.ASK_USER
         did = view["dispute_id"]
         done = disputes.settle(conn, profile_id="default", dispute_id=did, keep=new,
-                               channel="dashboard", actor="varun")
+                               channel="dashboard", actor="alice")
     assert done["status"] == "settled" and done["retired"] == [head]
     assert _retired(db, head)[2] == new
 

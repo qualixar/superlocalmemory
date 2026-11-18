@@ -37,7 +37,7 @@ def bind_slot(db, fact_id: str, subject: str, relation: str, value: str, when: s
         conn.close()
 
 
-def admit_like_the_route(db, edit: dict, *, actor: str = "varun") -> dict:
+def admit_like_the_route(db, edit: dict, *, actor: str = "alice") -> dict:
     """What ``update_fact_authorized`` does, at the storage layer (no engine, no embedder):
     the edited words become the successor of a correction case waiting for review, with
     origin channel ``external_edit``."""

@@ -14,7 +14,7 @@ from superlocalmemory.truth import disputes
 from tests.test_compiler.conftest import PROFILE, raw, table_rows
 from tests.test_compiler.helpers import add_fact, admit_like_the_route, bind_slot
 
-PERSON = Basis.person("varun", "cli")
+PERSON = Basis.person("alice", "cli")
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +139,7 @@ def test_a_person_applies_it_and_the_new_words_are_confirmed(slotted, conn) -> N
     assert expired is not None
     trust = db.execute("SELECT origin_class, basis FROM fact_trust WHERE fact_id = ?",
                        (case["successor_fact_id"],))[0]
-    assert trust["origin_class"] == "user_confirmed" and "varun" in trust["basis"]
+    assert trust["origin_class"] == "user_confirmed" and "alice" in trust["basis"]
     proposals.rollback_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
     assert db.execute("SELECT status FROM correction_cases")[0][0] == "rolled_back"
     assert db.execute("SELECT system_expired_at FROM fact_temporal_validity WHERE fact_id = ?",
@@ -163,7 +163,7 @@ def test_no_certificate_covers_an_edit_of_a_persons_words(slotted, conn) -> None
 def test_declining_the_set_declines_the_pending_correction_too(slotted, conn) -> None:
     db, head, root = slotted
     _plan, queued = _queue(db, conn, root)
-    proposals.reject_set(conn, profile_id=PROFILE, set_id=queued[0]["set_id"], actor="varun",
+    proposals.reject_set(conn, profile_id=PROFILE, set_id=queued[0]["set_id"], actor="alice",
                          channel="cli")
     assert db.execute("SELECT status FROM correction_cases")[0][0] == "rejected"
     assert db.execute("SELECT system_expired_at FROM fact_temporal_validity WHERE fact_id = ?",
@@ -208,7 +208,7 @@ def test_a_conflict_dispute_can_be_settled_for_the_edit_and_the_edit_is_current(
     head_fact = db.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
                            (dispute["revision_a"],))[0][0]
     result = disputes.settle(conn, profile_id=PROFILE, dispute_id=dispute["dispute_id"],
-                             keep=succ, channel="cli", actor="varun")
+                             keep=succ, channel="cli", actor="alice")
     assert result["status"] == "settled" and result["retired"] == [head_fact]
     hidden = db.get_nonapplied_correction_successor_ids([succ], PROFILE)
     assert hidden == set()  # the edit is a normal, searchable memory now

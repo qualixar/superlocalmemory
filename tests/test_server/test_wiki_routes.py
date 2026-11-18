@@ -12,7 +12,7 @@ from superlocalmemory.compiler import page_sources, proposals
 from tests.test_server.test_per_request_profile import _daemon
 from tests.test_truth.test_slot_pass import _fact
 
-PERSON = proposals.Basis.person("varun", "cli")
+PERSON = proposals.Basis.person("alice", "cli")
 ENTITY = "ent-slm"
 
 

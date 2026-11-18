@@ -73,7 +73,7 @@ def test_a_person_confirmed_memory_has_no_mapping_rule_but_says_who(db) -> None:
 
     fact = _save(db, "Approved text from a tool.", WEB)
     with db.raw_connection() as conn:
-        fact_trust.mark_confirmed(conn, fact.fact_id, by="varun", channel="cli")
+        fact_trust.mark_confirmed(conn, fact.fact_id, by="alice", channel="cli")
     got = why.explain(_ro(db), fact.fact_id)["origin"]
     assert got["class"] == "user_confirmed" and got["rule"] is None
     assert got["basis"].startswith("confirmed:cli:")
@@ -229,6 +229,6 @@ def test_the_text_names_who_approved_and_how(db) -> None:
     db.execute("INSERT INTO trust_approvals (approval_id, fact_id, profile_id, wanted, state, "
                "requested_by, requested_channel, requested_at, decided_by, decided_channel, "
                "decided_at) VALUES ('a1', ?, 'default', 'rule', 'approved', 'claude', 'mcp', "
-               "'2026-11-16T09:00:00', 'varun', 'cli', '2026-11-16T09:05:00')", (fact.fact_id,))
+               "'2026-11-16T09:00:00', 'alice', 'cli', '2026-11-16T09:05:00')", (fact.fact_id,))
     text = "\n".join(why.lines(why.explain(_ro(db), fact.fact_id)))
-    assert "It asked to be: rule (approved by varun via cli)" in text
+    assert "It asked to be: rule (approved by alice via cli)" in text

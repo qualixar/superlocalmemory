@@ -15,7 +15,7 @@ from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.storage.models import EntityProfile
 from tests.test_compiler.conftest import ENTITY, PROFILE, raw, table_rows, versions_of
 
-PERSON = Basis.person("varun", "cli")
+PERSON = Basis.person("alice", "cli")
 #: Every table a proposal can change, as plain rows, before and after.
 TOUCHED = ("atomic_facts", "fact_temporal_validity", "entity_profiles", "core_memory_blocks",
            "persona_summary", "community_summaries")
@@ -77,7 +77,7 @@ def test_rolling_back_a_retire_restores_every_touched_row_exactly(store, conn) -
                                   proposals=[_retire(ids)])
     assert _snapshot(db) == before  # proposing changes nothing
     done = proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
-    assert done["state"] == "applied" and done["basis"] == {"kind": "person", "ref": "varun@cli"}
+    assert done["state"] == "applied" and done["basis"] == {"kind": "person", "ref": "alice@cli"}
     assert _snapshot(db) != before  # the old memory is retired
     assert _case_states(db) == ["applied"]
     proposals.rollback_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
@@ -153,7 +153,7 @@ def test_applying_without_a_basis_is_refused_and_changes_nothing(store, conn) ->
     assert proposals.get_set(conn, PROFILE, set_id)["state"] == "proposed"
 
 
-@pytest.mark.parametrize("basis", [Basis.person("", "cli"), Basis.person("varun", "agent"),
+@pytest.mark.parametrize("basis", [Basis.person("", "cli"), Basis.person("alice", "agent"),
                                    Basis("person", "x"), Basis("whim", "x"),
                                    Basis.certificate("")])
 def test_a_basis_that_names_no_person_or_certificate_is_refused(store, conn, basis) -> None:
@@ -245,7 +245,7 @@ def test_a_set_is_decided_once(store, conn) -> None:
     with pytest.raises(StateRefused):
         proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
     with pytest.raises(StateRefused):
-        proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="varun",
+        proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="alice",
                              channel="cli")
     proposals.rollback_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
     with pytest.raises(StateRefused):
@@ -257,9 +257,9 @@ def test_rejecting_changes_no_memory(store, conn) -> None:
     before = _snapshot(db)
     set_id = proposals.create_set(conn, profile_id=PROFILE, origin="dream",
                                   proposals=[_retire(ids)])
-    done = proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="varun",
+    done = proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="alice",
                                 channel="dashboard")
-    assert done["state"] == "rejected" and done["decided_by"] == "varun"
+    assert done["state"] == "rejected" and done["decided_by"] == "alice"
     assert _snapshot(db) == before and _case_states(db) == []
     with pytest.raises(StateRefused):
         proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
@@ -288,7 +288,7 @@ def test_a_ledger_case_waiting_for_review_is_a_retire_proposal_with_its_basis(st
     proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
     assert _case_states(db) == ["applied"]
     after = proposals.case_as_proposal(conn, PROFILE, case_id)
-    assert after["state"] == "applied" and after["basis"] == {"kind": "person", "ref": "varun"}
+    assert after["state"] == "applied" and after["basis"] == {"kind": "person", "ref": "alice"}
     proposals.rollback_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
     assert _snapshot(db) == before and _case_states(db) == ["rolled_back"]
 
@@ -296,7 +296,7 @@ def test_a_ledger_case_waiting_for_review_is_a_retire_proposal_with_its_basis(st
 def test_rejecting_an_adopted_case_declines_it_in_the_ledger(store, conn) -> None:
     db, ids = store
     set_id = proposals.adopt_case(conn, profile_id=PROFILE, case_id=_case(db, ids))
-    proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="varun", channel="cli")
+    proposals.reject_set(conn, profile_id=PROFILE, set_id=set_id, actor="alice", channel="cli")
     assert _case_states(db) == ["rejected"]
 
 

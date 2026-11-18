@@ -17,7 +17,7 @@ from superlocalmemory.storage import fact_origin
 from superlocalmemory.trust import origin_class as oc
 from tests.test_compiler.conftest import ENTITY, PROFILE, raw
 
-PERSON = proposals.Basis.person("varun", "cli")
+PERSON = proposals.Basis.person("alice", "cli")
 
 
 def test_external_edit_is_a_channel_with_a_reasoned_class() -> None:

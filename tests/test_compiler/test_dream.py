@@ -14,7 +14,7 @@ from superlocalmemory.compiler.proposals import Basis
 from tests.test_compiler.conftest import PROFILE, raw, table_rows
 from tests.test_compiler.helpers import add_fact, bind_slot
 
-PERSON = Basis.person("varun", "cli")
+PERSON = Basis.person("alice", "cli")
 #: Append-only records of the decision itself: they say what happened and are not rolled back.
 AUDIT = {"proposal_sets", "proposals", "proposal_facts", "correction_cases", "correction_events",
          "correction_case_until_source", "artifact_versions", "artifact_version_facts",
@@ -117,7 +117,7 @@ def test_a_waiting_set_blocks_a_second_one_and_a_recent_set_too(busy) -> None:
     db, _ids, _dups = busy
     first = dream.run_profile(db, PROFILE)
     assert dream.run_profile(db, PROFILE, now=LATER)["skipped"] == "a dream set is still waiting for review"
-    proposals.reject_set(raw(db), profile_id=PROFILE, set_id=first["set_id"], actor="varun",
+    proposals.reject_set(raw(db), profile_id=PROFILE, set_id=first["set_id"], actor="alice",
                          channel="cli")
     assert dream.run_profile(db, PROFILE)["skipped"] == "the last dream set is recent"
 
@@ -125,7 +125,7 @@ def test_a_waiting_set_blocks_a_second_one_and_a_recent_set_too(busy) -> None:
 def test_a_rejected_proposal_is_not_proposed_again_unchanged(busy) -> None:
     db, _ids, _dups = busy
     first = dream.run_profile(db, PROFILE)
-    proposals.reject_set(raw(db), profile_id=PROFILE, set_id=first["set_id"], actor="varun",
+    proposals.reject_set(raw(db), profile_id=PROFILE, set_id=first["set_id"], actor="alice",
                          channel="cli")
     assert dream.run_profile(db, PROFILE, now=LATER)["skipped"] == "nothing to propose"
 

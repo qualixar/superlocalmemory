@@ -14,7 +14,7 @@ from superlocalmemory.compiler.proposals import Basis, BasisRefused
 from tests.test_compiler.conftest import ENTITY, PROFILE, raw, table_rows, versions_of
 from tests.test_compiler.helpers import add_fact
 
-PERSON = Basis.person("varun", "cli")
+PERSON = Basis.person("alice", "cli")
 PAGE_TABLES = ("compiled_pages", "page_citations", "artifact_versions", "atomic_facts")
 
 

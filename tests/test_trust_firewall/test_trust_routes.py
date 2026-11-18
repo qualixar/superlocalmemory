@@ -91,13 +91,13 @@ def test_an_agent_cannot_borrow_the_dashboards_door(world) -> None:
 def test_a_person_at_a_terminal_approves_and_it_is_recorded(world) -> None:
     client, _app, db, _mine, evil, _page = world
     r = client.post(f"/api/trust/approve/{evil}", headers={SHELL_HEADER: "tty"},
-                    json={"channel": "cli", "by": "varun"})
+                    json={"channel": "cli", "by": "alice"})
     assert r.status_code == 200, r.text
     assert r.json()["now"] == "user_confirmed" and r.json()["was"] == "tool_output"
     assert _taint(db, evil) == "user_confirmed"
     row = db.execute("SELECT decided_by, decided_channel, decided_at FROM trust_approvals "
                      "WHERE fact_id = ?", (evil,))[0]
-    assert (row["decided_by"], row["decided_channel"]) == ("varun", "cli") and row["decided_at"]
+    assert (row["decided_by"], row["decided_channel"]) == ("alice", "cli") and row["decided_at"]
     assert client.get("/api/trust/pending").json()["count"] == 1
 
 

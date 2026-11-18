@@ -230,11 +230,11 @@ def test_the_batch_recomputes_rows_of_an_older_mapping_but_not_a_persons_confirm
     with db.raw_connection() as conn:
         conn.execute("UPDATE fact_trust SET origin_class='user_direct', taint_class='user_direct', "
                      "basis='v0:old' WHERE fact_id = ?", (a.fact_id,))
-        ft.mark_confirmed(conn, b.fact_id, by="varun", channel="dashboard")
+        ft.mark_confirmed(conn, b.fact_id, by="alice", channel="dashboard")
     assert ft.run_batch(db) == 1
     rows = _rows(db)
     assert rows[a.fact_id][:2] == ("web", "web")
-    assert rows[b.fact_id] == ("user_confirmed", "user_confirmed", "confirmed:dashboard:varun")
+    assert rows[b.fact_id] == ("user_confirmed", "user_confirmed", "confirmed:dashboard:alice")
 
 
 def test_the_batch_marks_facts_saved_before_origins_unknown(db) -> None:
@@ -253,7 +253,7 @@ def test_the_batch_is_the_step_only_while_the_flag_observes(db, monkeypatch) -> 
 
 def test_mark_confirmed_refuses_a_fact_that_does_not_exist(db) -> None:
     with db.raw_connection() as conn, pytest.raises(LookupError):
-        ft.mark_confirmed(conn, "nope", by="varun", channel="cli")
+        ft.mark_confirmed(conn, "nope", by="alice", channel="cli")
 
 
 # -- reads never write --------------------------------------------------------------------------
@@ -303,7 +303,7 @@ def test_a_cycle_is_walked_once_not_until_the_bound(db) -> None:
 def test_a_confirmation_survives_a_later_computation(db) -> None:
     fact = _store(db, "Mail about tea.", _web())
     with db.raw_connection() as conn:
-        ft.mark_confirmed(conn, fact.fact_id, by="varun", channel="dashboard")
+        ft.mark_confirmed(conn, fact.fact_id, by="alice", channel="dashboard")
     ft.store(lambda sql, params: db.execute(sql, params), fact.fact_id, "default",
              ft.compute(_query(db), fact.fact_id))
     assert _rows(db)[fact.fact_id][0] == "user_confirmed"

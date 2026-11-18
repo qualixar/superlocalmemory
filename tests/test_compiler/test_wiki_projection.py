@@ -14,7 +14,7 @@ from superlocalmemory.compiler.page_text import block_hash
 from tests.test_compiler.conftest import ENTITY, PROFILE, raw, table_rows
 from tests.test_compiler.helpers import add_fact, bind_slot
 
-PERSON = proposals.Basis.person("varun", "cli")
+PERSON = proposals.Basis.person("alice", "cli")
 
 
 @pytest.fixture

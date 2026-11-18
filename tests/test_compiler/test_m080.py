@@ -42,7 +42,7 @@ def test_m080_builds_without_facts_and_holds_the_applied_needs_a_basis_invariant
                          f"basis_kind, basis_ref, created_at) VALUES {bad[:-1]}, 'now')")
     conn.execute("INSERT INTO proposal_sets (set_id, profile_id, origin, state, basis_kind, "
                  "basis_ref, created_at) VALUES ('s4', 'p', 'dream', 'applied', 'person', "
-                 "'varun@cli', 'now')")
+                 "'alice@cli', 'now')")
 
 
 def test_deleting_a_set_or_a_version_takes_its_members_and_links_with_it() -> None:
