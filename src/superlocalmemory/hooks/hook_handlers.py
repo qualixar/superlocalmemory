@@ -207,6 +207,16 @@ def handle_hook(action: str) -> None:
         _hook_codex_stop()
         return
 
+    if action == "overlap":  # Hermes post_llm_call (W3 open item): overlap only
+        from superlocalmemory.hooks._outcome_common import read_stdin_json
+        from superlocalmemory.hooks.stop_outcome_hook import overlap_only
+
+        payload = read_stdin_json()
+        if isinstance(payload, dict):
+            overlap_only(payload)
+        sys.stdout.write("{}")
+        return
+
     handlers = {
         "mandate": _hook_mandate,
         "start": _hook_start,

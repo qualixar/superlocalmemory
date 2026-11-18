@@ -95,6 +95,38 @@ def _run_recall(query: str) -> str:
         return ""
 
 
+def _queue_context(query: str, session_id: str) -> str:
+    """W3 open item: the recall through the daemon's hook queue, so the answer
+    gets a ``hook_recall`` receipt with this conversation's id (usage joins it)
+    and a memory the conversation already got is not shown again. Only when the
+    daemon's hook socket is up (else the queue would wait for nobody); returns
+    the rendered, untrusted-framed evidence or ``""``."""
+    try:
+        from superlocalmemory.hooks.hook_daemon import owned_socket_path
+
+        if owned_socket_path() is None:
+            return ""
+        from superlocalmemory.core.recall_queue import RecallQueue
+        from superlocalmemory.hooks import auto_recall_hook as ar
+
+        queue = RecallQueue(ar._get_queue_db_path())
+        try:
+            request_id = queue.enqueue(
+                query=query, limit_n=_RECALL_LIMIT, mode=ar._detect_mode(),
+                agent_id="before_web_hook", session_id=session_id, priority="high",
+                stall_timeout_s=_RECALL_TIMEOUT_SEC)
+            result = queue.poll_result(request_id, timeout_s=_RECALL_TIMEOUT_SEC)
+        finally:
+            queue.close()
+        if not isinstance(result, dict) or result.get("ok") is False:
+            return ""
+        envelope = ar._format_envelope(result.get("results") or [], response=result)
+        context = (envelope.get("hookSpecificOutput") or {}).get("additionalContext", "")
+        return context if isinstance(context, str) else ""
+    except Exception:  # noqa: BLE001 - fail open to the command path
+        return ""
+
+
 def main() -> int:
     """Entry point. Always returns 0 — fail-open contract."""
     try:
@@ -103,17 +135,20 @@ def main() -> int:
         if len(query) < _MIN_QUERY_LEN:
             return 0
 
-        recalled = _run_recall(query)
-        if not recalled:
-            return 0
-
         preview = query[:_PREVIEW_CHARS].replace('"', "'")
-        from superlocalmemory.core.injection import render_untrusted_text
-        memory_evidence = render_untrusted_text(
-            recalled,
-            source_type="before-web-recall",
-            source_id=preview,
-        )
+        session_id = payload.get("session_id")
+        memory_evidence = _queue_context(query, session_id if isinstance(session_id, str)
+                                         else "")
+        if not memory_evidence:
+            recalled = _run_recall(query)
+            if not recalled:
+                return 0
+            from superlocalmemory.core.injection import render_untrusted_text
+            memory_evidence = render_untrusted_text(
+                recalled,
+                source_type="before-web-recall",
+                source_id=preview,
+            )
         if not memory_evidence:
             return 0
         sys.stdout.write(

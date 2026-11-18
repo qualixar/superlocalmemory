@@ -233,6 +233,7 @@ class SlmHermesPlugin:
         self._mcp("log_tool_event", args)
 
     def post_llm_call(self, **kwargs: Any) -> None:
+        self._overlap(kwargs)
         # Issue #263: turns went to ``observe``, which keeps only English
         # decision/bug/preference sentences, so ordinary and non-English turns
         # were dropped. ``remember`` is the ordinary save path, any language.
@@ -251,6 +252,33 @@ class SlmHermesPlugin:
             "content": content, "session_id": session_id, "agent_id": "hermes",
             "tags": "hermes,conversation-turn", "idempotency_key": "hermes-turn:" + key,
         }, timeout=timeout)
+
+    def _overlap(self, kwargs: dict) -> None:
+        """W3: score this turn's reply against the memories delivered in the
+        session (opt-in ``outcomes.usage``; checked inside ``slm``). The reply goes
+        to the local ``slm`` process on stdin and never further; only memory ids and
+        scores are stored. Local mode only; never raises."""
+        reply = kwargs.get("assistant_response")
+        session_id = str(kwargs.get("session_id") or "")
+        if not isinstance(reply, str) or not reply.strip() or not session_id:
+            return
+        if self._mode() == "remote":
+            return
+        binary = shutil.which("slm")
+        if not binary:
+            return
+        payload = json.dumps({"session_id": session_id,
+                              "last_assistant_message": reply[:20_000]})
+
+        def run() -> None:
+            try:
+                subprocess.run([binary, "hook", "overlap"], input=payload, text=True,
+                               capture_output=True, timeout=5, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                return
+
+        # Off the turn's path: Hermes never waits for the score.
+        threading.Thread(target=run, daemon=True, name="slm-overlap").start()
 
     def on_session_end(self, **kwargs: Any) -> None:
         # Hermes emits this after every turn. Per-turn settlement selects only

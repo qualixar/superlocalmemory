@@ -44,7 +44,15 @@ def _inner_main(started: float | None = None) -> str:
     payload = read_stdin_json()
     if payload is None:
         return "invalid_payload"
+    return settle(payload, started)
 
+
+def settle(payload: dict, started: float | None = None) -> str:
+    """The turn's overlap (if any) and its finalize, from an already-read payload.
+
+    Shared by Claude Code's ``stop_outcome`` and Codex's installed ``codex-stop``
+    (whose Stop input carries ``last_assistant_message`` too, per the Codex hooks
+    reference), so both hosts settle the same way."""
     session_id = payload.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         return "no_session"
@@ -95,6 +103,22 @@ def overlap_events(payload: dict, session_id: str, profile_id: str) -> list[dict
     if not scores:
         return []
     return [ed.overlap_signal(session_id=session_id, scores=scores, profile_id=profile_id)]
+
+
+def overlap_only(payload: dict) -> str:
+    """Hermes (``post_llm_call``, via ``slm hook overlap``): only the overlap signal.
+    Hermes settles its outcomes itself at ``on_session_end``. Never raises."""
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return "no_session"
+    try:
+        from superlocalmemory.hooks import event_delivery as ed
+
+        profile_id = ed.active_profile()
+        events = overlap_events(payload, session_id, profile_id)
+        return f"overlap_{ed.deliver(events, profile=profile_id)}" if events else "no_overlap"
+    except Exception:
+        return "failed"
 
 
 def _cleanup_session_state(session_id: str) -> None:

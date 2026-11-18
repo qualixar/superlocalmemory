@@ -285,14 +285,26 @@ def hook_codex_prompt() -> None:
 
 
 def hook_codex_stop(stop_body) -> None:
-    """Codex Stop: the shared session checkpoint, bounded, then ``{}``."""
+    """Codex Stop: the shared session checkpoint, then the turn's overlap and
+    finalize (``stop_outcome_hook.settle``), bounded, then ``{}``."""
     deadline = HookDeadline(STOP_DEADLINE_S)
     watchdog = Watchdog(STOP_DEADLINE_S + WATCHDOG_GRACE_S, lambda: "{}").start()
+    payload: dict = {}
     try:
-        _apply_codex_session(_codex_payload())
+        payload = _codex_payload()
+        _apply_codex_session(payload)
         stop_body(deadline)
     except SystemExit:
         pass
+    except Exception:
+        pass
+    try:
+        # W3 open item: the overlap and the turn's finalize, as the Claude Code
+        # Stop does (Codex's Stop input carries ``last_assistant_message`` too).
+        from superlocalmemory.hooks.stop_outcome_hook import settle
+
+        if deadline.remaining() > 0:
+            settle(payload)
     except Exception:
         pass
     finally:

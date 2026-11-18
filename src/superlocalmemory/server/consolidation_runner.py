@@ -178,6 +178,19 @@ def ranker_step(profile_id: str, *, config: Any = None) -> dict:
         return {"error": str(exc)}
 
 
+def receipt_step(profile_id: str, *, config: Any = None) -> dict:
+    """Delete delivery receipts nothing can read any more (W3 retention). Never raises."""
+    try:
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.outcomes.receipt_retention import prune
+
+        config = config or SLMConfig.load()
+        return prune(config.db_path, profile_id)
+    except Exception as exc:  # noqa: BLE001 - retention never breaks consolidation
+        logger.warning("receipt retention step failed: %s", exc)
+        return {"error": str(exc)}
+
+
 async def run_full_consolidation(
     app_state: Any,
     profile_id: str,
@@ -209,6 +222,7 @@ async def run_full_consolidation(
             # profile switch must not wait on it.
             result["ranker"] = await asyncio.to_thread(ranker_step, profile_id)
             result["workflows"] = await asyncio.to_thread(workflow_step, profile_id)
+            result["receipts_pruned"] = await asyncio.to_thread(receipt_step, profile_id)
         logger.info(
             "consolidation finished (trigger=%s): assertions=%s patterns=%s",
             trigger,
