@@ -27,6 +27,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from superlocalmemory.storage.write_lock import get_write_lock
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -224,7 +226,7 @@ class WorkflowMiner:
                  for bucket, v in temporal.items()]
         conn = sqlite3.connect(str(self._db_path), timeout=5.0)
         try:
-            with conn:
+            with get_write_lock(self._db_path), conn:  # mined above, outside it (WS-7)
                 conn.execute("DELETE FROM workflow_patterns WHERE profile_id = ?", (profile_id,))
                 conn.executemany(
                     "INSERT INTO workflow_patterns (profile_id, pattern_type, pattern_key,"

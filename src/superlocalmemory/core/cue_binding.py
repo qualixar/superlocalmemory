@@ -52,23 +52,34 @@ _TEXT_CAP = 4000
 #: and not the tail of a longer word. Absolute, ``~/`` and relative forms.
 _PATH = re.compile(r"(?<![\w/.:~@-])(?:~/|/)?(?:[\w.-]+/)+[\w.-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}\b")
 
-_FIRST_FACT = "f.rowid = (SELECT MIN(g.rowid) FROM atomic_facts g WHERE g.memory_id = f.memory_id)"
+# The memory's first fact: no fact of the same memory has a smaller rowid. Written as a
+# NOT EXISTS the index on memory_id answers at its first row; the MIN() form read every fact
+# of the memory, per row, and let the planner walk the whole table (WS-7: 2.5 s per cycle on
+# 43,888 facts). A fact with no memory id is not a first fact, as before.
+_FIRST_FACT = ("f.memory_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM atomic_facts g "
+               "WHERE g.memory_id = f.memory_id AND g.rowid < f.rowid)")
 _EXPLICIT = f"""
 SELECT f.rowid, f.fact_id, f.profile_id, m.metadata_json
   FROM atomic_facts f JOIN memories m ON m.memory_id = f.memory_id
  WHERE f.rowid > ? AND f.rowid <= ? AND instr(m.metadata_json, ?) > 0 AND {_FIRST_FACT}
  ORDER BY f.rowid LIMIT ?
 """
+# The kind is read through its own index (``IN`` over the covering ``idx_facts_memory_kind``):
+# as a plain term the planner walked every fact newest first to find the few plans.
 _PROSPECTIVE = f"""
 SELECT f.fact_id, f.profile_id, f.content
   FROM atomic_facts f
- WHERE f.memory_kind = 'prospective' AND f.quarantined = 0 AND f.lifecycle != 'archived'
+ WHERE f.rowid IN (SELECT rowid FROM atomic_facts WHERE memory_kind = 'prospective')
+   AND f.quarantined = 0 AND f.lifecycle != 'archived'
    AND f.merged_into IS NULL AND {_FIRST_FACT}
    AND NOT EXISTS (SELECT 1 FROM memory_cues c WHERE c.fact_id = f.fact_id AND c.origin = ?)
  ORDER BY f.rowid DESC LIMIT ?
 """
+# Written only while the fact still exists: the scan runs outside the writer lock, so a fact
+# can be erased between it and this write, and a cue for an erased fact would outlive it (I-11).
 _INSERT = ("INSERT OR IGNORE INTO memory_cues (cue_id, profile_id, fact_id, kind, pattern, "
-           "created_at, origin) VALUES (?, ?, ?, ?, ?, ?, ?)")
+           "created_at, origin) SELECT ?, ?, ?, ?, ?, ?, ? "
+           "WHERE EXISTS (SELECT 1 FROM atomic_facts WHERE fact_id = ?)")
 
 
 def cue_id(profile_id: str, fact_id: str, spec: str) -> str:
@@ -96,7 +107,7 @@ def _bind(conn: sqlite3.Connection, profile_id: str, fact_id: str, specs: list[s
         except CueError:
             continue  # a stored cue that no door would accept is skipped, never bound
         made += conn.execute(_INSERT, (cue_id(profile_id, fact_id, cue.spec), profile_id, fact_id,
-                                       cue.kind, cue.pattern, now, origin)).rowcount
+                                       cue.kind, cue.pattern, now, origin, fact_id)).rowcount
     return made
 
 
@@ -108,6 +119,18 @@ def _stored(metadata_json: object) -> list[str]:
     return [s for s in value if isinstance(s, str)] if isinstance(value, list) else []
 
 
+def _explicit_rows(conn: sqlite3.Connection, after_rowid: int, limit: int) -> tuple[list, int]:
+    """The scan: facts after the watermark whose memory carries cues. Returns ``(rows, top)``."""
+    top = conn.execute("SELECT COALESCE(MAX(rowid), 0) FROM atomic_facts").fetchone()[0]
+    rows = conn.execute(_EXPLICIT, (int(after_rowid), top, METADATA_KEY, int(limit))).fetchall()
+    return rows, top
+
+
+def _write_explicit(conn: sqlite3.Connection, rows: list) -> int:
+    return sum(_bind(conn, profile_id, fact_id, _stored(meta), EXPLICIT)
+               for _, fact_id, profile_id, meta in rows)
+
+
 def bind_explicit(conn: sqlite3.Connection, after_rowid: int = 0, limit: int = BATCH) -> tuple[int, int]:
     """Cues given on a save, bound to the memory's first fact. Returns ``(bound, new watermark)``.
 
@@ -115,23 +138,29 @@ def bind_explicit(conn: sqlite3.Connection, after_rowid: int = 0, limit: int = B
     the caller keeps the watermark, so a pass never rescans the whole store.
     """
     try:
-        top = conn.execute("SELECT COALESCE(MAX(rowid), 0) FROM atomic_facts").fetchone()[0]
-        rows = conn.execute(_EXPLICIT, (int(after_rowid), top, METADATA_KEY, int(limit))).fetchall()
+        rows, top = _explicit_rows(conn, after_rowid, limit)
     except sqlite3.OperationalError:  # a store before M078, or a fresh one
         return 0, after_rowid
-    made = sum(_bind(conn, profile_id, fact_id, _stored(meta), EXPLICIT)
-               for _, fact_id, profile_id, meta in rows)
-    return made, (top if len(rows) < limit else rows[-1][0])
+    return _write_explicit(conn, rows), (top if len(rows) < limit else rows[-1][0])
+
+
+def _extracted_rows(conn: sqlite3.Connection, limit: int) -> list:
+    """The scan: prospective memories whose first fact has no extracted cue yet."""
+    return conn.execute(_PROSPECTIVE, (EXTRACTED, int(limit))).fetchall()
+
+
+def _write_extracted(conn: sqlite3.Connection, rows: list) -> int:
+    return sum(_bind(conn, profile_id, fact_id, [f"{PATH}:{p}" for p in extract_paths(content)],
+                     EXTRACTED) for fact_id, profile_id, content in rows)
 
 
 def bind_extracted(conn: sqlite3.Connection, limit: int = BATCH) -> int:
     """A ``path`` cue for each file a prospective memory's text names."""
     try:
-        rows = conn.execute(_PROSPECTIVE, (EXTRACTED, int(limit))).fetchall()
+        rows = _extracted_rows(conn, limit)
     except sqlite3.OperationalError:
         return 0
-    return sum(_bind(conn, profile_id, fact_id, [f"{PATH}:{p}" for p in extract_paths(content)],
-                     EXTRACTED) for fact_id, profile_id, content in rows)
+    return _write_extracted(conn, rows)
 
 
 def run(db, state_dir: Path) -> int:
@@ -145,9 +174,22 @@ def run(db, state_dir: Path) -> int:
         after = int(json.loads(state.read_text(encoding="utf-8"))["after_rowid"])
     except (OSError, ValueError, KeyError, TypeError):
         after = 0
+    # The scans run on a read-only connection with no writer lock held; the lock is taken only
+    # for the inserts (WS-7: the scan used to run inside it, 2.5 s a cycle on a real store).
+    from superlocalmemory.truth.invariants import open_read_only
+
+    reader = open_read_only(str(db.db_path))
+    try:
+        try:
+            explicit, top = _explicit_rows(reader, after, BATCH)
+            extracted = _extracted_rows(reader, BATCH)
+        except sqlite3.OperationalError:  # a store before M078, or a fresh one
+            return 0
+    finally:
+        reader.close()
+    last = top if len(explicit) < BATCH else explicit[-1][0]
     with db.raw_connection() as conn:
-        made, last = bind_explicit(conn, after)
-        made += bind_extracted(conn)
+        made = _write_explicit(conn, explicit) + _write_extracted(conn, extracted)
     if last != after:
         state.parent.mkdir(parents=True, exist_ok=True)
         tmp = state.with_suffix(".json.tmp")

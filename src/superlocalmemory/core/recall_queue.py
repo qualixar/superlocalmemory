@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -95,6 +97,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_recall_idem_key
 """
 
 
+class _Bell:
+    """An in-process doorbell for one queue file (WS-7).
+
+    The queue is a SQLite file: the consumer looks for work by polling and a client looks
+    for its answer by polling, each sleeping between looks. When both live in one process
+    (the daemon's hook socket and its queue consumer) they share this bell: a writer rings
+    it after its commit and a sleeper wakes at once. ``generation`` is read BEFORE the look,
+    so a ring that lands between the look and the wait is not lost. Another process cannot
+    ring it and is found by polling as before: the bell only shortens a wait, never replaces one.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._generation = 0
+
+    def generation(self) -> int:
+        with self._cond:
+            return self._generation
+
+    def ring(self) -> None:
+        with self._cond:
+            self._generation += 1
+            self._cond.notify_all()
+
+    def wait(self, seen: int, timeout_s: float) -> bool:
+        """Sleep up to ``timeout_s`` or until rung after ``seen``; True when rung."""
+        with self._cond:
+            return self._cond.wait_for(lambda: self._generation != seen, max(timeout_s, 0.0))
+
+
+_BELLS: "weakref.WeakValueDictionary[str, _Bell]" = weakref.WeakValueDictionary()
+_BELLS_LOCK = threading.Lock()
+
+
+def _bell_for(db_path: Path) -> _Bell:
+    key = os.path.realpath(db_path)
+    with _BELLS_LOCK:
+        bell = _BELLS.get(key)
+        if bell is None:
+            bell = _BELLS[key] = _Bell()
+        return bell
+
+
 def _now() -> float:
     return time.time()
 
@@ -117,6 +162,7 @@ class RecallQueue:
     def __init__(self, db_path: Path | str) -> None:
         self._db_path = Path(db_path)
         self._lock = threading.RLock()
+        self._bell = _bell_for(self._db_path)
         self._conn = _safe_open_db(self._db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -130,6 +176,18 @@ class RecallQueue:
                 self._conn.execute(s)
         self._add_missing_columns()
         self._closed = False
+
+    def _ring(self) -> None:
+        """Wake every sleeper on this file in this process (after a commit)."""
+        self._bell.ring()
+
+    def work_generation(self) -> int:
+        """Read before looking for work, hand to ``wait_for_work`` when there was none."""
+        return self._bell.generation()
+
+    def wait_for_work(self, seen: int, timeout_s: float) -> bool:
+        """Sleep until a request or an answer is written in this process, or the timeout."""
+        return self._bell.wait(seen, timeout_s)
 
     def _add_missing_columns(self) -> None:
         """A queue file written before 4.2.30 has no ``deadline_at`` (A-14): add it."""
@@ -222,6 +280,7 @@ class RecallQueue:
                     ),
                 )
                 self._conn.execute("COMMIT")
+                self._ring()
                 return rid
             except Exception:
                 self._conn.execute("ROLLBACK")
@@ -268,6 +327,7 @@ class RecallQueue:
                     ),
                 )
                 self._conn.execute("COMMIT")
+                self._ring()
                 return rid
             except Exception:
                 self._conn.execute("ROLLBACK")
@@ -329,6 +389,7 @@ class RecallQueue:
             except Exception:
                 self._conn.execute("ROLLBACK")
                 raise
+            self._ring()
             if cur.rowcount == 0:
                 import logging as _log
                 _log.getLogger(__name__).warning(
@@ -345,6 +406,7 @@ class RecallQueue:
                 "WHERE request_id = ? AND completed = 0 AND dead_letter = 0",
                 (request_id,),
             )
+        self._ring()
 
     def mark_dead_letter(self, request_id: str, *, reason: str) -> None:
         with self._lock:
@@ -354,6 +416,7 @@ class RecallQueue:
                 "WHERE request_id = ? AND completed = 0 AND cancelled = 0",
                 (reason, request_id),
             )
+        self._ring()
 
     def unsubscribe(self, request_id: str) -> None:
         with self._lock:
@@ -371,6 +434,7 @@ class RecallQueue:
         deadline = time.monotonic() + timeout_s
         idx = 0
         while True:
+            seen = self._bell.generation()  # before the look: a ring after it is not lost
             row = self._get_row(request_id)
             if row is not None:
                 if row["dead_letter"]:
@@ -389,7 +453,7 @@ class RecallQueue:
                 self._POLL_SCHEDULE[min(idx, len(self._POLL_SCHEDULE) - 1)],
                 remaining,
             )
-            time.sleep(sleep_for)
+            self._bell.wait(seen, sleep_for)  # an answer written in this process ends it early
             idx += 1
 
     def close(self) -> None:

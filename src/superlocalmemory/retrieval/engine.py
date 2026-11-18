@@ -351,8 +351,11 @@ class RetrievalEngine:
             profile_hits = []
             channel_status["profile"] = chstat.NOT_CONFIGURED
 
-        # Dynamic top-k for aggregation queries
-        effective_limit = 100 if strat.query_type == "aggregation" else limit
+        # The caller's limit is the answer's size, whatever the query says (R-43, F-37): an
+        # aggregation intent used to replace it with 100, so MCP and the CLI returned 36-86
+        # results for ``limit=10``. The intent still sets the channel weights; a caller who
+        # wants a wide answer asks for a large limit.
+        effective_limit = limit
 
         # 3. Run channels; flags travel as parameters (no shared state). Owned by
         # this call: non-empty means this answer is incomplete, not just slow.

@@ -3295,9 +3295,11 @@ async def lifespan(application: FastAPI):
             _queue_db = state_path("recall_queue.db")
             _recall_queue = RecallQueue(_queue_db)
             _engine_recall_adapter = EngineRecallAdapter(engine, profile_runtime)
+            from superlocalmemory.core.queue_consumer import configured_workers
             _queue_consumer = QueueConsumer(
                 queue=_recall_queue,
                 pool=_engine_recall_adapter,
+                workers=configured_workers(),  # WS-7: sessions are not served one at a time
             )
             _queue_consumer.start()
             application.state.queue_consumer = _queue_consumer

@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 MAX_MEMBER_SAMPLE = 10
 
 
+def _tombstoned(db: Any, profile_id: str) -> frozenset[str]:
+    """Fact ids of this profile that are being erased (none when the store has no tombstones)."""
+    if not aggregate_erasure_clause_for_db(db, "community_summaries"):
+        return frozenset()  # the manager's cached probe: the table is absent
+    return frozenset(
+        str(dict(r)["fact_id"]) for r in db.execute(
+            "SELECT fact_id FROM projection_tombstones WHERE profile_id = ?", (profile_id,)))
+
+
 def build_community_context(
     db: Any, results: list[Any], profile_id: str, top_k: int = 8,
 ) -> dict | None:
@@ -54,27 +63,35 @@ def build_community_context(
     treats both as "no thematic context for this recall", never as a
     failure.
     """
-    erasure = aggregate_erasure_clause_for_db(db, "community_summaries")
     rows = [
         dict(r) for r in db.execute(
             "SELECT community_id, summary, keywords, fact_ids_json, "
-            f"fact_count FROM community_summaries WHERE profile_id = ?{erasure}",
+            "fact_count FROM community_summaries WHERE profile_id = ?",
             (profile_id,),
         )
     ]
     if not rows:
         return None
+    # A summary written from a member that is being erased is withheld whole. The check used
+    # to be SQL: a json_each over every member of every summary, probed against the
+    # tombstones (WS-7: 88 ms of every recall on a 44k-fact store). The tombstones are few
+    # and this function parses the member lists anyway, so the check is a set lookup here.
+    # Read after the summaries: a tombstone written in between still withholds.
+    tombstoned = _tombstoned(db, profile_id)
 
     fact_to_cid: dict[str, int] = {}
     summ_by_cid: dict[int, dict] = {}
     for r in rows:
         cid = int(r["community_id"])
-        summ_by_cid[cid] = r
         try:
-            for fid in json.loads(r.get("fact_ids_json") or "[]"):
-                fact_to_cid[str(fid)] = cid
+            members = [str(fid) for fid in json.loads(r.get("fact_ids_json") or "[]")]
         except (ValueError, TypeError):
             continue
+        if tombstoned and not tombstoned.isdisjoint(members):
+            continue
+        summ_by_cid[cid] = r
+        for fid in members:
+            fact_to_cid[fid] = cid
 
     top_ids = [
         res.fact.fact_id

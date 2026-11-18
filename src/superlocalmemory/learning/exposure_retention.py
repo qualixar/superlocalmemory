@@ -24,6 +24,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from superlocalmemory.storage.write_lock import get_write_lock
+
 logger = logging.getLogger(__name__)
 
 #: Routing only: hours after which an exposure no delivery or outcome names can
@@ -44,13 +46,13 @@ def _has(conn: sqlite3.Connection, schema: str, table: str, column: str) -> bool
         return False
 
 
-def _delete(conn: sqlite3.Connection, select_ids: str, params: tuple) -> int:
+def _delete(conn: sqlite3.Connection, select_ids: str, params: tuple, lock) -> int:
     """Delete one batch of exposures (features first) chosen by ``select_ids``."""
     ids = [r[0] for r in conn.execute(select_ids + f" LIMIT {BATCH}", params)]
     if not ids:
         return 0
     marks = ",".join("?" * len(ids))
-    with conn:
+    with lock, conn:  # the id read above ran outside it: one short hold per batch
         conn.execute(f"DELETE FROM learning_features WHERE signal_id IN ({marks})", ids)
         conn.execute(f"DELETE FROM learning_signals WHERE id IN ({marks})", ids)
     return len(ids)
@@ -80,6 +82,7 @@ def prune(learning_db: str | Path, memory_db: str | Path | None, profile_id: str
     """Delete exposures that can no longer be labelled and those over the cap.
     Returns the counts; never raises."""
     out = {"unlabellable": 0, "over_cap": 0}
+    lock = get_write_lock(learning_db)  # learning.db's writer lock, taken per batch (WS-7)
     try:
         conn = sqlite3.connect(str(learning_db), timeout=5.0, uri=True)
     except sqlite3.Error as exc:
@@ -97,9 +100,9 @@ def prune(learning_db: str | Path, memory_db: str | Path | None, profile_id: str
         outcomes = attached and _has(conn, "mem", "action_outcomes", "recall_query_id")
         if deliveries or outcomes:  # never judge "unlabellable" without seeing a label source
             sql = _unlabellable_sql(deliveries, outcomes)
-            while n := _delete(conn, sql, (profile_id, UNLABELLED_GRACE_H)):
+            while n := _delete(conn, sql, (profile_id, UNLABELLED_GRACE_H), lock):
                 out["unlabellable"] += n
-        while n := _delete(conn, _OVER_CAP, (profile_id, profile_id, KEEP_LABELLABLE)):
+        while n := _delete(conn, _OVER_CAP, (profile_id, profile_id, KEEP_LABELLABLE), lock):
             out["over_cap"] += n
     except sqlite3.Error as exc:
         logger.warning("exposure retention stopped: %s", exc)

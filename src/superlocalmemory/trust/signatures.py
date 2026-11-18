@@ -337,17 +337,19 @@ def maintenance_step(db: Any, *, max_batches: int = 5) -> int:
     if signer is None or not _observing():
         return 0
     total = 0
-    with db.raw_connection() as conn:
+    for _ in range(max_batches):
+        # One short write per batch (WS-7): the writer lock is let go between batches, so a
+        # save waits for at most one batch of 200 HMACs, never for the whole run.
         try:
-            _ensure_mark_table(conn)
-            for _ in range(max_batches):
-                moved = reseal_moved(conn, signer)
-                fresh = sign_missing(conn, signer)
-                total += moved + fresh
-                if moved < BATCH and fresh < BATCH:
-                    break
+            with db.raw_connection() as conn:
+                _ensure_mark_table(conn)
+                moved = reseal_moved(conn, signer, limit=BATCH)
+                fresh = sign_missing(conn, signer, limit=BATCH)
         except sqlite3.OperationalError:  # a store before M082
             return 0
+        total += moved + fresh
+        if moved < BATCH and fresh < BATCH:
+            break
     return total
 
 

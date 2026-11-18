@@ -121,13 +121,25 @@ _RECENCY_PHRASES: tuple[str, ...] = (
 )
 
 _AGGREGATION_WORDS: frozenset[str] = frozenset({
-    "all", "list", "every", "everything", "various", "different",
-    "many", "several", "multiple", "summarize", "overview",
+    "list", "everything", "summarize", "overview",
     # V3.3.21 R5: LoCoMo cat 1 patterns — "What X does/did Y Z?" needs aggregation.
     # "What activities does Melanie partake in?" = aggregation, not factual.
     "activities", "events", "hobbies", "instruments", "types",
     "things", "places", "jobs", "skills", "interests", "pets",
 })
+
+# R-43 (4.2.30): a quantifier alone is not a request for a collection. "all passed", "in all",
+# "a different company", "many agents" sit in ordinary statements (and in the fact text a
+# query is often cut from); read as an intent they sent the query down the wide path. A
+# quantifier counts only inside a request: a question or an instruction opens the query.
+_AGGREGATION_QUANTIFIERS: frozenset[str] = frozenset({
+    "all", "every", "various", "different", "many", "several", "multiple",
+})
+_REQUEST_OPENERS = re.compile(
+    r"^\W*(?:what|which|who|whom|where|list|show|give|name|tell|enumerate|find|"
+    r"how many|how much)\b")
+# Idioms that hold a quantifier word and ask for no collection.
+_QUANTIFIER_IDIOMS = re.compile(r"\b(?:not at all|at all|after all|all in all|in all)\b")
 
 # V3.3.21 R5: Plural noun patterns that signal aggregation queries.
 # "What [noun]s has/does [entity] [verb]?" = needs cross-session aggregation.
@@ -241,6 +253,8 @@ class QueryStrategyClassifier:
             return "temporal"
         if words & _AGGREGATION_WORDS:
             return "aggregation"
+        if _is_quantified_request(q):
+            return "aggregation"
         # V3.3.21 R5: Regex patterns for aggregation questions
         if any(re.search(p, q) for p in _AGGREGATION_PATTERNS):
             return "aggregation"
@@ -254,6 +268,14 @@ class QueryStrategyClassifier:
         if any(p in q for p in _VAGUE_PHRASES):
             return "vague"
         return "general"
+
+
+def _is_quantified_request(lowered_query: str) -> bool:
+    """A question or instruction that holds a quantifier ("What are all the hobbies...")."""
+    if not _REQUEST_OPENERS.match(lowered_query):
+        return False
+    words = set(re.sub(r"[^\w\s'-]", "", _QUANTIFIER_IDIOMS.sub(" ", lowered_query)).split())
+    return bool(words & _AGGREGATION_QUANTIFIERS)
 
 
 _DEFAULT_CLASSIFIER = QueryStrategyClassifier()

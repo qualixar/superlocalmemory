@@ -432,6 +432,7 @@ These override config file settings when set:
 | `SLM_AGENT_ID` | Default agent attribution for MCP calls |
 | `SLM_RATE_LIMIT_WRITE`, `SLM_RATE_LIMIT_READ`, `SLM_RATE_LIMIT_WINDOW` | Daemon HTTP rate limit (defaults 30 writes, 120 reads, 60 seconds) |
 | `SLM_REMOTE_RERANK_DEADLINE_S` | Longer time limit for a remote rerank call |
+| `SLM_HOOK_RECALL_WORKERS` | How many agent sessions' per-prompt recalls the daemon serves at the same time (default 2, from 1 to 4). One is the old behaviour: sessions served strictly in turn |
 | `SLM_LOOP_KILL` | Any non-empty value stops bounded loops |
 | `SLM_CROSS_ENCODER_API_KEY` | Runtime-only bearer token for a remote rerank endpoint; overrides any owner-only config value |
 | `SLM_SKIP_LAYA` | `1` (also `true`, `yes`, `on`) stops setup from installing the on-device answer check; `slm setup --no-laya` does the same. `SLM_INSTALL_LAYA=0` also opts out |

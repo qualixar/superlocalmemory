@@ -21,7 +21,7 @@ how far back:
 So pulls older than ``KEEP_PULL_DAYS`` that nothing above needs are deleted
 with their receipts and usage rows, and need-gate turns older than that too.
 Deletes run in batches (``BATCH`` rows per statement) on the consolidation
-timer, so the writer lock is never held for long. Ids and numbers only: there
+timer; the store's writer lock is taken for one batch at a time and let go between them. Ids and numbers only: there
 is no memory text in any of these tables.
 """
 
@@ -33,6 +33,7 @@ from pathlib import Path
 
 from superlocalmemory.outcomes import effects, utility
 from superlocalmemory.outcomes import randomiser as rz
+from superlocalmemory.storage.write_lock import get_write_lock
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def _sql() -> tuple[str, list]:
     return sql, [*pulls, *randomised]
 
 
-def _batch(conn: sqlite3.Connection, profile_id: str) -> int:
+def _batch(conn: sqlite3.Connection, profile_id: str, lock) -> int:
     sql, names = _sql()
     pulls = names[:len(rz.PULL_PATHS)]
     randomised = names[len(rz.PULL_PATHS):]
@@ -72,7 +73,7 @@ def _batch(conn: sqlite3.Connection, profile_id: str) -> int:
     if not ids:
         return 0
     marks = ", ".join("?" * len(ids))
-    with conn:
+    with lock, conn:  # the id read above ran outside it: one short hold per batch
         conn.execute(f"DELETE FROM injection_usage WHERE delivery_id IN ({marks})", ids)
         conn.execute(f"DELETE FROM injection_receipts WHERE delivery_id IN ({marks})", ids)
         conn.execute(f"DELETE FROM injection_deliveries WHERE delivery_id IN ({marks})", ids)
@@ -87,11 +88,12 @@ def prune(db_path: str | Path, profile_id: str) -> dict:
     except sqlite3.Error as exc:
         logger.debug("receipt retention: %s", exc)
         return out
+    lock = get_write_lock(db_path)  # the store file's writer lock, taken per batch (WS-7)
     try:
-        while n := _batch(conn, profile_id):
+        while n := _batch(conn, profile_id, lock):
             out["pull_deliveries"] += n
         while True:
-            with conn:
+            with lock, conn:
                 n = conn.execute(
                     "DELETE FROM need_turns WHERE turn_id IN (SELECT turn_id FROM need_turns"
                     " WHERE profile_id = ? AND julianday(at) < julianday('now') - ? LIMIT ?)",
