@@ -97,7 +97,11 @@ def describe(section: dict) -> list[str]:
         return []
     lines = [f"Trust: instruction firewall {section.get('taint', 'unknown')}, secret screen "
              f"{section.get('secret_screen', 'unknown')}"]
-    if section.get("waiting") or section.get("approved"):
+    if section.get("taint") == "off" and section.get("waiting"):
+        # Nothing is held while the firewall is off: say what it would hold.
+        lines.append(f"  Would wait for your OK if the firewall were on: {section['waiting']}; "
+                     f"approved by you: {section.get('approved', 0)}")
+    elif section.get("waiting") or section.get("approved"):
         lines.append(f"  Waiting for your OK: {section.get('waiting', 0)}; approved by you: "
                      f"{section.get('approved', 0)}")
     if section.get("waiting"):

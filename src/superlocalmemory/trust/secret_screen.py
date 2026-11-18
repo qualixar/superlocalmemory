@@ -61,9 +61,14 @@ def state() -> FlagState:
         return FlagState.OFF
 
 
+#: The house rule's own example (``[REDACTED:TYPE:LAST4]``): text that quotes the rule
+#: holds no credential, so it is never counted as one.
+_EXAMPLE = re.compile(r"\[REDACTED:TYPE:LAST4\]", re.IGNORECASE)
+
+
 def types_in(text: str) -> Counter:
     """How many placeholders of each type ``text`` holds (never any value)."""
-    return Counter(_PLACEHOLDER.findall(text or ""))
+    return Counter(_PLACEHOLDER.findall(_EXAMPLE.sub("", text or "")))
 
 
 @dataclass(frozen=True)

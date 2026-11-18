@@ -108,3 +108,22 @@ def test_a_memory_with_several_facts_is_counted_once(db, monkeypatch) -> None:
     with connect(db) as conn:
         held = report.placeholders(conn, "default")
     assert held["by_type"] == {"GITHUB": 1} and held["memories"] == 1
+
+
+def test_quoting_the_masking_rule_is_not_a_credential() -> None:
+    from superlocalmemory.trust import secret_screen
+
+    text = "Mask secrets as [REDACTED:TYPE:LAST4]; this one is [REDACTED:GITHUB_PAT:ab12]."
+    assert dict(secret_screen.types_in(text)) == {"GITHUB_PAT": 1}
+
+
+def test_with_the_firewall_off_nothing_is_said_to_wait() -> None:
+    from superlocalmemory.trust import report
+
+    off = "\n".join(report.describe({"taint": "off", "secret_screen": "off", "waiting": 31,
+                                     "approved": 0}))
+    assert "Would wait for your OK if the firewall were on: 31" in off
+    assert "Waiting for your OK: 31" not in off
+    on = "\n".join(report.describe({"taint": "on", "secret_screen": "off", "waiting": 3,
+                                    "approved": 1}))
+    assert "Waiting for your OK: 3; approved by you: 1" in on
