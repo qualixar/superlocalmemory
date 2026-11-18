@@ -181,6 +181,10 @@ def _repair(args: Namespace) -> None:
 
 def cmd_media(args: Namespace) -> None:
     sub = getattr(args, "media_command", None) or "status"
+    if sub == "pack":  # WS-8: the optional models, in cli/media_pack_cmd.py
+        from superlocalmemory.cli.media_pack_cmd import cmd_pack
+
+        return cmd_pack(args)
     args.media_command = sub
     {"enable": _enable, "disable": _disable, "status": _status, "gc": _gc, "repair": _repair}[sub](args)
 
@@ -204,3 +208,6 @@ def register_media_parser(sub: Any) -> None:
     r = msub.add_parser("repair", help="make pictures findable by what they show (re-embeds them; owner or admin)")
     r.add_argument("--dry-run", action="store_true", help="only count what needs repair")
     r.add_argument("--json", **flag)
+    from superlocalmemory.cli.media_pack_cmd import register_pack_parser
+
+    register_pack_parser(msub, flag)

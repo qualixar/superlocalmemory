@@ -29,6 +29,13 @@ from superlocalmemory.mcp.tool_hints import ADDS, DESTROYS_ONCE, READ_ONLY, SETS
 logger = logging.getLogger(__name__)
 
 
+def _kill_switch_state() -> dict:
+    """Is the 4.2.30 kill switch on, from where, in plain words (D-23). Never raises."""
+    from superlocalmemory.core import kill_switch
+
+    return kill_switch.current()
+
+
 def _projection_queue_depth(db: object) -> int:
     """Facts queued for the graph and vector projections, or 0 when there are none.
 
@@ -1230,6 +1237,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                         "projection_queue_depth": int(
                             daemon_status.get("projection_queue_depth", 0)
                         ),
+                        "kill_switch": _kill_switch_state(),
                     }
 
             engine = get_engine()
@@ -1270,6 +1278,7 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "profile_generation": 0,
                 "version": SLM_VERSION,
                 "projection_queue_depth": _projection_queue_depth(engine._db),
+                "kill_switch": _kill_switch_state(),
             }
         except Exception as exc:
             logger.exception("get_status failed")

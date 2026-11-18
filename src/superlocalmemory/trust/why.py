@@ -204,6 +204,21 @@ def _deliveries(conn: sqlite3.Connection, fact_id: str, limit: int) -> dict[str,
     return {"shown": shown, "considered": seen, "recent": items}
 
 
+def _regions(conn: sqlite3.Connection, memory_id: str, content: str) -> list[dict[str, Any]] | None:
+    """Where on its picture or page this fact's text sat (WS-8). ``None`` (no key at all) unless the
+    ``media.regions`` flag is on and the store has pictures: with it off, the answer is what it was."""
+    from superlocalmemory.core.feature_flags import FeatureFlags
+    from superlocalmemory.media import regions
+
+    try:
+        path = regions.media_db_next_to(conn)
+        if path is None or not FeatureFlags(path.parent).enabled("media.regions"):
+            return None
+        return regions.for_fact(conn, memory_id, content)
+    except Exception:  # noqa: BLE001 - provenance never fails an explanation
+        return None
+
+
 def explain(conn: sqlite3.Connection, fact_id: str, *, profile_id: str | None = None,
             signer: Any = None, deliveries: int = DELIVERIES,
             hidden: Callable[[list[str]], set[str]] = lambda ids: set()) -> dict[str, Any] | None:
@@ -218,7 +233,7 @@ def explain(conn: sqlite3.Connection, fact_id: str, *, profile_id: str | None = 
     from superlocalmemory.truth import fact_truth
 
     truth = fact_truth.for_fact(conn, profile, fact_id, hidden=hidden)
-    return {
+    report = {
         "fact_id": fact_id, "profile_id": profile, "memory_id": memory_id,
         "created_at": created_at, "preview": _preview(content),
         "origin": origin,
@@ -228,6 +243,10 @@ def explain(conn: sqlite3.Connection, fact_id: str, *, profile_id: str | None = 
         "compiler": _compiler(conn, fact_id),
         "deliveries": _deliveries(conn, fact_id, deliveries),
     }
+    placed = _regions(conn, memory_id, content)
+    if placed is not None:
+        report["source_regions"] = placed
+    return report
 
 
 #: Most memories one ``fetch(why=true)`` explains (routing-only: keeps one call small).
@@ -280,6 +299,8 @@ def lines(report: dict[str, Any]) -> list[str]:
                if a["decided_by"] else a["state"])
         out.append(f"  It asked to be: {a['wanted']} ({how})")
     out += ["", "Signature", f"  {report['signature']['words']}"]
+    if report.get("source_regions"):
+        out += ["", "Where the text was read"] + [f"  {r['where']}" for r in report["source_regions"]]
     truth = report["truth"]
     out += ["", "Truth",
             f"  {len(truth['slots'])} slot(s), {len(truth['disputes'])} open dispute(s)."]

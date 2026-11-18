@@ -21,6 +21,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _kill_switch_now() -> dict:
+    """The kill switch state for ``slm status`` (D-23): on or off, where from, in words."""
+    from superlocalmemory.core import kill_switch
+
+    return kill_switch.current()
+
+
 def _cli_projection_queue_depth(db_path: object) -> int:
     """Facts queued for the graph and vector projections, read straight from disk.
 
@@ -2832,6 +2839,7 @@ def cmd_status(args: Namespace) -> None:
                 "projection_queue_depth": int(
                     daemon_status.get("projection_queue_depth", 0)
                 ),
+                "kill_switch": _kill_switch_now(),
                 "saves_waiting": int(daemon_status.get("saves_waiting", 0)),
                 "unreadable_saves": int(daemon_status.get("unreadable_saves", 0)),
             }
@@ -2896,6 +2904,7 @@ def cmd_status(args: Namespace) -> None:
             "profile_generation": 0,
             "version": SLM_VERSION,
             "projection_queue_depth": _cli_projection_queue_depth(config.db_path),
+            "kill_switch": _kill_switch_now(),
         }
         json_print("status", data=data, next_actions=[
             {"command": "slm health --json", "description": "Check math layer health"},
@@ -3248,7 +3257,8 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("media", "Images & documents: enable | disable | status"),
     ]),
     ("Learning switches", [
-        ("flags", "What SLM learns from: slm flags | set <flag> on|shadow|off | kill on|off"),
+        ("flags", "What SLM learns from: slm flags | set <flag> on|shadow|off | kill on|off | "
+                 "rollback-retirements [--dry-run]"),
         ("measurement", "What SLM measures, and the off switch: slm measurement status|on|off"),
     ]),
     ("Help", [

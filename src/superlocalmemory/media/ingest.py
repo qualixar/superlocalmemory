@@ -28,8 +28,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from superlocalmemory.media import files
-from superlocalmemory.media.labels import NO_TEXT, TEXT_MARKER
+from superlocalmemory.media import captions, files, regions
+from superlocalmemory.media.labels import CAPTION, NO_TEXT, TEXT_MARKER
 from superlocalmemory.memory_core import (
     ContentOrigin,
     effective_pii_redaction,
@@ -37,6 +37,7 @@ from superlocalmemory.memory_core import (
     scan_sensitive,
 )
 from superlocalmemory.memory_core.submit import SavePending, SaveReceipt, SaveRequest, submit_memory_settled
+from superlocalmemory.runtimes import media_packs
 from superlocalmemory.runtimes.space_plan import compatible, current_space_plan
 from superlocalmemory.runtimes.worker_client import MediaWorkerError, MediaWorkerWarming
 
@@ -81,6 +82,19 @@ class MediaReceipt:
     duplicate_of: str | None = None
     near_duplicate_of: str | None = None
     extracted_text_preview: str = ""
+    #: The short description the caption model wrote (WS-8); empty, and left out of the reply, unless
+    #: ``media.captions`` is on and it produced one.
+    description: str = ""
+
+
+def receipt_dict(receipt: "MediaReceipt") -> dict[str, Any]:
+    """The receipt as the routes and tools return it; ``description`` appears only when there is one."""
+    from dataclasses import asdict
+
+    body = asdict(receipt)
+    if not body.get("description"):
+        body.pop("description", None)
+    return body
 
 
 class _Stop(Exception):
@@ -104,6 +118,8 @@ class _Ocr:
     #: True only when the whole OCR text was scanned for personal data and
     #: credentials, whatever the redaction setting. Unscanned is never clean.
     scanned: bool = False
+    #: Box of each recognised line, as fractions of the picture (WS-8, only with ``media.regions`` on).
+    regions: list = field(default_factory=list)
 
 
 @dataclass
@@ -285,33 +301,49 @@ def _place(job: _Job, info: dict[str, Any], profile_id: str) -> str:
     return job.placed
 
 
-def _ocr_key(stored_sha: str, redact: bool):
+def _redactor(job: _Job):
+    """The redaction the memory's own text goes through, as text -> text (for a region's snippet)."""
+    return lambda text: prepare_for_save(text, origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact).text
+
+
+def _ocr_key(stored_sha: str, redact: bool, with_regions: bool = False):
     from superlocalmemory.cache.keys import CacheKey, params_hash
 
     # "2": the entry carries the full-text scan verdict (older entries do not).
-    return CacheKey(stored_sha, "ocr.auto", "2", params_hash=params_hash({"redaction": redact, "lang": "auto"}))
+    params = {"redaction": redact, "lang": "auto"}
+    if with_regions:  # its own entries: the others carry no boxes (and with the part off the key is unchanged)
+        params["regions"] = True
+    return CacheKey(stored_sha, "ocr.auto", "2", params_hash=params_hash(params))
+
+
+def _cache_payload(out: "_Ocr") -> bytes:
+    """What is cached: the same fields as ever, plus the boxes only when there are some."""
+    return json.dumps({k: v for k, v in out.__dict__.items() if k != "regions" or v}).encode("utf-8")
 
 
 def _ocr(job: _Job, info: dict[str, Any]) -> _Ocr:
-    key = _ocr_key(info["stored_sha"], job.redact)
+    want_regions = media_packs.flag_enabled("media.regions", job.root)
+    key = _ocr_key(info["stored_sha"], job.redact, want_regions)
     try:
         hit = job.cache.get(key) if job.cache is not None else None
         if hit:
             return _Ocr(**json.loads(bytes(hit).decode("utf-8")))
     except Exception:  # noqa: BLE001 - a cache fault only costs a recompute
         logger.debug("ocr cache read skipped")
-    reply = job.client.ocr_image(info["stored_path"], wait_cold=False)
+    reply = (job.client.ocr_image(info["stored_path"], wait_cold=False, regions=True) if want_regions
+             else job.client.ocr_image(info["stored_path"], wait_cold=False))
     engine, full = str(reply.get("engine") or "none"), str(reply.get("text") or "")
     prepared = prepare_for_save(full[:MAX_OCR_CHARS], origin=ContentOrigin.DERIVED_TEXT, pii_redaction=job.redact)
-    out = _Ocr(engine, prepared.text, prepared.pii_count, prepared.secret_count)
+    boxes = regions.clean_regions(reply.get("regions") or [], _redactor(job)) if want_regions else []
+    out = _Ocr(engine, prepared.text, prepared.pii_count, prepared.secret_count, regions=boxes)
     try:  # vetting reads ALL of the text; what is stored stays the cut, redacted text
         found = scan_sensitive(full)
-        out = _Ocr(engine, prepared.text, found.pii, found.secrets, scanned=True)
+        out = _Ocr(engine, prepared.text, found.pii, found.secrets, scanned=True, regions=boxes)
     except Exception:  # noqa: BLE001 - an unscanned picture is simply not cleared for remote use
         logger.warning("picture text could not be scanned; it stays local-only")
     if engine != "none" and job.cache is not None:
         try:
-            job.cache.put(key, json.dumps(out.__dict__).encode("utf-8"), kind="json")
+            job.cache.put(key, _cache_payload(out), kind="json")
         except Exception:  # noqa: BLE001
             logger.debug("ocr cache write skipped")
     return out
@@ -335,10 +367,12 @@ def _near_duplicate(store: Any, profile_id: str, phash: str | None) -> str | Non
 
 # -- saving --------------------------------------------------------------------
 
-def _segments(content: str, ocr_text: str) -> tuple[tuple[str, ContentOrigin], ...]:
+def _segments(content: str, ocr_text: str, caption: str = "") -> tuple[tuple[str, ContentOrigin], ...]:
     """The searchable words of a picture memory: the person's note, the text read, or the label.
 
-    The worker's generated caption is never part of them; it is kept in the picture's own record.
+    The worker's measured summary is never part of them; it is kept in the picture's own record. A
+    description written by the pack's caption model (``media.captions``, ``caption`` not empty) follows the
+    others under its own label, so it reads as a model's words and never as the person's.
     """
     parts: list[tuple[str, ContentOrigin]] = []
     if content.strip():
@@ -349,6 +383,8 @@ def _segments(content: str, ocr_text: str) -> tuple[tuple[str, ContentOrigin], .
     if not ocr_text.strip():
         # The label also keeps a one-word note long enough to be saved as a fact.
         parts.append((("\n\n" if parts else "") + NO_TEXT, ContentOrigin.DERIVED_TEXT))
+    if caption:
+        parts.append((f"\n\n{CAPTION}{caption}", ContentOrigin.DERIVED_TEXT))
     return tuple(parts)
 
 
@@ -401,13 +437,14 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     profile_id = args["profile_id"]
     info = _prepare(job, data)
     ocr = _ocr(job, info)  # reads the scratch file, so the file moves to its address only after this
+    caption = captions.describe(job.root, info["stored_path"], redact=_redactor(job), wait_cold=not job.remote)
     vector = job.client.embed_images([info["stored_path"]], wait_cold=False)[0]
     signature = _check_space(job, len(vector))
     near = _near_duplicate(job.store, profile_id, info.get("phash"))
     relpath = _place(job, info, profile_id)
     media_id = uuid.uuid4().hex
     request = SaveRequest(
-        segments=_segments(args["content"], ocr.text),
+        segments=_segments(args["content"], ocr.text, caption),
         profile_id=profile_id, source_type="media",
         trusted_actor_id=args["actor_id"], tags=args["tags"], session_date=args["session_date"],
         trusted_metadata={"_slm_source": {"type": "media", "media_id": media_id, "origin": "tool",
@@ -438,13 +475,15 @@ def _store_it(job: _Job, data: bytes, src_sha: str, args: dict[str, Any]) -> Med
     preview = ocr.text[:PREVIEW_CHARS]
     try:
         indexed = _write_row(job, fields, vector, profile_id, signature)
+        if ocr.regions:  # keyed by the picture: a queued memory is found later through its anchor
+            regions.record(job.store, profile_id, media_id, 0, ocr.regions, engine=ocr.engine)
     except Exception as exc:  # noqa: BLE001 - the memory exists; the file stays for later reconciliation
         logger.warning("memory %s saved but its image row was not (%s)", saved.memory_id, type(exc).__name__)
         return MediaReceipt("stored", memory_id=saved.memory_id, extracted_text_preview=preview,
                             reason="The text was saved; the picture could not be indexed.")
     return MediaReceipt("stored", media_id=media_id, memory_id=saved.memory_id,
                         near_duplicate_of=near, extracted_text_preview=preview,
-                        reason="" if indexed else NO_VECTOR_REASON)
+                        reason="" if indexed else NO_VECTOR_REASON, description=caption)
 
 
 def remember_media(

@@ -840,6 +840,14 @@ def main() -> None:
     flags_kill = flags_sub.add_parser(
         "kill", help="on: every 4.2.30 subsystem off at once; off: back to the flags")
     flags_kill.add_argument("value", choices=["on", "off"])
+    flags_back = flags_sub.add_parser(
+        "rollback-retirements",
+        help="Bring back memories 4.2.30 retired (says how many first; the kill switch "
+             "does not undo retirements)")
+    flags_back.add_argument("--dry-run", action="store_true",
+                            help="Only say how many would come back")
+    flags_back.add_argument("--profile", default="", help="Profile (default: the active one)")
+    flags_back.add_argument("--db", default=None, help="Store file (default: yours)")
     flags_p.add_argument("--json", action="store_true", help="Output structured JSON")
     warmup_p = sub.add_parser(
         "warmup",

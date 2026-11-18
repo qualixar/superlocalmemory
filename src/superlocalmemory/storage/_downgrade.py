@@ -57,6 +57,10 @@ _SERIAL = re.compile(r"^M(\d{3})_")
 #: The first release that opens a store stamped at each schema version. A
 #: store prepared for schema N opens in that release and every later one.
 OLDEST_RELEASE_FOR_SCHEMA = {51: "4.1.18"}
+#: The published release just before a version whose number skipped ahead (4.2.30 follows 4.2.19:
+#: 4.2.20-4.2.29 are kept for hot-fixes of 4.2.19 and none exists). Without it the "one patch
+#: back" rule would name a release that was never published. Add a line whenever a release skips.
+LAST_RELEASE_BEFORE: dict[str, str] = {"4.2.30": "4.2.19"}
 
 
 def _parse(version: str) -> tuple[int, ...] | None:
@@ -74,6 +78,9 @@ def downgrade_target_release(target_schema: int, current: str) -> str | None:
     now, floor = _parse(current), _parse(oldest or "")
     if now is None or floor is None:
         return oldest
+    known = _parse(LAST_RELEASE_BEFORE.get(".".join(str(part) for part in now), ""))
+    if known is not None and floor <= known < now:
+        return ".".join(str(part) for part in known)
     major, minor, patch = now
     previous = (major, minor, patch - 1) if patch > 0 else None
     if previous is None or previous < floor or previous >= now:

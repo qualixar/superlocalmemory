@@ -358,6 +358,18 @@ Never switch it off on your own
 initiative, even to make a test or a measurement tidier. Run it only when the
 user asks, and when `pending` is true, pass the notice on to the user.
 
+**The 4.2.30 kill switch.** `get_status` and `health` carry `kill_switch`
+(`on`, `source`: file or environment, and a sentence in words). `slm flags`
+shows it too. When it is on, everything new in 4.2.30 is off and recall reads the
+way it did before 4.2.30: no dispute, source, standing or origin notes, no `why`
+block, no background pass writing anything. Say so when results look plainer than
+usual. Turning it on or off is the user's choice (`slm flags kill on|off`, the
+dashboard card "Turn off everything new in 4.2.30", or `POST /api/flags/kill`);
+never flip it on your own. It does not undo retirements: when the user wants
+the memories 4.2.30 retired back, run `slm flags rollback-retirements --dry-run`,
+tell them the count, and run it without `--dry-run` only on their yes. It is
+recorded as a decision and **Recent decisions** can undo it.
+
 ## Trust: the instruction firewall and the secret screen (4.2.30)
 
 ```bash

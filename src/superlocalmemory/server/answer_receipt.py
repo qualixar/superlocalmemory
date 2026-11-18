@@ -52,8 +52,23 @@ def why(item: dict, found_by: tuple[str, ...] = ()) -> dict:
     return block
 
 
+def _killed() -> bool:
+    try:
+        from superlocalmemory.core.feature_flags import kill_switch_on
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        return kill_switch_on(canonical_data_root())
+    except Exception:  # noqa: BLE001 - a label is never worth a failed recall
+        return False
+
+
 def with_why(results: list[dict], *, found_by: tuple[str, ...] = ()) -> list[dict]:
-    """Each result with its ``why`` block; never raises (presentation only)."""
+    """Each result with its ``why`` block; never raises (presentation only).
+
+    With the kill switch on (D-23) results come back as they were before 4.2.30: no ``why``,
+    so no standing and no origin either."""
+    if _killed():
+        return results
     out = []
     for item in results:
         try:

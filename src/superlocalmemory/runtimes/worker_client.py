@@ -85,11 +85,12 @@ _QUIET_LIBRARIES = {"HF_HUB_DISABLE_PROGRESS_BARS": "1", "TQDM_DISABLE": "1",
 class MediaWorkerClient(MediaEmbedderPort):
     def __init__(self, env: Any, *, model_id: str, revision: str, idle_s: float | None = None,
                  rss_limit_mb: int | None = None, request_timeout_s: float = 120.0,
-                 load_timeout_s: float = 600.0, role: str = "") -> None:
+                 load_timeout_s: float = 600.0, role: str = "", model_dir: Path | str | None = None) -> None:
         if model_id.startswith("fake:") and not _test_mode():
             raise ValueError("fake models are for tests only")
         self._env, self.model_id, self.revision = env, model_id, revision
-        self.role = role  # "image": a vision-only model that never embeds text
+        self.role = role  # "image": a vision-only model that never embeds text; "caption"/"document": a pack model
+        self._model_dir = Path(model_dir) if model_dir is not None else None  # a pack model's own folder
         self.idle_s = float(idle_s if idle_s is not None else _env_number("SLM_MEDIA_WORKER_IDLE_S", DEFAULT_IDLE_S))
         self.rss_limit_mb = int(rss_limit_mb if rss_limit_mb is not None
                                 else _env_number("SLM_MEDIA_WORKER_RSS_LIMIT_MB",
@@ -122,7 +123,13 @@ class MediaWorkerClient(MediaEmbedderPort):
         return self._loaded and self.pid is not None
 
     # -- process --------------------------------------------------------------
+    def _hf_home(self) -> str:
+        """Where this worker finds its files: its own folder for a pack model, else the environment's weights."""
+        return str(self._model_dir if self._model_dir is not None else self._env.weights_dir())
+
     def _model_arg(self) -> str:
+        if self._model_dir is not None:
+            return str(self._model_dir)
         weights = Path(self._env.weights_dir())
         if not self.model_id.startswith("fake:") and weights.is_dir() and any(weights.iterdir()):
             return str(weights)
@@ -251,7 +258,7 @@ class MediaWorkerClient(MediaEmbedderPort):
                 self._spawn()
                 reply = self._roundtrip({"cmd": "load", "model": self._model_arg(), "revision": self.revision,
                                          "role": self.role, "max_pixels": self._max_pixels(),
-                                         "hf_home": str(self._env.weights_dir()), "device": "auto"},
+                                         "hf_home": self._hf_home(), "device": "auto"},
                                         self.load_timeout_s, cap_mb=self._load_cap_mb())
         except RuntimeError as exc:
             if isinstance(exc, MediaWorkerError):
@@ -422,9 +429,22 @@ class MediaWorkerClient(MediaEmbedderPort):
             fields["classify"] = False
         return self._image_request("prepare_image", wait_cold, **fields)
 
-    def ocr_image(self, path: Path | str, *, wait_cold: bool = True) -> dict:
-        """The text in an image: ``{"engine": ..., "text": ...}`` (engine ``none`` when none is installed)."""
+    def ocr_image(self, path: Path | str, *, wait_cold: bool = True, regions: bool = False) -> dict:
+        """The text in an image: ``{"engine": ..., "text": ...}`` (engine ``none`` when none is installed).
+
+        ``regions=True`` adds ``"regions"``, the box of each line as fractions of the picture (WS-8).
+        """
+        if regions:
+            return self._image_request("ocr_image", wait_cold, path=str(path), regions=True)
         return self._image_request("ocr_image", wait_cold, path=str(path))
+
+    def caption_image(self, path: Path | str, *, wait_cold: bool = True) -> str:
+        """A short description of the picture (only on a client made for the ``caption`` pack model)."""
+        return str(self._image_request("caption_image", wait_cold, path=str(path)).get("caption") or "")
+
+    def parse_document(self, path: Path | str, *, wait_cold: bool = True) -> dict:
+        """One page image read by the document model: ``{"engine", "text", "regions"}`` (``document`` pack)."""
+        return self._image_request("parse_document", wait_cold, path=str(path))
 
     def embed_query(self, text: str, *, wait_s: float = 0.3) -> list[float] | None:
         """For recall: a vector only if the worker is already warm and free; otherwise None."""
@@ -466,6 +486,32 @@ def _shared_client(managed: Any, model_id: str, revision: str, role: str, *,
             client = _CLIENTS[key] = MediaWorkerClient(managed, model_id=model_id, revision=revision, role=role)
             if stop_hook:
                 register_media_stop_hook(client.stop)
+        return client
+
+
+_PACK_CLIENTS: dict[tuple[str, str, str, str], MediaWorkerClient] = {}
+
+
+def live_pack_clients() -> list[MediaWorkerClient]:
+    """The pack-model clients that already exist in this process (kept apart from ``live_clients``:
+    the dashboard's picture-model memory line and the text embedder look only at the embedding model)."""
+    with _CLIENTS_LOCK:
+        return list(_PACK_CLIENTS.values())
+
+
+def shared_pack_client(managed: Any, model_id: str, revision: str, role: str, model_dir: Path | str,
+                       idle_s: float) -> MediaWorkerClient:
+    """The one client per pack model: its own worker process, its own folder, a short idle time.
+
+    A pack model never shares a worker with the embedding model, so only one model is in memory in each
+    process and a pack's memory goes back to the machine ``idle_s`` after its last request.
+    """
+    key = (str(managed.root), model_id, revision, role)
+    with _CLIENTS_LOCK:
+        client = _PACK_CLIENTS.get(key)
+        if client is None:
+            client = _PACK_CLIENTS[key] = MediaWorkerClient(managed, model_id=model_id, revision=revision,
+                                                            role=role, model_dir=model_dir, idle_s=idle_s)
         return client
 
 
@@ -511,5 +557,5 @@ def text_embedder(*, env: Any, data_root: str | Path | None, model_id: str,
 
 
 __all__ = ["MediaWorkerClient", "MediaWorkerError", "MediaWorkerWarming", "WORKER_PATH", "live_clients",
-           "media_embedder",
+           "live_pack_clients", "media_embedder", "shared_pack_client",
            "text_embedder", "text_loadout_role"]

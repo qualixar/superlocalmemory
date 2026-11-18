@@ -4,6 +4,8 @@ Pictures and documents are off until you turn them on, in the dashboard (the Doc
 
 The **Upgrade memory engine (preview)** card is a separate, optional step, and not available for text yet (see below). It re-reads every memory with the model that also reads pictures, so text and pictures share one search space. See [Upgrading the memory engine](#upgrading-the-memory-engine-preview) below.
 
+Three optional parts add to this: a short description of each picture (a 0.5 GB download), a larger model for scanned pages (1.9 GB) and "where text was found" (no download). See [Better pictures and documents](media-pack.md).
+
 ## What your computer needs
 
 | | |

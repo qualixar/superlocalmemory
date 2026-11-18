@@ -29,7 +29,7 @@ from superlocalmemory.core.recall_gate import background_work, yield_to_recalls
 from superlocalmemory.documents.chunking import chunk_text
 from superlocalmemory.documents.heavy import parse_reservation
 from superlocalmemory.documents.parse_proc import ParseFailed, ParseLimit, ParseSession, ParseStopped
-from superlocalmemory.media import files
+from superlocalmemory.media import files, regions
 from superlocalmemory.media.labels import DOCUMENT
 from superlocalmemory.memory_core import (
     ContentOrigin,
@@ -38,6 +38,7 @@ from superlocalmemory.memory_core import (
     scan_sensitive,
 )
 from superlocalmemory.memory_core.submit import SavePending, SaveRequest, submit_memory_settled
+from superlocalmemory.runtimes import media_packs
 from superlocalmemory.runtimes.worker_client import MediaWorkerError
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,9 @@ class _Text:
     #: True only when the whole page text was scanned, whatever the redaction
     #: setting. Unscanned is never clean.
     scanned: bool = False
+    #: Where on the page each line was (fractions; WS-8, only with ``media.regions`` on) and who read it.
+    regions: list | None = None
+    engine: str = ""
 
 
 def _derived(text: str, redact: bool) -> _Text:
@@ -287,6 +291,10 @@ class JobRunner:
         vector = self.ctx.client.embed_images([png], wait_cold=True)[0]
         memory_ids, fact_ids = self._page_memories(page_no, text)
         media_id = self._page_item(event, page_no, text, memory_ids, thumb, phash, vector)
+        if text.regions:
+            regions.record(self.store, self.profile_id, media_id, page_no, text.regions, engine=text.engine,
+                           redact=lambda t: prepare_for_save(t, origin=ContentOrigin.DERIVED_TEXT,
+                                                             pii_redaction=self.redact).text)
         self.store.put_page(self.doc_id, page_no, media_id=media_id, memory_ids=memory_ids, fact_ids=fact_ids,
                             text_origin=text.origin, char_count=len(text.text))
         png.unlink(missing_ok=True)
@@ -295,12 +303,32 @@ class JobRunner:
         if event.get("has_text_layer"):
             return _derived(str(event.get("text") or ""), self.redact)
         try:
-            reply = self.ctx.client.ocr_image(png, wait_cold=True)
+            reply = self._read_scan(png)
         except MediaWorkerError:
             return _Text()
         found = _derived(str(reply.get("text") or ""), self.redact)
         found.origin = "ocr" if found.origin != "none" and reply.get("engine") not in (None, "none") else "none"
-        return found if found.origin == "ocr" else _Text()
+        if found.origin != "ocr":
+            return _Text()
+        if media_packs.flag_enabled("media.regions", Path(self.store.path).parent):
+            found.regions, found.engine = reply.get("regions") or [], str(reply.get("engine") or "")
+        return found
+
+    def _read_scan(self, png: Path) -> dict[str, Any]:
+        """The text of a scanned page: the document model when that part is on and answers with words
+        (WS-8, ``media.document_pack``), else the standard reader, which is also the fallback for any failure."""
+        root = Path(self.store.path).parent
+        if media_packs.is_active("documents", root):
+            try:
+                pack = media_packs.pack_client("documents", root)
+                reply = pack.parse_document(png, wait_cold=True) if pack is not None else {}
+                if str(reply.get("text") or "").strip():
+                    return reply
+            except Exception as exc:  # noqa: BLE001 - the document model never blocks a page
+                logger.warning("document model skipped for a page (%s)", type(exc).__name__)
+        if media_packs.flag_enabled("media.regions", root):
+            return self.ctx.client.ocr_image(png, wait_cold=True, regions=True)
+        return self.ctx.client.ocr_image(png, wait_cold=True)
 
     def _thumb(self, png: Path) -> tuple[bytes | None, str | None]:
         out = Path(tempfile.mkdtemp(dir=self.work))

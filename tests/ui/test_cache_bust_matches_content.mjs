@@ -97,7 +97,9 @@ const HASHED = ['od-brain.js', 'od-graph.js', 'fact-detail.js', 'od-memories.js'
                 // 4.2.30 D-49: Recent decisions by your agents.
                 'od-decisions.js',
                 // 4.2.30 WS-9: the Import card.
-                'od-import.js'];
+                'od-import.js',
+                // 4.2.30 WS-8: the optional picture and document models card.
+                'od-media-packs.js'];
 //: Stylesheets stamped the same way (static/css/<name>?v=<sha256[:8]>).
 const HASHED_CSS = ['od-apps.css', 'design-system.css'];
 

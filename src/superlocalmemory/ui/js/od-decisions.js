@@ -19,12 +19,13 @@
 
   var KIND = {
     promotion: 'Memory promoted', proposal: 'Proposed changes', dispute: 'Dispute',
-    label: 'Audit label', signing: 'Memories signed again', import: 'Memories imported'
+    label: 'Audit label', signing: 'Memories signed again', import: 'Memories imported',
+    rollback_retirements: 'Retired memories brought back', kill_switch: 'Kill switch'
   };
   var CHANNEL = { mcp: 'over MCP', cli: 'from the command line', http: 'over HTTP',
                   dashboard: 'on the dashboard' };
   var UNDONE = { promote: 'Withdrawn', apply: 'Rolled back', settle: 'Reopened', label: 'Retracted',
-                 run: 'Taken back' };
+                 run: 'Taken back', on: 'Set back', off: 'Set back' };
   var rows = [];
   var counts = { total: 0, undone: 0, open: 0 };
 

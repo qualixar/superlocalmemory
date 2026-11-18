@@ -155,5 +155,52 @@ async def disable_media_route(request: Request):
     return {"media": _media_view(status, root)}
 
 
+# -- the optional picture and document models (WS-8) -------------------------------------------------
+
+def _pack_name(body: dict[str, Any]) -> str:
+    name = body.get("pack")
+    if name not in ("captions", "documents", "regions"):
+        raise HTTPException(400, detail="pack must be one of: captions, documents, regions.")
+    return name
+
+
+@router.get("/media/packs")
+def get_media_packs() -> dict[str, Any]:
+    """Where each optional part stands, with the download size to show before anything is downloaded."""
+    from superlocalmemory.runtimes import media_packs
+
+    return {"packs": media_packs.status_all(_data_root(), env=_media_env())}
+
+
+@router.post("/media/packs/enable")
+async def enable_media_pack_route(request: Request):
+    """Turn one part on; its model downloads in the background. Needs ``{"pack": ..., "yes": true}``."""
+    _gate(request)
+    body = await _body(request)
+    if body.get("yes") is not True:
+        raise HTTPException(400, detail="Send {\"yes\": true} to download the model and turn this on.")
+    source = body.get("source", "dashboard")
+    if source not in tuple(s for s in feat.SOURCES if s != "npm"):
+        raise HTTPException(400, detail="source must be one of: cli, dashboard, api.")
+    from superlocalmemory.runtimes import media_packs
+
+    result = media_packs.enable(_pack_name(body), source=source, data_root=_data_root(), env=_media_env())
+    refused = result.get("refused")
+    if refused:  # this computer or this moment cannot take it: a state conflict, not a server fault
+        return JSONResponse({"pack": result, "detail": refused}, status_code=409)
+    return JSONResponse({"pack": result}, status_code=202 if result["state"] == "downloading" else 200)
+
+
+@router.post("/media/packs/disable")
+async def disable_media_pack_route(request: Request):
+    _gate(request)
+    body = await _body(request)
+    from superlocalmemory.runtimes import media_packs
+
+    result = media_packs.disable(_pack_name(body), remove_files=body.get("remove_files") is True,
+                                 data_root=_data_root(), env=_media_env())
+    return {"pack": result}
+
+
 def register(app: Any) -> None:
     app.include_router(router)

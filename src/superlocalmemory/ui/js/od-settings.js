@@ -317,6 +317,18 @@
     return g;
   }
 
+  // 4.2.30 D-23 (§8.10.3 k): the kill switch and the bring-back-retired command (od-killswitch.js).
+  function buildKillSwitch() {
+    var mount = el('div', { 'data-set':'', 'data-txt':'turn off everything new 4.2.30 kill switch retired bring back memories' },
+      { padding:'16px 20px' });
+    var g = makeGrp('Turn off everything new in 4.2.30', 'shield', [mount]);
+    g.id = 'settings-kill-switch';
+    if (window.SLMKillSwitch && typeof window.SLMKillSwitch.renderInto === 'function') {
+      window.SLMKillSwitch.renderInto(mount);
+    }
+    return g;
+  }
+
   /* ═══════════════════════════════════════════════════════════
      Filter + Load all
   ═══════════════════════════════════════════════════════════ */
@@ -373,7 +385,7 @@
     hub.appendChild(sWrap);
 
     var frag = document.createDocumentFragment();
-    [buildMode(), buildAnswerCheck(), buildMeasurement(), buildEmb(), buildStorage(), buildScope(), buildRuntime(),
+    [buildMode(), buildAnswerCheck(), buildMeasurement(), buildKillSwitch(), buildEmb(), buildStorage(), buildScope(), buildRuntime(),
      buildCapture(), buildRecall(), buildInvoke(), buildForgetting(),
      buildEvolution(), buildBackup(), buildMesh(), buildTrust(),
      buildRateLimit(), buildDaemon()

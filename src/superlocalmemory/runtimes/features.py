@@ -125,9 +125,25 @@ def sources_enabled(data_root: str | Path | None = None) -> bool:
     return bool(read_features(data_root)["sources"].get("enabled"))
 
 
+def _kept_keys(path: Path) -> dict[str, Any]:
+    """Top-level keys of the file this module does not own (the 4.2.30 flags and the kill switch).
+
+    ``features.json`` is shared with ``core/feature_flags``; rewriting it from the three keys this
+    module reads would erase every flag and the kill switch the first time images are turned on.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k not in ("schema", "media", "sources", "engine_upgrade")}
+
+
 def _write_features(data_root: str | Path | None, data: dict[str, Any]) -> None:
     path = features_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    data = {**_kept_keys(path), **data}
     fd, tmp_name = tempfile.mkstemp(prefix=f"{path.name}.", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

@@ -12,12 +12,15 @@ from __future__ import annotations
 
 #: Leads the text read from a picture.
 TEXT_MARKER = "[Text in image]\n"
+#: Leads the short description a small local model wrote of a picture (WS-8, ``media.captions``). Recall
+#: shows it as it is, so a reader can tell a model's description from the person's own words.
+CAPTION = "[Description written by a model]\n"
 #: The whole content of an image that had neither words nor readable text.
 NO_TEXT = "[Image without text]"
 #: Follows a document's title, so a one-word title is still a saveable memory.
 DOCUMENT = "[PDF document]"
 
 #: Every label recall removes before judging whether a memory has text of its own.
-LABELS: tuple[str, ...] = (TEXT_MARKER.strip(), NO_TEXT, DOCUMENT)
+LABELS: tuple[str, ...] = (TEXT_MARKER.strip(), CAPTION.strip(), NO_TEXT, DOCUMENT)
 
-__all__ = ["DOCUMENT", "LABELS", "NO_TEXT", "TEXT_MARKER"]
+__all__ = ["CAPTION", "DOCUMENT", "LABELS", "NO_TEXT", "TEXT_MARKER"]

@@ -69,6 +69,8 @@ def test_cli_cancel_message_is_true(store, capsys) -> None:
 @pytest.mark.parametrize("current, expected", [
     ("4.1.20", "4.1.19"), ("4.1.19", "4.1.18"), ("4.1.25", "4.1.24"),
     ("not-a-version", "4.1.18"),
+    # 4.2.30 follows 4.2.19 (4.2.20-4.2.29 were never published): never name "4.2.29".
+    ("4.2.30", "4.2.19"),
 ])
 def test_the_target_release_is_the_one_before_this(current, expected) -> None:
     from superlocalmemory.storage._downgrade import downgrade_target_release

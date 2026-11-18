@@ -54,8 +54,7 @@ def _write_private(directory: str, ext: str, data: bytes) -> str:
 def _camera_fields(exif) -> dict:
     """The four fields that are kept; GPS and everything else is never read."""
     out: dict = {}
-    date = exif.get_ifd(_EXIF_IFD).get(_DATE_ORIGINAL)
-    if date:
+    if date := exif.get_ifd(_EXIF_IFD).get(_DATE_ORIGINAL):
         out["DateTimeOriginal"] = str(date).strip()
     for tag, name in _EXIF_FIELDS.items():
         value = exif.get(tag)
@@ -241,8 +240,8 @@ def _local_ocr_params(module: ModuleType) -> dict[str, str] | None:
     return params if len(params) == len(_RAPIDOCR_MODELS) else None
 
 
-def _rapidocr(path: str) -> str | None:
-    """Use verified local models only; an unavailable backend never blocks save."""
+def _rapidocr(path: str, found: list | None = None) -> str | None:
+    """Verified local models only; an unavailable backend never blocks save. ``found`` gets (box, text) pairs."""
     try:
         module = importlib.import_module("rapidocr")
         params = _local_ocr_params(module)
@@ -250,6 +249,8 @@ def _rapidocr(path: str) -> str | None:
             return None
         result = module.RapidOCR(params=params)(path)
         texts = getattr(result, "txts", None)
+        if found is not None and texts and getattr(result, "boxes", None) is not None:
+            found.extend(zip(list(result.boxes), texts))
         return "\n".join(texts) if texts else ""
     except ImportError:
         logger.warning("RapidOCR unavailable: package or inference dependency missing")
@@ -258,12 +259,11 @@ def _rapidocr(path: str) -> str | None:
     return None
 
 
-def ocr_image(path: str, *, engine: str = "auto") -> dict:
-    """Read the text in an image: ``{"engine": "apple_vision|rapidocr|none", "text": str}``."""
-    candidates = {"apple_vision": _apple_vision, "rapidocr": _rapidocr}
-    empty = None
+def ocr_image(path: str, *, engine: str = "auto", found: list | None = None) -> dict:
+    """Read the text in an image: ``{"engine": "apple_vision|rapidocr|none", "text": str}``; ``found``: see rapidocr."""
+    candidates, empty = {"apple_vision": _apple_vision, "rapidocr": _rapidocr}, None
     for name in (candidates if engine == "auto" else [engine] if engine in candidates else []):
-        text = candidates[name](path)
+        text = candidates[name](path, found) if found is not None and name == "rapidocr" else candidates[name](path)
         if text is not None:
             result = {"engine": name, "text": text}
             if text.strip() or engine != "auto":

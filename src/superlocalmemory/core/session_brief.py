@@ -365,11 +365,23 @@ def _workspace_line(ws: Workspace) -> str:
     return line
 
 
+def _killed() -> bool:
+    try:
+        from superlocalmemory.core.feature_flags import kill_switch_on
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        return kill_switch_on(canonical_data_root())
+    except Exception:  # noqa: BLE001 - the start never fails over a flag read
+        return False
+
+
 def notes(conn, pid: str, ws: Workspace) -> tuple[str, ...]:
     """The workspace line, then what needs attention in this project."""
     if not ws.keys:
         return ()
     out = [_workspace_line(ws)]
+    if _killed():  # D-23: with the kill switch on, a start ignores disputes and source leases
+        return tuple(out)
     for part in (_dispute_notes, _stale_notes):
         try:
             out.extend(part(conn, pid, ws))

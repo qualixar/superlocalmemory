@@ -41,11 +41,19 @@ SIGNING = "signing"
 #: unit; undoing it rolls the whole run back exactly (``portability/rollback``). Recorded when the
 #: run starts, by whoever started it, through any door; the rollback is recorded too.
 IMPORT = "import"
-KINDS: tuple[str, ...] = (PROMOTION, PROPOSAL, DISPUTE, LABEL, SIGNING, IMPORT)
+#: "Bring back memories that 4.2.30 retired" (D-23): every applied truth-layer retirement is rolled
+#: back through the correction ledger. Undo applies the same cases again, if none has moved.
+ROLLBACK_RETIREMENTS = "rollback_retirements"
+#: Turning the kill switch on or off (D-23, D-49): any caller; undo sets it back, if nobody has
+#: changed it since.
+KILL_SWITCH = "kill_switch"
+KINDS: tuple[str, ...] = (PROMOTION, PROPOSAL, DISPUTE, LABEL, SIGNING, IMPORT,
+                          ROLLBACK_RETIREMENTS, KILL_SWITCH)
 #: Actions a caller can take back, by kind (a rejection or a rollback is not undone again).
 UNDOABLE: dict[str, frozenset[str]] = {
     PROMOTION: frozenset({"promote"}), PROPOSAL: frozenset({"apply"}),
     DISPUTE: frozenset({"settle"}), LABEL: frozenset({"label"}), IMPORT: frozenset({"run"}),
+    ROLLBACK_RETIREMENTS: frozenset({"run"}), KILL_SWITCH: frozenset({"on", "off"}),
 }
 DEFAULT_ACTOR = "client:local"
 MAX_ACTOR = 80
@@ -184,5 +192,5 @@ def counts(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
 
 
 __all__ = ["CHANNELS", "DEFAULT_ACTOR", "DISPUTE", "Decider", "IMPORT", "KINDS", "LABEL", "PROMOTION",
-           "PROPOSAL", "SIGNING", "UNDOABLE", "clean_actor", "clean_channel", "counts", "get", "log",
-           "mark_undone", "open_decision", "recent"]
+           "KILL_SWITCH", "PROPOSAL", "ROLLBACK_RETIREMENTS", "SIGNING", "UNDOABLE", "clean_actor", "clean_channel",
+           "counts", "get", "log", "mark_undone", "open_decision", "recent"]

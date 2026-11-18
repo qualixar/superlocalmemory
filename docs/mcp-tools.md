@@ -496,7 +496,7 @@ Report how using recalled memories turned out.
 
 | Tool | Parameters | What it does |
 |------|-----------|--------------|
-| `get_status` | `profile_id` | Fact, entity and edge counts, mode, profile, database size |
+| `get_status` | `profile_id` | Fact, entity and edge counts, mode, profile, database size, and `kill_switch` (is everything new in 4.2.30 turned off) |
 | `get_version` | none | SLM, Python and platform versions |
 | `get_attribution` | none | Author, version, license and provenance |
 | `health` | `profile_id`, `memory` | Math-layer, database and component health; `memory=true` returns the Memory Health report instead (deliveries, use rates with ranges, randomised effects with intervals, judge certificates, second opinions, and a `trust` section: origin counts, `waiting_items` (memories waiting for the user's OK, with where each came from) and the credentials held as `[REDACTED:TYPE:LAST4]` placeholders by type; ids and numbers only) |

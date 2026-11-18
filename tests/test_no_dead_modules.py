@@ -93,6 +93,8 @@ _KNOWN_DEAD: dict[str, str] = {
                                      "which cannot import this package (runtimes/worker_client.py)",
     "runtimes/media_image_ops.py": "ALIVE — run by path inside the managed environment, "
                                    "loaded by runtimes/multimodal_worker.py",
+    "runtimes/pack_models.py": "ALIVE — run by path inside the managed environment, "
+                               "loaded by runtimes/multimodal_worker.py (WS-8 media packs)",
     "runtimes/pdf_parse.py": "ALIVE — run by path inside the managed environment, "
                              "which cannot import this package (documents/runner.py)",
     "dynamics/activation_guided_quantization.py": "seeded 4.0.6 — triage",

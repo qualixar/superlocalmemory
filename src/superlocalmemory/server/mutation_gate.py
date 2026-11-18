@@ -128,6 +128,8 @@ _EXACT: dict[str, Rule] = {
         "/api/v3/ratelimit",
         "/api/v3/features/media/enable",
         "/api/v3/features/media/disable",
+        "/api/v3/features/media/packs/enable",
+        "/api/v3/features/media/packs/disable",
         "/api/import/switch",
         "/api/v3/answer-check/mode",
         "/api/v3/answer-check/save",

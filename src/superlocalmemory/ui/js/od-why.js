@@ -57,6 +57,15 @@
     var sig = d.signature || {};
     container.appendChild(part('Signature', sig.words || '', sig.state === 'modified' ? 'tone-warn' : ''));
 
+    // WS-8: where on its picture or page the text was read ("from page 3, top left"); only present
+    // when the "keep the place" setting is on and the memory came from a picture or a scanned page.
+    var places = (d.source_regions || []).map(function (r) { return r && r.where; }).filter(Boolean);
+    if (places.length) {
+      var placeBox = part('Where the text was read', places.join('; ') + '.');
+      placeBox.setAttribute('data-regions', String(places.length));
+      container.appendChild(placeBox);
+    }
+
     var dl = d.deliveries || {};
     var recent = (dl.recent || []).slice(0, RECENT);
     var head = dl.considered

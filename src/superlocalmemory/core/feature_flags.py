@@ -128,6 +128,20 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Import memories and conversations from ChatGPT, Claude, Mem0, Letta, OKF and "
          "Markdown files (preview, run in the background, undo the whole run)",
          shadowable=False),
+    # D-19: the multimodal pack is optional and ships dark (WS-8). Each flag also needs its model
+    # downloaded on purpose (``slm media pack enable``): nothing downloads from a hook or a recall.
+    Flag("media.captions", "WS-8", FlagState.OFF,
+         "Describe each saved picture in a few words with a small local model, on every platform "
+         "(the description is marked as written by a model; a failure never blocks the save)",
+         shadowable=False),
+    Flag("media.document_pack", "WS-8", FlagState.OFF,
+         "Read scanned document pages with the PaddleOCR-VL model instead of the default reader "
+         "(the default reader stays as the fallback)",
+         shadowable=False),
+    Flag("media.regions", "WS-8", FlagState.OFF,
+         "Keep the page and the box each picture text came from, and show it in why "
+         "(\"from page 3, top left\")",
+         shadowable=False),
 )}
 
 

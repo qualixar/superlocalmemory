@@ -189,7 +189,7 @@ In the tables, a parameter followed by `?` is optional. The Profiles column says
 
 | Tool | Parameters | What it does | Profiles | Remote |
 |---|---|---|---|---|
-| `get_status` | `profile_id`? | Fact count, entity count, mode, profile and database size | full, power | read |
+| `get_status` | `profile_id`? | Fact count, entity count, mode, profile, database size and `kill_switch` (is everything new in 4.2.30 turned off) | full, power | read |
 | `health` | `profile_id`?, `memory`? | System health: scoring, consistency and lifecycle layers, database integrity, components; `memory=true`: the Memory Health report (what was delivered, how often each memory is used, whether memory measurably helps, judge certificates, second opinions, and a Trust section: where memories came from, those waiting for the user's OK, credentials held as placeholders by type) | power | read |
 | `get_version` | none | SLM, Python and platform versions | power | read |
 | `get_mode` | none | Current operating mode and what it means | power | read |

@@ -32,6 +32,7 @@ from superlocalmemory.media.store_doc_erase import DocumentEraseMixin
 from superlocalmemory.media.store_documents import DocumentsMixin
 from superlocalmemory.media.store_erase import EraseMixin
 from superlocalmemory.media.store_jobs import JobsMixin, utc_stamp
+from superlocalmemory.media.store_regions import RegionsMixin
 from superlocalmemory.media.store_revet import RevetMixin
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ def _exif_text(raw: Any) -> str:
     return json.dumps(kept, sort_keys=True)
 
 
-class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin, RevetMixin):
+class MediaStore(JobsMixin, DocumentsMixin, DocumentEraseMixin, EraseMixin, RevetMixin, RegionsMixin):
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._wlock = threading.RLock()

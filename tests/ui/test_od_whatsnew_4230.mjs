@@ -19,7 +19,7 @@ const KEY = 'slm.whatsnew.4.2.30';
 const FLAGS = { need_gate: 'delivery.need_gate', cues: 'delivery.cues', measurement: null,
   origin: 'trust.taint', firewall: 'trust.taint', secrets: 'trust.secret_screen', signing: 'trust.signing',
   why: null, proposals: 'compiler.dream', wiki: 'compiler.wiki', import: 'portability.import',
-  decisions: null };
+  media_packs: 'media.captions', decisions: null };
 const state = (on = [], kill = false) => ({ success: true, kill_switch: kill,
   features: Object.fromEntries(Object.entries(FLAGS).map(([k, f]) => [k, { on: on.includes(k), flag: f }])) });
 
@@ -47,10 +47,10 @@ describe('What memory can do now card (4.2.30)', () => {
     assert.match(HTML, /static\/js\/od-whatsnew-4230\.js\?v=[0-9a-f]{8}/);
   });
 
-  it('offers all twelve entries when nothing is on, one line each', async () => {
+  it('offers all thirteen entries when nothing is on, one line each', async () => {
     const d = await page(state());
     assert.deepEqual(entries(d), ['need_gate', 'cues', 'measurement', 'origin', 'firewall', 'secrets',
-      'signing', 'why', 'proposals', 'wiki', 'import', 'decisions']);
+      'signing', 'why', 'proposals', 'wiki', 'import', 'media_packs', 'decisions']);
     assert.ok(d.window.requested.length >= 1 && d.window.requested.every((u) => u === '/api/whatsnew/state'));
     for (const li of d.host.querySelectorAll('li')) {
       assert.ok(li.querySelector('strong').textContent.length > 3, 'a short title');
@@ -67,7 +67,7 @@ describe('What memory can do now card (4.2.30)', () => {
   it('does not offer what is already on', async () => {
     const d = await page(state(['need_gate', 'origin', 'firewall', 'signing']));
     assert.deepEqual(entries(d), ['cues', 'measurement', 'secrets', 'why', 'proposals', 'wiki', 'import',
-      'decisions']);
+      'media_packs', 'decisions']);
   });
 
   it('shows the plain switch for a feature with a flag and none for one without', async () => {

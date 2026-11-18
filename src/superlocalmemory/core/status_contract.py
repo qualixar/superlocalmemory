@@ -35,6 +35,7 @@ CANONICAL_STATUS_FIELDS: tuple[str, ...] = (
     "profile_generation",
     "version",
     "projection_queue_depth",
+    "kill_switch",  # D-23: is everything new in 4.2.30 turned off (core/kill_switch.py)
 )
 
 #: The counts, and the one query each comes from. Profile-scoped without

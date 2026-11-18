@@ -56,6 +56,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, field_validator
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.core.kill_switch import current as _kill_switch_now
 from superlocalmemory.core.process_role import clear_daemon_process, mark_daemon_process
 from superlocalmemory.daemon.materializer import (
     PassHooks,
@@ -254,6 +255,9 @@ except ImportError:  # pragma: no cover — defensive for stripped installs
     _perf_log_flush_fn = None  # type: ignore[assignment]
 
 logger = logging.getLogger("superlocalmemory.unified_daemon")
+#: ``sys.modules`` under a name no local ``import sys`` can shadow (lifespan imports sys
+#: further down, which makes a bare ``sys`` there a local, unbound at shutdown).
+_SYS_MODULES = sys.modules
 
 _DEFAULT_PORT = 8765
 _LEGACY_PORT = 8767
@@ -4011,7 +4015,7 @@ async def lifespan(application: FastAPI):
     # WS-9: stop running import jobs before the engine closes (they save through it).
     # Only if the import pack was ever loaded: no lazy import on the shutdown path. A run
     # cut short here is closed with a plain note on the next read; undo still works.
-    _import_jobs = sys.modules.get("superlocalmemory.portability.jobs")
+    _import_jobs = _SYS_MODULES.get("superlocalmemory.portability.jobs")
     if _import_jobs is not None:
         try:
             _import_jobs.JOBS.stop_all(timeout=3.0)
@@ -4951,7 +4955,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
         "insights", "timeline", "abstraction", "integrity", "overtaken", "truth", "outcomes",
         "proposals", "trust", "trust_why", "delivered", "trust_overview", "whatsnew", "wiki",
-        "decisions", "portability",
+        "decisions", "portability", "kill_switch",
     ):
         try:
             _mod = __import__(
@@ -6495,6 +6499,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             # CLI and MCP read their own status from here, so this is where the
             # number has to be for all three surfaces to agree.
             "projection_queue_depth": projection_queue_depth,
+            "kill_switch": _kill_switch_now(),
             # F2 fix: expose M028 backfill progress so operators can monitor
             # the post-upgrade fact/entity association repair state.
             "m028_backfill": getattr(

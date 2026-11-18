@@ -263,13 +263,18 @@ class MaintenanceScheduler:
 
     def _cue_pass(self) -> None:
         """4.2.30 W3-8: bind cues given on saves, and file paths named in plans, to
-        facts (core/cue_binding.py). Always runs: it is bounded and resumable, and the
-        ``delivery.cues`` flag only decides whether cues are shown."""
+        facts (core/cue_binding.py). It runs whatever ``delivery.cues`` says (bounded and
+        resumable; the flag only decides whether cues are shown), but never while the kill
+        switch is on: that stops every 4.2.30 pass (D-23), this one included."""
         if not self._running:
             return
         try:
             from superlocalmemory.core import cue_binding
-            from superlocalmemory.infra.data_root import state_path
+            from superlocalmemory.core.feature_flags import kill_switch_on
+            from superlocalmemory.infra.data_root import canonical_data_root, state_path
+
+            if kill_switch_on(canonical_data_root()):
+                return
 
             bound = cue_binding.run(self._db, state_path("backfill"))
             if bound:

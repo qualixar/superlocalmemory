@@ -34,7 +34,7 @@ from superlocalmemory.documents import (
     submit_document,
 )
 from superlocalmemory.media.gc import gc as run_gc
-from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.media.ingest import MediaInput, receipt_dict, remember_media
 from superlocalmemory.media.repair import repair as run_repair
 from superlocalmemory.retrieval.remote_view import parse_view
 from superlocalmemory.server.loopback import is_loopback
@@ -157,7 +157,7 @@ async def remember(req: MediaRememberRequest, request: Request):
         remember_media, inp, content=req.content, profile_id=profile, actor_id=actor_id, runtime=runtime,
         config=engine._config, tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
         scope=scope, shared_with=shared_with)
-    body = dataclasses.asdict(receipt)
+    body = receipt_dict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason  # the 422 reader (daemon_request) shows this, not a generic line
     return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
@@ -345,7 +345,7 @@ async def submit(req: DocumentSubmitRequest, request: Request):
         submit_document, inp, content=req.content, profile_id=profile, actor_id=actor_id, config=engine._config,
         tags=req.tags, session_date=req.session_date, idempotency_key=req.idempotency_key,
         scope=scope, shared_with=shared_with)
-    body = dataclasses.asdict(receipt)
+    body = receipt_dict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason
     return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))
@@ -369,7 +369,7 @@ async def retry(document_id: str, request: Request, profile_id: str = ""):
     receipt = await asyncio.to_thread(retry_document, document_id, profile_id=profile, actor_id=actor_id)
     if receipt is None:
         raise HTTPException(404, detail="Not found.")
-    body = dataclasses.asdict(receipt)
+    body = receipt_dict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason
     return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))

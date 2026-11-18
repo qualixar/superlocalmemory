@@ -15,7 +15,6 @@ remote fetch rules, the same governance and profile checks as any other save.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 import re
 from pathlib import Path
@@ -25,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from superlocalmemory.documents import submit_document
-from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.media.ingest import MediaInput, receipt_dict, remember_media
 from superlocalmemory.media.upload_links import UploadRow, default_links, looks_like
 from superlocalmemory.server.routes.media import _CODES, _profile, _require_local
 
@@ -98,7 +97,7 @@ async def finish_upload(upload_id: str, request: Request):
             receipt = await asyncio.to_thread(submit_document, MediaInput(stream=fh, remote=True), **common)
         finally:
             fh.close()
-    body = dataclasses.asdict(receipt)
+    body = receipt_dict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason
     return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))

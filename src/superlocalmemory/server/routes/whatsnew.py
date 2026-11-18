@@ -34,6 +34,7 @@ ENTRIES: dict[str, str | None] = {
     "proposals": "compiler.dream",
     "wiki": "compiler.wiki",
     "import": "portability.import",
+    "media_packs": "media.captions",
     "decisions": None,  # D-49: agents decide; always available, no switch
 }
 

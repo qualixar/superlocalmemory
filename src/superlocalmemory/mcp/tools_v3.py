@@ -199,10 +199,13 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             if memory:
                 return _memory_health(engine, pid)
 
+            from superlocalmemory.mcp.tools_core import _kill_switch_state
+
             status: dict = {
                 "success": True,
                 "mode": engine._config.mode.value,
                 "profile": pid,
+                "kill_switch": _kill_switch_state(),
                 "components": {},
             }
 

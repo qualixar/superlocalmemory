@@ -54,6 +54,15 @@ def undo(conn: sqlite3.Connection, *, profile_id: str, decision_id: str,
                                    channel=decider.channel, actor=decider.actor)
         elif kind == decisions.IMPORT:
             done = _undo_import(engine, runtime, profile_id, subject, decider)
+        elif kind == decisions.ROLLBACK_RETIREMENTS:
+            from superlocalmemory.truth import retirement_rollback
+
+            done = retirement_rollback.undo(conn, profile_id=profile_id, found=found,
+                                            decider=decider)
+        elif kind == decisions.KILL_SWITCH:
+            from superlocalmemory.core import kill_switch
+
+            done = kill_switch.undo(conn, found=found, decider=decider)
         elif kind == decisions.LABEL:
             from superlocalmemory.core import audit_review
 

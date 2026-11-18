@@ -50,6 +50,9 @@
     { id: 'import', title: 'Bring memories from other apps',
       line: 'Import what ChatGPT, Claude, Mem0, Letta or your Markdown notes remember. You see a preview first, and one Undo removes the whole import.',
       doc: 'importing.md' },
+    { id: 'media_packs', title: 'Better pictures and documents',
+      line: 'Optional models describe your pictures and read scanned pages better. Each is off until you turn it on, and the download size is shown first.',
+      pane: 'media-pane', paneLabel: 'Open Documents & Images' },
     { id: 'decisions', title: 'Your agents decide, and you can undo',
       line: 'Agents can settle disputes and apply changes themselves. Each decision is listed on the Dashboard with an Undo.',
       pane: 'dashboard-pane', paneLabel: 'Open the Dashboard' }

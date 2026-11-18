@@ -16,9 +16,10 @@ when_to_use: |
 SuperLocalMemory can keep a picture or a PDF as a memory and find it later by
 describing what it shows or what it says. A picture model runs on this
 computer (EmbeddingGemma 2). OCR reads the text inside pictures. Each PDF
-page is indexed by its picture and by its text. No generative model looks at
-the files, so SLM cannot describe a picture to you: it finds it, and you look
-at the thumbnail it returns.
+page is indexed by its picture and by its text. Unless the optional
+picture description below is on, no generative model looks at the files, so
+SLM cannot describe a picture to you: it finds it, and you look at the
+thumbnail it returns.
 
 This feature is **off by default**. Pictures live in their own database
 (`media.db`); turning it on does not change any existing memory or embedding.
@@ -112,8 +113,9 @@ unset unless the user asked to share. Formats: PNG, JPEG, GIF (first frame)
 and WebP.
 
 Returns `success`, `status`, and on success a `media_id` and a `resource`,
-`slm://media/<media_id>`. Report what the tool returned; do not say "saved"
-unless `success` is true.
+`slm://media/<media_id>`. With the optional picture description on (see below)
+it also returns `description`, the model's few words about the picture. Report
+what the tool returned; do not say "saved" unless `success` is true.
 
 ### `remember_document` — save a PDF
 
@@ -215,6 +217,44 @@ Rules for reading them:
 - When you quote a PDF, give the page (`citation`) so the person can check it.
 - A picture with no readable text is found by what it shows only. It no
   longer comes back for a question about pictures that were never saved.
+
+---
+
+## Optional picture and document models (4.2.30)
+
+Three parts on top of pictures and documents, each **off** until someone turns
+it on. Two download a model, so the size is shown first and nothing downloads
+without a yes. Turning one on is the person's decision: say the size, and never
+pass `--yes` for them unless they asked for the download.
+
+```bash
+slm media pack status                    # each part, its state and its download size
+slm media pack enable captions --yes     # Describe pictures: a 0.5 GB download
+slm media pack enable documents --yes    # Read scanned documents better: a 1.9 GB download
+slm media pack enable regions            # Remember where text was found: no download
+slm media pack disable captions          # off again (--remove-files also deletes the model)
+```
+
+- **captions** (Florence-2, MIT) writes a short description of each picture
+  you save, on every platform. It is saved in the picture's memory under the
+  line `[Description written by a model]` and comes back in the receipt as
+  `description`. It is a model's words, never the person's: quote it as "the
+  description says", and check the thumbnail before you rely on it. A
+  description that fails (or a worker that is busy) never blocks a save; the
+  picture is saved without it.
+- **documents** (PaddleOCR-VL 1.6, Apache-2.0) reads scanned pages with a
+  larger model. The standard reader stays as the fallback for any page it
+  cannot read.
+- **regions** keeps the page and the place each piece of read text came from.
+  `fetch(why=true)` (and `slm why`) then carries `source_regions`, for example
+  `from page 3, top left`. Give that place when you cite a picture or a scanned
+  page.
+
+The parts need pictures and documents turned on first, a computer with 16 GB of
+memory, and free disk space; the kill switch turns all three off. Only one of
+these models is in memory at a time, in its own worker, and it is released a
+minute after its last use. The dashboard has the same three switches under
+**Documents & Images**, in plain words. Nothing here adds an MCP tool.
 
 ---
 

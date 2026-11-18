@@ -351,7 +351,11 @@ Two delivery features are off by default and turned on with `slm flags set <flag
 
 **Opinions are labelled.** A remembered opinion or preference is shown to agents as "a view or preference someone stated, not a checked fact", so a model does not agree with it just because it was remembered.
 
-`slm measurement off` turns `outcomes.holdout` and `outcomes.swaps` off together; add `--receipts` to turn `outcomes.receipts` off as well. `slm flags kill on` (or `SLM_4230_OFF=1`) turns every 4.2.30 setting off at once. The notice, the version of it you acknowledged and each on/off change are kept in `disclosures.json` in the data folder. **Where the off switch is.** It is the command above and the dashboard's Settings card "Help SLM measure what works" (one On/Off switch for withholding and swapping). It is not a plugin setting: withholding and swapping happen in the SLM daemon and the session-start command, which a plugin's own options (Claude Code's `userConfig` reaches only the plugin's own processes) cannot switch, and the other hosts have no such option. Inside an agent the instruction is a skill and a rules line telling the agent to run `slm measurement off` when the user asks, never on its own.
+`slm measurement off` turns `outcomes.holdout`, `outcomes.swaps` and `outcomes.usage` off together; add `--receipts` to turn `outcomes.receipts` off as well. `slm flags kill on` (or `SLM_4230_OFF=1`) turns every 4.2.30 setting off at once. The notice, the version of it you acknowledged and each on/off change are kept in `disclosures.json` in the data folder. **Where the off switch is.** It is the command above and the dashboard's Settings card "Help SLM measure what works" (one On/Off switch for withholding and swapping). It is not a plugin setting: withholding and swapping happen in the SLM daemon and the session-start command, which a plugin's own options (Claude Code's `userConfig` reaches only the plugin's own processes) cannot switch, and the other hosts have no such option. Inside an agent the instruction is a skill and a rules line telling the agent to run `slm measurement off` when the user asks, never on its own.
+
+### The kill switch (D-23)
+
+One switch returns the store to pre-4.2.30 read behaviour without a downgrade: `slm flags kill on`, `SLM_4230_OFF=1` in the daemon's environment, `POST /api/flags/kill`, or the dashboard's Settings card "Turn off everything new in 4.2.30". It stops every 4.2.30 pass (the trust, signing, slot, dispute, backlog, cue and dream passes, imports and the media packs, the need check, the harm gate, receipts, withholding and swaps) and makes reads ignore slots, source leases, disputes and taint: recall results carry no dispute, source, standing or origin notes and no `why` block, and the session start and pins stop filtering by origin. Nothing is written by a stopped pass. `slm flags` and MCP `get_status` and `health` (`kill_switch`) say whether it is on and whether the file or the environment holds it. It does not undo retirements; `slm flags rollback-retirements [--dry-run]` (dashboard: "Bring back memories that 4.2.30 retired") does, as a recorded decision that can be undone.
 
 ### Where a memory came from, and what may replace it (`trust.taint`)
 
@@ -386,6 +390,10 @@ state, an import either happens or it does not). On, `slm import` and the **Brin
 card can preview, run and undo the import of a ChatGPT, Claude, Mem0, Letta, OKF or Markdown file. The kill switch reads
 it as off. The limits are fixed routing constants, not settings: an upload of at most 64 MB, 50 listed contradictions
 and 0 judge calls per run, one run at a time per profile. [Importing from other apps](importing.md).
+
+### The optional picture and document models (`media.captions`, `media.document_pack`, `media.regions`)
+
+All three are off by default and have no shadow state. `slm media pack enable captions|documents` downloads the model first (0.5 GB and 1.9 GB, shown before it starts) and only then sets the flag; setting a flag by hand never downloads anything, and a part whose files are not on this computer acts as off. `media.regions` has no download: it keeps the page and place each piece of read text came from. They need images and documents on, and the kill switch reads all three as off. The memory caps and the idle time (60 seconds) are fixed routing constants, not settings. [Better pictures and documents](media-pack.md).
 
 ### The living wiki and the dream cycle (`compiler.wiki`, `compiler.dream`)
 

@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from superlocalmemory.core.config import CANONICAL_RECALL_LIMIT
+from superlocalmemory.core.kill_switch import current as _kill_switch_now
 from superlocalmemory.core.session_identity import synthetic_session_id
 from superlocalmemory.core.status_contract import (
     COUNT_QUERIES,
@@ -210,6 +211,7 @@ def dashboard(request: Request):
             # keeping up, which is otherwise invisible: nothing errors, the
             # memory is safely in SQLite, and recall just quietly gets worse.
             "projection_queue_depth": queue_depth,
+            "kill_switch": _kill_switch_now(),
             **counts,
         }
         # #303: the mode's default, made true to the endpoints actually configured.

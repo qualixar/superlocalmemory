@@ -22,10 +22,18 @@ Every request may carry an ``"id"``; the reply echoes it.
   {"cmd": "prepare_image", "path": "...", "out_dir": "...", "classify": true}
                     -> {"ok": true, "mime", "width", "height", "exif", "phash",
                         "stored_path", "stored_ext", "thumb_path"}
-  {"cmd": "ocr_image", "path": "..."}
+  {"cmd": "ocr_image", "path": "...", "regions": false}
                     -> {"ok": true, "engine": "apple_vision|rapidocr|none|fake", "text": "..."}
+                       (with "regions": true the reply also has "regions": [{"text", "bbox"}], the box as
+                        fractions of the picture)
+  {"cmd": "caption_image", "path": "..."}   (needs role "caption")
+                    -> {"ok": true, "caption": "..."}
+  {"cmd": "parse_document", "path": "..."}  (needs role "document")
+                    -> {"ok": true, "engine": "paddleocr_vl|fake", "text": "...", "regions": [...]}
   {"cmd": "quit"}
 
+Roles ``caption`` and ``document`` load one optional pack model (WS-8) from a local folder and nothing
+else: the worker holds that one model, so it never shares memory with the embedding model.
 Role ``image`` loads a vision-only model: it embeds images, never text. Role ``text`` loads
 only the text tower of a text+image model: it embeds text, never images. ``max_pixels`` (> 0)
 shrinks larger pictures before they are embedded. A fake model
@@ -58,6 +66,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 MAX_TEXTS = 64
 MAX_TEXT_CHARS = 8_000
 MAX_PATHS = 16
+PACK_ROLES = ("caption", "document")
 # One forward pass holds at most this much: measured on a 24 GB Mac, batch-16 long texts
 # peaked at 12 GB and batch-16 pictures at 7.3 GB, against ~3.9 GB for one picture.
 TEXT_PASS_CHARS = 4_000
@@ -154,6 +163,33 @@ def _load_real(model: str, revision: str, hf_home: str, device: str, role: str =
     _STATE.update(model=loaded, device=chosen, text_only=role == "text", max_pixels=max_pixels,
                   dim=int(loaded.get_sentence_embedding_dimension() or 0))
     return _STATE["dim"]
+
+
+def _pack_models():
+    """``pack_models.py`` next to this file, loaded by path (-I leaves our directory off sys.path)."""
+    if "packs" not in _STATE:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pack_models.py")
+        spec = importlib.util.spec_from_file_location("pack_models", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _STATE["packs"] = module
+    return _STATE["packs"]
+
+
+def _load_pack(role: str, model: str, device: str) -> int:
+    """One pack model (``caption`` or ``document``) from a local folder; no network, no remote code."""
+    if not os.path.isdir(model):
+        raise _Invalid("the model files are not on this computer; turn the pack on again")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        packs = _pack_models()
+        chosen = _pick_device(device)
+        loader = packs.load_caption if role == "caption" else packs.load_document
+        _STATE.update(model=loader(model, chosen), device=chosen)
+    except Exception:  # noqa: BLE001 - library or weights missing, or the class does not fit these weights
+        raise _Invalid("the model could not be loaded here; it needs the image environment "
+                       "and its model files") from None
+    return 0
 
 
 def _load_vision(model: str, revision: str, hf_home: str, device: str) -> int:
@@ -290,10 +326,10 @@ def _cmd_load(req: dict) -> dict:
     if not isinstance(model, str) or not model:
         raise _Invalid("model is required")
     role = req.get("role") or ""
-    if role not in ("", "image", "text"):
+    if role not in ("", "image", "text", *PACK_ROLES):
         raise _Invalid("unknown role")
     fake = model.startswith("fake:") or os.environ.get("SLM_MEDIA_WORKER_FAKE") == "1"
-    _STATE.update(vision=False, text_only=False)
+    _STATE.update(vision=False, text_only=False, pack="")
     if fake:
         try:
             dim = int(model.split(":", 1)[1]) if model.startswith("fake:") else FAKE_DIM
@@ -302,13 +338,15 @@ def _cmd_load(req: dict) -> dict:
         if not 1 <= dim <= 4096:
             raise _Invalid("bad fake model")
         _STATE.update(model=None, device="cpu", dim=dim)
+    elif role in PACK_ROLES:
+        _STATE["dim"] = _load_pack(role, model, str(req.get("device") or "auto"))
     elif role == "image":
         _STATE["dim"] = _load_vision(model, str(req.get("revision") or ""), str(req.get("hf_home") or ""),
                                      str(req.get("device") or "auto"))
     else:
         _STATE["dim"] = _load_real(model, str(req.get("revision") or ""), str(req.get("hf_home") or ""),
                                    str(req.get("device") or "auto"), role, _pixel_cap(req))
-    _STATE.update(name=model, fake=fake)
+    _STATE.update(name=model, fake=fake, pack=role if role in PACK_ROLES else "")
     return {"dim": _STATE["dim"]}
 
 
@@ -320,6 +358,8 @@ def _cmd_embed_text(req: dict) -> dict:
         raise _Invalid("invalid texts")
     if _STATE["fake"]:
         return {"vectors": [_fake_vector(t.encode("utf-8"), _STATE["dim"]) for t in texts]}
+    if _STATE.get("pack"):
+        raise _Invalid("this model does not embed text")
     if _STATE.get("vision"):
         raise _Invalid("this model embeds images only")
     vectors: list[list[float]] = []
@@ -352,6 +392,8 @@ def _cmd_embed_image(req: dict) -> dict:
             with open(path, "rb") as fh:
                 vectors.append(_fake_vector(fh.read(), _STATE["dim"]))
         return {"vectors": vectors}
+    if _STATE.get("pack"):
+        raise _Invalid("this model does not embed pictures")
     if _STATE.get("text_only"):
         raise _Invalid("this model embeds text only")
     if _STATE.get("vision"):
@@ -390,18 +432,79 @@ def _cmd_prepare_image(req: dict) -> dict:
         raise _Invalid(f"ValueError: {exc}") from None
 
 
+def _fake_regions(path: str) -> list:
+    """Fake mode: the boxes a test wrote next to the picture (``<path>.regions.json``), else none."""
+    try:
+        with open(path + ".regions.json", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
 def _cmd_ocr_image(req: dict) -> dict:
     path = req.get("path")
     if not isinstance(path, str):
         raise _Invalid("invalid paths")
     _check_paths([path])
+    wanted = req.get("regions") is True
     if _STATE["fake"]:
         try:
             with open(path + ".ocr.txt", encoding="utf-8") as fh:
-                return {"engine": "fake", "text": fh.read(MAX_TEXT_CHARS * 8)}
+                reply = {"engine": "fake", "text": fh.read(MAX_TEXT_CHARS * 8)}
         except OSError:
-            return {"engine": "fake", "text": ""}
+            reply = {"engine": "fake", "text": ""}
+        return {**reply, "regions": _fake_regions(path)} if wanted else reply
+    if wanted:
+        found: list = []
+        reply = _image_ops().ocr_image(path, found=found)
+        packs = _pack_models()
+        try:
+            return {**reply, "regions": packs.normalised_regions(found, packs.picture_size(path))}
+        except Exception:  # noqa: BLE001 - boxes are extra: the text is returned without them
+            return {**reply, "regions": []}
     return _image_ops().ocr_image(path)
+
+
+def _need_pack(role: str) -> None:
+    if _STATE.get("pack") != role:
+        raise _Invalid("the model for this is not loaded")
+
+
+def _cmd_caption_image(req: dict) -> dict:
+    path = req.get("path")
+    if not isinstance(path, str):
+        raise _Invalid("invalid paths")
+    _check_paths([path])
+    _need_pack("caption")
+    if _STATE["fake"]:
+        try:
+            with open(path + ".caption.txt", encoding="utf-8") as fh:
+                return {"caption": fh.read(2_000).strip()}
+        except OSError:
+            with open(path, "rb") as fh:
+                return {"caption": "A test picture " + hashlib.sha256(fh.read()).hexdigest()[:6]}
+    caption = _pack_models().caption(_STATE["model"], path)
+    _release_memory()
+    return {"caption": caption}
+
+
+def _cmd_parse_document(req: dict) -> dict:
+    path = req.get("path")
+    if not isinstance(path, str):
+        raise _Invalid("invalid paths")
+    _check_paths([path])
+    _need_pack("document")
+    if _STATE["fake"]:
+        try:
+            with open(path + ".ocr.txt", encoding="utf-8") as fh:
+                text = fh.read(MAX_TEXT_CHARS * 8)
+        except OSError:
+            text = ""
+        return {"engine": "fake", "text": text, "regions": _fake_regions(path)}
+    parsed = _pack_models().parse_document(_STATE["model"], path)
+    _release_memory()
+    return parsed
 
 
 def _cmd_sleep(req: dict) -> dict:
@@ -413,7 +516,8 @@ def _cmd_sleep(req: dict) -> dict:
 
 _COMMANDS = {"ping": _cmd_ping, "load": _cmd_load, "embed_text": _cmd_embed_text,
              "embed_image": _cmd_embed_image, "prepare_image": _cmd_prepare_image,
-             "ocr_image": _cmd_ocr_image, "sleep": _cmd_sleep}
+             "ocr_image": _cmd_ocr_image, "caption_image": _cmd_caption_image,
+             "parse_document": _cmd_parse_document, "sleep": _cmd_sleep}
 
 
 def handle(req: dict) -> dict:

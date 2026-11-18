@@ -23,7 +23,7 @@ import sqlite3
 MEDIA_SCHEMA_VERSION = 1
 
 #: Tables that carry a profile_id column and are moved/erased with a profile.
-PROFILE_TABLES = ("media_items", "documents", "jobs", "sources", "media_vector_rows")
+PROFILE_TABLES = ("media_items", "documents", "jobs", "sources", "media_vector_rows", "media_regions")
 
 _DDL = (
     "CREATE TABLE IF NOT EXISTS media_schema (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -49,6 +49,20 @@ _DDL = (
       thumb_webp BLOB, created_at TEXT NOT NULL, tombstoned_at TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_media_profile_sha ON media_items(profile_id, source_sha256)",
     "CREATE INDEX IF NOT EXISTS ix_media_anchor ON media_items(anchor_memory_id)",
+    # WS-8 region provenance: where on the picture or page each piece of read text was (fractions 0..1 of
+    # the width and height). Additive and optional (flag media.regions): an older build never reads it.
+    # The erase trigger below removes a picture's regions with the picture (I-11); the profile column
+    # moves and erases them with the profile (PROFILE_TABLES).
+    """CREATE TABLE IF NOT EXISTS media_regions (
+      region_id TEXT PRIMARY KEY, media_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+      page_no INTEGER NOT NULL DEFAULT 0 CHECK (page_no >= 0),
+      x0 REAL NOT NULL, y0 REAL NOT NULL, x1 REAL NOT NULL, y1 REAL NOT NULL,
+      engine TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '', snippet TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS ix_media_regions_item ON media_regions(media_id)",
+    "CREATE INDEX IF NOT EXISTS ix_media_regions_profile ON media_regions(profile_id)",
+    """CREATE TRIGGER IF NOT EXISTS trg_media_regions_item_erased AFTER DELETE ON media_items
+      BEGIN DELETE FROM media_regions WHERE media_id = OLD.media_id; END""",
     "CREATE INDEX IF NOT EXISTS ix_media_doc ON media_items(document_id, page_no)",
     """CREATE TABLE IF NOT EXISTS media_vector_rows (
       space_id TEXT NOT NULL, vec_rowid INTEGER NOT NULL, media_id TEXT NOT NULL,

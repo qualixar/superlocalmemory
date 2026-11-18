@@ -556,6 +556,18 @@ slm media repair              # give pictures that can't be found by what they s
 slm media repair --dry-run    # only count them
 ```
 
+### `slm media pack status|enable|disable` (4.2.30)
+
+```bash
+slm media pack status [captions|documents|regions]   # state and download size of each part
+slm media pack enable captions                       # "Describe pictures: a 0.5 GB download"; asks, --yes skips
+slm media pack enable documents                      # "Read scanned documents better: a 1.9 GB download"
+slm media pack enable regions                        # no download: keeps the page and place of read text
+slm media pack disable captions [--remove-files]     # off again; memories are kept
+```
+
+Optional models for pictures and documents, each off until turned on; the download size is shown before anything downloads and `--yes` is the person's yes (an agent never passes it unasked). They need `slm media enable` first and are read as off under the kill switch. `--json` is for agents. Full guide: [Better pictures and documents](media-pack.md).
+
 Images and documents need a computer with at least 16 GB of memory. On a smaller computer `enable` refuses with a plain reason and exits with code 4; your text memories keep working. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
 
 `slm media repair` re-reads each kept picture and stores its vector in the current picture index. Use it when a save told you the picture "can't be found by what it shows yet", or after the picture model or mode changed (saving then says the index was built with a different model). It rebuilds the index for the current model first, only once the first picture has embedded, so a failed run never leaves you without an index. One run works for up to four minutes; if it says pictures are left, run it again. Pictures whose file is no longer kept are counted and skipped.
@@ -1560,7 +1572,7 @@ slm wiki sync                   # any caller: read your edits back as proposals
 slm wiki dir [PATH|--default]   # show or choose the folder
 ```
 
-SuperLocalMemory compiles pages from your memories: the current state of a subject, the story of a family of decisions, a topic. Every sentence is a word-for-word piece of a memory it cites or a fixed template over slot values, re-checked whenever the page is read; no model writes any of it, and each page says how many sentences it withheld. A page is never a memory. `build` writes the approved pages to a Markdown folder and needs `slm flags set compiler.wiki on` (`shadow` only reports what it would write); it never overwrites a file you edited. `rebuild` compiles the pages and approves them as you; `sync` reads edited blocks back as proposals (reviewed with `slm proposals`, applied by compare-and-swap on the slot version, a dispute if the slot moved on), and deleting a line forgets nothing. `rebuild` and `sync` refuse to run without an interactive terminal; `status`, `diff` and `build` work anywhere. Details: [The living wiki](living-wiki.md).
+SuperLocalMemory compiles pages from your memories: the current state of a subject, the story of a family of decisions, a topic. Every sentence is a word-for-word piece of a memory it cites or a fixed template over slot values, re-checked whenever the page is read; no model writes any of it, and each page says how many sentences it withheld. A page is never a memory. `build` writes the approved pages to a Markdown folder and needs `slm flags set compiler.wiki on` (`shadow` only reports what it would write); it never overwrites a file you edited. `rebuild` compiles the pages and approves them as you; `sync` reads edited blocks back as proposals (reviewed with `slm proposals`, applied by compare-and-swap on the slot version, a dispute if the slot moved on), and deleting a line forgets nothing. `rebuild`, `sync`, `status`, `diff` and `build` all work anywhere, with no terminal (D-49: any caller decides, and `rebuild` prints how to roll it back). Details: [The living wiki](living-wiki.md).
 
 ### `slm import` (4.2.30)
 
@@ -1586,6 +1598,10 @@ agents. Full guide: [Importing from other apps](importing.md).
 ### `slm consent` (4.2.30)
 
 `slm consent` lists what may leave this computer and whether you agreed. Today there is one purpose, `judge_ladder_hosted`: the background judges send pairs of your memories to the online Jev judge, one pair per request, to ask whether the newer one replaces the older one (passwords and keys removed first). `slm consent give judge_ladder_hosted` shows the notice and asks you to type `yes`; it needs a terminal and the online answer check with Jev turned on, because it uses the same connection. `slm consent withdraw judge_ladder_hosted` stops it at once and works anywhere. The consent names its provider: if the answer check moves to another provider, the judges stop asking Jev until you agree again. Each change is written to the audit chain first. The dashboard offers the same under Settings, Answer check, Online with Jev, Background judges. While the judges only watch (see `slm flags`), they do not ask Jev.
+
+### `slm flags [set FLAG on|shadow|off | kill on|off | rollback-retirements [--dry-run]]` (4.2.30)
+
+`slm flags` shows every 4.2.30 setting and the kill switch (`--json` for scripts); it needs no daemon. `slm flags kill on` (or `SLM_4230_OFF=1`) is the kill switch: it stops every 4.2.30 background pass and makes reads ignore slots, source leases, disputes and taint, so SuperLocalMemory reads your store the way it did before 4.2.30, without a downgrade. It does not bring back memories that 4.2.30 already retired. `slm flags rollback-retirements` does that: it says first how many memories would come back, then (without `--dry-run`) brings them back as one recorded decision (who, channel `cli`, when) that **Recent decisions** can undo, and the undo retires them again only if none of those memories has changed since, otherwise it refuses in words and changes nothing. It touches only the retirements the truth layer made, never a person's or the consolidator's, and it works with the kill switch on or off. Any caller may run it; with SuperLocalMemory running it goes through the daemon, otherwise it writes the store directly. `--profile` picks the profile, `--json` prints the counts. The same two actions are on the dashboard under Settings, "Turn off everything new in 4.2.30", over HTTP (`GET` and `POST /api/flags/kill`, `POST /api/flags/rollback-retirements`), and the switch state is in the MCP `get_status` and `health` output as `kill_switch`.
 
 ### `slm measurement [status|on|off] [--receipts] [--json]` (4.2.30)
 

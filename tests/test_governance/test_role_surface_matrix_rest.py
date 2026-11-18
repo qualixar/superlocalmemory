@@ -322,6 +322,8 @@ INSTALLATION_WIDE = (
     ("PUT", "/api/v3/ratelimit"),
     ("POST", "/api/v3/features/media/enable"),
     ("POST", "/api/v3/features/media/disable"),
+    ("POST", "/api/v3/features/media/packs/enable"),
+    ("POST", "/api/v3/features/media/packs/disable"),
     ("PUT", "/api/optimize/config"),
     ("DELETE", "/api/optimize/cache/clear"),
     ("POST", "/api/v3/answer-check/jev/consent"),

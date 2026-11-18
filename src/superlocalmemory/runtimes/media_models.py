@@ -51,6 +51,17 @@ MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
 })
 
 
+#: Memory numbers of the optional pack models (WS-8), by repo: ``(worker memory cap MB, free MB wanted
+#: before loading)``. PROVISIONAL, routing-only: estimated from the parameter counts at 32-bit (Florence-2
+#: base 0.23 B, PaddleOCR-VL 0.9 B) plus working memory; they are measured on the first real run.
+#: Not entries of ``MODEL_PROFILES``: these models make no embeddings, so no evidence floor applies.
+PACK_MEMORY_MB: Mapping[str, tuple[int, int]] = MappingProxyType({
+    "florence-community/Florence-2-base": (2500, 2500),
+    "PaddlePaddle/PaddleOCR-VL-1.6": (6500, 6000),
+    "PaddlePaddle/PaddleOCR-VL": (6500, 6000),
+})
+
+
 #: Seconds to embed one memory with the managed model on a CPU. PROVISIONAL: the cloud RAM check
 #: measured ~0.5 s per text (p50, mixed short and long); BENCH calibrates it on the Mac.
 PROVISIONAL_SECONDS_PER_MEMORY = 0.5
@@ -69,6 +80,8 @@ def profile_for(model: str) -> ModelProfile | None:
 
 def rss_limit_mb_for(model: str) -> int:
     profile = profile_for(model)
+    if profile is None and model in PACK_MEMORY_MB:
+        return PACK_MEMORY_MB[model][0]
     return profile.rss_limit_mb if profile is not None else DEFAULT_RSS_LIMIT_MB
 
 
@@ -83,6 +96,8 @@ def effective_rss_limit_mb(model: str) -> int:
 def load_mb_for(model: str) -> int:
     """Free memory to ask for before loading ``model`` (the default covers text and fake models)."""
     profile = profile_for(model)
+    if profile is None and model in PACK_MEMORY_MB:
+        return PACK_MEMORY_MB[model][1]
     return profile.load_mb if profile is not None else DEFAULT_LOAD_MB
 
 
@@ -98,6 +113,25 @@ def text_min_semantic_for(model: str) -> float | None:
     return profile.text_min_semantic if profile is not None else None
 
 
+#: The flag that switches each pack model on (WS-8).
+PACK_FLAGS: Mapping[str, str] = MappingProxyType({
+    "florence-community/Florence-2-base": "media.captions",
+    "PaddlePaddle/PaddleOCR-VL-1.6": "media.document_pack",
+})
+
+
+def _enabled_pack_caps() -> list[int]:
+    """Memory caps of the pack models whose flag is on: with every pack off the watchdog is what it was."""
+    try:
+        from superlocalmemory.core.feature_flags import FeatureFlags
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        flags = FeatureFlags(canonical_data_root())
+        return [PACK_MEMORY_MB[repo][0] for repo, flag in PACK_FLAGS.items() if flags.enabled(flag)]
+    except Exception:  # noqa: BLE001 - a flag that cannot be read leaves the watchdog as it was
+        return []
+
+
 def watchdog_limit_mb(default: int) -> int:
     """Memory limit the daemon's watchdog applies to the picture worker; 0 means no limit.
 
@@ -107,11 +141,11 @@ def watchdog_limit_mb(default: int) -> int:
     try:
         wanted = int(float(os.environ["SLM_MEDIA_WORKER_RSS_LIMIT_MB"]))
     except (KeyError, ValueError):
-        return max([default, *(p.rss_limit_mb for p in MODEL_PROFILES.values())])
+        return max([default, *(p.rss_limit_mb for p in MODEL_PROFILES.values()), *_enabled_pack_caps()])
     return max(wanted, 0)
 
 
 __all__ = ["DEFAULT_LOAD_MB", "ONE_MODEL_DEFAULT_ENABLED", "ONE_MODEL_MIN_RAM_GB", "PROVISIONAL_SECONDS_PER_MEMORY",
            "DEFAULT_RSS_LIMIT_MB", "EG2_REPO", "EG2_REVISION", "effective_rss_limit_mb", "MODEL_PROFILES",
-           "ModelProfile", "load_mb_for", "min_score_for", "profile_for", "rss_limit_mb_for",
-           "text_min_semantic_for", "watchdog_limit_mb"]
+           "ModelProfile", "PACK_FLAGS", "PACK_MEMORY_MB", "load_mb_for", "min_score_for", "profile_for",
+           "rss_limit_mb_for", "text_min_semantic_for", "watchdog_limit_mb"]

@@ -18,7 +18,6 @@ bytes really are, whatever ``kind`` says.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 import shutil
 import tempfile
@@ -30,7 +29,7 @@ from fastapi.responses import JSONResponse
 
 from superlocalmemory.documents import submit_document
 from superlocalmemory.media import files
-from superlocalmemory.media.ingest import MediaInput, remember_media
+from superlocalmemory.media.ingest import MediaInput, receipt_dict, remember_media
 from superlocalmemory.server.routes.media import _CODES, _profile, _require_local, _save_scope
 from superlocalmemory.server.write_governance import enforce_remember_governance
 
@@ -117,7 +116,7 @@ async def upload(request: Request, kind: str = Query("", max_length=8),
         receipt = await asyncio.to_thread(_ingest, kind, work, file_name, common, runtime)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    body = dataclasses.asdict(receipt)
+    body = receipt_dict(receipt)
     if receipt.status == "refused":
         body["detail"] = receipt.reason
     return JSONResponse(body, status_code=_CODES.get(receipt.status, 200))

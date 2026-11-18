@@ -139,10 +139,15 @@ A web app can save a picture or PDF in two ways. ChatGPT can hand over an attach
 | `slm media disable` | Turns it off; memories are kept (`--remove-files` also deletes the downloaded models) |
 | `slm media gc` | Reports picture records whose memory is gone, files with no record and pictures not yet linked; `--apply` fixes them. It never deletes a memory and only touches stored picture files |
 | `slm media repair` | Re-reads kept pictures into the current picture index, after a model change or a "can't be found by what it shows yet" message; `--dry-run` only counts them |
+| `slm media pack status`, `enable captions\|documents\|regions`, `disable ...` | The optional models: a short description of each picture (0.5 GB download), a larger model for scanned pages (1.9 GB) and "where text was found" (no download). Each is off until you turn it on, the size is shown first and nothing downloads without a yes; `enable` asks, `--yes` skips the question |
 | `slm sources add PATH` | Connects a folder or Obsidian vault after a preview and your confirmation |
 | `slm sources list`, `report`, `rescan`, `remove` | Manage connected folders |
 
 After `enable`, restart SLM (`slm restart`, or the dashboard button) so the picture worker starts. `enable` also starts SLM if it is not running.
+
+## Better pictures and documents (optional)
+
+Under **Documents & Images** the card **Better pictures and documents** has three switches, all off until you turn them on. **Describe pictures** writes a short description of each picture you save, on every system, and shows it under the line "Description written by a model" so you can tell it from your own words; a description that fails never stops the picture being saved. **Read scanned documents better** reads scanned pages with a larger model and falls back to the standard reader for any page it cannot read. **Remember where text was found** keeps the page and place the text came from, so a memory's **Why was this shown?** can say "from page 3, top left". The two models download only when you say yes, with the size shown first (0.5 GB and 1.9 GB), and each runs alone and is released a minute after its last use. Turning one off keeps your memories. Full guide: `docs/media-pack.md` in the repository.
 
 ## Exports and erasure
 

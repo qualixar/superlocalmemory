@@ -358,8 +358,9 @@
     ramLine.setAttribute('data-od-ram', '');
     ramLine.hidden = true;
     var body = el('div');
+    var packs = el('div', 'od-media-section');   // WS-8: optional picture and document models
     var folders = el('div', 'od-media-section');
-    [head, cardHost, ramLine, body, folders].forEach(function (n) { pane.appendChild(n); });
+    [head, cardHost, ramLine, packs, body, folders].forEach(function (n) { pane.appendChild(n); });
     // Folders have their own switch, so they show whether or not images are on; drawn once.
     if (typeof window.odRenderSources === 'function') window.odRenderSources(folders);
     F().mountMediaCard(cardHost, {
@@ -368,8 +369,9 @@
         ramLine.textContent = text;
         ramLine.hidden = !text;
         if (!body.firstChild) buildBody(body);
+        if (window.odMediaPacks && !packs.firstChild) window.odMediaPacks.mount(packs);
       },
-      onNotReady: function () { body.textContent = ''; ramLine.hidden = true; },
+      onNotReady: function () { body.textContent = ''; ramLine.hidden = true; packs.textContent = ''; },
     });
   }
 
