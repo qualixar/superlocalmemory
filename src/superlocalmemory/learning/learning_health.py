@@ -146,6 +146,41 @@ def _newest(*values: float | None) -> float | None:
     return max(present) if present else None
 
 
+def _ranking_learners(learning: sqlite3.Connection | None, p: str, mode: str) -> list[Learner]:
+    """The ranking, feature-logging and bandit learners (they depend on ``SLM_RANKING``)."""
+    ranking_off = mode == "off"
+    out: list[Learner] = []
+    for name, learns, table in (
+            ("ranking", "reorders recall with the learned model and bandit", None),
+            ("feature_logging", "records what each recall offered, to train on",
+             "learning_signals"),
+            ("bandit", "tries channel weightings and keeps what works", "bandit_plays")):
+        rows, last = _stat(learning, table, p) if table else (None, None)
+        active = mode == "v2-ensemble" or (name == "ranking" and not ranking_off)
+        out.append(Learner(name, learns, rows, _jd_to_iso(last),
+                           LEARNING if active else OFF,
+                           f"on ({mode})" if active else
+                           ("SLM_RANKING is not set: recall keeps its fusion order"
+                            if ranking_off else f"runs only with SLM_RANKING=v2-ensemble ({mode})")))
+    return out
+
+
+def _agent_learners(learning: sqlite3.Connection | None, p: str) -> list[Learner]:
+    """The learners that learn only when an agent reports something."""
+    out: list[Learner] = []
+    for name, learns, table, tool in (
+            ("agent_experiences", "what agents report worked or failed", "agent_experiences",
+             "record_agent_experience"),
+            ("execution_learning", "lessons from bounded-loop runs",
+             "execution_learning_events", "observe_bounded_loop_execution_learning")):
+        rows, last = _stat(learning, table, p)
+        out.append(Learner(name, learns, rows, _jd_to_iso(last),
+                           LEARNING if rows else WAITING,
+                           "fed by agents" if rows else f"learns when an agent calls {tool}; "
+                                                        "none has yet"))
+    return out
+
+
 def measure(learning: sqlite3.Connection | None, memory: sqlite3.Connection | None,
             profile_id: str, *, environ: Mapping[str, str] | None = None) -> list[Learner]:
     """Every learner's state for one profile."""
@@ -170,29 +205,8 @@ def measure(learning: sqlite3.Connection | None, memory: sqlite3.Connection | No
               _stat(learning, "_store_patterns", p), saved,
               CONSOLIDATION_CADENCE_H, "new memory"),
     ]
-    ranking_off = mode == "off"
-    for name, learns, table in (
-            ("ranking", "reorders recall with the learned model and bandit", None),
-            ("feature_logging", "records what each recall offered, to train on",
-             "learning_signals"),
-            ("bandit", "tries channel weightings and keeps what works", "bandit_plays")):
-        rows, last = _stat(learning, table, p) if table else (None, None)
-        active = mode == "v2-ensemble" or (name == "ranking" and not ranking_off)
-        out.append(Learner(name, learns, rows, _jd_to_iso(last),
-                           LEARNING if active else OFF,
-                           f"on ({mode})" if active else
-                           ("SLM_RANKING is not set: recall keeps its fusion order"
-                            if ranking_off else f"runs only with SLM_RANKING=v2-ensemble ({mode})")))
-    for name, learns, table, tool in (
-            ("agent_experiences", "what agents report worked or failed", "agent_experiences",
-             "record_agent_experience"),
-            ("execution_learning", "lessons from bounded-loop runs",
-             "execution_learning_events", "observe_bounded_loop_execution_learning")):
-        rows, last = _stat(learning, table, p)
-        out.append(Learner(name, learns, rows, _jd_to_iso(last),
-                           LEARNING if rows else WAITING,
-                           "fed by agents" if rows else f"learns when an agent calls {tool}; "
-                                                        "none has yet"))
+    out += _ranking_learners(learning, p, mode)
+    out += _agent_learners(learning, p)
     out.append(_flow("workflow_mining", "your recurring sequences of work and time-of-day habits "
                      "(kept in shadow: nothing reaches soft prompts yet)",
                      _stat(learning, "workflow_patterns", p), saved,

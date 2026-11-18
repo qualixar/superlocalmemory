@@ -1,11 +1,12 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""The measurement notice (4.2.30 D-28): what SLM measures, said once in plain words.
+"""The measurement notice (4.2.30 D-28, D-49): what SLM measures, said once in plain words.
 
-Randomised withholding and logged swaps are on by default for everyone, with a
-clear switch (``outcomes.switch``). D-28 makes disclosure a condition of
-shipping that default: install and upgrade print this notice, the dashboard
-shows it until a person has seen it, and ``slm measurement status`` prints it.
+Receipts, randomised withholding, logged swaps and usage detection are on by default for
+everyone, with a clear switch (``outcomes.switch``). The notice is **informational and gates
+nothing** (D-49): install and upgrade print it, the first ``slm`` run on a terminal after an
+upgrade prints it, the dashboard shows a banner until it has been seen, and ``slm measurement
+status`` prints it, but no measure waits for anyone to read it.
 
 ``<SLM_HOME>/disclosures.json`` records which version of the notice has been
 shown, when, and through which surface (``cli``, ``dashboard``, ``install``),
@@ -24,7 +25,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-NOTICE_VERSION = "4.2.30-1"
+NOTICE_VERSION = "4.2.30-2"
 DISCLOSURES_FILE = "disclosures.json"
 CHANNELS = ("cli", "dashboard", "install")
 #: Most entries kept in the on/off history.
@@ -64,11 +65,16 @@ def text() -> str:
         "much attention each position gets, so SuperLocalMemory does not just "
         "favour whatever is on top.\n"
         "\n"
-        "Two more measures stay off unless you turn them on: checking whether "
-        "an agent's reply used the memories it was given, and deciding for each "
-        "prompt whether memory is needed.\n"
+        "Usage detection is on too. When an agent finishes a reply, SuperLocalMemory "
+        "compares that reply with the memories it was given, to see which ones were "
+        "used. It keeps ids and scores only, never the reply, and the comparison "
+        "happens on this computer. Without it, leaving a memory out could never show "
+        "whether it was missed.\n"
         "\n"
-        "To turn the withholding and swapping off, run: slm measurement off\n"
+        "One more measure stays off unless you turn it on: deciding for each prompt "
+        "whether memory is needed.\n"
+        "\n"
+        "To turn the withholding, swapping and usage detection off, run: slm measurement off\n"
         "Or open the dashboard, go to Settings, and switch off \"Help SLM "
         "measure what works\". To stop the receipts too, run: slm measurement "
         "off --receipts\n"

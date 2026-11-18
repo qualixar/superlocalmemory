@@ -1999,13 +1999,6 @@ def _cli_remember_idempotency_key(body: dict) -> str:
     import json as _json
 
     material = _json.dumps(body, sort_keys=True, ensure_ascii=False, default=str)
-    # The save records whether a terminal was behind it (WS-5, origin class), and the
-    # journal hashes that with the request: the same words typed at a terminal and sent
-    # by a script are two requests. A terminal keeps the key it always had.
-    from superlocalmemory.core.agent_attribution import SHELL_HEADER, shell_headers
-
-    if shell_headers("cli").get(SHELL_HEADER) == "no_tty":
-        material += "\x00no_tty"
     return "cli:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -3163,10 +3156,10 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("models", "Installed Ollama models, recommendations, hosted catalogue"),
         ("corrections", "Corrections your own delete, replace or edit closed"),
         ("disputes", "What needs your answer: disputed values, changed source files"),
-        ("audit", "Answer a few questions so SuperLocalMemory's judges can earn trust"),
+        ("audit", "Give blind labels so SuperLocalMemory's judges can earn trust (any caller; recorded)"),
         ("proposals", "Changes proposed to your memory: review, apply, decline, undo"),
         ("wiki", "Your memories as Markdown pages; your edits become proposals: status, diff, build, sync"),
-        ("trust", "Memories waiting for your OK before they can be rules or pins: pending, approve"),
+        ("trust", "Memories held back from being rules or pins until promoted: pending, promote, withdraw"),
         ("why", "Everything that explains one memory: where it came from, why it was shown"),
         ("signing", "Signed memories and the keyed audit chain: status, resign"),
         ("outcome", "Report whether recalled memories helped (trains ranking)"),

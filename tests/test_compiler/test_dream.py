@@ -19,7 +19,7 @@ PERSON = Basis.person("alice", "cli")
 AUDIT = {"proposal_sets", "proposals", "proposal_facts", "correction_cases", "correction_events",
          "correction_case_until_source", "artifact_versions", "artifact_version_facts",
          "write_commits", "projection_outbox", "fact_search_changes", "judge_receipts",
-         "slm_schema_version", "migration_log"}
+         "slm_schema_version", "migration_log", "decision_log"}
 LATER = datetime.now(UTC) + timedelta(hours=7)
 
 

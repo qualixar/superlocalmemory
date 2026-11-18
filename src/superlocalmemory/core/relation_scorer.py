@@ -30,7 +30,7 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from superlocalmemory.core.judge_calibration import CANNOT_TELL, RETIRING
+from superlocalmemory.core.judge_calibration import CANNOT_TELL, COUNTING_LABEL, RETIRING
 from superlocalmemory.core.judge_ladder import Item, TierAnswer
 from superlocalmemory.core.judge_questions import SLOT_RELATION, Question
 
@@ -81,9 +81,10 @@ class Model:
 _LABELLED = """
 SELECT r.receipt_id, r.fact_ids_json, l.label FROM judge_receipts r
   JOIN judge_labels l ON l.receipt_id = r.receipt_id AND l.source = 'audit' AND l.blind = 1
+       AND {counting}
  WHERE r.question_id = ? AND r.question_version = ? AND r.fact_ids_json IS NOT NULL
  ORDER BY r.receipt_id
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 
 def _pairs(conn: sqlite3.Connection) -> list[tuple[str, list[float], int]]:

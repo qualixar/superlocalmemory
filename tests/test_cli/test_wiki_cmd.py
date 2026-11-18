@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""``slm wiki``: anyone reads and builds; only a person at a terminal rebuilds or syncs (WS-6, D-17)."""
+"""``slm wiki``: any caller reads, builds, rebuilds or syncs; each is recorded (WS-6, D-17, D-49)."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ def _wire(monkeypatch, *, tty=True, answers=()):
             return {"success": True, "pages": 2, "set_id": "x", "files": BUILD}
         return BUILD
 
+    monkeypatch.setenv("SLM_AGENT_ID", "alice")  # the client name on the record, never a real user
     monkeypatch.setattr(daemon, "daemon_request", fake)
     monkeypatch.setattr(wiki_cmd, "_daemon", lambda: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: tty)
@@ -74,47 +75,50 @@ def test_diff_and_build_work_without_a_terminal_and_json_is_for_agents(monkeypat
     assert "you edited it" in capsys.readouterr().out
     assert wiki_cmd.cmd_wiki(_args("build", json=True)) == 0
     assert json.loads(capsys.readouterr().out)["data"]["written"] == ["topic/a.md"]
-    assert sent[-1] == ("POST", "/api/wiki/build", {"channel": "cli"})
+    assert sent[-1] == ("POST", "/api/wiki/build", {"by": "agent:alice"})
     assert wiki_cmd.cmd_wiki(_args("build")) == 0
     assert "kept topic/b.md: you edited it" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("sub", ["rebuild", "sync"])
-def test_without_a_terminal_a_person_command_is_refused_and_asks_nothing(monkeypatch, capsys, sub) -> None:
-    sent = _wire(monkeypatch, tty=False)
-    assert wiki_cmd.cmd_wiki(_args(sub)) == 1
-    assert sent == [] and "asks a person at a terminal" in capsys.readouterr().err
+def test_without_a_terminal_rebuild_and_sync_work_and_never_ask(monkeypatch, capsys, sub) -> None:
+    """D-49: no command needs a terminal or a confirmation; the daemon records who decided."""
+    sent = _wire(monkeypatch, tty=False, answers=())  # input() would raise StopIteration
+    assert wiki_cmd.cmd_wiki(_args(sub)) == 0
+    assert [(m, p) for m, p, _ in sent] == [("POST", f"/api/wiki/{sub}")]
+    assert "asks a person" not in capsys.readouterr().err
 
 
-def test_a_person_confirms_sync_and_it_goes_out_with_the_cli_channel(monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch, answers=["y"])
+def test_sync_goes_out_with_a_client_name_and_the_channel_comes_from_the_connection(
+        monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch)
+    monkeypatch.setenv("SLM_AGENT_ID", "claude-code")
     assert wiki_cmd.cmd_wiki(_args("sync", profile="work")) == 0
     out = capsys.readouterr().out
     assert "Proposed 1 edit(s)" in out and "a deleted line forgets nothing" in out
     assert "left alone: topic/b.md" in out and "slm proposals" in out
-    assert sent == [("POST", "/api/wiki/sync", {"channel": "cli", "profile_id": "work"})]
+    assert sent == [("POST", "/api/wiki/sync", {"by": "agent:claude-code", "profile_id": "work"})]
 
 
-def test_declining_sends_nothing(monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch, answers=["n"])
+def test_rebuild_says_it_was_applied_and_can_be_rolled_back(monkeypatch, capsys) -> None:
+    _wire(monkeypatch)
     assert wiki_cmd.cmd_wiki(_args("rebuild")) == 0
-    assert sent == [] and "Nothing was changed" in capsys.readouterr().out
-    _wire(monkeypatch, answers=["y"])
-    assert wiki_cmd.cmd_wiki(_args("rebuild")) == 0
-    assert "Compiled and approved 2 page(s)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Compiled and applied 2 page(s)" in out and "slm proposals rollback x" in out
 
 
 def test_the_daemons_refusal_is_a_plain_answer(monkeypatch, capsys) -> None:
     from superlocalmemory.cli import daemon
 
-    _wire(monkeypatch, answers=["y"])
+    _wire(monkeypatch)
 
     def refuse(*a, **k):
         raise daemon.DaemonRefused(403, "/api/wiki/sync")
 
     monkeypatch.setattr(daemon, "daemon_request", refuse)
     assert wiki_cmd.cmd_wiki(_args("sync")) == 1
-    assert "decided by a person" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "decided by a person" not in err and "role" in err
 
 
 def test_dir_shows_and_chooses_the_folder_in_the_data_folder_never_the_real_one(

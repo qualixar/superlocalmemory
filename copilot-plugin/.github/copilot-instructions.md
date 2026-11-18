@@ -12,11 +12,11 @@ Call `session_init(project_path, query)` ONCE per fresh session before any recal
 
 ### Remember
 - Atomic durable facts only (decisions, conventions, constraints, gotchas). One fact per call.
-- Recall-before-remember: `recall(query, 5)` first. If a near-match exists, save the new version with `replaces=<fact_id>` (takes effect at once, undoable); `update_memory` only proposes a correction a person must review, and the old text stays current until then.
+- Recall-before-remember: `recall(query, 5)` first. If a near-match exists, save the new version with `replaces=<fact_id>` (takes effect at once, undoable); `update_memory` only proposes a correction; it waits until a `review_correction` call (any agent or the dashboard, recorded) applies it, and the old text stays current until then.
 - Pass `kind` (rule, decision, status, procedure, ...) when you know it; a declared rule or decision is loaded at the start of later sessions.
 - Always supply tags + project + importance (7–10 for blockers/security/architecture).
 - Never dump a whole file; never claim "saved" without success:true.
-- Never save a credential (the secret screen, when on, stores it as `[REDACTED:TYPE:LAST4]`). With the instruction firewall on, a memory that is not the user's own words (a tool's output, a web page, an agent's earlier text) cannot become a pin, rule or core memory until the user approves it (`slm trust pending --json` lists what waits; approving is the user's, at a terminal); a pin answering `needs_approval` is waiting, not failed.
+- Never save a credential (the secret screen, when on, stores it as `[REDACTED:TYPE:LAST4]`). With the instruction firewall on, a memory that is not the user's own words (a tool's output, a web page, an agent's earlier text) cannot become a pin, rule or core memory by itself (`slm trust pending --json` lists what is held; promote one on purpose with `slm trust promote FACT_ID` or `core_memory(action="promote")`: recorded, and `withdraw` undoes it); a pin answering `needs_approval` is held back, not failed.
 - Scope is opt-in: writes are `personal`/private by default. Only use `scope="shared"/"global"` (or recall's `include_global`/`include_shared`) when the user explicitly asks to share across local profiles.
 
 ### Recall

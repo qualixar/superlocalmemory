@@ -85,7 +85,7 @@ const HASHED = ['od-brain.js', 'od-graph.js', 'fact-detail.js', 'od-memories.js'
                 'od-welcome.js',
                 // 4.2.30 WS-6: the Proposed changes card.
                 'od-proposals.js',
-                // 4.2.30 WS-5: the Waiting for your OK card (instruction firewall).
+                // 4.2.30 WS-5: the Held back from instructions card (instruction firewall).
                 'od-trust.js',
                 // 4.2.30 WS-5: the memory detail's "Why was this shown?" section and its mount in the drawer.
                 'od-why.js', 'od-memory-drawer.js',
@@ -93,7 +93,9 @@ const HASHED = ['od-brain.js', 'od-graph.js', 'fact-detail.js', 'od-memories.js'
                 // (od-truth.js) and the 4.2.30 What's new entries.
                 'od-delivered.js', 'od-trust-overview.js', 'od-whatsnew-4230.js', 'od-truth.js',
                 // 4.2.30 WS-6: the Living wiki card.
-                'od-wiki.js'];
+                'od-wiki.js',
+                // 4.2.30 D-49: Recent decisions by your agents.
+                'od-decisions.js'];
 //: Stylesheets stamped the same way (static/css/<name>?v=<sha256[:8]>).
 const HASHED_CSS = ['od-apps.css', 'design-system.css'];
 

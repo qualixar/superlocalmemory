@@ -16,6 +16,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from superlocalmemory.truth import invariant_i10 as i10
 from superlocalmemory.truth.validity import AFTER, BEFORE, SAME, order
 
 SAMPLE = 5
@@ -69,13 +70,6 @@ _SQL: dict[str, tuple[str, str]] = {
           JOIN memory_slots s ON s.head_revision_id = r.revision_id
           JOIN correction_cases c ON c.case_id = r.case_id
          WHERE c.status = 'rolled_back'"""),
-    "I-10": ("A judge decision that changed memory names a certificate, or a person", """
-        SELECT r.receipt_id FROM judge_receipts r
-         WHERE r.action_taken IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM judge_certificates c
-                            WHERE c.cert_id = r.action_ref AND c.profile_id = r.profile_id)
-           AND NOT (COALESCE(r.action_ref, '') GLOB '?*@cli'
-                    OR COALESCE(r.action_ref, '') GLOB '?*@dashboard')"""),
     "I-16": ("A current slot has a head and no open dispute", """
         SELECT s.slot_id FROM memory_slots s
          WHERE s.state = 'current' AND (s.head_revision_id IS NULL OR EXISTS (
@@ -85,8 +79,7 @@ _SQL: dict[str, tuple[str, str]] = {
 #: Needed by each query beyond the slot tables; a store without one skips the check.
 _NEEDS = {"I-01": ("atomic_facts", "fact_temporal_validity"),
           "I-06": ("fact_temporal_validity", "correction_cases"),
-          "I-07": ("correction_cases",), "I-08": ("correction_cases",),
-          "I-10": ("judge_receipts", "judge_certificates")}
+          "I-07": ("correction_cases",), "I-08": ("correction_cases",)}
 
 NOT_CHECKED_HERE = {
     "I-09": "every model-tier ask has a receipt (checked by the ladder's tests, not the store)",
@@ -144,6 +137,8 @@ def check(conn: sqlite3.Connection) -> list[Result]:
         ready = set(_NEEDS.get(inv, ())) <= present
         runs.append((inv, title, (lambda sql=sql: _ids(conn, sql)) if ready else None))
     runs.append(("I-05", "Single-valued slot revisions are ordered in valid time", lambda: _i05(conn)))
+    runs.append(("I-10", "A memory change names a certificate, a rule certificate or a recorded "
+                 "decision (who and channel)", lambda: i10.violations(conn, present)))
     runs.append(("I-12", "valid_until is not before valid_from, and every valid_until has a source",
                  (lambda: _i12(conn)) if "fact_temporal_validity" in present else None))
     results = []

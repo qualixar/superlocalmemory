@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""``slm audit``: a person answers at a terminal; a script or agent cannot (W2, R-16)."""
+"""``slm audit``: any caller labels; a person at a terminal, an agent without one (W2, D-49)."""
 
 from __future__ import annotations
 
@@ -37,18 +37,64 @@ def _wire(monkeypatch, *, tty=True, answers=(), pending=None):
 
 
 def _args(**kw):
-    return Namespace(count=False, profile="", json=False, **kw)
+    base = dict(count=False, profile="", json=False, list_queue=False, answer=None,
+                retract=None, model="")
+    return Namespace(**{**base, **kw})
 
 
-def test_without_a_terminal_it_refuses_and_asks_nothing(monkeypatch, capsys) -> None:
+def test_without_a_terminal_it_lists_the_queue_and_asks_nothing(monkeypatch, capsys) -> None:
+    """D-49: no terminal gate. An agent reads the queue and labels with --answer."""
     sent = _wire(monkeypatch, tty=False)
-    assert audit_cmd.cmd_audit(_args()) == 1
-    assert sent == [] and "asks a person at a terminal" in capsys.readouterr().err
+    monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("asked a question"))
+    assert audit_cmd.cmd_audit(_args()) == 0
+    out = capsys.readouterr().out
+    assert "weekly" in out and "slm audit --answer ITEM_ID LABEL" in out
+    assert [m for m, _p, _b in sent] == ["GET"]
+
+
+def test_the_queue_as_json_for_agents_carries_the_agents_model(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    assert audit_cmd.cmd_audit(_args(list_queue=True, json=True, model="claude sonnet")) == 0
+    assert "model=claude%20sonnet" in sent[0][1]
+    import json
+
+    assert json.loads(capsys.readouterr().out)["data"]["items"][0]["item_id"] == "h1"
+
+
+def test_an_agent_answers_without_a_terminal_and_names_its_model(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("SLM_AGENT_ID", "codex")
+    sent = _wire(monkeypatch, tty=False)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.daemon_request",
+                        lambda m, p, b=None, **f: sent.append((m, p, b)) or
+                        {"success": True, "labelled": 2, "counted": 2})
+    assert audit_cmd.cmd_audit(_args(answer=["h1", "replaces"], model="gpt-x")) == 0
+    assert sent[-1] == ("POST", "/api/audit/h1/answer",
+                        {"label": "replaces", "model": "gpt-x", "by": "agent:codex"})
+    assert "counts toward 2" in capsys.readouterr().out
+
+
+def test_an_answer_with_no_model_is_saved_but_says_it_does_not_count(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.daemon_request",
+                        lambda m, p, b=None, **f: sent.append((m, p, b)) or
+                        {"success": True, "labelled": 2, "counted": 0})
+    assert audit_cmd.cmd_audit(_args(answer=["h1", "same"])) == 0
+    assert sent[-1][2]["model"] == "" and "does not count" in capsys.readouterr().out
+
+
+def test_a_label_can_be_retracted(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    monkeypatch.setattr("superlocalmemory.cli.daemon.daemon_request",
+                        lambda m, p, b=None, **f: sent.append((m, p, b)) or
+                        {"success": True, "retracted": 2})
+    assert audit_cmd.cmd_audit(_args(retract="h1")) == 0
+    assert sent[-1][:2] == ("POST", "/api/audit/h1/retract")
+    assert "Label taken back" in capsys.readouterr().out
 
 
 def test_count_works_anywhere_and_writes_nothing(monkeypatch, capsys) -> None:
     sent = _wire(monkeypatch, tty=False)
-    assert audit_cmd.cmd_audit(Namespace(count=True, profile="", json=False)) == 0
+    assert audit_cmd.cmd_audit(_args(count=True)) == 0
     assert [m for m, _p, _b in sent] == ["GET"] and "1 question(s) waiting" in capsys.readouterr().out
 
 
@@ -57,7 +103,9 @@ def test_a_numbered_answer_is_saved_as_the_option_label(monkeypatch, capsys) -> 
     assert audit_cmd.cmd_audit(_args()) == 0
     out = capsys.readouterr().out
     assert "A (2026-03-01): weekly" in out and "Please type one of the numbers" in out
-    assert sent[-1] == ("POST", "/api/audit/h1/answer", {"label": "replaces", "channel": "cli"})
+    method, path, body = sent[-1]
+    assert (method, path) == ("POST", "/api/audit/h1/answer")
+    assert body["label"] == "replaces" and body["model"] == "human"  # a person at the terminal
     assert "Saved 1 answer(s)" in out
 
 

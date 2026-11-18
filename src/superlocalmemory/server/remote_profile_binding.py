@@ -154,6 +154,11 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
     # dispute_id / keep (4.2.30, D-39): which dispute and which side; disputes live
     # inside the profile the call is routed to, so neither selects a profile.
     "dispute_id", "keep",
+    # promote / audit / model (4.2.30, D-49): ``core_memory(promote=)`` releases a held
+    # memory of the routed profile (authorized as an update, by the caller's role);
+    # ``list_disputes(audit=)`` lists that profile's blind audit queue; ``model`` is the
+    # labeller's own model id, recorded with its label. None selects a profile.
+    "promote", "audit", "model",
     # memory (4.2.30, W3-5): ``health(memory=true)`` adds the Memory Health report of
     # the profile the call is routed to; selects no profile.
     "memory",

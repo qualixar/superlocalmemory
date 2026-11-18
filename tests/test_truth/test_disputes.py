@@ -32,11 +32,11 @@ def _head(db) -> str:
                       "ON r.revision_id = s.head_revision_id")[0]["fact_id"]
 
 
-def _settle(db, keep, channel="agent"):
+def _settle(db, keep, channel="mcp"):
     with db.raw_connection() as conn:
         did = conn.execute("SELECT dispute_id FROM slot_disputes WHERE state='open'").fetchone()[0]
         return disputes.settle(conn, profile_id="default", dispute_id=did, keep=keep,
-                               channel=channel, actor="claude-code")
+                               channel=channel, actor="agent:claude-code")
 
 
 def test_a_returned_fact_carries_both_sides_newest_first(disputed) -> None:
@@ -83,12 +83,12 @@ def test_keeping_the_newer_side_retires_the_older_through_the_ledger(disputed) -
     result = _settle(db, new)
     assert result["status"] == disputes.SETTLED
     assert result["resolution"] == "b" and result["retired"] == [old]
-    assert result["settled_by"] == "person:agent:claude-code"
+    assert result["settled_by"] == "agent:claude-code@mcp"
     assert _open(db) == 0 and _head(db) == new
     _until, expired, by = _retired(db, old)
     assert by == new and expired is not None
     row = db.execute("SELECT resolved_by FROM slot_disputes")[0]
-    assert row["resolved_by"] == "person:agent:claude-code"
+    assert row["resolved_by"] == "agent:claude-code@mcp"
 
 
 def test_keeping_the_older_side_retires_the_newer(disputed) -> None:
@@ -115,7 +115,7 @@ def test_a_wrong_answer_or_channel_changes_nothing(disputed) -> None:
     with pytest.raises(disputes.SettleRefused):
         _settle(db, "some-other-fact")
     with pytest.raises(disputes.SettleRefused):
-        _settle(db, "both", channel="email")
+        _settle(db, "both", channel="agent")  # not one of mcp, cli, http, dashboard
     assert _open(db) == 1
 
 
@@ -153,3 +153,78 @@ def test_a_ledger_that_will_not_apply_leaves_everything_as_it_was(disputed) -> N
     with pytest.raises(disputes.SettleRefused, match="did not apply"):
         _settle(db, new)
     assert _open(db) == 1 and _retired(db, old)[1] is None
+
+
+# -- D-49: every answer is recorded and can be taken back -----------------------------------------
+
+def _log(db):
+    return [tuple(r) for r in db.execute(
+        "SELECT action, actor, channel, reverted_by FROM decision_log ORDER BY rowid")]
+
+
+def test_an_answer_is_recorded_with_who_channel_and_time(disputed) -> None:
+    db, _old, new = disputed
+    _settle(db, new)
+    assert _log(db) == [("settle", "agent:claude-code", "mcp", None)]
+    row = db.execute("SELECT summary, decided_at FROM decision_log")[0]
+    assert "newer" in row["summary"] and row["decided_at"]
+
+
+def _reopen(db, channel="dashboard", actor="dashboard"):
+    with db.raw_connection() as conn:
+        did = conn.execute("SELECT dispute_id FROM slot_disputes").fetchone()[0]
+        return disputes.reopen(conn, profile_id="default", dispute_id=did, channel=channel,
+                               actor=actor)
+
+
+@pytest.mark.parametrize("keep", ["new", "old"])
+def test_reopening_brings_the_retired_memory_back_and_the_question_open(disputed, keep) -> None:
+    db, old, new = disputed
+    snapshot = [tuple(r) for r in db.execute(
+        "SELECT revision_id, state, superseded_by, reason_code FROM slot_revisions "
+        "ORDER BY revision_id")]
+    _settle(db, new if keep == "new" else old)
+    loser = old if keep == "new" else new
+    assert _retired(db, loser)[1] is not None
+    out = _reopen(db)
+    assert out["status"] == "open" and out["restored"] == [loser]
+    assert _retired(db, loser)[1] is None and _open(db) == 1 and _head(db) == old
+    assert [tuple(r) for r in db.execute(
+        "SELECT revision_id, state, superseded_by, reason_code FROM slot_revisions "
+        "ORDER BY revision_id")] == snapshot
+    row = db.execute("SELECT state, resolution, resolved_by FROM slot_disputes")[0]
+    assert (row["state"], row["resolution"], row["resolved_by"]) == ("open", None, None)
+    assert _log(db) == [("settle", "agent:claude-code", "mcp", "dashboard"),
+                        ("reopen", "dashboard", "dashboard", None)]
+    again = _settle(db, new)  # and it can be answered again
+    assert again["status"] == disputes.SETTLED
+
+
+@pytest.mark.parametrize("keep", ["both", "unrelated"])
+def test_reopening_a_both_or_unrelated_answer(disputed, keep) -> None:
+    db, old, new = disputed
+    _settle(db, keep)
+    assert _reopen(db)["restored"] == []
+    assert _open(db) == 1 and _head(db) == old
+    assert db.execute("SELECT state FROM slot_revisions WHERE fact_id = ?", (new,))[0][0] == "disputed"
+
+
+def test_a_dispute_that_is_not_settled_cannot_be_reopened(disputed) -> None:
+    db, _old, _new = disputed
+    with db.raw_connection() as conn:
+        did = conn.execute("SELECT dispute_id FROM slot_disputes").fetchone()[0]
+        with pytest.raises(LookupError):
+            disputes.reopen(conn, profile_id="default", dispute_id=did, channel="cli")
+        with pytest.raises(LookupError):
+            disputes.reopen(conn, profile_id="default", dispute_id="nope", channel="cli")
+
+
+def test_a_value_that_moved_on_cannot_be_reopened(disputed) -> None:
+    db, _old, new = disputed
+    _settle(db, new)
+    with db.raw_connection() as conn:
+        conn.execute("UPDATE memory_slots SET head_revision_id = 'elsewhere'")
+        did = conn.execute("SELECT dispute_id FROM slot_disputes").fetchone()[0]
+        with pytest.raises(disputes.ReopenRefused, match="changed since"):
+            disputes.reopen(conn, profile_id="default", dispute_id=did, channel="cli")
+    assert db.execute("SELECT state FROM slot_disputes")[0][0] == "resolved"

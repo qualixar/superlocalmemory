@@ -1537,9 +1537,10 @@ def _truth_claims(slot: str | None, slot_value: str | None,
     """The reserved slot and lease metadata ``store`` sets (never caller metadata)."""
     out: dict = {}
     if slot is not None or slot_value is not None:
+        from superlocalmemory.trust.secret_screen import screen_field
         from superlocalmemory.truth.slot_claims import METADATA_KEY, encode
 
-        claim = encode(slot, slot_value)
+        claim = encode(screen_field(slot), screen_field(slot_value))  # A-11: a side field
         if claim is not None:
             out[METADATA_KEY] = claim
     if source_file:

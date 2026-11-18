@@ -5,9 +5,10 @@
 Reads (``GET /api/wiki/...``) need the review-read role and refuse any remote app: a page
 quotes memory. ``POST /api/wiki/build`` projects the approved pages to the Markdown folder
 (behind ``compiler.wiki``; in shadow it only says what it would write). ``POST
-/api/wiki/rebuild`` and ``POST /api/wiki/sync`` are a person's: they compile the pages again
-and apply them on that person's approval, and read edited Markdown back as proposals, so they
-need the memory-update role, a person's door (``cli`` or ``dashboard``) and a local caller.
+/api/wiki/rebuild`` and ``POST /api/wiki/sync`` are one decision by any caller (D-49): they
+compile the pages again and apply them (recorded with who and the channel, undone with the
+proposals rollback), and read edited Markdown back as proposals, so they need the
+memory-update role; who and the channel come from the connection.
 No request names a path: the folder is ``SLM_WIKI_DIR`` or ``<data folder>/wiki``, so the
 daemon never writes where a caller says.
 """
@@ -15,7 +16,6 @@ daemon never writes where a caller says.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,18 +25,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["wiki"])
 
-_ACTOR = re.compile(r"[^A-Za-z0-9_.:@-]")
 _MAX_EDITS = 50
 
 
 class WikiRequest(BaseModel):
-    channel: str = Field(default="dashboard", max_length=16)
+    #: Legacy: the channel comes from the connection (``server/decision_door.py``, D-49).
+    channel: str = Field(default="", max_length=16)
+    by: str = Field(default="", max_length=80)
     profile_id: str | None = None
-
-
-def _local_only(caller_view: str) -> None:
-    if (caller_view or "").strip():
-        raise HTTPException(403, detail="The living wiki is for this computer only")
 
 
 def _read(engine: Any):
@@ -52,12 +48,13 @@ def _flag() -> str:
     return FeatureFlags(canonical_data_root()).state("compiler.wiki").value
 
 
-def _person(body: WikiRequest, ctx: dict, target: str):
-    """The basis of a person's decision, refused unless it names a person's door (I-10)."""
+def _person(request: Request, body: WikiRequest, ctx: dict, target: str):
+    """The basis of a caller's recorded decision: who and the channel, from the connection (I-10)."""
     from superlocalmemory.compiler import proposals
+    from superlocalmemory.server import decision_door
 
-    actor = _ACTOR.sub("", str(ctx.get("agent_id") or "")) or "local-user"
-    basis = proposals.Basis.person(actor, body.channel)
+    who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
+    basis = proposals.Basis.decision(who.actor, who.channel)
     try:
         proposals.check_basis(None, target, basis, [])
     except proposals.BasisRefused as exc:
@@ -66,12 +63,11 @@ def _person(body: WikiRequest, ctx: dict, target: str):
 
 
 @router.get("/api/wiki/pages")
-def list_pages(request: Request, kind: str = "", profile_id: str = "", caller_view: str = ""):
+def list_pages(request: Request, kind: str = "", profile_id: str = ""):
     """The compiled pages of a profile (titles and counts, no text) and the wiki's status."""
     from superlocalmemory.compiler import pages, wiki
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     try:
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
@@ -92,12 +88,11 @@ def list_pages(request: Request, kind: str = "", profile_id: str = "", caller_vi
 
 
 @router.get("/api/wiki/pages/{page_id}")
-def show_page(request: Request, page_id: str, profile_id: str = "", caller_view: str = ""):
+def show_page(request: Request, page_id: str, profile_id: str = ""):
     """One page with every sentence re-checked now, its citations and what it withheld."""
     from superlocalmemory.compiler import pages
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     try:
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
@@ -118,12 +113,11 @@ def show_page(request: Request, page_id: str, profile_id: str = "", caller_view:
 
 
 @router.get("/api/wiki/diff")
-def folder_diff(request: Request, profile_id: str = "", caller_view: str = ""):
+def folder_diff(request: Request, profile_id: str = ""):
     """What a build would change in the folder, and which files hold edits waiting for sync."""
     from superlocalmemory.compiler import wiki
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     try:
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
@@ -141,17 +135,16 @@ def folder_diff(request: Request, profile_id: str = "", caller_view: str = ""):
         raise m._canonical_mutation_error(exc, "Living wiki diff error")
 
 
-def _gate(request: Request, body: WikiRequest, caller_view: str, *, person: bool):
-    """Authorise a write: ``(engine, target, ctx, basis)``; ``basis`` only for a person's route."""
+def _gate(request: Request, body: WikiRequest, *, person: bool):
+    """Authorise a write: ``(engine, target, ctx, basis)``; ``basis`` only for a deciding route."""
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     profile = m._routed_profile(body.profile_id)
     engine, target, ctx = m._authorize_memory_mutation(
         request, "update", "wiki", run_pre_hook=False, profile=profile)
     basis = None
     if person:
-        basis = _person(body, ctx, target)
+        basis = _person(request, body, ctx, target)
     return engine, target, ctx, basis
 
 
@@ -172,12 +165,12 @@ def _guard(exc: Exception, label: str):
 
 
 @router.post("/api/wiki/build")
-def build_wiki(request: Request, body: WikiRequest, caller_view: str = ""):
+def build_wiki(request: Request, body: WikiRequest):
     """Project the approved pages to the Markdown folder (shadow: report only; off: refused)."""
     from superlocalmemory.compiler import wiki
 
     try:
-        engine, target, _ctx, _basis = _gate(request, body, caller_view, person=False)
+        engine, target, _ctx, _basis = _gate(request, body, person=False)
         state = _flag()
         if state == "off":
             raise HTTPException(409, detail="The Markdown wiki is off. Turn it on with: "
@@ -197,13 +190,13 @@ def build_wiki(request: Request, body: WikiRequest, caller_view: str = ""):
 
 
 @router.post("/api/wiki/rebuild")
-def rebuild_pages(request: Request, body: WikiRequest, caller_view: str = ""):
-    """A person compiles the pages again from memory and approves them in one step (I-10);
+def rebuild_pages(request: Request, body: WikiRequest):
+    """A caller compiles the pages again from memory and applies them in one recorded step (I-10);
     the Markdown folder follows when ``compiler.wiki`` is on."""
     from superlocalmemory.compiler import dream, proposals, wiki
 
     try:
-        engine, target, _ctx, basis = _gate(request, body, caller_view, person=True)
+        engine, target, _ctx, basis = _gate(request, body, person=True)
         reader = _read(engine)
         try:
             planned = dream.plan(reader, target, merges=False)
@@ -213,7 +206,7 @@ def rebuild_pages(request: Request, body: WikiRequest, caller_view: str = ""):
         if planned["items"]:
             with engine._db.raw_connection() as conn:
                 set_id = proposals.create_set(conn, profile_id=target, origin="rebuild",
-                                              title="Pages rebuilt by a person",
+                                              title="Pages rebuilt",
                                               proposals=planned["items"])
                 proposals.apply_set(conn, profile_id=target, set_id=set_id, basis=basis)
             out.update(set_id=set_id, pages=len(planned["items"]))
@@ -235,15 +228,15 @@ def rebuild_pages(request: Request, body: WikiRequest, caller_view: str = ""):
 
 
 @router.post("/api/wiki/sync")
-def sync_wiki(request: Request, body: WikiRequest, caller_view: str = ""):
-    """A person reads the edited Markdown back: each edited block becomes a proposal, never a
+def sync_wiki(request: Request, body: WikiRequest):
+    """A caller reads the edited Markdown back: each edited block becomes a proposal, never a
     write. The words pass normal admission (secret screen, origin ``external_edit``)."""
     from superlocalmemory.compiler import wiki
     from superlocalmemory.core.mutations import update_fact_authorized
     from superlocalmemory.server.routes import memories as m
 
     try:
-        engine, target, _ctx, _basis = _gate(request, body, caller_view, person=True)
+        engine, target, _ctx, _basis = _gate(request, body, person=True)
         state = _flag()
         if state == "off":
             raise HTTPException(409, detail="The Markdown wiki is off. Turn it on with: "

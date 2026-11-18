@@ -335,9 +335,10 @@ def _upcoming_scheduled_facts(
 
 
 def _pin_needs_approval(db, fact_id: str) -> dict | None:
-    """The instruction firewall at the pin door (WS-5): a memory whose taint is below
-    ``system`` is not pinned by an agent's call. The request is recorded so the user sees it
-    under "Waiting for your OK"; an agent cannot approve it. ``None``: pin as usual."""
+    """The instruction firewall at the pin door (WS-5, D-49): a memory whose taint is below
+    ``system`` is not pinned by itself. The request is recorded and listed under "Waiting for
+    your OK"; one explicit ``core_memory(action="promote")`` (any caller) releases it.
+    ``None``: pin as usual."""
     from superlocalmemory.trust import firewall
 
     verdict = firewall.check_promotion(db, fact_id, firewall.PIN)
@@ -350,6 +351,23 @@ def _pin_needs_approval(db, fact_id: str) -> dict | None:
         logger.debug("pin request not recorded (%s)", type(exc).__name__)
     return {"success": False, "needs_approval": True, "fact_id": fact_id,
             "taint": verdict.taint, "error": verdict.reason}
+
+
+def _promote_or_withdraw(engine, db, action: str, fact_id: str, profile_id: str) -> dict:
+    """One explicit promotion (or its withdrawal) by this agent, recorded on channel ``mcp``."""
+    from superlocalmemory.trust import firewall
+
+    authorization = authorize_mcp_mutation(
+        engine, "update", mutation_source=f"mcp-core-memory-{action}",
+        profile_id=profile_id, fact_id=fact_id)
+    try:
+        with db.raw_connection() as conn:
+            done = (firewall.approve if action == "promote" else firewall.withdraw)(
+                conn, fact_id, by=f"agent:{_get_agent_id()}", channel="mcp")
+    except LookupError as exc:
+        return {"success": False, "error": str(exc)}
+    authorization.complete()
+    return {"success": True, "action": action, **done}
 
 
 def _owns_fact(db, profile_id: str, fact_id: str) -> bool:
@@ -707,12 +725,18 @@ def register_active_tools(server, get_engine: Callable) -> None:
         action: str,
         fact_id: str = "",
         profile_id: str = "",
+        promote: bool = False,
     ) -> dict:
         """Manage the explicit Core Memory pin set (v3.4.65).
 
-        - pin:   mark a fact as always-injected
-        - unpin: clear the pin
-        - list:  return currently pinned facts
+        - pin:     mark a fact as always-injected
+        - unpin:   clear the pin
+        - list:    return currently pinned facts
+        - promote: release a memory the instruction firewall holds (it came from a tool, a
+          web page, another agent or an agent's own words) so it may be a pin, a rule or part
+          of session start. One explicit call, on purpose; it is recorded with your agent id
+          and can be taken back with ``withdraw``. ``pin`` with ``promote=true`` does both.
+        - withdraw: take a promotion back (the memory returns to its own class).
 
         ``profile_id``: the profile whose pins these are (empty = the active
         one). A pin or unpin changes only a fact that profile owns.
@@ -732,6 +756,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 if not _owns_fact(db, pid, fact_id):
                     return {"success": False, "error": f"Memory {fact_id} not found"}
                 held = _pin_needs_approval(db, fact_id)
+                if held is not None and promote:
+                    promoted = _promote_or_withdraw(engine, db, "promote", fact_id, pid)
+                    if not promoted.get("success"):
+                        return promoted
+                    db.set_pinned(fact_id, True)
+                    return {"success": True, "action": "pin", "fact_id": fact_id,
+                            "promoted": True}
                 if held is not None:
                     return held
                 authorization = authorize_mcp_mutation(
@@ -760,6 +791,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 db.set_pinned(fact_id, False)
                 authorization.complete()
                 return {"success": True, "action": "unpin", "fact_id": fact_id}
+
+            if action in ("promote", "withdraw"):
+                if not fact_id:
+                    return {"success": False, "error": f"fact_id required for {action}"}
+                if not _owns_fact(db, pid, fact_id):
+                    return {"success": False, "error": f"Memory {fact_id} not found"}
+                return _promote_or_withdraw(engine, db, action, fact_id, pid)
 
             if action == "list":
                 from superlocalmemory.mcp.remote_visibility import visible_facts

@@ -78,7 +78,7 @@ def test_every_known_channel_has_a_row_and_none_falls_through() -> None:
 
 def test_a_channel_added_later_lands_on_unknown_never_on_a_trusted_class() -> None:
     got = oc.classify(Signals(channel="from-the-future", transform="verbatim"))
-    assert got == oc.Classified("unknown", "v2:no_row")
+    assert got == oc.Classified("unknown", "v3:no_row")
 
 
 def test_every_row_says_why_and_ids_are_unique() -> None:
@@ -89,20 +89,24 @@ def test_every_row_says_why_and_ids_are_unique() -> None:
 
 
 @pytest.mark.parametrize("signals,expected,row", [
-    (dict(channel="remember_http", transform="verbatim", role="user"), "user_direct", "remember.person"),
-    (dict(channel="python_api", transform="verbatim", role="user"), "user_direct", "remember.person"),
-    # package B: the shell door. A terminal (or no shell signal, the dashboard) is a person; a
-    # shell with no terminal is not; a named agent stays an agent whatever its shell did.
-    (dict(channel="remember_http", transform="verbatim", role="user", agent_id_source="shell:tty"),
-     "user_direct", "remember.person"),
+    # D-49: fails closed. Only the dashboard's own door is the user's statement; no signal,
+    # a terminal, a script or an agent's shell is the caller's own words.
     (dict(channel="remember_http", transform="verbatim", role="user",
-          agent_id_source="shell:no_tty"), "agent_inferred", "remember.shell_no_tty"),
+          agent_id_source="dashboard"), "user_direct", "remember.dashboard"),
     (dict(channel="python_api", transform="verbatim", role="user",
-          agent_id_source="shell:no_tty"), "agent_inferred", "remember.shell_no_tty"),
+          agent_id_source="dashboard"), "user_direct", "remember.dashboard"),
+    (dict(channel="remember_http", transform="verbatim", role="user"),
+     "agent_inferred", "remember.agent"),
+    (dict(channel="python_api", transform="verbatim", role="user"),
+     "agent_inferred", "remember.agent"),
+    (dict(channel="remember_http", transform="verbatim", role="user",
+          agent_id_source="shell:tty"), "agent_inferred", "remember.agent"),
+    (dict(channel="remember_http", transform="verbatim", role="user",
+          agent_id_source="shell:no_tty"), "agent_inferred", "remember.agent"),
     (dict(channel="remember_http", transform="verbatim", role="assistant", agent_id="claude"),
      "agent_inferred", "remember.agent"),
     (dict(channel="remember_http", transform="verbatim", role="user", agent_id="claude",
-          agent_id_source="shell:no_tty"), "agent_inferred", "remember.agent"),
+          agent_id_source="dashboard"), "agent_inferred", "remember.agent"),
     (dict(channel="remember_http", transform="verbatim", role="user", agent_id="claude"),
      "agent_inferred", "remember.agent"),
     (dict(channel="remember_http", transform="verbatim", role="user", speaker="Alex"),
@@ -131,7 +135,7 @@ def test_every_row_says_why_and_ids_are_unique() -> None:
 def test_the_mapping_rows(signals, expected, row) -> None:
     got = oc.classify(Signals(**signals))
     assert got.origin_class == expected
-    assert got.basis == f"v2:{row}"
+    assert got.basis == f"v3:{row}"
 
 
 @pytest.mark.parametrize("source_type,expected", [
@@ -144,14 +148,15 @@ def test_an_unnamed_channel_is_read_from_its_source_type(source_type, expected) 
 
 def test_a_named_channel_is_not_overridden_by_its_source_type() -> None:
     assert _cls(channel="remember_http", transform="verbatim", role="user",
-                source_type="web-clip") == "user_direct"
+                agent_id_source="dashboard", source_type="web-clip") == "user_direct"
 
 
 # -- the transform only lowers -------------------------------------------------------------------
 
 def test_a_model_rewrite_caps_at_model_generated() -> None:
-    got = oc.classify(Signals(channel="remember_http", transform="model_rewritten", role="user"))
-    assert got == oc.Classified("model_generated", "v2:remember.person+model_rewritten")
+    got = oc.classify(Signals(channel="remember_http", transform="model_rewritten", role="user",
+                              agent_id_source="dashboard"))
+    assert got == oc.Classified("model_generated", "v3:remember.dashboard+model_rewritten")
     assert _cls(channel="import", transform="model_rewritten") == "model_generated"
     assert _cls(channel="derived", transform="model_rewritten") == "model_generated"
 
@@ -164,9 +169,11 @@ def test_an_unknown_transform_is_no_better_than_an_agents_guess() -> None:
 
 def test_a_transform_never_raises_a_class_and_unknown_stays_unknown() -> None:
     for channel in fo.CHANNELS:
-        base = _cls(channel=channel, transform="verbatim", role="user")
+        base = _cls(channel=channel, transform="verbatim", role="user",
+                    agent_id_source="dashboard")
         for transform in fo.TRANSFORMS:
-            got = _cls(channel=channel, transform=transform, role="user")
+            got = _cls(channel=channel, transform=transform, role="user",
+                       agent_id_source="dashboard")
             if base == "unknown":
                 assert got == "unknown"
             else:

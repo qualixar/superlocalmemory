@@ -398,16 +398,17 @@ reported as not found; the command exits 1 only when none of the ids matched.
 
 ### `slm trust pending|status|approve`
 
-Memories that wait for your OK before they can be instructions (the instruction firewall, `trust.taint`; see [Configuration](configuration.md#the-instruction-firewall-trusttaint-on)).
+Memories held back from being instructions until one explicit promotion (the instruction firewall, `trust.taint`; see [Configuration](configuration.md#the-instruction-firewall-trusttaint-on)).
 
 ```bash
-slm trust pending [--json] [--limit N]   # what waits, and where each memory came from (anyone, including an agent)
-slm trust status [--json]                # is the firewall acting; how many wait; how many have no class yet
-slm trust approve FACT_ID [FACT_ID...]   # you, at an interactive terminal
-slm trust approve --all                  # everything `pending` lists, one answer (you, at a terminal)
+slm trust pending [--json] [--limit N]   # what is held back, and where each memory came from
+slm trust status [--json]                # is the firewall acting; how many are held; how many have no class yet
+slm trust promote FACT_ID [FACT_ID...]   # any caller: release a memory on purpose (alias: approve)
+slm trust promote --all                  # everything `pending` lists, one call
+slm trust withdraw FACT_ID [FACT_ID...]  # take a promotion back
 ```
 
-`approve` shows each memory and asks `[y/N]`; it refuses to run without a terminal, so a script or an agent cannot approve in your place (the same rule as `slm audit`). The approval is recorded with who, when and that it came from the terminal. `--profile` selects a profile; `--json` prints the machine-readable result.
+`promote` needs no terminal and no confirmation (D-49). It is recorded with who (an agent id, `SLM_AGENT_ID`, or your user name), the channel `cli` and the time, appears under **Recent decisions by your agents** on the dashboard, and `withdraw` undoes it. `--profile` selects a profile; `--json` prints the machine-readable result.
 
 ### `slm why FACT_ID`
 
@@ -425,10 +426,10 @@ Signed memories (`trust.signing`, D-16).
 
 ```bash
 slm signing status [--all] [--json] [--db FILE]   # is signing available; how many memories are signed; the audit chain
-slm signing resign [--yes]                         # sign again what a lost key signed (you, at a terminal; stop the daemon first)
+slm signing resign [--yes]                         # sign again what a lost key signed, and memories whose signature was removed (any caller, recorded as a decision; stop the daemon first)
 ```
 
-`status` reads the keychain once and the store read-only; `--all` checks every signed memory instead of a sample of 500. `resign` asks a person: it refuses without an interactive terminal and while the daemon runs, never creates a key, and only touches memories signed under a key this computer no longer holds.
+`status` reads the keychain once and the store read-only; `--all` checks every signed memory instead of a sample of 500. `resign` is open to any caller (D-49): at a terminal it asks first, without one it needs `--yes`, and each run is recorded as a decision (who, channel, counts) and listed under "Recent decisions by your agents" (it has no undo: it changes no memory). It refuses while the daemon runs, never creates a key, and touches only memories signed under a key this computer no longer holds and memories that were signed and lost their signature (the doctor lists them by id; look at one with `slm why`). It shows both counts and asks before it signs anything. A background batch never signs a memory whose signature was removed: only this command does.
 
 ### `slm cues list [--json]`
 
@@ -641,7 +642,7 @@ slm doctor --refile-hidden         # list memories hidden although scored to kee
 slm doctor --refile-hidden --yes   # re-file exactly those
 ```
 
-`slm doctor --truth [--db FILE] [--signatures-all] [--json]` checks the truth layer's invariants read-only (use `--db` on a copy of the store), then the signatures (a random sample of 500 memories, or every one with `--signatures-all`) and the audit chain's links, including the keyed ones; it reads the signing key from the keychain once and exits 1 on a modified memory or a broken link. See [Signed memories](signed-memories.md).
+`slm doctor --truth [--db FILE] [--signatures-all] [--json]` checks the truth layer's invariants read-only (I-10: every memory change names a certificate, a rule certificate or a recorded decision with who and the channel: judge receipts, settled disputes, applied proposal sets, promotions and approvals are all checked) (use `--db` on a copy of the store), then the signatures (a random sample of 500 memories, or every one with `--signatures-all`) and the audit chain's links, including the keyed ones; it reads the signing key from the keychain once and exits 1 on a modified memory or a broken link. See [Signed memories](signed-memories.md).
 
 `--refile-hidden` lists memories whose lifecycle zone is archive or forgotten
 although their retention score is above 0.8, with their id and the first 80
@@ -1530,21 +1531,21 @@ See [Scale engine](scale-engine.md).
 
 ## `slm disputes` and `slm audit` (4.2.30)
 
-`slm disputes` lists what needs your answer: two memories that state different values of the same thing, and memories whose source file changed. `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated` answers one; `slm disputes still-true FACT_ID` says a changed file still supports its memory.
+`slm disputes` lists what needs an answer: two memories that state different values of the same thing, and memories whose source file changed. `slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated` answers one (any caller; recorded with who, the channel and the time); `slm disputes reopen DISPUTE_ID` takes the answer back, and the retired memory returns; `slm disputes still-true FACT_ID` says a changed file still supports its memory.
 
-`slm audit` asks you, at a terminal, the questions SuperLocalMemory's judges were asked, without their answers, so a judge can earn permission to act on its own. It refuses to run without a terminal, so a script or an agent cannot answer for you; `slm audit --count` says how many are waiting and works anywhere.
+`slm audit` asks the questions SuperLocalMemory's judges were asked, without their answers, so a judge can earn permission to act on its own. Any caller may label: on a terminal `slm audit` asks one question at a time; `slm audit --count` says how many wait; `slm audit --list --model MODEL --json` lists them for an agent (pairs only that model judged are left out); `slm audit --answer ITEM LABEL --model MODEL` gives one label; `slm audit --retract ITEM` takes it back. Each label is recorded with who gave it, the channel and the labeller's model, and counts toward a judge's certificate only when that model differs from the judged tier's model (a person on the dashboard always counts), so a judge never grades itself.
 
 ### `slm proposals` (4.2.30)
 
 ```bash
 slm proposals [list] [--state proposed|applied|rolled_back|rejected|all] [--limit N] [--profile P] [--json]
 slm proposals show SET_ID [--json]
-slm proposals apply SET_ID       # you, at a terminal
-slm proposals reject SET_ID      # you, at a terminal
-slm proposals rollback SET_ID    # you, at a terminal
+slm proposals apply SET_ID       # any caller; recorded
+slm proposals reject SET_ID      # any caller; recorded
+slm proposals rollback SET_ID    # undo an applied set exactly
 ```
 
-SuperLocalMemory can propose changes to your memory: retire an older memory in favour of a newer one, merge copies, rewrite a derived summary. A set is decided as one unit: nothing in it touches your memory until you `apply` it, applying is all-or-nothing, and `rollback` puts back exactly what it replaced. Applying needs a basis: your approval at a terminal or on the dashboard (recorded with the door you used), or, only while `compiler.auto_apply` is on, an open certificate that covers that kind of change. `apply`, `reject` and `rollback` refuse to run without an interactive terminal, so a script or an agent cannot decide for you; `list` and `show` work anywhere and `--json` is for agents. Erasing a memory removes the proposals and previous versions that name it.
+SuperLocalMemory can propose changes to your memory: retire an older memory in favour of a newer one, merge copies, rewrite a derived summary. A set is decided as one unit: nothing in it touches your memory until it is applied, applying is all-or-nothing, and `rollback` puts back exactly what it replaced. Applying needs a basis (I-10): a recorded decision by any caller (who, the channel and the time, shown under **Recent decisions by your agents**) or, only while `compiler.auto_apply` is on, an open certificate that covers that kind of change. `apply`, `reject` and `rollback` need no terminal and no confirmation; `--json` is for agents. Erasing a memory removes the proposals and previous versions that name it.
 
 Before any derived summary, persona, entity profile, scene or core memory block is rewritten, its previous row is kept as a version (the last five per item; three for scenes). The dashboard's **Proposed changes** card shows the same sets with **Apply**, **Reject** and **Undo**.
 
@@ -1554,8 +1555,8 @@ Before any derived summary, persona, entity profile, scene or core memory block 
 slm wiki [status] [--json]      # compiled pages, the Markdown folder, edits waiting
 slm wiki diff [--json]          # what a build would change; files holding your edits
 slm wiki build [--json]         # write the approved pages to the folder (needs compiler.wiki)
-slm wiki rebuild                # you, at a terminal: compile the pages again and approve them
-slm wiki sync                   # you, at a terminal: read your edits back as proposals
+slm wiki rebuild                # any caller: compile the pages again and apply them (recorded)
+slm wiki sync                   # any caller: read your edits back as proposals
 slm wiki dir [PATH|--default]   # show or choose the folder
 ```
 
@@ -1571,6 +1572,6 @@ SLM measures whether memory actually helps your agents, and this is the one swit
 
 By default SLM writes a receipt each time it hands memories to an agent (which memory ids, their rank and score, and the logged chance of each choice; ids and numbers only, on this computer). In about 1 in 10 session starts it changes one thing by a logged random draw: one eligible memory is left out, or, when an agent opens a session through MCP, one way of searching is switched off for that fetch. Pinned rules, standing rules, core blocks, explicit recall, cues and lease warnings are never left out. In about 1 in 20 of an agent's own recalls, two neighbouring results trade places; nothing is left out or added.
 
-`slm measurement off` turns the withholding and the swapping off together (`outcomes.holdout` and `outcomes.swaps`). Receipts stay on unless you add `--receipts`. `slm measurement on` turns them back on. A change takes effect at the next session start. The usage check (`outcomes.usage`) and the need check (`delivery.need_gate`) are off unless you turn them on with `slm flags set`; this command never changes them. `slm flags kill on` still turns every 4.2.30 measure off at once.
+`slm measurement off` turns the withholding, the swapping and the usage check off together (`outcomes.holdout`, `outcomes.swaps` and `outcomes.usage`). Receipts stay on unless you add `--receipts`. `slm measurement on` turns them back on. A change takes effect at the next session start. The usage check compares an agent's reply with the memories it was given, on this computer, and keeps ids and scores only; it is on by default because without it the withholding could never show whether a memory was used. The need check (`delivery.need_gate`) is off unless you turn it on with `slm flags set`; this command never changes it. The notice is informational and gates nothing: it is printed by `slm setup`, `slm upgrade-hosts` and the install, and on the first `slm` run on a terminal after an upgrade. `slm flags kill on` still turns every 4.2.30 measure off at once.
 
 `--json` returns `measuring`, `kill_switch`, each measure's `state`, `pending` (the notice has not been acknowledged yet) and the `notice` text. Reading it as JSON does not count as having seen the notice; running `status` yourself does. The same switch is in the dashboard under Settings, "Help SLM measure what works", and a banner on the dashboard home shows the notice until you press OK. `slm setup` and `slm upgrade-hosts` print the notice once, and so does the npm install. An agent turns this off only when you ask it to. Every change is recorded with its time and surface in `disclosures.json` in the SLM data folder.

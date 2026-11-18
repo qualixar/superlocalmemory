@@ -7,9 +7,9 @@ class of the winner is at least the class of the one it retires
 (``origin_class.at_least``): a web page cannot overwrite what the user said, a
 tool's output cannot overwrite an agent's own words. ``unknown`` on either side
 never passes (it is outside the order). A blocked decision is not dropped: it
-stays an open dispute, relabelled ``origin_below_head``, and only a person
-settles it (``slm disputes settle``, the dashboard): a person's answer is a
-lawful basis whatever the classes (I-10).
+stays an open dispute, relabelled ``origin_below_head``, and only a recorded
+decision settles it (``slm disputes settle``, MCP ``settle_dispute``, the dashboard; any
+caller, D-49): a recorded decision is a lawful basis whatever the classes (I-10).
 
 The class compared is the *taint* (the lowest class among a fact and what it
 was derived from), because a fact built from a web page is no more trustworthy

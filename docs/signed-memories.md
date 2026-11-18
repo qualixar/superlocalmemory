@@ -28,7 +28,7 @@ same way SuperLocalMemory does. Signing is tamper evidence, not access control.
   and `slm why --verify` are commands you run on purpose, so they read it themselves, once.
 * **A lost key loses no data.** Memories signed under it are reported as "signed under another
   key", never as modified, and nothing is deleted. Sign them again under the new key with
-  `slm signing resign` (you, at an interactive terminal, with the daemon stopped). It is never
+  `slm signing resign` (any caller: an agent passes `--yes`; recorded as a decision; daemon stopped). It is never
   done automatically: a pass that re-signed everything with a new key would make a copied,
   edited file look valid.
 
@@ -43,11 +43,58 @@ command-line save or before the flag was turned on, by a small background batch 
 maintenance cycle (200 per batch). A signature is written once; the batch never rewrites the
 signature of a memory that has changed, so a changed memory stays "modified" until you decide.
 
-Limits, plainly: signing attests "unchanged since it was signed", not "never altered before". The
-first time signing runs it seals what is in the store. A signature row deleted by someone with
-the file makes that memory read "unsigned" (reported, never as intact), but the next batch signs
-it as it then stands. Moving a memory to another profile by editing both tables by hand looks
-like a profile fold and is signed again.
+### The signing mark: a removed signature is not a new memory
+
+Someone with the file can change a memory's text and also delete its signature row. If the batch
+then signed "whatever is unsigned", the changed memory would read "signed, and unchanged". So the
+daemon keeps a second record, `signing_progress` (one row, no memory text): the highest memory row
+number it has signed up to, the time signing first ran, and a MAC under the same keychain key. A
+memory saved through the daemon moves the mark up to itself the moment it is signed; the batch
+moves it up over the memories it signs.
+
+* The batch signs only unsigned memories **above** the mark. An unsigned memory **at or below** it
+  was signed once, so it reads **"signature missing"**: `slm doctor --truth` fails, `slm why` says
+  "Its signature was removed", the dashboard says "no longer have their signature". The batch never
+  signs it.
+* Someone with the file cannot make a mark that checks, so cannot lower it. A mark that is gone
+  while signed memories remain, or that does not check, is a failure too, and the batch signs
+  nothing until you look. A mark made under another key (you lost the key) is reported, not a
+  failure, and waits for you.
+* **`slm signing resign`** (any caller, recorded as a decision, daemon stopped) is the one door back:
+  it shows how many memories lost their signature and asks; on yes it signs them, and the
+  memories signed under an old key, as they stand now, and writes the mark again. Look at them
+  first with `slm why FACT_ID`.
+* The first time signing runs it seals the memories already in the store, in the same bounded
+  batches (the mark moves up as each batch is signed), so a signature removed between two batches
+  of that first sealing is already refused.
+
+What it still does not cover, plainly:
+
+* A memory that existed when signing first ran and was already changed then is sealed as it was.
+* The mark is a row number. Someone who replaces a memory by a **new row above the mark** (new text,
+  no signature) makes it look like a memory saved later, and the batch signs it. A copy of an older
+  valid mark put back lowers the protection to that point. Signatures can only vouch for what the
+  daemon has seen; they are tamper evidence for a copy of the file, not for a person who rebuilds a
+  row and the table around it.
+* Erasing the newest memories and then saving with a process that holds no key (a hook, or a
+  command-line save with the daemon down) before the next batch can reuse an erased row number at or
+  below the mark: that memory reads "signature missing" until you run `slm signing resign`. A save
+  through the daemon is signed at admission and never shows this. A repair that rewrites a
+  memory's text (restoring text a redaction blanked) also removes its signature and, for the same
+  reason, waits for `slm signing resign`.
+* **Not signed: `pinned`, the memory kind (rule, decision, ...) and the taint class** (the origin
+  classes of `fact_trust`). Someone with the file can flip a memory to "pinned" and "rule", or
+  give it a trusted taint class, and its text signature still checks. They are left out on
+  purpose: these fields change legitimately through processes that do not hold the key (a hook,
+  a pin from the command line or an agent, the kind classifier, an explicit promotion), so signing them would either make
+  every legitimate change read "modified" or put the key into those processes, which D-16 rules
+  out ("never from a hook"). What that leaves open: a rewritten file can promote a memory to a
+  standing instruction with its signature intact. The instruction firewall (`trust.taint`) does not
+  close it either, because the taint class lives in the same file. `slm doctor --truth` and
+  `slm why` therefore report the text signature, not the standing-instruction fields. Treat a
+  copied or restored file you did not make yourself as untrusted for rules and pins, and review
+  your pins and standing rules after restoring it (`slm trust pending` lists those below the
+  firewall floor).
 
 ## Profile folds, export and import
 
@@ -58,7 +105,8 @@ like a profile fold and is signed again.
   key, so it does not sign. Until the batch runs the memory is counted "moved by a fold", not
   modified. A bad signature stays bad through a fold.
 * **A repair that rewrites a memory's text** (restoring text a redaction blanked) drops that
-  memory's signature, so it is signed again with the restored text.
+  memory's signature; it reads "signature missing" until you run `slm signing resign` (see the
+  signing mark above).
 * **Export** (`slm gdpr export` and the dashboard's export) writes memories, not signatures: a signature means
   nothing off the machine whose keychain made it.
 * **Import** saves memories through the normal save path, so the importing computer signs them
@@ -84,7 +132,16 @@ be rewritten and still verify.
   counts plain links that follow the first keyed one. They are shown, not trusted as keyed.
 * Links made under an earlier key cannot be checked by HMAC once that key is gone; their order and
   previous-links are still checked and the report counts them as "keyed under a key this computer
-  does not hold".
+  does not hold". **When this computer does hold a key, those links pass only if a later anchor
+  keyed under your current key stands behind them** (that anchor's HMAC covers the hash of the
+  entry before it, so it vouches for everything written earlier). Someone with the file and no key
+  could give every link, and the anchor, a made-up key id and rewrite an entry; the order, the
+  previous-links and the external anchor would still agree. With your key present that now fails:
+  "no anchor under your current key vouches for them". After a lost key, the daemon writes that
+  anchor at its next audit entry, so the check reads as failed until then. Without a key nothing
+  can be said about those links beyond their order. Still open: the content of links made under a
+  key that is gone (only the head they ended on is vouched for), and a keyed stretch rewritten as
+  plain links.
 * A keyed link must carry the key the latest anchor declared, so a plain or foreign link cannot be
   relabelled as keyed to escape its check.
 

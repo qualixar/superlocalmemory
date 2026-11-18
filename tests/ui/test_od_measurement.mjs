@@ -16,7 +16,7 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 
 const NOTICE = 'SuperLocalMemory now measures whether memory helps your agents.\n\n' +
   'About 1 in 10 session starts change one thing <img src=x onerror=alert(1)>.\n\n' +
-  'To turn the withholding and swapping off, run: slm measurement off';
+  'To turn the withholding, swapping and usage detection off, run: slm measurement off';
 
 function report(over = {}) {
   const flags = [

@@ -73,7 +73,7 @@ describe('Trust overview card', () => {
     const d = page(REPORT, { navigated: nav });
     check(d).click();
     await flush();
-    assert.match(text(d), /3 memories are waiting for your OK; 1 approved by you\./);
+    assert.match(text(d), /3 memories are held back; 1 promoted\./);
     assert.match(text(d), /The instruction firewall is on/);
     [...d.window.document.querySelectorAll('button')].find((b) => b.textContent === 'Review them').click();
     assert.deepEqual(nav, ['dashboard-pane']);

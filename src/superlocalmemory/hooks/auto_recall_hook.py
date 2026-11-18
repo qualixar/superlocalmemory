@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 
 _DEFAULT_LIMIT = 15           # raised from 3 for formatter candidate pool
 
@@ -38,6 +39,38 @@ _DEFAULT_LIMIT = 15           # raised from 3 for formatter candidate pool
 #: socket before it injects nothing. The hook's own limit in ``hooks.json`` is
 #: 7 s; the daemon stops waiting at 4 s (``hook_daemon.PROMPT_BUDGET_S``).
 CLIENT_BUDGET_S = 5.0
+#: One total for the whole hook, whichever path answers (A-15): the socket, then (only if the
+#: socket is absent) the queue, then HTTP, each cut to what is left. Under the 7 s host limit.
+TOTAL_BUDGET_S = CLIENT_BUDGET_S
+#: Below this a wait is not worth starting.
+MIN_WAIT_S = 0.2
+
+#: One prompt event can reach this hook twice: a Codex user with the plugin AND the installed host
+#: hooks has per-prompt recall registered by both (the plugin's ``hooks.json`` and the installed
+#: ``codex-prompt``, which runs this action as a child). The first to start owns the turn; the
+#: other answers ``{}`` (A-17). Routing-only: both fire together, well inside the hook's 7 s limit.
+TURN_WINDOW_S = 20.0
+
+#: Swapped by tests.
+_clock = time.monotonic
+_wall = time.time
+
+
+class _Budget:
+    """What is left of the hook's one budget."""
+
+    def __init__(self, total: float = TOTAL_BUDGET_S) -> None:
+        self._end = _clock() + total
+
+    def remaining(self) -> float:
+        return max(0.0, self._end - _clock())
+
+    def spent(self) -> bool:
+        return self.remaining() < MIN_WAIT_S
+
+
+class _DaemonBusy(Exception):
+    """The hook socket exists and did not answer in time: end the hook with ``{}``."""
 
 _MODE_TIMEOUTS = {
     "A": 10.0,
@@ -78,28 +111,67 @@ def _get_queue_db_path():
     return state_path("recall_queue.db")
 
 
-def _try_socket_first(prompt: str, session_id: str) -> dict | None:
+def _turn_folder() -> str:
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return str(canonical_data_root() / "session_state" / "auto-recall-turns")
+
+
+def _first_for_this_turn(session_id: str, prompt: str) -> bool:
+    """True when no other ``auto_recall`` hook has taken this turn in the last
+    :data:`TURN_WINDOW_S` seconds (so this one should recall); False when one has.
+
+    The turn is the session and the prompt, hashed (no text is stored). The marker is created
+    with ``O_EXCL``, so two hooks started together cannot both win. Fail-open: a folder that
+    cannot be written, or any error, answers True: recall is never suppressed by a bookkeeping
+    failure. Markers older than the window are removed here.
+    """
+    import hashlib
+    import os
+
+    try:
+        folder = _turn_folder()
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        name = hashlib.sha256(f"{session_id}\0{prompt}".encode()).hexdigest()[:24]
+        path = os.path.join(folder, name)
+        now = _wall()
+        for old in os.listdir(folder):
+            try:
+                if now - os.stat(os.path.join(folder, old)).st_mtime > TURN_WINDOW_S:
+                    os.unlink(os.path.join(folder, old))
+            except OSError:
+                continue
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return False
+        os.close(fd)
+        return True
+    except Exception:
+        return True
+
+
+def _try_socket_first(prompt: str, session_id: str, budget: _Budget | None = None) -> dict | None:
     """Try the persistent hook daemon socket. Returns full envelope or None.
 
     The socket path returns an already-formatted Claude Code envelope.
     If this returns a non-None dict, the caller writes it to stdout directly
-    (skip _do_recall + _format_envelope). Returns None on any failure,
-    triggering the subprocess fallback.
+    (skip _do_recall + _format_envelope). Returns None when there is no socket, or it
+    failed at once (the caller may fall back). Raises ``_DaemonBusy`` when the socket exists and
+    did not answer in time: the daemon is busy, so nothing else is tried (A-15).
     """
-    try:
-        from superlocalmemory.hooks.hook_daemon import try_socket_recall
-        response = try_socket_recall(
-            prompt=prompt,
-            session_id=session_id,
-            timeout=CLIENT_BUDGET_S,
-        )
-        if response is None or not isinstance(response, dict):
-            return None
-        if not response:
-            return {}
-        return response
-    except Exception:
+    from superlocalmemory.hooks import hook_daemon
+
+    wait = CLIENT_BUDGET_S if budget is None else min(CLIENT_BUDGET_S, budget.remaining())
+    response, outcome = hook_daemon.socket_recall(prompt=prompt, session_id=session_id,
+                                                  timeout=wait)
+    if outcome == hook_daemon.SOCKET_TIMEOUT:
+        raise _DaemonBusy()
+    if response is None or not isinstance(response, dict):
         return None
+    if not response:
+        return {}
+    return response
 
 
 class _Results(list):
@@ -112,9 +184,10 @@ class _Results(list):
     response: dict | None = None
 
 
-def _do_recall(query: str, limit: int = _DEFAULT_LIMIT, session_id: str = "") -> list[dict] | None:
+def _do_recall(query: str, limit: int = _DEFAULT_LIMIT, session_id: str = "",
+               budget: _Budget | None = None) -> list[dict] | None:
     """Enqueue recall to queue, poll for result. Returns list of dicts or None."""
-    response = _do_recall_response(query, limit=limit, session_id=session_id)
+    response = _do_recall_response(query, limit=limit, session_id=session_id, budget=budget)
     if response is None:
         return None
     results = response.get("results", [])
@@ -126,13 +199,17 @@ def _do_recall(query: str, limit: int = _DEFAULT_LIMIT, session_id: str = "") ->
 
 
 def _do_recall_response(query: str, limit: int = _DEFAULT_LIMIT,
-                        session_id: str = "") -> dict | None:
+                        session_id: str = "", budget: _Budget | None = None) -> dict | None:
     """Like ``_do_recall`` but the whole response, so a verdict can travel."""
     try:
         from superlocalmemory.core.recall_queue import RecallQueue
 
         mode = _detect_mode()
         timeout = min(_get_mode_timeout(mode), CLIENT_BUDGET_S)
+        if budget is not None:
+            if budget.spent():
+                return None
+            timeout = min(timeout, budget.remaining())
         stall_timeout = timeout
         db_path = _get_queue_db_path()
         queue = RecallQueue(db_path)
@@ -146,6 +223,7 @@ def _do_recall_response(query: str, limit: int = _DEFAULT_LIMIT,
                 session_id=session_id,
                 priority="high",
                 stall_timeout_s=stall_timeout,
+                deadline_s=timeout,  # A-14: what we stop waiting for is never "delivered"
             )
 
             result = queue.poll_result(request_id, timeout_s=timeout)
@@ -160,7 +238,7 @@ def _do_recall_response(query: str, limit: int = _DEFAULT_LIMIT,
             queue.close()
 
     except Exception:
-        return _fallback_response(query, limit, session_id)
+        return _fallback_response(query, limit, session_id, budget)
 
 
 def _fallback_recall(query: str, limit: int, session_id: str) -> list[dict] | None:
@@ -168,7 +246,8 @@ def _fallback_recall(query: str, limit: int, session_id: str) -> list[dict] | No
     return data["results"] if data is not None else None
 
 
-def _fallback_response(query: str, limit: int, session_id: str) -> dict | None:
+def _fallback_response(query: str, limit: int, session_id: str,
+                       budget: _Budget | None = None) -> dict | None:
     """Fallback: ask the daemon's /recall directly if the queue path fails.
 
     Only through the identity-checked daemon client: the prompt the user just
@@ -197,7 +276,12 @@ def _fallback_response(query: str, limit: int, session_id: str) -> dict | None:
             "depth": "0",
             "via": "hook",  # W3-1: names the injection receipt's path
         })
-        data = daemon_request("GET", f"/recall?{params}", timeout_seconds=CLIENT_BUDGET_S / 2)
+        wait = CLIENT_BUDGET_S / 2
+        if budget is not None:
+            if budget.spent():
+                return None
+            wait = min(wait, budget.remaining())
+        data = daemon_request("GET", f"/recall?{params}", timeout_seconds=wait)
         if not isinstance(data, dict):
             return None
         results = data.get("results", [])
@@ -290,6 +374,7 @@ def _per_prompt_off() -> bool:
 
 
 def main() -> int:
+    budget = _Budget()  # the one budget starts here, before anything is read or checked
     try:
         raw = sys.stdin.read()
     except Exception:
@@ -323,11 +408,19 @@ def main() -> int:
 
     # W3-7d: the daemon's need gate decides and logs every prompt, the obvious
     # ones too (their miss rate is measured), so they go to the socket as well.
+    if budget.spent() or not _first_for_this_turn(session_id, prompt):
+        sys.stdout.write("{}")
+        return 0
     try:
-        socket_result = _try_socket_first(prompt, session_id)
+        socket_result = _try_socket_first(prompt, session_id, budget)
         if socket_result is not None:
             sys.stdout.write(json.dumps(socket_result) if socket_result else "{}")
             return 0
+    except _DaemonBusy:
+        # The socket is there and did not answer: the daemon is busy. A second recall or an
+        # HTTP call would only add to it, and the budget is spent (A-15).
+        sys.stdout.write("{}")
+        return 0
     except Exception:
         pass
 
@@ -343,7 +436,7 @@ def main() -> int:
         return 0
 
     try:
-        results = _do_recall(prompt, limit=_DEFAULT_LIMIT, session_id=session_id)
+        results = _do_recall(prompt, limit=_DEFAULT_LIMIT, session_id=session_id, budget=budget)
     except Exception:
         sys.stdout.write("{}")
         return 0

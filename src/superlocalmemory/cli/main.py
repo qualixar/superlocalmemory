@@ -232,6 +232,11 @@ def main() -> None:
                 from superlocalmemory.cli import laya_offer
                 laya_offer.after_upgrade()
 
+    # 4.2.30 D-28/D-49: the measurement notice, informational, on the first terminal run.
+    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run:
+        from superlocalmemory.cli.measurement_cmd import announce_on_terminal
+        announce_on_terminal(sys.argv)
+
     parser = argparse.ArgumentParser(
         prog="slm",
         description=f"SuperLocalMemory V4 ({_ver}) — AI agent memory with mathematical foundations",
@@ -1320,7 +1325,7 @@ def main() -> None:
     from superlocalmemory.cli.wiki_cmd import register_wiki_parsers
     register_wiki_parsers(sub)  # 4.2.30 WS-6: pages compiled from memory, Markdown both ways
     from superlocalmemory.cli.trust_cmd import register_trust_parsers
-    register_trust_parsers(sub)  # 4.2.30 WS-5: memories waiting for your OK (instruction firewall)
+    register_trust_parsers(sub)  # 4.2.30 WS-5: memories held back until promoted (instruction firewall, D-49)
     from superlocalmemory.cli.why_cmd import register_why_parsers
     register_why_parsers(sub)  # 4.2.30 WS-5: everything that explains one memory
     from superlocalmemory.cli.signing_cmd import register_signing_parsers

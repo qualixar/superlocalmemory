@@ -135,7 +135,17 @@ class QueueConsumer:
                 logger.warning("DLQ mark failed for %s: %s", request_id, exc)
             return True
 
-        result_json = self._execute_recall(query, limit_n, session_id)
+        deadline_at = claimed.get("deadline_at")
+        if deadline_at is not None and time.time() >= deadline_at:
+            # The client stopped waiting before we started: nobody will read the answer, and
+            # running it would record a delivery that never happened (A-14).
+            self._cancel_abandoned(request_id)
+            return True
+
+        from superlocalmemory.core import recall_deadline
+
+        with recall_deadline.scope(deadline_at):
+            result_json = self._execute_recall(query, limit_n, session_id)
 
         try:
             n = self._queue.complete(
@@ -147,6 +157,12 @@ class QueueConsumer:
             logger.warning("Queue complete failed for %s: %s", request_id, exc)
 
         return True
+
+    def _cancel_abandoned(self, request_id: str) -> None:
+        try:
+            self._queue.cancel(request_id)
+        except Exception as exc:
+            logger.warning("Queue cancel failed for %s: %s", request_id, exc)
 
     def _cleanup_completed(self) -> None:
         try:

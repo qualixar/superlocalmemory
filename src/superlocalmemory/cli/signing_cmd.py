@@ -3,7 +3,7 @@
 """``slm signing``: signed memories and the keyed audit chain (WS-5, D-16).
 
     slm signing status [--json] [--all]   # is signing available; how many memories are signed
-    slm signing resign [--yes]            # sign again what a lost key signed (you, at a terminal)
+    slm signing resign [--yes]            # sign again what a lost key or a removed signature left
 
 The key lives in your operating system's keychain and nowhere else; there is no key file.
 Signing detects a change made by something that has the file but not your login session (a
@@ -12,8 +12,12 @@ running as you. A lost key loses no data: memories signed under it are listed as
 under another key", never as modified, and ``resign`` signs them again under the new key.
 
 ``status`` reads the keychain once and the store read-only. ``resign`` blesses what is in the
-store as it stands, so it asks a person: it needs an interactive terminal and refuses while
-the daemon runs (stop it first), like ``slm db fidelity``. It never creates a key.
+store as it stands. Any caller may run it (D-49: an agent passes ``--yes``; at a terminal it
+asks first); each run is recorded as a decision (who, channel ``cli``, counts) and listed under
+"Recent decisions by your agents". It has no undo: it changes no memory, and the marks it
+replaces could no longer be checked. It refuses while the daemon runs (stop it first), like
+``slm db fidelity``, and never creates a key. Signing never claimed to stop a process running
+as you, so asking for a terminal here protected nothing.
 """
 
 from __future__ import annotations
@@ -33,8 +37,10 @@ def register_signing_parsers(sub: Any) -> None:
     st.add_argument("--db", default=None, help="Store file (default: yours)")
     st.add_argument("--json", action="store_true", help="machine-readable output")
     rs = ssub.add_parser("resign", help="Sign again the memories a lost key signed "
-                                        "(you, at a terminal; stop the daemon first)")
-    rs.add_argument("--yes", action="store_true", help="Do not ask for the final yes")
+                                        "(recorded as a decision; stop the daemon first)")
+    rs.add_argument("--yes", action="store_true",
+                    help="Do not ask for the final yes (needed when no terminal is attached)")
+    rs.add_argument("--profile", default="", help="Profile the decision is recorded under")
     rs.add_argument("--db", default=None, help="Store file (default: yours)")
 
 
@@ -70,14 +76,28 @@ def _daemon_running() -> bool:
     return bool(owned_daemon_process_alive())
 
 
+def _question(other: int, removed: int, record_bad: bool) -> str:
+    parts = []
+    if other:
+        parts.append(f"{other} memories were signed under a key this computer no longer holds")
+    if removed:
+        parts.append(f"{removed} memories were signed and lost their signature (it was removed, "
+                     "so they may have been changed: look at them with `slm why <id>` first)")
+    if record_bad and not (other or removed):
+        parts.append("the signing record does not check under the current key")
+    return "; ".join(parts).capitalize() + ". Sign them again as they are now? [y/N] "
+
+
 def _resign(args: Namespace) -> int:
     from superlocalmemory.cli import doctor_trust
     from superlocalmemory.cli.doctor_truth import _db_path
     from superlocalmemory.trust import signatures
     from superlocalmemory.trust import signing_key as sk
 
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        print("Signing again asks a person: run it at an interactive terminal.", file=sys.stderr)
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if not interactive and not getattr(args, "yes", False):
+        print("Nothing changed: without a terminal to ask at, pass --yes to sign again.",
+              file=sys.stderr)
         return 2
     if _daemon_running():
         print("SLM is running. Stop it first (`slm serve stop`), then run `slm signing resign` "
@@ -94,23 +114,43 @@ def _resign(args: Namespace) -> int:
     conn = sqlite3.connect(str(path), timeout=30)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
-        waiting = conn.execute("SELECT COUNT(*) FROM fact_signatures WHERE key_id != ?",
-                               (loaded.signer.key_id,)).fetchone()[0]
-        if not waiting:
-            print("Nothing to sign again: no memory is signed under another key.")
+        other = conn.execute("SELECT COUNT(*) FROM fact_signatures WHERE key_id != ?",
+                             (loaded.signer.key_id,)).fetchone()[0]
+        report = signatures.verify(conn, loaded.signer, sample=0)
+        removed = report.missing
+        record_bad = report.record in (signatures.RECORD_MISSING, signatures.RECORD_FORGED,
+                                       signatures.RECORD_OTHER_KEY)
+        if not (other or removed or record_bad):
+            print("Nothing to sign again: no memory is signed under another key, none lost its "
+                  "signature, and the signing record checks.")
             return 0
         if not getattr(args, "yes", False):
-            answer = input(f"{waiting} memories were signed under a key this computer no longer "
-                           "holds. Sign them again as they are now? [y/N] ")
+            answer = input(_question(other, removed, record_bad))
             if answer.strip().lower() not in ("y", "yes"):
                 print("Nothing changed.")
                 return 1
         with conn:
-            done = signatures.resign(conn, loaded.signer, only_other_key=True)
+            done = signatures.resign(conn, loaded.signer, only_other_key=True,
+                                     include_missing=True)
+            _record(conn, args, loaded.signer.key_id, done, other, removed)
     finally:
         conn.close()
     print(f"Signed {done} memories again under the current key.")
     return 0
+
+
+def _record(conn: sqlite3.Connection, args: Namespace, key_id: str, done: int, other: int,
+            removed: int) -> None:
+    """The decision record (D-49): who signed again, through the command line, and how many."""
+    from superlocalmemory.cli.health_memory import _profile
+    from superlocalmemory.cli.trust_cmd import _who
+    from superlocalmemory.core import decisions
+
+    summary = (f"Signed {done} memories again under the current key ({other} under a lost key, "
+               f"{removed} that had lost their signature)")
+    decisions.log(conn, profile_id=_profile(args), kind=decisions.SIGNING, subject_id=key_id,
+                  action="resign", decider=decisions.Decider(_who(), "cli"), summary=summary,
+                  detail={"signed": done, "other_key": other, "removed": removed})
 
 
 def run(args: Namespace) -> None:

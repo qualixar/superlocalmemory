@@ -23,19 +23,56 @@ def _db_path(args: Namespace) -> Path:
     return canonical_data_root() / "memory.db"
 
 
+def _refuse_no_store(path: Path, use_json: bool) -> None:
+    message = f"No store at {path}"
+    if use_json:
+        from superlocalmemory.cli.json_output import json_print
+        json_print("doctor", error={"code": "NO_STORE", "message": message})
+    else:
+        print(message, file=sys.stderr)
+    sys.exit(2)
+
+
+def _print_certificates(certificates: list, second: list) -> None:
+    live = [c for c in certificates if not c["voided_at"]]
+    print(f"Judge certificates: {len(live)} open, {len(certificates) - len(live)} voided")
+    for c in certificates[:20]:
+        state = (f"voided {c['voided_at'][:10]} ({c['void_reason']})" if c["voided_at"]
+                 else f"open since {c['issued_at'][:10]}")
+        print(f"  {c['tier']}/{c['model']} {c['verdict']} [{c['population']}, {c['regime']}]: "
+              f"{state}; {c['n']} audited, {c['errors']} wrong, threshold {c['threshold']:.2f}")
+    print("Second opinions (M-06: a stronger judge asked in shadow):"
+          + ("" if second else " none yet"))
+    for s in second:
+        print(f"  {s['lower_tier']}/{s['lower_model']} -> {s['upper_tier']}/{s['upper_model']}: "
+              f"sure of something else on {s['disagreed']} of {s['pairs']} pairs "
+              f"(95% bounds {s['rate_lower']:.2f}-{s['rate_upper']:.2f})")
+
+
+def _print_text(path: Path, results: list, violated: list, certificates: list, second: list,
+                sig: dict, audit: dict) -> None:
+    from superlocalmemory.cli import doctor_trust
+    from superlocalmemory.truth import invariants as inv
+
+    print(f"Truth invariants on {path} (read-only)")
+    for r in results:
+        mark = {inv.OK: "ok  ", inv.VIOLATED: "FAIL", inv.NOT_APPLICABLE: "n/a ",
+                inv.NOT_CHECKED: "----"}[r.status]
+        tail = f": {r.count} ({', '.join(r.sample)})" if r.status == inv.VIOLATED else ""
+        print(f"  [{mark}] {r.invariant} {r.title}{tail}")
+    print(f"{len(violated)} violated" if violated else "No violations among the checked invariants")
+    _print_certificates(certificates, second)
+    for line in doctor_trust.lines(sig, audit):
+        print(line)
+
+
 def cmd_doctor_truth(args: Namespace) -> None:
     from superlocalmemory.truth import invariants as inv
 
     path = _db_path(args)
     use_json = getattr(args, "json", False)
     if not path.is_file():
-        message = f"No store at {path}"
-        if use_json:
-            from superlocalmemory.cli.json_output import json_print
-            json_print("doctor", error={"code": "NO_STORE", "message": message})
-        else:
-            print(message, file=sys.stderr)
-        sys.exit(2)
+        _refuse_no_store(path, use_json)
     from superlocalmemory.cli import doctor_trust
     from superlocalmemory.core import judge_certificates as certs
     from superlocalmemory.core import shadow_escalation as shadow
@@ -60,28 +97,7 @@ def cmd_doctor_truth(args: Namespace) -> None:
              "sample": list(r.sample)} for r in results], "certificates": certificates,
             "second_opinions": second, "signatures": sig, "audit_chain": audit})
     else:
-        print(f"Truth invariants on {path} (read-only)")
-        for r in results:
-            mark = {inv.OK: "ok  ", inv.VIOLATED: "FAIL", inv.NOT_APPLICABLE: "n/a ",
-                    inv.NOT_CHECKED: "----"}[r.status]
-            tail = f": {r.count} ({', '.join(r.sample)})" if r.status == inv.VIOLATED else ""
-            print(f"  [{mark}] {r.invariant} {r.title}{tail}")
-        print(f"{len(violated)} violated" if violated else "No violations among the checked invariants")
-        live = [c for c in certificates if not c["voided_at"]]
-        print(f"Judge certificates: {len(live)} open, {len(certificates) - len(live)} voided")
-        for c in certificates[:20]:
-            state = (f"voided {c['voided_at'][:10]} ({c['void_reason']})" if c["voided_at"]
-                     else f"open since {c['issued_at'][:10]}")
-            print(f"  {c['tier']}/{c['model']} {c['verdict']} [{c['population']}, {c['regime']}]: "
-                  f"{state}; {c['n']} audited, {c['errors']} wrong, threshold {c['threshold']:.2f}")
-        print("Second opinions (M-06: a stronger judge asked in shadow):"
-              + ("" if second else " none yet"))
-        for s in second:
-            print(f"  {s['lower_tier']}/{s['lower_model']} -> {s['upper_tier']}/{s['upper_model']}: "
-                  f"sure of something else on {s['disagreed']} of {s['pairs']} pairs "
-                  f"(95% bounds {s['rate_lower']:.2f}-{s['rate_upper']:.2f})")
-        for line in doctor_trust.lines(sig, audit):
-            print(line)
+        _print_text(path, results, violated, certificates, second, sig, audit)
     if violated or doctor_trust.failed(sig, audit):
         sys.exit(1)
 

@@ -42,8 +42,13 @@ def signature_state(conn: sqlite3.Connection, signer: sk.Signer | None, key_stat
         return {"ok": None, "words": f"The signatures could not be checked ({type(exc).__name__}).",
                 "key_words": sk.words(key_status)}
     out = r.as_dict()
-    out["ok"] = r.ok if r.checked else None
-    if r.modified:
+    out["ok"] = r.ok if (r.checked or r.missing or not r.ok) else None
+    if r.missing:
+        words = (f"{r.missing} memories were signed and no longer have their signature. It was "
+                 "removed outside SuperLocalMemory, so they may have been changed.")
+    elif r.record in (signatures.RECORD_MISSING, signatures.RECORD_FORGED):
+        words = signatures.record_words(r.record)
+    elif r.modified:
         words = (f"{r.modified} of the {r.checked} memories checked no longer match their "
                  "signature. They were changed outside SuperLocalMemory.")
     elif not r.signed:

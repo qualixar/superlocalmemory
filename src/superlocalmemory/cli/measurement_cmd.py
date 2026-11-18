@@ -110,10 +110,34 @@ def announce_if_pending() -> bool:
         return False
 
 
+#: Commands whose output is read by a machine, or that show the notice themselves.
+_QUIET = frozenset({"mcp", "hook", "daemon", "measurement", "serve", "setup", "upgrade-hosts"})
+
+
+def announce_on_terminal(argv: list[str]) -> bool:
+    """The first ``slm`` run on a terminal after an upgrade (``pip install -U`` and plugin
+    updates print nothing otherwise): show the notice on stderr. It is informational and gates
+    nothing (D-49). Silent for machine commands, ``--json`` and anything without a terminal;
+    counted as seen only because a terminal printed it. Never raises."""
+    import sys
+
+    try:
+        command = argv[1] if len(argv) > 1 else ""
+        if not command or command.startswith("-") or command in _QUIET or "--json" in argv:
+            return False
+        if not (sys.stderr.isatty() and sys.stdin.isatty()):
+            return False
+        from superlocalmemory.outcomes import disclosure
+
+        return disclosure.announce(_home(), channel="cli")
+    except Exception:  # noqa: BLE001 - a notice never breaks a command
+        return False
+
+
 def run(args: Namespace) -> None:
     rc = cmd_measurement(args)
     if rc:
         raise SystemExit(rc)
 
 
-__all__ = ["announce_if_pending", "cmd_measurement", "register_measurement_parsers", "run"]
+__all__ = ["announce_if_pending", "announce_on_terminal", "cmd_measurement", "register_measurement_parsers", "run"]

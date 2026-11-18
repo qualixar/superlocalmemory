@@ -20,9 +20,11 @@ from superlocalmemory.core.feature_flags import (
 )
 
 #: What 4.2.30 measures by default: injection receipts (D-22), randomised
-#: withholding (D-28, D-34) and logged adjacent swaps (D-46). Everything else
+#: withholding (D-28, D-34), logged adjacent swaps (D-46) and usage detection (D-49: without
+#: it the withholding and the swaps could never observe a ``used`` outcome). Everything else
 #: ships dark.
-DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout", "outcomes.swaps"})
+DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout", "outcomes.swaps",
+                        "outcomes.usage"})
 
 
 def test_4230_measures_by_default_and_every_other_flag_ships_dark() -> None:
@@ -165,3 +167,20 @@ def test_writing_a_flag_keeps_the_kill_switch(tmp_path) -> None:
     set_kill_switch(tmp_path, True)
     write_flag(tmp_path, "truth.slots", FlagState.ON)
     assert FeatureFlags(tmp_path, environ={}).killed
+
+
+def test_the_need_gate_help_says_shadow_still_injects_memories() -> None:
+    """In shadow the score never skips but memories ARE injected (labels need deliveries), so
+    the help text must not call it a mode that changes nothing."""
+    words = FLAGS["delivery.need_gate"].summary.lower()
+    assert "shadow" in words and "injected" in words and "never skips" in words
+    assert "changes nothing" not in words
+
+
+def test_the_docs_say_what_the_need_gate_shadow_does() -> None:
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / "docs" / "configuration.md").read_text()
+    line = next(x for x in text.splitlines() if x.startswith("- **`delivery.need_gate`"))
+    assert "`shadow` logs the threshold it would use without applying it" not in line
+    assert "memories are still injected" in line and "never skips" in line

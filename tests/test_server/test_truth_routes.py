@@ -50,7 +50,8 @@ def test_settling_keeps_one_side_and_closes_the_dispute(disputed) -> None:
     did = _dispute_id(app)
     r = client.post(f"/api/disputes/{did}/settle", json={"keep": new, "channel": "dashboard"})
     assert r.status_code == 200, r.text
-    assert r.json()["retired"] == [old] and r.json()["settled_by"].startswith("person:dashboard")
+    # the channel is the connection's: a body that says "dashboard" is not the dashboard
+    assert r.json()["retired"] == [old] and r.json()["settled_by"] == "client:local@http"
     assert client.get("/api/truth/attention").json()["counts"]["disputes"] == 0
     again = client.post(f"/api/disputes/{did}/settle", json={"keep": new})
     assert again.status_code == 404
@@ -171,20 +172,54 @@ def audited(disputed):
     return client, app, old, new
 
 
-def test_the_audit_queue_answers_on_this_computer_only(audited) -> None:
+def test_the_audit_queue_answers_for_any_caller_and_a_parameter_decides_nothing(audited) -> None:
     client, app, old, new = audited
-    body = client.get("/api/audit/pending").json()
+    body = client.get("/api/audit/pending", params={"caller_view": "remote"}).json()
     assert body["count"] == 1
     (item,) = body["items"]
     assert [m_["fact_id"] for m_ in item["memories"]] == [old, new] and "verdict" not in repr(item)
-    remote = {"caller_view": "remote"}
-    assert client.get("/api/audit/pending", params=remote).status_code == 403
     url = f"/api/audit/{item['item_id']}/answer"
-    assert client.post(url, params=remote, json={"label": "same"}).status_code == 403
     assert client.post(url, json={"label": "maybe"}).status_code == 422
-    r = client.post(url, json={"label": "replaces"})
+    r = client.post(url, json={"label": "replaces", "model": "some-model"})
     assert r.status_code == 200 and r.json()["labelled"] == 1
+    assert r.json()["labeller_kind"] == "agent" and r.json()["counted"] == 1
     assert client.get("/api/audit/pending").json()["count"] == 0
     assert client.post(url, json={"label": "replaces"}).status_code == 404
-    label = app.state.engine._db.execute("SELECT labeller, blind FROM judge_labels")[0]
-    assert label["labeller"].startswith("person:dashboard") and label["blind"] == 1
+    label = app.state.engine._db.execute(
+        "SELECT labeller, blind, labeller_kind, labeller_model FROM judge_labels")[0]
+    assert label["labeller"] == "client:local@http" and label["blind"] == 1
+    assert (label["labeller_kind"], label["labeller_model"]) == ("agent", "some-model")
+
+
+def test_only_the_dashboards_own_door_labels_as_a_person(audited) -> None:
+    from fastapi.testclient import TestClient
+
+    from superlocalmemory.core.agent_attribution import CHANNEL_HEADER
+    from superlocalmemory.core.security_primitives import ensure_install_token
+
+    client, app, _old, _new = audited
+    (item,) = client.get("/api/audit/pending").json()["items"]
+    url = f"/api/audit/{item['item_id']}/answer"
+    page = TestClient(app, client=("127.0.0.1", 50000))
+    page.headers["X-Install-Token"] = ensure_install_token()
+    forged = client.post(url, json={"label": "replaces", "channel": "dashboard"},
+                         headers={CHANNEL_HEADER: "dashboard"})
+    assert forged.json()["labeller_kind"] == "agent" and forged.json()["counted"] == 0
+    client.post(f"/api/audit/{item['item_id']}/retract", json={})
+    r = page.post(url, json={"label": "replaces"}, headers={CHANNEL_HEADER: "dashboard"})
+    assert r.json()["labeller_kind"] == "person" and r.json()["counted"] == 1
+
+
+def test_a_label_can_be_retracted_and_a_settlement_reopened(audited) -> None:
+    client, app, old, new = audited
+    (item,) = client.get("/api/audit/pending").json()["items"]
+    client.post(f"/api/audit/{item['item_id']}/answer", json={"label": "same"})
+    assert client.post(f"/api/audit/{item['item_id']}/retract", json={}).json()["retracted"] == 1
+    assert client.get("/api/audit/pending").json()["count"] == 1
+    assert client.post(f"/api/audit/{item['item_id']}/retract", json={}).status_code == 404
+    did = _dispute_id(app)
+    assert client.post(f"/api/disputes/{did}/reopen").status_code == 404  # still open
+    client.post(f"/api/disputes/{did}/settle", json={"keep": new})
+    r = client.post(f"/api/disputes/{did}/reopen", json={})
+    assert r.status_code == 200 and r.json()["restored"] == [old]
+    assert client.get("/api/truth/attention").json()["counts"]["disputes"] == 1

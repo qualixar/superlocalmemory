@@ -67,7 +67,7 @@ def test_i05_and_i06_a_superseded_value_out_of_order_and_still_current(slotted) 
 
     with db.raw_connection() as conn:
         dispute = conn.execute("SELECT dispute_id FROM slot_disputes").fetchone()[0]
-        slot_store.resolve_dispute(conn, dispute, "b", resolved_by="person:alex")
+        slot_store.resolve_dispute(conn, dispute, "b", resolved_by="alice@cli")
     assert "I-06" in _violated(db)  # settled but not yet in the ledger
     _reconcile(db)
     assert _violated(db) == set()

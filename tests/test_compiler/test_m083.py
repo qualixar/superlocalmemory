@@ -26,7 +26,7 @@ def test_m083_is_deferred_after_m082_additive_and_repairable() -> None:
     catalogued = {m.name: m for m in DEFERRED_MIGRATIONS}
     assert M083.NAME in catalogued and catalogued[M083.NAME].dependencies == (M082.NAME,)
     assert M083.DOWNGRADE_FLOOR == 51 and M083.DB_TARGET == "memory"
-    assert _schema_version.SUPPORTED_SCHEMA_VERSION == 83
+    assert _schema_version.SUPPORTED_SCHEMA_VERSION >= 83
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE atomic_facts (fact_id TEXT PRIMARY KEY)")
     assert not M083.verify(conn)

@@ -4,11 +4,12 @@
 
 ``slm measurement``, the dashboard card and the plugin skills all call this
 module, so there is one definition of "measuring" and one place that changes it.
-The two interventions, randomised withholding (``outcomes.holdout``) and logged
-swaps (``outcomes.swaps``), go on and off together. Receipts
+The interventions, randomised withholding (``outcomes.holdout``), logged swaps
+(``outcomes.swaps``) and the usage check (``outcomes.usage``, on by default since D-49: the
+other two cannot observe a ``used`` outcome without it), go on and off together. Receipts
 (``outcomes.receipts``: ids and numbers only) are left alone unless asked for.
-Usage detection and the need gate are the person's own choices and are never
-touched here. The kill switch (``slm flags kill``) still turns everything off.
+The need gate is a separate choice and is never touched here. The kill switch
+(``slm flags kill``) still turns everything off.
 
 Every change is written to the history in ``disclosures.json`` with its time and
 surface; a failure to write that history never stops a switch being turned off.
@@ -26,6 +27,9 @@ from superlocalmemory.outcomes import disclosure
 logger = logging.getLogger(__name__)
 
 INTERVENTIONS = ("outcomes.holdout", "outcomes.swaps")
+USAGE = "outcomes.usage"
+#: What ``slm measurement off`` / ``on`` changes (receipts only when asked).
+SWITCHED = (*INTERVENTIONS, USAGE)
 RECEIPTS = "outcomes.receipts"
 
 #: (flag, short label, what it does in plain words)
@@ -42,7 +46,7 @@ _FLAG_WORDS = (
      "is left out or added."),
     ("outcomes.usage", "Usage check",
      "Compares an agent's last reply with the memories it was given to see which were used. "
-     "Ids and scores only. Off unless you turn it on."),
+     "Ids and scores only; this computer only. Switched off with the withholding and swaps."),
     ("delivery.need_gate", "Need check",
      "Decides for each prompt whether memory is needed, and recalls a few of the prompts it "
      "would skip to measure its own misses. Never stores the prompt text. Off unless you "
@@ -79,7 +83,7 @@ def set_measurement(slm_home: Path, on: bool, *, channel: str,
     """
     _check_channel(channel)
     target = FlagState.ON if on else FlagState.OFF
-    wanted = (*INTERVENTIONS, RECEIPTS) if include_receipts else INTERVENTIONS
+    wanted = (*SWITCHED, RECEIPTS) if include_receipts else SWITCHED
     changed: dict[str, str] = {}
     for flag_id in wanted:
         # Compare the stored choice, not an environment override or the kill
@@ -102,4 +106,4 @@ def _record(slm_home: Path, on: bool, channel: str, changed: dict[str, str]) -> 
         logger.warning("measurement change not recorded in disclosures.json: %s", exc)
 
 
-__all__ = ["INTERVENTIONS", "RECEIPTS", "set_measurement", "status"]
+__all__ = ["INTERVENTIONS", "RECEIPTS", "SWITCHED", "USAGE", "set_measurement", "status"]

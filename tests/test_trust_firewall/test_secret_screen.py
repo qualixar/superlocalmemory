@@ -213,3 +213,26 @@ def test_other_events_and_a_screen_that_cannot_run(monkeypatch) -> None:
     assert fake.github().encode() in event_spool._encode(odd)  # only a tool event carries a tool's text
     monkeypatch.setattr(ss, "screen", lambda _t: (_ for _ in ()).throw(RuntimeError("no")))
     assert event_spool._encode(_tool_event(output_summary=fake.github())) is None  # dropped, never clear
+
+
+# -- A-11: the side fields of a save --------------------------------------------------------------
+
+@pytest.mark.parametrize("mode, replaced, counted", [("off", False, False), ("shadow", False, True),
+                                                      ("on", True, True)])
+def test_screen_field_follows_the_flag(monkeypatch, caplog, mode, replaced, counted) -> None:
+    monkeypatch.setenv(FLAG, mode)
+    secret = fake.github()
+    with caplog.at_level("INFO", logger="superlocalmemory.trust.secret_screen"):
+        out = ss.screen_field(f"token {secret}")
+    assert (secret not in out) is replaced
+    assert any("credential(s) before save" in r.message for r in caplog.records) is counted
+    assert secret not in caplog.text
+
+
+def test_screen_field_leaves_none_and_lists_alone(monkeypatch) -> None:
+    monkeypatch.setenv(FLAG, "on")
+    assert ss.screen_field(None) is None
+    assert ss.screen_fields(None) is None
+    secret = fake.github()
+    out = ss.screen_fields(["repo:proj", f"error:{secret}"])
+    assert out[0] == "repo:proj" and secret not in out[1] and "[REDACTED:" in out[1]

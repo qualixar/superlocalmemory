@@ -260,6 +260,11 @@ window.slmInstallToken = (function () {
                 if (!headers.has('X-Install-Token')) {
                     headers.set('X-Install-Token', token);
                 }
+                // D-49: which of SuperLocalMemory's own doors made the call. The daemon records it on
+                // every decision (and a dashboard save as the user's own words); it grants nothing.
+                if (!headers.has('X-SLM-Channel')) {
+                    headers.set('X-SLM-Channel', 'dashboard');
+                }
                 init.headers = headers;
                 init.credentials = init.credentials || 'same-origin';
                 return send();

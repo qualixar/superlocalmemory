@@ -14,7 +14,8 @@ from tests.test_core.test_coverage_backfill import _db
 TAINT = env_name("trust.taint")
 SCREEN = env_name("trust.secret_screen")
 
-PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user")
+PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user",
+                  agent_id_source="dashboard")
 AGENT = fo.Origin("remember_http", "verbatim", source_type="http", role="assistant",
                   agent_id="claude")
 SYSTEM = fo.Origin("loop_ledger", "system_built", source_type="http")

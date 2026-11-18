@@ -285,7 +285,7 @@ remember(content="SLM now ships one big release a month",
 
 A later memory with the same slot and the same value is a restatement and
 changes nothing. A different value does not silently replace the old one: it
-opens a dispute, and the user's answer (or a checked rule) settles it. A slot
+opens a dispute, and a decision (by you on evidence, the user, or a checked rule) settles it; `settle_dispute` records who decided and `keep="reopen"` undoes it. A slot
 with no value only groups memories and never retires anything.
 
 When the fact was read from a local file, pass `source_file` with its absolute

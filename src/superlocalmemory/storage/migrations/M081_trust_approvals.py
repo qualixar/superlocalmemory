@@ -10,7 +10,7 @@ sections, until a person approves it (``trust/firewall.py``).
 This table records the two things nothing else can: what was *asked for* and refused or
 withheld (``wanted``: ``pin``, ``rule``, ``decision``, ``core`` or ``session_start``, with who
 asked and through which door), and the person's answer (who, when, through which door:
-``cli`` or ``dashboard``; an agent never approves). The approval itself raises the fact to
+``mcp``, ``cli``, ``http`` or ``dashboard``; any caller may promote, D-49). The promotion itself raises the fact to
 ``user_confirmed`` in ``fact_trust`` (``fact_trust.mark_confirmed``); this row is the
 review record, and the waiting list. No memory text is stored here.
 

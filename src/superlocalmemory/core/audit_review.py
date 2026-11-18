@@ -1,9 +1,9 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""The audit queue a person answers: blind labels that let a judge earn a certificate (W2, R-16).
+"""The audit queue any caller answers: blind labels that let a judge earn a certificate (W2, R-16, D-49).
 
 ``core/audit_sampler`` draws which judge receipts get audited, at random and
-before anyone knows the answer. This module is what a person sees and how the
+before anyone knows the answer. This module is what a labeller sees and how the
 answer is written:
 
 * one item per *pair* (``inputs_hash``), whichever tiers were asked about it:
@@ -15,11 +15,15 @@ answer is written:
 * the answer is one of the question's own options or "I can't tell"
   (``cannot_tell``, which never counts for or against a judge).
 
-Audits are for people on this machine: the CLI asks only at an interactive
-terminal and the HTTP routes refuse remote callers. An agent that answers in a
-person's place would be grading its own kind, so no MCP tool writes an audit
-label. (A local process can still reach the HTTP route with the install token;
-the labeller and channel are recorded so such labels can be told apart.)
+**Any caller may label** (D-49): an agent through MCP, the command line or HTTP, a script, or
+a person on the dashboard. The label row records the labeller (``actor@channel``), its kind
+(``person`` for the dashboard's door, otherwise ``agent``) and, for an agent, its own model id.
+**A label counts toward a certificate cell only if the labeller's model differs from the judged
+tier's model** (a person's label always counts; an agent that gives no model id does not count),
+so a judge never grades itself. The labeller is not shown the judge's verdict, model or score:
+blindness is unchanged, and an agent that names its model is simply not offered pairs that only
+its own model judged. One label per receipt per labeller; ``retract`` takes a label back
+(recorded in the decision log), and the receipt is waiting again.
 """
 
 from __future__ import annotations
@@ -28,11 +32,12 @@ import json
 import sqlite3
 from collections.abc import Sequence
 
+from superlocalmemory.core import decisions
 from superlocalmemory.core.audit_sampler import record_audit_label
-from superlocalmemory.core.judge_calibration import CANNOT_TELL
+from superlocalmemory.core.judge_calibration import CANNOT_TELL, COUNTING_LABEL
 from superlocalmemory.core.judge_questions import QUESTIONS
 
-CHANNELS = ("cli", "dashboard")
+CHANNELS = decisions.CHANNELS
 TEXT_CHARS = 1200
 MAX_ITEMS = 50
 
@@ -68,11 +73,13 @@ SELECT r.inputs_hash, MIN(r.question_id), MIN(r.fact_ids_json), MIN(r.decided_at
  WHERE r.profile_id = ? AND (r.audit_selected = 1 OR r.inbox_selected = 1)
    AND r.inputs_hash IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM judge_labels l
-                    WHERE l.receipt_id = r.receipt_id AND l.source = 'audit')
+                    WHERE l.receipt_id = r.receipt_id AND l.source = 'audit'
+                      AND {counting})
+   AND (? = '' OR r.model <> ?)
  GROUP BY r.inputs_hash
  ORDER BY MIN(r.decided_at), r.inputs_hash
  LIMIT ?
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 
 def _texts(conn: sqlite3.Connection, fact_ids: Sequence[str]) -> list[dict]:
@@ -90,14 +97,24 @@ def _texts(conn: sqlite3.Connection, fact_ids: Sequence[str]) -> list[dict]:
 POOL = 500
 
 
-def pending(conn: sqlite3.Connection, profile_id: str, limit: int = 10) -> list[dict]:
+def _model(raw: str) -> str:
+    return " ".join(str(raw or "").split())[:80]
+
+
+def pending(conn: sqlite3.Connection, profile_id: str, limit: int = 10,
+            labeller_model: str = "") -> list[dict]:
     """Pairs drawn for audit and not yet answered, without any verdict, the most
-    valuable first (``core/audit_value``: answers that move a certificate, then risk)."""
+    valuable first (``core/audit_value``: answers that move a certificate, then risk).
+
+    ``labeller_model`` (an agent's own model id) leaves out pairs that only that same model
+    judged: its label could not count, so it is not offered the work.
+    """
     from superlocalmemory.core import audit_value
 
     limit = max(1, min(int(limit), MAX_ITEMS))
+    mine = _model(labeller_model)
     try:
-        rows = conn.execute(_PENDING, (profile_id, POOL)).fetchall()
+        rows = conn.execute(_PENDING, (profile_id, mine, mine, POOL)).fetchall()
     except sqlite3.OperationalError:  # a store before M072
         return []
     out = []
@@ -123,39 +140,75 @@ def pending_count(conn: sqlite3.Connection, profile_id: str) -> int:
             "SELECT COUNT(DISTINCT inputs_hash) FROM judge_receipts r WHERE r.profile_id = ? "
             "AND (r.audit_selected = 1 OR r.inbox_selected = 1) AND r.inputs_hash IS NOT NULL "
             "AND NOT EXISTS (SELECT 1 FROM judge_labels l WHERE l.receipt_id = r.receipt_id "
-            "AND l.source = 'audit')", (profile_id,)).fetchone()[0])
+            "AND l.source = 'audit' AND " + COUNTING_LABEL + ")", (profile_id,)).fetchone()[0])
     except sqlite3.OperationalError:
         return 0
 
 
 def answer(conn: sqlite3.Connection, *, profile_id: str, item_id: str, label: str,
-           channel: str, actor: str = "") -> int:
-    """Write the person's label to every drawn, unlabelled receipt of the pair.
+           channel: str, actor: str = "", kind: str = "agent", model: str = "") -> dict:
+    """Write one blind label to every drawn receipt of the pair that this labeller has not
+    labelled and that has no counting label yet.
 
-    Returns how many receipts it labelled. Raises ``LookupError`` when the item
-    is not waiting in this profile and ``ValueError`` for an answer that is not
-    one of the question's options.
+    Returns ``{"labelled": n, "counted": k}``: how many receipts it labelled and for how many
+    the label counts toward a certificate cell (D-49: always for a person; for an agent only
+    where its model, ``model``, is known and differs from the judged tier's). Raises
+    ``LookupError`` when the item is not waiting for this labeller in this profile and
+    ``ValueError`` for an answer that is not one of the question's options.
     """
     if channel not in CHANNELS:
         raise ValueError(f"channel must be one of {CHANNELS}")
+    who = decisions.Decider(decisions.clean_actor(actor), channel)
+    labeller = who.ref
     receipts = [r[0] for r in conn.execute(
         "SELECT r.receipt_id FROM judge_receipts r WHERE r.profile_id = ? AND r.inputs_hash = ? "
         "AND (r.audit_selected = 1 OR r.inbox_selected = 1) AND NOT EXISTS (SELECT 1 FROM "
-        "judge_labels l WHERE l.receipt_id = r.receipt_id AND l.source = 'audit') "
-        "ORDER BY r.receipt_id", (profile_id, item_id))]
+        "judge_labels l WHERE l.receipt_id = r.receipt_id AND l.source = 'audit' AND "
+        f"({COUNTING_LABEL} OR l.labeller = ?)) ORDER BY r.receipt_id",
+        (profile_id, item_id, labeller))]
     if not receipts:
         raise LookupError(f"no audit item {item_id} waiting")
-    labeller = f"person:{channel}" + (f":{actor[:80]}" if actor else "")
     conn.execute("SAVEPOINT audit")
+    counted = 0
     try:
         for receipt_id in receipts:  # the question's own options are checked per receipt
-            record_audit_label(conn, receipt_id, label, labeller=labeller, blind=True)
+            counted += bool(record_audit_label(conn, receipt_id, label, labeller=labeller,
+                                               blind=True, kind=kind, model=model))
     except Exception:
         conn.execute("ROLLBACK TO audit")
         conn.execute("RELEASE audit")
         raise
     conn.execute("RELEASE audit")
-    return len(receipts)
+    decisions.log(conn, profile_id=profile_id, kind=decisions.LABEL, subject_id=item_id,
+                  action="label", decider=who,
+                  summary="Gave a blind audit label" + ("" if counted else " (does not count)"),
+                  detail={"receipts": receipts, "labeller": labeller, "kind": kind,
+                          "model": _model(model), "counted": counted})
+    return {"labelled": len(receipts), "counted": counted}
 
 
-__all__ = ["CHANNELS", "PLAIN", "answer", "pending", "pending_count"]
+def retract(conn: sqlite3.Connection, *, profile_id: str, item_id: str, channel: str,
+            actor: str = "") -> dict:
+    """Take back the labels the newest un-retracted label decision for ``item_id`` wrote: the
+    receipts are waiting again and no certificate rests on them. Recorded like any decision.
+    ``LookupError`` when there is no label of this pair to retract."""
+    if channel not in CHANNELS:
+        raise ValueError(f"channel must be one of {CHANNELS}")
+    who = decisions.Decider(decisions.clean_actor(actor), channel)
+    before = decisions.open_decision(conn, profile_id, decisions.LABEL, item_id)
+    if before is None:
+        raise LookupError(f"no label of item {item_id} to retract")
+    detail = before["detail"]
+    receipts = list(detail.get("receipts") or [])
+    marks = ",".join("?" * len(receipts)) or "''"
+    removed = conn.execute(
+        f"DELETE FROM judge_labels WHERE source = 'audit' AND labeller = ? AND receipt_id IN ({marks})",
+        (detail.get("labeller", ""), *receipts)).rowcount
+    decisions.mark_undone(conn, before["decision_id"], who)
+    decisions.log(conn, profile_id=profile_id, kind=decisions.LABEL, subject_id=item_id,
+                  action="retract", decider=who, summary="Retracted a blind audit label",
+                  detail={"removed": removed})
+    return {"retracted": removed}
+
+
+__all__ = ["CHANNELS", "PLAIN", "answer", "pending", "pending_count", "retract"]

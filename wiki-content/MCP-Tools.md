@@ -57,10 +57,10 @@ In the tables, a parameter followed by `?` is optional. The Profiles column says
 | `delete_memory` | `fact_id`, `agent_id`?, `profile_id`? | Delete one memory by exact fact id | full, power | write |
 | `review_correction` | `case_id`, `action`, `expected_version`, `event_valid_until`?, `profile_id`? | Apply, reject or roll back a review-gated correction case; `expected_version` guards against stale reviews | core, code, full, power | write |
 | `list_corrections` | `limit`?, `profile_id`? | List correction cases for a human or host reviewer | core, code, full, power | read |
-| `list_disputes` | `limit`?, `profile_id`? | What needs the user's answer: open disputes (both sides, newest first) and memories whose source file changed | full, power | read |
-| `settle_dispute` | `dispute_id`, `keep`, `profile_id`? | Record the user's answer: `keep` is the true side's `fact_id`, `both` or `unrelated` | core, code, full, power | write |
+| `list_disputes` | `limit`?, `profile_id`?, `audit`?, `model`? | What needs an answer: open disputes (both sides, newest first) and memories whose source file changed; `audit=true` lists the blind audit queue | full, power | read |
+| `settle_dispute` | `dispute_id`, `keep`, `profile_id`?, `model`? | Settle a dispute (recorded with your agent id, undone with `keep="reopen"`): `keep` is the true side's `fact_id`, `both` or `unrelated`; `dispute_id="audit:<item>"` gives a blind audit label | core, code, full, power | write |
 | `switch_profile` | `profile_id` | Change the active memory profile. This is a different concept from the MCP tool profile that decides which tools you see | core, code, full, power | host only |
-| `core_memory` | `action`, `fact_id`?, `profile_id`? | Manage the Core Memory pin set: `action` is `pin`, `unpin` or `list`. A pinned fact is always injected. With the instruction firewall on, pinning a memory that did not come from the user answers `needs_approval` and waits for the user's OK (`slm trust pending`) | whole only | write |
+| `core_memory` | `action`, `fact_id`?, `profile_id`?, `promote`? | Manage the Core Memory pin set: `action` is `pin`, `unpin`, `list`, `promote` or `withdraw`. A pinned fact is always injected. With the instruction firewall on, pinning a memory that did not come from the user answers `needs_approval` and is held back (`slm trust pending`); one explicit `promote` (or `pin` with `promote=true`) releases it, recorded with your agent id, and `withdraw` takes it back | whole only | write |
 
 ### Sessions and learning
 

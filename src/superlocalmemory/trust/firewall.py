@@ -11,19 +11,27 @@ rm -rf before a build" and have every later session told it.
 The rule (``trust.taint`` on; shadow only counts): a memory whose *taint* (the lowest
 class among it and what it was derived from, ``fact_trust``) is below ``system`` in the
 M-15 order, or unknown, cannot be a pin, a rule, a decision or a core block, and is not
-placed in the session-start fact sections, until a person approves it. It is still
-recalled as evidence, inside the untrusted frame, like any memory. The floor is
-:data:`FLOOR`. An agent's own words (``agent_inferred``) are below it: what an agent
-saves after reading a web page is exactly what a planted instruction looks like.
-Memories saved before 4.2.30 are ``unknown`` and wait too: ``slm trust pending`` lists
-them, and ``slm trust approve --all`` clears the lot in one answer (a person, at a terminal).
+placed in the session-start fact sections, **by itself**. It is still recalled as evidence,
+inside the untrusted frame, like any memory. The floor is :data:`FLOOR`. An agent's own words
+(``agent_inferred``) are below it: what an agent saves after reading a web page is exactly
+what a planted instruction looks like. The rule needs nobody to run it.
 
-**Approval is a person's, through two doors** (the D-37 pattern of ``slm audit``): the
-command line, only at an interactive terminal, and the dashboard's "Waiting for your OK".
-Both land in :func:`approve`, which raises the memory to ``user_confirmed``
-(``fact_trust.mark_confirmed``, the one door for that class) and records who, when and
-through which door in ``trust_approvals`` (M081). An agent can read the list
-(``slm trust pending --json``) and can never approve.
+**One explicit promotion is enough, from any caller** (D-49): an agent through MCP, the
+command line or HTTP, a script, or a person on the dashboard calls :func:`approve` (``slm
+trust promote``, MCP ``core_memory(action="promote")``, ``POST /api/trust/promote/{id}``, the
+dashboard button). It raises the memory to ``user_confirmed``
+(``fact_trust.mark_confirmed``, the one door for that class) and records who (an agent id, a
+client name or ``dashboard``), through which channel, and when, in ``trust_approvals`` (M081)
+and in the decision log (``core/decisions``, M084). Nothing asks whether a person is behind the
+call: a check that cannot be enforced is not made. A promotion is reversible: :func:`withdraw`
+puts the memory back under its own class and takes back the pin the promotion applied. The
+safety is the rule above plus the record, which the dashboard lists ("Recent decisions by your
+agents") so nobody is needed for anything to work.
+
+**Grandfathered:** a memory saved before 4.2.30 has no origin row (``unknown``). If it was
+already a pin, a standing rule or a decision, it stays one: the first classification records
+that it was promoted before 4.2.30 (origin ``unknown``, basis ``confirmed:grandfathered``)
+so nothing the user relied on disappears. Only new promotions follow the rule.
 
 **Where it is enforced.** Reading is gated at the places that build session context:
 ``block_sources.source_filter`` / ``not_sources`` (core blocks and the session-start fact
@@ -48,6 +56,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from superlocalmemory.core import decisions
 from superlocalmemory.trust import fact_trust
 from superlocalmemory.trust import origin_class as oc
 
@@ -70,8 +79,8 @@ WANT_WORDS = {
     CORE: "wanted to be part of your core memory",
     SESSION_START: "wanted to be shown at the start of every session",
 }
-#: Doors a person can approve through (an agent has none).
-PERSON_CHANNELS = frozenset({"cli", "dashboard"})
+#: Channels a promotion can come through (recorded, never a claim about who is behind it).
+CHANNELS = frozenset(decisions.CHANNELS)
 PREVIEW_CHARS = 280
 LIST_LIMIT = 200
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]")
@@ -184,6 +193,22 @@ def withheld(store: Any, fact_ids: Iterable[str]) -> set[str]:
     ids = [str(i) for i in fact_ids if i]
     if not ids or not active():
         return set()
+    return _below_floor(store, ids)
+
+
+def would_withhold(store: Any, fact_ids: Iterable[str]) -> set[str]:
+    """What :func:`withheld` would hold if the firewall acted: non-empty only in shadow.
+
+    For a place that counts what the firewall would have changed (a cue the hook still
+    delivers while ``trust.taint`` is ``shadow``). Read-only.
+    """
+    ids = [str(i) for i in fact_ids if i]
+    if not ids or state() != "shadow":
+        return set()
+    return _below_floor(store, ids)
+
+
+def _below_floor(store: Any, ids: list[str]) -> set[str]:
     got = taints(rows_of(store), ids)
     return {i for i in ids if not is_trusted_taint(got.get(i))}
 
@@ -218,8 +243,8 @@ class Decision:
 
 
 def check_promotion(store: Any, fact_id: str, wanted: str) -> Decision:
-    """May ``fact_id`` become ``wanted`` (a pin, a rule...) without a person? Always yes
-    unless the firewall acts."""
+    """May ``fact_id`` become ``wanted`` (a pin, a rule...) by itself? Always yes unless the
+    firewall acts; below the floor it needs one explicit promotion call (:func:`approve`)."""
     if not active():
         return Decision(True, "")
     got = taints(rows_of(store), [fact_id]).get(fact_id, oc.UNKNOWN)
@@ -227,8 +252,9 @@ def check_promotion(store: Any, fact_id: str, wanted: str) -> Decision:
         return Decision(True, got)
     return Decision(False, got,
                     f"This memory is {oc.label(got)}, so it cannot {_VERB.get(wanted, wanted)} "
-                    "until you approve it. Ask the user to approve it: `slm trust approve "
-                    f"{fact_id}` at a terminal, or the dashboard's \"Waiting for your OK\".")
+                    "by itself. If it should, promote it on purpose with one call "
+                    f"(`slm trust promote {fact_id}`, or core_memory(action=\"promote\", "
+                    f"fact_id=\"{fact_id}\")); the promotion is recorded and can be withdrawn.")
 
 
 _VERB = {PIN: "be pinned", RULE: "be a standing rule", DECISION: "be a standing decision",
@@ -267,43 +293,97 @@ def request(conn: sqlite3.Connection, fact_id: str, wanted: str, *, by: str,
             "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
             (uuid.uuid4().hex, fact_id, row[0], wanted, _clean(by, 80), _clean(channel, 24),
              _now()))
+        conn.execute(  # a withdrawn promotion asks again when something wants it again
+            "UPDATE trust_approvals SET state = 'pending', requested_by = ?, "
+            "requested_channel = ?, requested_at = ? WHERE fact_id = ? AND wanted = ? "
+            "AND state = 'withdrawn'", (_clean(by, 80), _clean(channel, 24), _now(), fact_id,
+                                        wanted))
     except sqlite3.Error as exc:
         logger.warning("approval request for %s not recorded (%s)", fact_id, type(exc).__name__)
 
 
 def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) -> dict:
-    """A person's approval of one memory (D-37). The caller has checked it is a person.
+    """One explicit promotion of one memory by any caller (D-49). Recorded and reversible.
 
-    Raises ``ValueError`` for a door an agent could be using, ``LookupError`` for a memory
-    that does not exist. Returns what it did.
+    ``by`` is who (an agent id, a client name, ``dashboard``) and ``channel`` one of
+    :data:`CHANNELS`. Raises ``ValueError`` for a channel that is not one of them,
+    ``LookupError`` for a memory that does not exist. Returns what it did.
     """
-    if channel not in PERSON_CHANNELS:
-        raise ValueError(f"approval is a person's: the door must be one of "
-                         f"{sorted(PERSON_CHANNELS)}, not {channel!r}")
+    if channel not in CHANNELS:
+        raise ValueError(f"the channel must be one of {sorted(CHANNELS)}, not {channel!r}")
     before = fact_trust.origin_of(conn, fact_id)
     if before is None:
         raise LookupError(f"no memory {fact_id}")
-    fact_trust.mark_confirmed(conn, fact_id, by=by, channel=channel)
+    who = decisions.clean_actor(by)
+    fact_trust.mark_confirmed(conn, fact_id, by=who, channel=channel)
     when = _now()
     waiting = [r[0] for r in conn.execute(
         "SELECT wanted FROM trust_approvals WHERE fact_id = ? AND state = 'pending'",
         (fact_id,)).fetchall()]
     conn.execute("UPDATE trust_approvals SET state = 'approved', decided_by = ?, "
                  "decided_channel = ?, decided_at = ? WHERE fact_id = ? AND state = 'pending'",
-                 (_clean(by, 80), channel, when, fact_id))
-    if not waiting:  # approved before anything asked: the record still says who, when and how
-        profile = conn.execute("SELECT profile_id FROM atomic_facts WHERE fact_id = ?",
-                               (fact_id,)).fetchone()[0]
+                 (who, channel, when, fact_id))
+    profile = conn.execute("SELECT profile_id FROM atomic_facts WHERE fact_id = ?",
+                           (fact_id,)).fetchone()[0]
+    if not waiting:  # promoted before anything asked: the record still says who, when and how
         conn.execute(
-            "INSERT OR IGNORE INTO trust_approvals (approval_id, fact_id, profile_id, wanted, "
-            "state, requested_by, requested_channel, requested_at, decided_by, decided_channel, "
-            "decided_at) VALUES (?, ?, ?, 'any', 'approved', ?, ?, ?, ?, ?, ?)",
-            (uuid.uuid4().hex, fact_id, profile, _clean(by, 80), channel, when,
-             _clean(by, 80), channel, when))
-    if PIN in waiting:  # the pin that was refused is now what the person asked for
+            "INSERT INTO trust_approvals (approval_id, fact_id, profile_id, wanted, state, "
+            "requested_by, requested_channel, requested_at, decided_by, decided_channel, "
+            "decided_at) VALUES (?, ?, ?, 'any', 'approved', ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(fact_id, wanted) DO UPDATE SET state = 'approved', decided_by = ?, "
+            "decided_channel = ?, decided_at = ?",
+            (uuid.uuid4().hex, fact_id, profile, who, channel, when, who, channel, when,
+             who, channel, when))
+    applied: list[str] = []
+    if PIN in waiting:  # the pin that was refused is now what the caller asked for
         conn.execute("UPDATE atomic_facts SET pinned = 1 WHERE fact_id = ?", (fact_id,))
+        applied.append(PIN)
+    decisions.log(
+        conn, profile_id=profile, kind=decisions.PROMOTION, subject_id=fact_id, action="promote",
+        decider=decisions.Decider(who, channel),
+        summary=f"Promoted a memory that was {oc.label(before['taint'])}",
+        detail={"was_origin": before["class"], "was_taint": before["taint"],
+                "was_basis": before["basis"], "applied": applied, "wanted": waiting})
     return {"fact_id": fact_id, "was": before["taint"], "now": oc.USER_CONFIRMED,
-            "applied": [PIN] if PIN in waiting else [], "wanted": waiting, "decided_at": when}
+            "applied": applied, "wanted": waiting, "decided_at": when, "actor": who,
+            "channel": channel}
+
+
+promote = approve  # the word that reads better for an agent: one explicit promotion
+
+
+def withdraw(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) -> dict:
+    """Take a promotion back: the memory returns to its own class, and a pin the promotion
+    applied is removed. Recorded like any decision. ``LookupError`` if there is nothing to take
+    back (the memory does not exist or was not promoted)."""
+    if channel not in CHANNELS:
+        raise ValueError(f"the channel must be one of {sorted(CHANNELS)}, not {channel!r}")
+    row = conn.execute("SELECT profile_id FROM atomic_facts WHERE fact_id = ?",
+                       (fact_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"no memory {fact_id}")
+    profile = row[0]
+    who = decisions.clean_actor(by)
+    held = fact_trust.origin_of(conn, fact_id)
+    if held is None or not str(held["basis"]).startswith(f"{fact_trust.CONFIRMED}:"):
+        raise LookupError(f"memory {fact_id} has no promotion to withdraw")
+    promoted = decisions.open_decision(conn, profile, decisions.PROMOTION, fact_id)
+    applied = (promoted or {}).get("detail", {}).get("applied") or []
+    conn.execute("DELETE FROM fact_trust WHERE fact_id = ?", (fact_id,))
+    fresh = fact_trust.compute(fact_trust.on_conn(conn), fact_id)
+    if fresh is not None:
+        fact_trust.store(conn.execute, fact_id, profile, fresh)
+    if PIN in applied:
+        conn.execute("UPDATE atomic_facts SET pinned = 0 WHERE fact_id = ?", (fact_id,))
+    conn.execute("UPDATE trust_approvals SET state = 'withdrawn' WHERE fact_id = ? "
+                 "AND state = 'approved'", (fact_id,))
+    if promoted is not None:
+        decisions.mark_undone(conn, promoted["decision_id"], decisions.Decider(who, channel))
+    decisions.log(conn, profile_id=profile, kind=decisions.PROMOTION, subject_id=fact_id,
+                  action="withdraw", decider=decisions.Decider(who, channel),
+                  summary="Withdrew a promotion", detail={"unpinned": PIN in applied})
+    return {"fact_id": fact_id, "now": fresh.taint_class if fresh else oc.UNKNOWN,
+            "unpinned": PIN in applied, "actor": who, "channel": channel}
 
 
 # -- the waiting list --------------------------------------------------------------------------------
@@ -428,7 +508,8 @@ def _unclassified(conn: sqlite3.Connection) -> int:
 
 
 def approve_all(conn: sqlite3.Connection, profile_id: str, *, by: str, channel: str) -> dict:
-    """Approve everything :func:`pending` lists for ``profile_id`` (a person's one answer)."""
+    """Promote everything :func:`pending` lists for ``profile_id`` (one explicit call; each
+    promotion is recorded and can be withdrawn on its own)."""
     items = pending(conn, profile_id, LIST_LIMIT)["items"]
     done = [approve(conn, i["fact_id"], by=by, channel=channel)["fact_id"] for i in items]
     return {"approved": len(done), "fact_ids": done}
@@ -447,7 +528,7 @@ def counts(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
     return out
 
 
-__all__ = ["CORE", "DECISION", "Decision", "FLAG", "FLOOR", "PERSON_CHANNELS", "PIN", "RULE",
+__all__ = ["CHANNELS", "CORE", "DECISION", "Decision", "FLAG", "FLOOR", "PIN", "RULE",
            "SESSION_START", "TRUSTED", "WANTS", "active", "state", "approve", "approve_all",
            "check_promotion", "clause", "counts", "is_trusted_taint", "observing", "pending",
-           "request", "rows_of", "stamp", "taints", "withheld"]
+           "promote", "request", "rows_of", "stamp", "taints", "withdraw", "withheld", "would_withhold"]

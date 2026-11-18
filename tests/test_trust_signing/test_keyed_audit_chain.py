@@ -275,3 +275,97 @@ def test_an_anchor_that_declares_another_key_is_caught_even_without_the_key(path
           json.dumps({"reason": "chain_started", "key_id": "forged-key-id000", "previous_key_id": ""}))
     report = chain.verify_report()
     assert report["ok"] is False and "declares a different key" in report["reason"]
+
+
+# -- A-13 (Fable audit): the current key must vouch for the past ------------------------------------
+
+def _relabel_attack(path, fake="feedfacefeedface"):
+    """What someone with the file and no key does (fable/audit_probe.py): give every keyed link
+    and the anchor a made-up key id, then rewrite what entry 3 says. Hashes and prev-links are
+    untouched, so the chain order and the external anchor still agree."""
+    with sqlite3.connect(path) as conn:
+        for rid, op, meta in conn.execute("SELECT id, operation, metadata FROM audit_chain").fetchall():
+            if op == "key_anchor":
+                declared = json.loads(meta)
+                declared["key_id"] = fake
+                conn.execute("UPDATE audit_chain SET metadata = ?, key_id = ? WHERE id = ?",
+                             (json.dumps(declared), fake, rid))
+            else:
+                conn.execute("UPDATE audit_chain SET key_id = ? WHERE id = ?", (fake, rid))
+        conn.execute("UPDATE audit_chain SET operation='store', agent_id='someone-else', "
+                     "content_hash='rewritten' WHERE operation='delete'")
+
+
+def _history(path, signer):
+    sk.install(signer)
+    chain = AuditChain(path)
+    for i in range(4):
+        chain.log("delete" if i == 2 else "store", agent_id="agent-x", profile_id="default",
+                  content_hash=f"h{i}", metadata={"n": i})
+    return chain
+
+
+def test_the_relabel_attack_fails_when_the_real_key_is_available(path, signer) -> None:
+    chain = _history(path, signer)
+    assert chain.verify_report()["ok"] is True
+    _relabel_attack(path)
+    report = chain.verify_report()
+    assert report["ok"] is False and "vouch" in report["reason"]
+    assert report["failed_at"] == 1  # the first link no anchor of yours stands behind
+    assert report["keyed"] == 0
+
+
+def test_the_relabel_attack_is_not_visible_to_a_verifier_that_holds_no_key(path, signer) -> None:
+    """Without the key nothing can be said about a foreign-keyed link: order only. The claim
+    is "fails when the real key is available", and the doctor says what it did not check."""
+    chain = _history(path, signer)
+    _relabel_attack(path)
+    sk.install(None)
+    report = chain.verify_report()
+    assert report["ok"] is True and report["keyed_unverified"] == 5 and report["keyed"] == 0
+
+
+def test_the_relabel_attack_is_found_by_the_cached_check_too(path, signer) -> None:
+    chain = _history(path, signer)
+    assert cache.cached_report(chain)["ok"] is True
+    _relabel_attack(path)
+    cache.forget()
+    assert cache.cached_report(chain)["ok"] is False
+
+
+def test_a_foreign_anchor_appended_after_a_good_walk_is_found_by_the_cache(path, signer) -> None:
+    """The cache walks only what was added. A relabelled anchor and link appended later must
+    still need an anchor under the verifier's own key."""
+    chain = _history(path, signer)
+    assert cache.cached_report(chain)["ok"] is True
+    sk.install(None)
+    chain.log("store", agent_id="b")
+    _poke(path, "UPDATE audit_chain SET hash_version=3, key_id='feedfacefeedface', "
+                "operation='key_anchor', metadata=? WHERE id=6",
+          json.dumps({"reason": "key_changed", "key_id": "feedfacefeedface",
+                      "previous_key_id": signer.key_id}))
+    sk.install(signer)
+    report = cache.cached_report(chain)
+    assert report["ok"] is False and "vouch" in report["reason"]
+
+
+def test_a_real_key_change_is_vouched_for_by_the_new_keys_anchor(path) -> None:
+    old, new = sk.Signer(bytes(range(32))), sk.Signer(bytes(32))
+    chain = _history(path, old)
+    sk.install(new)
+    chain.log("store", agent_id="b")  # writes the anchor under the new key
+    report = chain.verify_report()
+    assert report["ok"] is True and report["keyed_unverified"] == 5 and report["keyed"] == 2
+
+
+def test_after_a_lost_key_the_history_waits_for_the_new_keys_anchor(path) -> None:
+    """Between the key being replaced and the daemon's next audit entry there is no anchor under
+    the new key. That state cannot be told from the relabel attack, so it is not passed: the
+    reason says what to do, and the next entry (an anchor under the new key) clears it."""
+    old, new = sk.Signer(bytes(range(32))), sk.Signer(bytes(32))
+    chain = _history(path, old)
+    sk.install(new)
+    report = chain.verify_report()
+    assert report["ok"] is False and "no anchor under your current key" in report["reason"]
+    chain.log("store", agent_id="daemon")
+    assert chain.verify_report()["ok"] is True

@@ -41,8 +41,9 @@ certificate that covers it, and none exists), an earlier version of a rebuilt pa
 
 There are two ways to make them:
 
-1. **You rebuild.** `slm wiki rebuild` (at a terminal) or **Rebuild pages** on the dashboard
-   compiles the pages and applies them in one step, recorded as your approval.
+1. **You or an agent rebuild.** `slm wiki rebuild` or **Rebuild pages** on the dashboard
+   compiles the pages and applies them in one step, recorded (who, channel, time) and undone
+   with `slm proposals rollback`.
 2. **The dream cycle.** With `compiler.dream` on, the background maintenance cycle looks over
    each profile at most every six hours and queues one ProposalSet for review: a page for every
    subject whose page is new or changed, and a merge for each group of exact duplicates (the same
@@ -79,7 +80,7 @@ it wrote it; it says so and keeps your file.
 
 ### Editing a file
 
-Change the words of a block and run `slm wiki sync` (at a terminal) or press **Read my edits** on
+Change the words of a block and run `slm wiki sync` or press **Read my edits** on
 the dashboard. SLM finds edited blocks **by hash**, and for each one:
 
 - the new words are screened like any save (a credential becomes a `[REDACTED:TYPE:LAST4]`
@@ -114,8 +115,8 @@ file is kept. Versions and proposals that quote the memory go with it.
   `sentences[].facts` (the memory ids), `withheld` and `stale`.
 - CLI: `slm wiki status|diff --json`.
 - HTTP: `GET /api/wiki/pages`, `GET /api/wiki/pages/{id}`, `GET /api/wiki/diff` (local callers with
-  the review-read role). `POST /api/wiki/build`, `/rebuild` and `/sync` need the memory-update role
-  and refuse a remote app; `rebuild` and `sync` also need a person's door (`cli` or `dashboard`).
+  the review-read role). `POST /api/wiki/build`, `/rebuild` and `/sync` need the memory-update role;
+  who decided and the channel come from the connection and are recorded (D-49).
 - Dashboard: the **Living wiki** card lists pages, shows each sentence with the memory it comes
   from (**Open memory** searches for it), and has **Rebuild pages** and **Read my edits**.
 

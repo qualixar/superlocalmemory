@@ -30,7 +30,11 @@ import sqlite3
 from collections.abc import Sequence
 
 from superlocalmemory.core import risk_policy
-from superlocalmemory.core.judge_calibration import CERTIFIABLE_REGIMES, clean_decisions_needed
+from superlocalmemory.core.judge_calibration import (
+    CERTIFIABLE_REGIMES,
+    COUNTING_LABEL,
+    clean_decisions_needed,
+)
 
 #: The weight of a wrong retirement against a wrong "keep both" (harm).
 HARM = {"replaces": 3.0}
@@ -45,9 +49,9 @@ SELECT inputs_hash, question_id, question_version, tier, model, verdict, populat
           FROM judge_receipts r
          WHERE r.profile_id = ? AND r.audit_selected = 1 AND r.inputs_hash IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM judge_labels l WHERE l.receipt_id = r.receipt_id
-                           AND l.source = 'audit'))
+                           AND l.source = 'audit' AND {counting}))
  WHERE rn = 1
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 _LABELLED = """
 SELECT COUNT(*) FROM judge_receipts r
@@ -55,8 +59,8 @@ SELECT COUNT(*) FROM judge_receipts r
    AND r.model = ? AND r.verdict = ? AND r.population = ? AND r.batching_regime = ?
    AND r.audit_selected = 1
    AND EXISTS (SELECT 1 FROM judge_labels l WHERE l.receipt_id = r.receipt_id
-               AND l.source = 'audit')
-"""
+               AND l.source = 'audit' AND {counting})
+""".replace("{counting}", COUNTING_LABEL)
 
 
 def _heads(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:

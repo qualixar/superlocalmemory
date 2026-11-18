@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS recall_requests (
     worker_progress   TEXT,
     stall_timeout_s   REAL,
     cost_usd          REAL    NOT NULL DEFAULT 0.0,
+    deadline_at       REAL,
     CHECK (completed IN (0, 1)),
     CHECK (cancelled IN (0, 1)),
     CHECK (dead_letter IN (0, 1)),
@@ -127,7 +128,14 @@ class RecallQueue:
             s = stmt.strip()
             if s:
                 self._conn.execute(s)
+        self._add_missing_columns()
         self._closed = False
+
+    def _add_missing_columns(self) -> None:
+        """A queue file written before 4.2.30 has no ``deadline_at`` (A-14): add it."""
+        have = {r["name"] for r in self._conn.execute("PRAGMA table_info(recall_requests)")}
+        if "deadline_at" not in have:
+            self._conn.execute("ALTER TABLE recall_requests ADD COLUMN deadline_at REAL")
 
     # ----- schema-level helpers (tests / ops) -----
     def _raw_execute(self, sql: str, params: Iterable[Any] = ()) -> None:
@@ -162,12 +170,17 @@ class RecallQueue:
         namespace: str = "",
         priority: str = "high",
         stall_timeout_s: float = 25.0,
+        deadline_s: float | None = None,
     ) -> str:
+        """Queue one recall. ``deadline_s`` is how long the client will wait: stored as an
+        absolute time, so an answer that finishes after it can be dropped, not recorded as
+        delivered (A-14). A request already queued by the same query gains the later deadline."""
         qhash = _query_hash(
             session_id=session_id, agent_id=agent_id, query=query,
             limit_n=limit_n, mode=mode, tenant_id=tenant_id,
             namespace=namespace,
         )
+        deadline_at = None if deadline_s is None else _now() + float(deadline_s)
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -184,9 +197,12 @@ class RecallQueue:
                     self._conn.execute(
                         "UPDATE recall_requests "
                         "SET subscriber_count = subscriber_count + 1, "
-                        "    last_subscribe_at = ? "
+                        "    last_subscribe_at = ?, "
+                        "    deadline_at = CASE WHEN ? IS NULL THEN deadline_at "
+                        "                       WHEN deadline_at IS NULL THEN ? "
+                        "                       ELSE MAX(deadline_at, ?) END "
                         "WHERE request_id = ?",
-                        (_now(), rid),
+                        (_now(), deadline_at, deadline_at, deadline_at, rid),
                     )
                     self._conn.execute("COMMIT")
                     return rid
@@ -196,13 +212,13 @@ class RecallQueue:
                     "(request_id, query_hash, job_type, session_id, agent_id, "
                     " namespace, tenant_id, query, limit_n, mode, priority, "
                     " weight, created_at, subscriber_count, last_subscribe_at, "
-                    " stall_timeout_s) "
-                    "VALUES (?, ?, 'recall', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    " stall_timeout_s, deadline_at) "
+                    "VALUES (?, ?, 'recall', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
                     (
                         rid, qhash, session_id, agent_id, namespace, tenant_id,
                         query, limit_n, mode, priority,
                         70 if priority == "high" else 30,
-                        _now(), _now(), stall_timeout_s,
+                        _now(), _now(), stall_timeout_s, deadline_at,
                     ),
                 )
                 self._conn.execute("COMMIT")
@@ -320,6 +336,15 @@ class RecallQueue:
                     request_id, received,
                 )
             return cur.rowcount
+
+    def cancel(self, request_id: str) -> None:
+        """The client is gone: drop a request that has not completed (``cancelled = 1``)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE recall_requests SET cancelled = 1 "
+                "WHERE request_id = ? AND completed = 0 AND dead_letter = 0",
+                (request_id,),
+            )
 
     def mark_dead_letter(self, request_id: str, *, reason: str) -> None:
         with self._lock:

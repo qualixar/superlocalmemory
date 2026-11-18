@@ -4,13 +4,15 @@
 
     slm disputes [list] [--limit N] [--profile P] [--json]
     slm disputes settle DISPUTE_ID --keep FACT_ID|both|unrelated [--profile P] [--json]
+    slm disputes reopen DISPUTE_ID [--profile P] [--json]
     slm disputes still-true FACT_ID [--profile P] [--json]
 
 ``list`` shows open disputes (two memories that say different values of the
 same thing, both sides with when each was said) and memories whose source file
 changed or went missing. ``settle`` answers one dispute: keep the side that is
-true now (the other is retired, and can be rolled back with
-``slm review-correction``), keep ``both``, or say they are ``unrelated``.
+true now (the other is retired), keep ``both``, or say they are ``unrelated``. Any
+caller may settle (D-49); the answer is recorded (who, channel ``cli``, when) and ``reopen``
+takes it back: the retired memory returns and the question is open again.
 ``still-true`` says you read the changed file and the memory still holds.
 
 All run inside SLM (it stays the only writer of its store); agents use the MCP
@@ -42,6 +44,10 @@ def register_disputes_parsers(sub: Any) -> None:
                     help="The fact id of the side that is true now, 'both' or 'unrelated'")
     st.add_argument("--profile", default="", help="Profile (default: the active one)")
     st.add_argument("--json", action="store_true", help="machine-readable output")
+    ro = dsub.add_parser("reopen", help="Take a settled answer back; the question is open again")
+    ro.add_argument("dispute_id", help="Dispute id of a settled dispute")
+    ro.add_argument("--profile", default="", help="Profile (default: the active one)")
+    ro.add_argument("--json", action="store_true", help="machine-readable output")
     ok = dsub.add_parser("still-true", help="You read the changed file; the memory still holds")
     ok.add_argument("fact_id", help="Fact id from slm disputes")
     ok.add_argument("--profile", default="", help="Profile (default: the active one)")
@@ -72,6 +78,21 @@ def _render(result: dict) -> None:
         print(f"    read it again, then: slm disputes still-true {c['fact_id']}")
 
 
+def _who() -> str:
+    """A client name for the record: the agent's own id when it set one, else the user's name."""
+    import os
+
+    name = os.environ.get("SLM_AGENT_ID", "").strip()
+    if name:
+        return f"agent:{name}"
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - a name is a courtesy, never a reason to fail
+        return "local user"
+
+
 def _request(sub: str, args: Namespace, profile: str) -> Any:
     from superlocalmemory.cli.daemon import daemon_request
 
@@ -83,9 +104,12 @@ def _request(sub: str, args: Namespace, profile: str) -> Any:
             path += "&profile_id=" + urllib.parse.quote(profile, safe="")
         return daemon_request("GET", path, **flags)
     body: dict = {"profile_id": profile} if profile else {}
+    body["by"] = _who()
     if sub == "settle":
-        body.update({"keep": args.keep, "channel": "cli"})
+        body.update({"keep": args.keep})
         path = f"/api/disputes/{urllib.parse.quote(args.dispute_id, safe='')}/settle"
+    elif sub == "reopen":
+        path = f"/api/disputes/{urllib.parse.quote(args.dispute_id, safe='')}/reopen"
     else:
         path = f"/api/changed-sources/{urllib.parse.quote(args.fact_id, safe='')}/still-true"
     return daemon_request("POST", path, body, **flags)
@@ -128,8 +152,12 @@ def cmd_disputes(args: Namespace) -> int:
     elif sub == "settle":
         retired = result.get("retired") or []
         print(f"Settled dispute {result['dispute_id']} ({result['resolution']})."
-              + (f" Retired {len(retired)} memory; slm review-correction can roll it back."
-                 if retired else " Nothing was retired."))
+              + (f" Retired {len(retired)} memory; undo with: slm disputes reopen "
+                 f"{result['dispute_id']}" if retired else " Nothing was retired."))
+    elif sub == "reopen":
+        print(f"Reopened dispute {result['dispute_id']}. "
+              + ("The retired memory is back. " if result.get("restored") else "")
+              + "Settle it again with: slm disputes settle")
     else:
         print(f"Noted: the memory {result['fact_id']} still holds for its source file.")
     return 0

@@ -552,7 +552,8 @@ class AuditChain:
             "legacy": legacy, "failed_at": None, "reason": "",
         }
         failure = (self._anchor_failure(rows)
-                   or self._link_walk(rows, _GENESIS_HASH, False, signer, tally)[0])
+                   or self._link_walk(rows, _GENESIS_HASH, False, signer, tally)[0]
+                   or (tally.unvouched_failure() if signer is not None else None))
         report.update(tally.as_report())
         if failure is not None:
             report.update(ok=False, failed_at=failure[0], reason=failure[1])

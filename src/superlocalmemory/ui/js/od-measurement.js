@@ -2,7 +2,7 @@
  *
  * Two surfaces over GET/POST /api/outcomes/measurement:
  *   - a Settings card: the notice in plain words, whether measuring is on, and one
- *     switch. Acts at once, no Save. Off stops the random withholding and swapping;
+ *     switch. Acts at once, no Save. Off stops the random withholding, the swapping and the usage check;
  *     receipts (ids and numbers, this computer only) stay unless turned off with
  *     `slm measurement off --receipts`.
  *   - a banner on the dashboard home, shown while the notice is pending: Learn more
@@ -105,7 +105,7 @@
         'The kill switch is on, so every 4.2.30 measure is off whatever is set here (slm flags kill off releases it).'));
     }
     cardMount.appendChild(buildSwitch(!!state.measuring));
-    var note = el('p', 'dash-card-meta', 'Turning this off stops the withholding and swapping. ' +
+    var note = el('p', 'dash-card-meta', 'Turning this off stops the withholding, the swapping and the usage check. ' +
       'Receipts (ids and numbers, kept on this computer) are still written. To stop them too, run slm measurement off --receipts.');
     cardMount.appendChild(note);
     var list = el('div', 'truth-checks');
@@ -192,7 +192,7 @@
     card.setAttribute('aria-label', 'What SuperLocalMemory measures');
     card.appendChild(el('p', null, state.measuring
       ? 'SLM now measures whether memory helps your agents. In a small share of session starts it leaves one memory out at random, ' +
-        'and swaps two neighbouring results in a few recalls. Everything is logged as ids and numbers on this computer only.'
+        'and swaps two neighbouring results in a few recalls. When a reply ends it compares the reply with the memories the agent was given, to see which were used. Everything is logged as ids and scores on this computer only. This is informational: nothing waits for you.'
       : 'SLM can measure whether memory helps your agents, but this is turned off here, so nothing is withheld or swapped.'));
     var actions = el('div', 'od-star-actions');
     actions.appendChild(btn('Learn more', 'ghost', goToCard));

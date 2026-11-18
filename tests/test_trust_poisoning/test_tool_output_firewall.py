@@ -131,7 +131,7 @@ def test_it_never_becomes_a_pin(armed) -> None:
                                                           _db=None, config=None))
     out = asyncio.run(server.tools["core_memory"](action="pin", fact_id=w.evil_core))
     assert out["success"] is False and out["needs_approval"] is True
-    assert "slm trust approve" in out["error"]
+    assert "promote" in out["error"]
     assert w.evil_core not in {f.fact_id for f in db.get_pinned(PID)}
     # and a pin set before the firewall acted is not shown either (below)
 
@@ -209,3 +209,31 @@ def test_a_memory_saved_before_4_2_30_waits_until_it_is_approved(db, monkeypatch
         assert firewall.pending(conn, PID)["items"][0]["origin_class"] == "unknown"
         firewall.approve_all(conn, PID, by="alice", channel="cli")
     assert [f.fact_id for f in standing_rules.standing_facts(db, PID)] == [old]
+
+
+def test_the_trust_report_counts_cue_holds_seen_in_shadow(tmp_path) -> None:
+    import sqlite3
+
+    from superlocalmemory.hooks import cue_hook
+    from superlocalmemory.trust import report
+
+    cue_hook._count_shadow(tmp_path, 2)
+    cue_hook._count_shadow(tmp_path, 1)
+    conn = sqlite3.connect(":memory:")
+    out = report.build(conn, "default", slm_home=tmp_path)
+    assert out["cues_would_hold"] == 3
+    assert "Cue deliveries the firewall would have held: 3" in "\n".join(
+        report.describe({**out, "taint": "shadow"}))
+
+
+def test_would_withhold_answers_only_in_shadow(db, monkeypatch) -> None:
+    from superlocalmemory.trust import firewall
+    from tests.test_trust_firewall.conftest import EVIL, TAINT, TOOL, save
+
+    fact = save(db, EVIL, TOOL)
+    with db.raw_connection() as conn:
+        for state, want_now, want_shadow in (("off", set(), set()), ("on", {fact}, set()),
+                                             ("shadow", set(), {fact})):
+            monkeypatch.setenv(TAINT, state)
+            assert firewall.withheld(conn, [fact]) == want_now
+            assert firewall.would_withhold(conn, [fact]) == want_shadow

@@ -5,8 +5,8 @@
     slm wiki [status] [--json]      # pages, the folder, edits waiting
     slm wiki diff [--json]          # what a build would change; files holding your edits
     slm wiki build [--json]         # write the approved pages to the folder
-    slm wiki rebuild                # you, at a terminal: compile the pages again and approve them
-    slm wiki sync                   # you, at a terminal: read your edits back as proposals
+    slm wiki rebuild                # any caller: compile the pages again and apply them (recorded)
+    slm wiki sync                   # any caller: read edits back as proposals
     slm wiki dir [PATH|--default]   # show or choose the folder
 
 Every sentence of a page is a word-for-word span of a memory it cites, or a fixed template
@@ -14,12 +14,14 @@ over slot values; no model writes any of it, and the page says how many sentence
 withheld. A page is derived: it is never saved as a memory. The Markdown folder is off until
 you run ``slm flags set compiler.wiki on`` (``shadow`` shows what would be written).
 
-Edit a sentence in a file and run ``slm wiki sync``: the edit becomes a proposal you review
-with ``slm proposals``; nothing changes until you apply it. Deleting a line changes nothing,
-and erasing a memory removes it from the pages and the files.
+Edit a sentence in a file and run ``slm wiki sync``: the edit becomes a proposal, reviewed with
+``slm proposals``; nothing changes until it is applied. Deleting a line changes nothing, and
+erasing a memory removes it from the pages and the files.
 
-``status``, ``diff`` and ``build`` work anywhere (``--json`` for agents); ``rebuild`` and
-``sync`` ask a person: they refuse to run without an interactive terminal.
+Every command works anywhere, for an agent or a person (``--json`` for scripts), with no
+terminal and no confirmation (D-49). ``rebuild`` applies a set of proposed pages: it is
+recorded with who ran it, listed on the dashboard under "Recent decisions by your agents", and
+``slm proposals rollback SET_ID`` takes it back exactly.
 """
 
 from __future__ import annotations
@@ -31,8 +33,6 @@ from typing import Any
 
 from superlocalmemory.cli.corrections_cmd import _daemon, _out, _refused
 
-_PERSON = {"rebuild": "Compile the pages again from your memories and approve them?",
-           "sync": "Read your edited Markdown back as proposals?"}
 _STATES = {"new": "not written yet", "changed": "will be rewritten", "edited": "you edited it "
            "(kept; run slm wiki sync)", "adopted": "already holds this text", "stale": "its page "
            "is gone"}
@@ -54,13 +54,6 @@ def register_wiki_parsers(sub: Any) -> None:
     d.add_argument("path", nargs="?", default="", help="Folder to use")
     d.add_argument("--default", action="store_true", help="Go back to the default folder")
     d.add_argument("--json", action="store_true", help="machine-readable output")
-
-
-def _confirm(question: str) -> bool:
-    try:
-        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
-    except EOFError:
-        return False
 
 
 def _query(profile: str) -> str:
@@ -108,9 +101,10 @@ def _show_sync(data: dict) -> None:
 
 def _show_rebuild(data: dict) -> None:
     if not data["pages"]:
-        print("The pages are up to date. Nothing to approve.")
+        print("The pages are up to date. Nothing to apply.")
     else:
-        print(f"Compiled and approved {data['pages']} page(s).")
+        print(f"Compiled and applied {data['pages']} page(s) as set {data['set_id']}. "
+              f"Undo: slm proposals rollback {data['set_id']}")
     if data.get("files"):
         _show_build(data["files"])
 
@@ -156,12 +150,15 @@ def _call(command: str, sub: str, profile: str, use_json: bool) -> int:
             data = daemon_request("GET", "/api/wiki/diff" + _query(profile),
                                   preserve_not_found=True, preserve_unprocessable=True)
         else:
-            body = {"channel": "cli", **({"profile_id": profile} if profile else {})}
+            from superlocalmemory.cli.proposals_cmd import _who
+
+            body = {"by": _who(), **({"profile_id": profile} if profile else {})}
             data = daemon_request("POST", f"/api/wiki/{sub}", body, preserve_conflict=True,
                                   preserve_not_found=True, preserve_unprocessable=True)
     except DaemonRefused:
-        return _refused(command, "SuperLocalMemory refused: the living wiki is for this "
-                                 "computer, decided by a person.", use_json, "NEEDS_A_PERSON")
+        return _refused(command, "SuperLocalMemory refused: this caller's role may not change "
+                                 "memory here (ask for the memory-update role).", use_json,
+                        "FORBIDDEN")
     except DaemonConflict as exc:
         return _refused(command, exc.detail, use_json)
     except DaemonUnprocessable as exc:
@@ -184,19 +181,12 @@ def cmd_wiki(args: Namespace) -> int:
     command = f"wiki {sub}"
     if sub == "dir":
         return _dir_command(args, use_json)
-    if sub in _PERSON and not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return _refused(command, f"slm wiki {sub} asks a person at a terminal; it cannot be done "
-                                 "by a script or an agent. Use slm wiki status --json to read "
-                                 "what is there.", use_json, "NEEDS_A_PERSON")
     from superlocalmemory.cli.commands import _daemon_unavailable
 
     if not _daemon():
         _daemon_unavailable(command, use_json)
         return 1
     profile = (getattr(args, "profile", "") or "").strip()
-    if sub in _PERSON and not _confirm(_PERSON[sub]):
-        print("Nothing was changed.")
-        return 0
     return _call(command, sub, profile, use_json)
 
 

@@ -309,14 +309,24 @@
                     <div class="card-pad" id="dash-wiki-body"></div>
                   </div>
 
-                  <!-- 4.2.30 WS-5: memories waiting for the person's OK before they can be instructions, filled by od-trust.js; hidden unless the firewall is on or in shadow -->
+                  <!-- 4.2.30 WS-5: memories held back from being instructions until one explicit promotion, filled by od-trust.js; hidden unless the firewall is on or in shadow -->
                   <div class="card" id="dash-trust-card" hidden>
                     <div class="card-head">
-                      <h3>Waiting for your OK</h3>
+                      <h3>Held back from instructions</h3>
                       <span class="chip-pill violet" id="dash-trust-count"></span>
                       <div class="spacer"></div>
                     </div>
                     <div class="card-pad" id="dash-trust-body"></div>
+                  </div>
+
+                  <!-- 4.2.30 D-49: what agents decided (promotions, disputes, proposals, labels) with an Undo, filled by od-decisions.js; hidden when nothing was decided -->
+                  <div class="card" id="dash-decisions-card" hidden>
+                    <div class="card-head">
+                      <h3>Recent decisions by your agents</h3>
+                      <span class="chip-pill violet" id="dash-decisions-count"></span>
+                      <div class="spacer"></div>
+                    </div>
+                    <div class="card-pad" id="dash-decisions-body"></div>
                   </div>
 
                   <div class="card" id="dash-health-card">
@@ -1669,7 +1679,7 @@
     <script src="static/js/lifecycle.js"></script>
     <script src="static/js/compliance.js?v=f63afc16"></script>
     <script src="static/js/init.js?v=a4c439a7"></script>
-    <script src="static/js/dashboard.js?v=de4b9207"></script>
+    <script src="static/js/dashboard.js?v=363f5b7e"></script>
     <script src="static/js/recall-lab.js?v=92cc71a8"></script>
     <script src="static/js/trust-dashboard.js?v=3d4e9da6"></script>
     <script src="static/js/math-health.js"></script>
@@ -1748,16 +1758,17 @@
     <script src="static/js/od-media-find.js?v=10cc0e63"></script>
     <script src="static/js/od-media.js?v=4171a7af"></script>
     <script src="static/js/od-dash-home.js?v=aa602e3d"></script>
-    <script src="static/js/od-truth.js?v=05a63d1f"></script>
+    <script src="static/js/od-truth.js?v=e75b2214"></script>
     <script src="static/js/od-why.js?v=eb961d18"></script>
-    <script src="static/js/od-proposals.js?v=ad33f9c4"></script>
+    <script src="static/js/od-proposals.js?v=84469c26"></script>
     <script src="static/js/od-wiki.js?v=134c8743"></script>
-    <script src="static/js/od-trust.js?v=0e1be5ad"></script>
+    <script src="static/js/od-trust.js?v=f50c0e3f"></script>
+    <script src="static/js/od-decisions.js?v=944d06d2"></script>
     <script src="static/js/od-outcomes.js?v=2313c886"></script>
-    <script src="static/js/od-delivered.js?v=db827e8c"></script>
-    <script src="static/js/od-trust-overview.js?v=148381a4"></script>
-    <script src="static/js/od-whatsnew-4230.js?v=f3fcaa5a"></script>
-    <script src="static/js/od-measurement.js?v=962d4334"></script>
+    <script src="static/js/od-delivered.js?v=8c95b450"></script>
+    <script src="static/js/od-trust-overview.js?v=43ee4a3d"></script>
+    <script src="static/js/od-whatsnew-4230.js?v=11568084"></script>
+    <script src="static/js/od-measurement.js?v=e48268a2"></script>
     <script src="static/js/od-help.js?v=e06df0d4"></script>
     <script src="static/js/od-polish.js?v=0ca34b74"></script>
     <script src="static/js/od-startup.js?v=e8035f95"></script>

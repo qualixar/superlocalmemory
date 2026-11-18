@@ -7,8 +7,8 @@
 //   - Reject  : changes nothing.
 //   - Undo    : on a set you applied, puts back exactly what it replaced.
 // Every answer goes to the same routes `slm proposals` uses
-// (POST /api/proposals/{id}/apply|reject|rollback) with the channel "dashboard",
-// which records that a person decided. Memory text is only ever set with
+// (POST /api/proposals/{id}/apply|reject|rollback); the daemon records who decided and the
+// channel (the dashboard's own door), and "Recent decisions by your agents" lists it with an Undo. Memory text is only ever set with
 // textContent. The card hides itself when there is nothing to show.
 (function () {
   'use strict';
@@ -49,7 +49,7 @@
     return fetch('/api/proposals/' + encodeURIComponent(id) + '/' + action, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'dashboard' })
+      body: JSON.stringify({})
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok || !j.success) throw new Error(detailOf(j, 'That did not work (HTTP ' + r.status + ').'));

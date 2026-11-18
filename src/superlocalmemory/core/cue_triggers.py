@@ -289,7 +289,7 @@ SELECT c.kind, c.pattern, f.fact_id, f.content, f.memory_kind, f.created_at
   FROM memory_cues c
   JOIN atomic_facts f ON f.fact_id = c.fact_id
   LEFT JOIN fact_temporal_validity v ON v.fact_id = f.fact_id
- WHERE c.profile_id = ? AND f.profile_id = c.profile_id AND c.kind IN ({{kinds}}) AND {_LIVE}
+ WHERE c.profile_id = ? AND f.profile_id = c.profile_id AND c.kind IN ({{kinds}}) AND {_LIVE}{{fw}}
  ORDER BY c.created_at, c.cue_id
  LIMIT ?
 """
@@ -298,10 +298,19 @@ SELECT f.fact_id, f.content, f.memory_kind, f.created_at
   FROM memory_leases l
   JOIN atomic_facts f ON f.fact_id = l.fact_id
   LEFT JOIN fact_temporal_validity v ON v.fact_id = f.fact_id
- WHERE l.profile_id = ? AND l.source_kind = 'file' AND l.locator IN ({{locators}}) AND {_LIVE}
+ WHERE l.profile_id = ? AND l.source_kind = 'file' AND l.locator IN ({{locators}}) AND {_LIVE}{{fw}}
  ORDER BY f.created_at, f.fact_id
  LIMIT ?
 """
+
+
+def _firewall(conn: sqlite3.Connection) -> str:
+    """A cue is a push channel: a memory the instruction firewall holds (taint below
+    ``system``, not approved by a person) is never pushed by one (D-48, Fable A-10).
+    Empty unless ``trust.taint`` is on; a fact with no stored class is held (closed)."""
+    from superlocalmemory.trust import firewall
+
+    return firewall.clause(conn)
 
 
 def _kinds_for(event: Event) -> tuple[str, ...]:
@@ -339,7 +348,7 @@ def _cue_hits(conn: sqlite3.Connection, profile_id: str, event: Event,
               today: date) -> list[Hit]:
     kinds = _kinds_for(event)
     try:
-        rows = conn.execute(_CUES.format(kinds=",".join("?" * len(kinds))),
+        rows = conn.execute(_CUES.format(kinds=",".join("?" * len(kinds)), fw=_firewall(conn)),
                             (profile_id, *kinds, MAX_SCAN)).fetchall()
     except sqlite3.OperationalError:  # a store before M078
         return []
@@ -365,7 +374,8 @@ def _lease_hits(conn: sqlite3.Connection, profile_id: str, event: Event) -> list
     if not locators:
         return []
     try:
-        rows = conn.execute(_LEASES.format(locators=",".join("?" * len(locators))),
+        rows = conn.execute(_LEASES.format(locators=",".join("?" * len(locators)),
+                                           fw=_firewall(conn)),
                             (profile_id, *locators, MAX_FIRED)).fetchall()
     except sqlite3.OperationalError:  # a store before M070
         return []

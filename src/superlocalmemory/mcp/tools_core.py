@@ -1855,37 +1855,73 @@ def register_core_tools(server, get_engine: Callable) -> None:
             return {"success": False, "retryable": True, "error": "correction listing unavailable"}
 
     @server.tool(title="List Disputes", annotations=READ_ONLY)
-    async def list_disputes(limit: int = 50, profile_id: str = "") -> dict:
-        """What needs the user's answer: open disputes and changed source files.
+    async def list_disputes(limit: int = 50, profile_id: str = "", audit: bool = False,
+                            model: str = "") -> dict:
+        """What needs an answer: open disputes and changed source files.
 
         A dispute is two memories that state different values of the same thing
-        (``sides``, newest first, with when each was said). Ask the user which is
-        true now, then call ``settle_dispute``. ``changed_sources`` are memories
-        whose source file changed or went missing: read the file again before
-        relying on them. Recall results carry the same ``disputes`` and
-        ``source`` fields on the memories they return.
+        (``sides``, newest first, with when each was said). Decide which is true
+        now (ask the user when you cannot tell), then call ``settle_dispute``.
+        ``changed_sources`` are memories whose source file changed or went missing:
+        read the file again before relying on them. Recall results carry the same
+        ``disputes`` and ``source`` fields on the memories they return.
+
+        ``audit=true`` lists the blind audit queue instead: pairs of memories a judge
+        decided on, shown without the verdict, that need one label. Pass ``model``, your
+        own model id: pairs only that model judged are left out, since your label could
+        not count. Label with ``settle_dispute(dispute_id="audit:<item_id>", keep=<label>,
+        model=<your model id>)``.
         """
+        if audit:
+            import urllib.parse
+
+            path = _truth_path("/api/audit/pending", limit, profile_id)
+            if (model or "").strip():
+                path += "&model=" + urllib.parse.quote(model.strip(), safe="")
+            return await _truth_request("GET", path, None)
         return await _truth_request("GET", _truth_path("/api/truth/attention", limit,
                                                        profile_id), None)
 
     @server.tool(title="Settle Dispute", annotations=DESTROYS_ONCE)
     @admits(OperationKind.CORRECT)
-    async def settle_dispute(dispute_id: str, keep: str, profile_id: str = "") -> dict:
-        """Record the user's answer to one dispute from ``list_disputes`` or recall.
+    async def settle_dispute(dispute_id: str, keep: str, profile_id: str = "",
+                             model: str = "") -> dict:
+        """Settle one dispute from ``list_disputes`` or recall, or take a decision back.
 
-        ``keep`` is the ``fact_id`` of the side the user says is true now (the
-        other memory is retired and can be rolled back with
-        ``review_correction``), ``both`` when both are true, or ``unrelated``
-        when the two were never about the same thing. Settle only with the
-        user's answer; when unsure, leave the dispute open.
+        Any caller may decide; the decision is recorded with your agent id, the ``mcp``
+        channel and the time, and can be undone (also from the dashboard's "Recent
+        decisions by your agents"). ``keep`` is the ``fact_id`` of the side that is true
+        now (the other memory is retired and comes back if you reopen), ``both`` when
+        both are true, or ``unrelated`` when the two were never about the same thing.
+        Decide on evidence (the sides' dates and sources, the user's words); when you
+        cannot tell, leave it open or ask the user. ``keep="reopen"`` takes a settled
+        dispute's answer back.
+
+        Blind audit labels use the same tool: ``dispute_id="audit:<item_id>"`` (from
+        ``list_disputes(audit=true)``) and ``keep`` one of that item's option labels or
+        ``cannot_tell``; ``keep="retract"`` takes your label back. Pass ``model``, your own
+        model id: your label counts toward a judge's certificate only when it differs from
+        the judged model.
         """
         import urllib.parse
 
-        body: dict[str, object] = {"keep": keep, "channel": "agent"}
+        body: dict[str, object] = {"keep": keep}
         if (profile_id or "").strip():
             body["profile_id"] = profile_id.strip()
-        path = "/api/disputes/" + urllib.parse.quote(dispute_id or "", safe="") + "/settle"
-        return await _truth_request("POST", path, body)
+        target = dispute_id or ""
+        if target.startswith("audit:"):
+            item = urllib.parse.quote(target[len("audit:"):], safe="")
+            if keep == "retract":
+                return await _truth_request("POST", f"/api/audit/{item}/retract",
+                                            {k: v for k, v in body.items() if k != "keep"})
+            body = {"label": keep, "model": model or "",
+                    **{k: v for k, v in body.items() if k not in ("keep",)}}
+            return await _truth_request("POST", f"/api/audit/{item}/answer", body)
+        path = "/api/disputes/" + urllib.parse.quote(target, safe="")
+        if keep == "reopen":
+            return await _truth_request("POST", path + "/reopen",
+                                        {k: v for k, v in body.items() if k != "keep"})
+        return await _truth_request("POST", path + "/settle", body)
 
     def _truth_path(base: str, limit: int, profile_id: str) -> str:
         import urllib.parse

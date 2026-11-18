@@ -164,11 +164,36 @@ def test_signing_status_json(db, held, monkeypatch, signer, capsys) -> None:
     assert data["signatures"]["signed"] == 1 and data["audit_chain"] == {"present": False}
 
 
-def test_resign_needs_a_terminal(db, held, monkeypatch, capsys) -> None:
+def test_resign_without_a_terminal_needs_yes_and_never_prompts(db, held, monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("an agent run must not prompt"))
     with pytest.raises(SystemExit) as exc:
-        signing_cmd.run(Namespace(signing_command="resign", yes=True, db=str(db.db_path)))
-    assert exc.value.code == 2 and "interactive terminal" in capsys.readouterr().err
+        signing_cmd.run(Namespace(signing_command="resign", yes=False, db=str(db.db_path)))
+    assert exc.value.code == 2 and "pass --yes" in capsys.readouterr().err
+
+
+def test_an_agent_signs_again_with_yes_and_the_decision_is_recorded(
+        db, held, monkeypatch, signer, capsys) -> None:
+    """D-49: no terminal is needed; the run is a recorded decision, listed and not undoable."""
+    from superlocalmemory.core import decisions
+
+    old = _signed_store(db, monkeypatch, sk.Signer(bytes(reversed(range(32)))), "Signed under the lost key.")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(signing_cmd, "_daemon_running", lambda: False)
+    monkeypatch.setenv("SLM_AGENT_ID", "codex-7")
+    signing_cmd.run(Namespace(signing_command="resign", yes=True, db=str(db.db_path),
+                              profile="default"))
+    assert "Signed 1 memories again" in capsys.readouterr().out
+    assert db.execute("SELECT key_id FROM fact_signatures WHERE fact_id = ?",
+                      (old.fact_id,))[0]["key_id"] == signer.key_id
+    conn = sqlite3.connect(str(db.db_path))
+    try:
+        rows = [r for r in decisions.recent(conn, "default") if r["kind"] == decisions.SIGNING]
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0]["actor"] == "agent:codex-7" and rows[0]["channel"] == "cli"
+    assert rows[0]["action"] == "resign" and rows[0]["can_undo"] is False
 
 
 def _terminal(monkeypatch, *, daemon=False):
@@ -198,6 +223,20 @@ def test_resign_signs_again_only_what_a_lost_key_signed(db, held, monkeypatch, s
     assert "Signed 1 memories again" in capsys.readouterr().out
     row = db.execute("SELECT key_id FROM fact_signatures WHERE fact_id = ?", (old.fact_id,))[0]
     assert row["key_id"] == signer.key_id
+    signing_cmd.run(Namespace(signing_command="resign", yes=True, db=str(db.db_path)))
+    assert "Nothing to sign again" in capsys.readouterr().out
+
+
+def test_resign_signs_a_memory_whose_signature_was_removed_after_the_person_says_yes(
+        db, held, monkeypatch, capsys) -> None:
+    fact = _signed_store(db, monkeypatch, held, "Run the tests before every commit.")
+    db.execute("UPDATE atomic_facts SET content = 'Changed outside.' WHERE fact_id = ?", (fact.fact_id,))
+    db.execute("DELETE FROM fact_signatures WHERE fact_id = ?", (fact.fact_id,))
+    _terminal(monkeypatch)
+    prompts: list[str] = []
+    monkeypatch.setattr("builtins.input", lambda q="": prompts.append(q) or "y")
+    signing_cmd.run(Namespace(signing_command="resign", yes=False, db=str(db.db_path)))
+    assert "lost their signature" in prompts[0] and "Signed 1 memories again" in capsys.readouterr().out
     signing_cmd.run(Namespace(signing_command="resign", yes=True, db=str(db.db_path)))
     assert "Nothing to sign again" in capsys.readouterr().out
 

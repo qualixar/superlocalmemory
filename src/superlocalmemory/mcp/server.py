@@ -660,6 +660,10 @@ def _stdin_eof_monitor() -> None:
         _mlog.debug("stdin EOF monitor error: %s — watchdog will cover", exc)
 
 
+# D-49: every daemon request this process makes is an MCP tool call, so decisions it records
+# (a promotion, a settlement, a label) carry the channel ``mcp`` (core/agent_attribution).
+_os.environ.setdefault("SLM_CLIENT_CHANNEL", "mcp")
+
 if not _embedded_in_daemon:
     _stdin_monitor_thread = threading.Thread(
         target=_stdin_eof_monitor, daemon=True, name="stdin-eof-monitor"

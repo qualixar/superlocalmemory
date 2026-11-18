@@ -139,6 +139,8 @@ def _incremental(chain: AuditChain, key: str, state: _State) -> _State:
         added, state.through_hash, state.seen_v2, chain._signer(), tally)
     if failure is None:
         failure = chain._anchor_failure_at(total, lambda n: _entry_at(chain, n), total > 0)
+    if failure is None and chain._signer() is not None:
+        failure = tally.unvouched_failure()
     report = dict(state.report)
     report["entries"] = total
     report["legacy"] += sum(1 for r in added if r.get("hash_version", 1) == 1)

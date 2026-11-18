@@ -30,6 +30,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from superlocalmemory.core.judge_calibration import COUNTING_LABEL
 from superlocalmemory.core.judge_questions import QUESTIONS
 
 #: Verdicts that are not answers: never audited.
@@ -79,10 +80,11 @@ SELECT r.receipt_id, r.profile_id, r.question_id, r.subject_kind, r.subject_id,
   FROM judge_receipts r
  WHERE r.profile_id = ? AND (r.audit_selected = 1 OR r.inbox_selected = 1)
    AND NOT EXISTS (SELECT 1 FROM judge_labels l
-                    WHERE l.receipt_id = r.receipt_id AND l.source = 'audit')
+                    WHERE l.receipt_id = r.receipt_id AND l.source = 'audit'
+                      AND {counting})
  ORDER BY r.decided_at, r.receipt_id
  LIMIT ?
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 
 def queue(conn: sqlite3.Connection, profile_id: str, limit: int = 50) -> list[AuditItem]:
@@ -94,17 +96,32 @@ def queue(conn: sqlite3.Connection, profile_id: str, limit: int = 50) -> list[Au
     return [AuditItem(*row) for row in conn.execute(_QUEUE, (profile_id, limit))]
 
 
+LABELLER_KINDS = ("person", "agent")
+
+
+def counts_toward_certificate(kind: str, model: str, judged_model: str) -> bool:
+    """The rule of ``judge_calibration.COUNTING_LABEL`` for one label (D-49)."""
+    return kind == "person" or (bool(model) and model != judged_model)
+
+
 class NotSelectedError(ValueError):
     """The receipt was not drawn for audit; an audit label on it would bias certificates."""
 
 
 def record_audit_label(conn: sqlite3.Connection, receipt_id: str, label: str, *,
-                       labeller: str, blind: bool = True) -> None:
-    """Write one audit label. ``blind`` False is stored but never certifies."""
-    from superlocalmemory.core.judge_calibration import CANNOT_TELL
+                       labeller: str, blind: bool = True, kind: str = "person",
+                       model: str = "") -> bool:
+    """Write one audit label; returns whether it counts toward a certificate cell.
 
-    row = conn.execute("SELECT question_id, audit_selected, inbox_selected FROM judge_receipts "
-                       "WHERE receipt_id = ?", (receipt_id,)).fetchone()
+    ``blind`` False is stored but never certifies. ``kind`` is ``person`` or ``agent`` and
+    ``model`` the labelling agent's own model id (D-49): a person's label always counts, an
+    agent's counts only when its model is known and is not the judged tier's.
+    """
+    from superlocalmemory.core.judge_calibration import CANNOT_TELL
+    if kind not in LABELLER_KINDS:
+        raise ValueError(f"labeller kind must be one of {LABELLER_KINDS}")
+    row = conn.execute("SELECT question_id, audit_selected, inbox_selected, model FROM "
+                       "judge_receipts WHERE receipt_id = ?", (receipt_id,)).fetchone()
     if row is None:
         raise LookupError(f"no receipt {receipt_id}")
     if row[1] != 1 and row[2] != 1:
@@ -114,11 +131,14 @@ def record_audit_label(conn: sqlite3.Connection, receipt_id: str, label: str, *,
         raise ValueError(f"label {label!r} is not an answer to {row[0]}")
     if not labeller:
         raise ValueError("an audit label names its labeller")
+    model = " ".join(str(model or "").split())[:80]
     conn.execute(
-        "INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, labelled_at) "
-        "VALUES (?, ?, 'audit', ?, ?, ?)",
-        (receipt_id, label, labeller, int(bool(blind)), datetime.now(UTC).isoformat()))
+        "INSERT INTO judge_labels (receipt_id, label, source, labeller, blind, labelled_at, "
+        "labeller_kind, labeller_model) VALUES (?, ?, 'audit', ?, ?, ?, ?, ?)",
+        (receipt_id, label, labeller, int(bool(blind)), datetime.now(UTC).isoformat(), kind,
+         model))
+    return counts_toward_certificate(kind, model, str(row[3]))
 
 
-__all__ = ["AuditItem", "NOT_ANSWERS", "NotSelectedError", "draw", "queue",
-           "record_audit_label", "select"]
+__all__ = ["AuditItem", "NOT_ANSWERS", "LABELLER_KINDS", "NotSelectedError",
+           "counts_toward_certificate", "draw", "queue", "record_audit_label", "select"]

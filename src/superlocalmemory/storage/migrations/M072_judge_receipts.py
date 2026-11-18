@@ -24,7 +24,10 @@ A hosted ask's receipts carry ``consent_ref``, the consent record it relied on
 ``slm doctor --truth``, not a CHECK, so one bad row never voids a batch. ``inputs_hash`` is
 an HMAC under a local key (``core/receipt_key.py``), so it identifies what was
 judged without confirming a guess of erased text. Labels: many per receipt
-(one per source and labeller), with ``blind``. Amended in place before any
+(one per source and labeller), with ``blind``, ``labeller_kind`` (``person`` or ``agent``) and
+``labeller_model`` (D-49: an agent's label counts toward a certificate cell only when its model
+differs from the judged tier's model; a person's always counts; labels written before the
+columns existed are a person's). Amended in place before any
 release (blueprint D-29); only disposable store copies ran the first version.
 """
 
@@ -87,6 +90,8 @@ CREATE TABLE IF NOT EXISTS judge_labels (
     labeller    TEXT NOT NULL DEFAULT '',
     blind       INTEGER NOT NULL DEFAULT 0 CHECK (blind IN (0, 1)),
     labelled_at TEXT NOT NULL,
+    labeller_kind  TEXT NOT NULL DEFAULT 'person',
+    labeller_model TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (receipt_id, source, labeller)
 );
 CREATE TABLE IF NOT EXISTS judge_receipt_facts (
@@ -119,10 +124,23 @@ def _has_facts(conn: sqlite3.Connection) -> bool:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='atomic_facts'").fetchone())
 
 
+_LABEL_COLUMNS = (("labeller_kind", "TEXT NOT NULL DEFAULT 'person'"),
+                  ("labeller_model", "TEXT NOT NULL DEFAULT ''"))
+
+
+def _add_label_columns(conn: sqlite3.Connection) -> None:
+    """A store that ran the first version of this migration gains the D-49 columns."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(judge_labels)")}
+    for name, spec in _LABEL_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE judge_labels ADD COLUMN {name} {spec}")
+
+
 def apply(conn: sqlite3.Connection) -> None:
     for statement in DDL.split(";"):
         if statement.strip():
             conn.execute(statement)
+    _add_label_columns(conn)
     if _has_facts(conn):  # triggers hold no data: always the current body
         conn.execute("DROP TRIGGER IF EXISTS trg_judge_receipts_fact_erased")
         conn.execute(_FACT_TRIGGER)
@@ -132,6 +150,9 @@ def verify(conn: sqlite3.Connection) -> bool:
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     if not {"judge_receipts", "judge_labels", "idx_judge_receipts_inputs",
             "judge_receipt_facts", "idx_judge_receipt_facts_fact"} <= names:
+        return False
+    have = {r[1] for r in conn.execute("PRAGMA table_info(judge_labels)")}
+    if not {"labeller_kind", "labeller_model"} <= have:
         return False
     return not _has_facts(conn) or "trg_judge_receipts_fact_erased" in names
 

@@ -4,15 +4,19 @@
 
 Most callers are agents, so a dispute travels inside the recall result itself:
 both sides, newest first, each with when and where it was said, and the next
-action (``ask_user``: ask which is true now, then settle). People settle the
-same disputes on the dashboard. Every door (MCP ``settle_dispute``,
-``slm disputes settle``, ``POST /api/disputes/{id}/settle``, the dashboard
-buttons) calls :func:`settle`, so there is one route for a person's answer.
+action (``ask_user``: ask which is true now, then settle). Any caller settles
+the same disputes (D-49): an agent, a script or a person on the dashboard. Every
+door (MCP ``settle_dispute``, ``slm disputes settle``,
+``POST /api/disputes/{id}/settle``, the dashboard buttons) calls :func:`settle`, so
+there is one route for an answer.
 
-A person's answer is a lawful basis for retiring the losing memory (I-10), as
-``remember(replaces=…)`` is: the loser is retired through the correction
-ledger and the dispute records who answered and through which channel. A
-person's answer is never a blind label, so it never feeds a certificate.
+A caller's recorded answer is a lawful basis for retiring the losing memory (I-10),
+as ``remember(replaces=…)`` is: the loser is retired through the correction ledger
+and the dispute records who answered (an agent id, a client name or ``dashboard``),
+through which channel (``mcp``, ``cli``, ``http``, ``dashboard``) and when, in
+``resolved_by`` as ``actor@channel`` and in the decision log. :func:`reopen` takes
+the answer back: the retired memory returns and the question is open again. An
+answer is never a blind label, so it never feeds a certificate.
 
 Nothing here reads memory text beyond the facts the dispute names, and the
 other side's text passes the same visibility filter as any recall result.
@@ -24,7 +28,9 @@ import json
 import sqlite3
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
+from superlocalmemory.core import decisions
 from superlocalmemory.trust.supersession import ORIGIN_BELOW_HEAD
 from superlocalmemory.truth import slot_store
 from superlocalmemory.truth.slot_repair import ROLLED_BACK
@@ -34,8 +40,8 @@ from superlocalmemory.truth.slot_resolver import APPLIED, retire_superseded
 ASK_USER = "ask_user"
 KEEP_BOTH = "both"
 UNRELATED = "unrelated"
-#: Channels a person's answer may arrive through (recorded on the dispute).
-CHANNELS = ("agent", "cli", "dashboard", "http")
+#: Channels an answer may arrive through (recorded on the dispute; never a claim about who).
+CHANNELS = decisions.CHANNELS
 #: Characters of the other side's text a recall result carries.
 SIDE_TEXT_CHARS = 600
 MAX_LISTING = 200
@@ -67,6 +73,10 @@ SELECT d.dispute_id, d.reason_code, d.opened_at, d.revision_a, d.revision_b,
 
 class SettleRefused(ValueError):
     """The answer cannot be applied; nothing was changed."""
+
+
+class ReopenRefused(ValueError):
+    """The answer cannot be taken back (the value moved on since); nothing was changed."""
 
 
 @dataclass(frozen=True)
@@ -200,7 +210,7 @@ def _resolution(row: tuple, keep: str) -> str:
 
 def settle(conn: sqlite3.Connection, *, profile_id: str, dispute_id: str, keep: str,
            channel: str, actor: str = "") -> dict:
-    """A person's answer to one open dispute, applied in the caller's transaction.
+    """A caller's answer to one open dispute, applied in the caller's transaction.
 
     ``keep`` is the fact id of the side that is true now (the other side is
     retired through the correction ledger), ``both`` (both stay current) or
@@ -224,7 +234,7 @@ def settle(conn: sqlite3.Connection, *, profile_id: str, dispute_id: str, keep: 
     scope = conn.execute("SELECT s.scope FROM slot_disputes d JOIN memory_slots s "
                          "ON s.slot_id = d.slot_id WHERE d.dispute_id = ?",
                          (dispute_id,)).fetchone()[0]
-    by = f"person:{channel}" + (f":{actor[:80]}" if actor else "")
+    by = decisions.Decider(decisions.clean_actor(actor), channel).ref
     conn.execute("SAVEPOINT settle")
     try:
         retired = slot_store.resolve_dispute(conn, dispute_id, resolution, resolved_by=by)
@@ -246,9 +256,102 @@ def settle(conn: sqlite3.Connection, *, profile_id: str, dispute_id: str, keep: 
         conn.execute("RELEASE settle")
         raise
     conn.execute("RELEASE settle")
+    decisions.log(conn, profile_id=profile_id, kind=decisions.DISPUTE, subject_id=dispute_id,
+                  action="settle", decider=decisions.Decider(actor, channel),
+                  summary=_SUMMARY[resolution], detail={"resolution": resolution})
     return {"dispute_id": dispute_id, "status": SETTLED, "resolution": resolution,
             "retired": list(retired), "settled_by": by}
 
 
-__all__ = ["ASK_USER", "CHANNELS", "KEEP_BOTH", "SETTLED", "STALE", "SettleRefused", "UNRELATED", "for_facts",
-           "listing", "open_count", "settle"]
+_SUMMARY = {"a": "Settled a dispute: kept the earlier value",
+            "b": "Settled a dispute: kept the newer value",
+            "both": "Settled a dispute: both values are true",
+            "unrelated": "Settled a dispute: the two are unrelated"}
+
+
+def reopen(conn: sqlite3.Connection, *, profile_id: str, dispute_id: str, channel: str,
+           actor: str = "") -> dict:
+    """Take a settled dispute's answer back: the memory it retired returns, the slot is as it
+    was before the answer, and the question is open again. Recorded like any decision.
+
+    Raises :class:`LookupError` for a dispute that is not settled in this profile and
+    :class:`ReopenRefused` when the slot moved on since (nothing is changed then).
+    """
+    if channel not in CHANNELS:
+        raise ReopenRefused(f"channel must be one of {CHANNELS}")
+    row = conn.execute(
+        "SELECT d.slot_id, d.revision_a, d.revision_b, d.reason_code, d.resolution, "
+        "s.head_revision_id, s.version FROM slot_disputes d JOIN memory_slots s "
+        "ON s.slot_id = d.slot_id WHERE d.dispute_id = ? AND d.profile_id = ? "
+        "AND d.state = 'resolved'", (dispute_id, profile_id)).fetchone()
+    if row is None:
+        raise LookupError(f"no settled dispute {dispute_id}")
+    slot_id, rev_a, rev_b, reason, resolution, head, version = row
+    if head != (rev_b if resolution == "b" else rev_a):
+        raise ReopenRefused("The value changed since this was settled, so it cannot be "
+                            "reopened.")
+    if conn.execute("SELECT 1 FROM slot_disputes WHERE slot_id = ? AND revision_a = ? "
+                    "AND revision_b = ? AND state = 'open'",
+                    (slot_id, rev_a, rev_b)).fetchone():
+        raise ReopenRefused("The same question is already open.")
+    who = decisions.Decider(decisions.clean_actor(actor), channel)
+    conn.execute("SAVEPOINT reopen")
+    try:
+        restored = _restore_retired(conn, profile_id, resolution, rev_a, rev_b)
+        _restore_slot(conn, slot_id, int(version), rev_a, rev_b, reason)
+        conn.execute("UPDATE slot_disputes SET state = 'open', resolution = NULL, "
+                     "resolved_by = NULL, resolved_at = NULL WHERE dispute_id = ?",
+                     (dispute_id,))
+    except Exception:
+        conn.execute("ROLLBACK TO reopen")
+        conn.execute("RELEASE reopen")
+        raise
+    conn.execute("RELEASE reopen")
+    earlier = decisions.open_decision(conn, profile_id, decisions.DISPUTE, dispute_id)
+    if earlier is not None:
+        decisions.mark_undone(conn, earlier["decision_id"], who)
+    decisions.log(conn, profile_id=profile_id, kind=decisions.DISPUTE, subject_id=dispute_id,
+                  action="reopen", decider=who, summary="Reopened a dispute",
+                  detail={"was": resolution})
+    return {"dispute_id": dispute_id, "status": "open", "restored": restored,
+            "reopened_by": who.ref}
+
+
+def _restore_retired(conn: sqlite3.Connection, profile_id: str, resolution: str, rev_a: str,
+                     rev_b: str) -> list[str]:
+    """Roll back the correction case that retired the losing memory (a or b answers only)."""
+    if resolution not in ("a", "b"):
+        return []
+    from superlocalmemory.storage.correction_cases import transition_on_connection
+    from superlocalmemory.truth.slot_resolver import ACTOR, REASON
+
+    loser = conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
+                         (rev_a if resolution == "b" else rev_b,)).fetchone()[0]
+    case = conn.execute(
+        "SELECT case_id, version FROM correction_cases WHERE profile_id = ? AND "
+        "predecessor_fact_id = ? AND status = 'applied' AND reason_code = ? LIMIT 1",
+        (profile_id, loser, REASON)).fetchone()
+    if case is None:
+        raise ReopenRefused("The retired memory was already restored another way.")
+    transition_on_connection(
+        conn, case_id=case[0], expected_version=int(case[1]), actor=ACTOR,
+        operation_id=f"dispute-reopen:{case[0]}", from_status="applied",
+        to_status="rolled_back", mutate_temporal=True,
+        is_profile_active=lambda candidate: candidate == profile_id,
+        is_actor_trusted=lambda actor: actor == ACTOR)
+    return [loser]
+
+
+def _restore_slot(conn: sqlite3.Connection, slot_id: str, version: int, rev_a: str,
+                  rev_b: str, reason: str) -> None:
+    """The slot as it stood when the dispute opened: head ``a``, challenger ``b`` disputed."""
+    conn.execute("UPDATE slot_revisions SET state = 'head', superseded_by = NULL "
+                 "WHERE revision_id = ?", (rev_a,))
+    conn.execute("UPDATE slot_revisions SET state = 'disputed', superseded_by = NULL, "
+                 "reason_code = ? WHERE revision_id = ?", (reason, rev_b))
+    slot_store._move_head(conn, slot_id, version, rev_a, "disputed",
+                          datetime.now(UTC).isoformat())
+
+
+__all__ = ["ASK_USER", "CHANNELS", "KEEP_BOTH", "ReopenRefused", "SETTLED", "STALE",
+           "SettleRefused", "UNRELATED", "for_facts", "listing", "open_count", "reopen", "settle"]

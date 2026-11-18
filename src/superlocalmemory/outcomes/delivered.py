@@ -245,6 +245,8 @@ def gates(conn: sqlite3.Connection, profile_id: str, *, slm_home: Path | None = 
                           "rules_bound": need.get("rules_bound"), "alpha": need.get("alpha"),
                           "days": need_gate.WINDOW_DAYS},
             "harm_gate": {"state": harm.get("state"), "acting": False, "tests": harm.get("tests"),
+                          "facts_both_arms": harm.get("facts_both_arms"),
+                          "facts_ever_left_out": harm.get("facts_ever_left_out"),
                           "would_withhold_count": sum(1 for i in ids if i in visible),
                           "would_withhold": [{"fact_id": i, "preview": _clean(visible[i].get("content", ""))}
                                              for i in ids if i in visible][:LISTED]}}

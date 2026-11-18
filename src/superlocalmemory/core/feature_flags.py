@@ -73,8 +73,12 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
     # withholding and swaps (below) these are the only flags not "off".
     Flag("outcomes.receipts", "WS-3", FlagState.ON,
          "Write an injection receipt for every delivery (ids only, local)"),
-    Flag("outcomes.usage", "WS-3", FlagState.OFF,
-         "Detect whether delivered memories were used (local, ids only)"),
+    # D-49 (Varun, 18 Nov): usage detection is on by default. Without it withholding and
+    # swaps can only ever measure ``reask`` and the position curve (which needs ``used`` in
+    # all four cells) cannot be measured. It compares the agent's reply with the memories
+    # delivered, locally, and keeps ids and scores only.
+    Flag("outcomes.usage", "WS-3", FlagState.ON,
+         "Detect whether delivered memories were used (local, ids and scores only)"),
     # D-28 + D-34 (Varun, 15-16 Nov): withholding is on by default for every
     # user, with a clear switch to turn it off. The default flipped in the commit
     # that landed D-28's shipping conditions: the install/upgrade disclosure
@@ -94,7 +98,9 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "(nothing withheld) to measure how much attention each position gets",
          shadowable=False),
     Flag("delivery.need_gate", "WS-4", FlagState.OFF,
-         "Decide per prompt whether memory is needed before recalling"),
+         "Decide per prompt whether memory is needed before recalling (shadow: the fixed "
+         "rules still skip, the score never skips and the threshold is only logged, and "
+         "memories are still injected on the other prompts, because labels need deliveries)"),
     Flag("delivery.cues", "WS-4", FlagState.OFF,
          "Fire prospective memories on cues (file path, tool, error, repository, date)"),
     Flag("delivery.harm_gate", "WS-4", FlagState.OFF,

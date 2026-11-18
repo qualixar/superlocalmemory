@@ -325,6 +325,7 @@ class HookDaemon:
                 session_id=session_id,
                 priority="high",
                 stall_timeout_s=timeout,
+                deadline_s=timeout,  # A-14: what we stop waiting for is never "delivered"
             )
 
             result = self._queue.poll_result(request_id, timeout_s=timeout)
@@ -393,8 +394,17 @@ def owned_socket_path(sock_path: Path | None = None) -> Path | None:
     return path
 
 
-def _socket_request(path: Path, request: dict, timeout: float) -> dict | None:
-    """One newline-delimited JSON exchange. None on any failure."""
+#: What one exchange with the hook socket came to (A-15). The per-prompt hook ends with ``{}`` on a
+#: timeout (the daemon is busy: a second recall or HTTP would add to it) and falls back only when
+#: there is no socket, or it failed at once (a stale file, a refused connection).
+SOCKET_ANSWERED = "answered"
+SOCKET_ABSENT = "absent"
+SOCKET_TIMEOUT = "timeout"
+SOCKET_FAILED = "failed"
+
+
+def _socket_request_ex(path: Path, request: dict, timeout: float) -> tuple[dict | None, str]:
+    """One newline-delimited JSON exchange: ``(answer or None, SOCKET_*)``."""
     try:
         client = socket.socket(_AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -410,11 +420,37 @@ def _socket_request(path: Path, request: dict, timeout: float) -> dict | None:
         finally:
             client.close()
         if not data.strip():
-            return None
+            return None, SOCKET_FAILED
         response = json.loads(data.decode("utf-8").strip())
-        return response if isinstance(response, dict) else None
+        if not isinstance(response, dict):
+            return None, SOCKET_FAILED
+        return response, SOCKET_ANSWERED
+    except TimeoutError:  # socket.timeout is TimeoutError since Python 3.10
+        return None, SOCKET_TIMEOUT
     except Exception:
-        return None
+        return None, SOCKET_FAILED
+
+
+def _socket_request(path: Path, request: dict, timeout: float) -> dict | None:
+    """One newline-delimited JSON exchange. None on any failure."""
+    return _socket_request_ex(path, request, timeout)[0]
+
+
+def socket_recall(
+    sock_path: Path | None = None,
+    prompt: str = "",
+    session_id: str = "",
+    timeout: float = 15.0,
+) -> tuple[dict | None, str]:
+    """Ask the hook socket for a recall: ``(envelope or None, SOCKET_*)``.
+
+    ``SOCKET_ABSENT`` when there is no socket of ours, so the caller may fall back; a
+    ``SOCKET_TIMEOUT`` means the daemon is there and busy.
+    """
+    path = owned_socket_path(sock_path)
+    if path is None:
+        return None, SOCKET_ABSENT
+    return _socket_request_ex(path, {"prompt": prompt, "session_id": session_id}, timeout)
 
 
 def try_socket_recall(
@@ -428,10 +464,7 @@ def try_socket_recall(
     Returns the hook envelope dict on success, or None if the daemon
     is unavailable (triggers subprocess fallback in auto_recall_hook).
     """
-    path = owned_socket_path(sock_path)
-    if path is None:
-        return None
-    return _socket_request(path, {"prompt": prompt, "session_id": session_id}, timeout)
+    return socket_recall(sock_path, prompt, session_id, timeout)[0]
 
 
 def try_socket_events(

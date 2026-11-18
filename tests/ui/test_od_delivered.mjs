@@ -36,7 +36,8 @@ const REPORT = {
         memories: [MEMORY('f-old')] }] },
   ],
   need_gate: { turns: 40, skipped: 12, rules_bound: 0.03, alpha: 0.05, days: 30 },
-  harm_gate: { state: 'off', acting: false, tests: 4, would_withhold_count: 1,
+  harm_gate: { state: 'off', acting: false, tests: 4, facts_both_arms: 4, facts_ever_left_out: 6,
+               would_withhold_count: 1,
                would_withhold: [{ fact_id: 'f-harm', preview: 'A memory that hurt' }] },
 };
 
@@ -118,12 +119,30 @@ describe('Shown to your agents card', () => {
     assert.match(t, /A memory that hurt/);
   });
 
-  it('says so when no prompt was checked and nothing would be withheld', async () => {
-    const d = page({ ...REPORT, need_gate: { turns: null }, harm_gate: { would_withhold_count: 0, would_withhold: [] } });
+  it('says "not testable yet" when no memory has been left out often enough to compare', async () => {
+    const d = page({ ...REPORT, need_gate: { turns: null },
+      harm_gate: { tests: 0, facts_both_arms: 0, facts_ever_left_out: 2, would_withhold_count: 0, would_withhold: [] } });
     show(d).click();
     await flush();
     assert.match(text(d), /No prompts have been checked yet/);
+    assert.match(text(d), /Not testable yet: no memory has been left out often enough to compare/);
+    assert.doesNotMatch(text(d), /No memory has been measured as making an agent worse/);
+  });
+
+  it('says none was measured as worse only when memories were actually tested', async () => {
+    const d = page({ ...REPORT, harm_gate: { tests: 3, facts_both_arms: 3, facts_ever_left_out: 5,
+      would_withhold_count: 0, would_withhold: [] } });
+    show(d).click();
+    await flush();
     assert.match(text(d), /No memory has been measured as making an agent worse/);
+    assert.doesNotMatch(text(d), /Not testable yet/);
+  });
+
+  it('does not claim a result when the harm check could not be read', async () => {
+    const d = page({ ...REPORT, harm_gate: { would_withhold_count: 0, would_withhold: [] } });
+    show(d).click();
+    await flush();
+    assert.match(text(d), /Not testable yet/);
   });
 
   it('says so when nothing has been shown yet', async () => {

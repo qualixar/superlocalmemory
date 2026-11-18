@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""``slm proposals``: anyone reads; only a person at a terminal decides (WS-6, I-10)."""
+"""``slm proposals``: anyone reads and decides; recorded and reversible (WS-6, D-49)."""
 
 from __future__ import annotations
 
@@ -60,39 +60,51 @@ def test_json_listing_is_for_agents(monkeypatch, capsys) -> None:
 
 
 @pytest.mark.parametrize("sub", ["apply", "reject", "rollback"])
-def test_without_a_terminal_a_decision_is_refused_and_asks_nothing(monkeypatch, capsys, sub) -> None:
-    sent = _wire(monkeypatch, tty=False)
-    assert proposals_cmd.cmd_proposals(_args(sub)) == 1
-    assert sent == [] and "asks a person at a terminal" in capsys.readouterr().err
+@pytest.mark.parametrize("tty", [True, False])
+def test_a_decision_needs_no_terminal_and_asks_nothing(monkeypatch, sub, tty) -> None:
+    """D-49: an agent's shell tool decides the same way a person does; nothing is prompted."""
+    sent = _wire(monkeypatch, tty=tty)
+    monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("asked a question"))
+    assert proposals_cmd.cmd_proposals(_args(sub)) == 0
+    method, path, body = sent[-1]
+    assert (method, path) == ("POST", f"/api/proposals/s1/{sub}") and body["by"]
+    assert "channel" not in body  # the channel is the connection's, never a parameter
 
 
-def test_a_person_sees_the_set_confirms_and_it_is_sent_with_the_cli_channel(
-        monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch, answers=["y"])
+def test_the_set_is_shown_and_the_way_back_is_named(monkeypatch, capsys) -> None:
+    _wire(monkeypatch, tty=False)
     assert proposals_cmd.cmd_proposals(_args("apply")) == 0
     out = capsys.readouterr().out
-    assert "Retire “weekly”" in out and "Applied. Undo it any time with: slm proposals rollback s1" in out
-    assert sent[-1] == ("POST", "/api/proposals/s1/apply", {"channel": "cli"})
+    assert "Retire “weekly”" in out and "Undo it any time with: slm proposals rollback s1" in out
 
 
-@pytest.mark.parametrize("reply", ["n", "", "maybe"])
-def test_anything_but_yes_changes_nothing(monkeypatch, capsys, reply) -> None:
-    sent = _wire(monkeypatch, answers=[reply])
-    assert proposals_cmd.cmd_proposals(_args("apply")) == 0
-    assert [m for m, _p, _b in sent] == ["GET"] and "Nothing was changed" in capsys.readouterr().out
+def test_an_agents_own_id_is_the_name_recorded(monkeypatch) -> None:
+    monkeypatch.setenv("SLM_AGENT_ID", "codex")
+    sent = _wire(monkeypatch, tty=False)
+    proposals_cmd.cmd_proposals(_args("apply"))
+    assert sent[-1][2]["by"] == "agent:codex"
 
 
-def test_a_closed_input_stream_is_a_no(monkeypatch) -> None:
-    sent = _wire(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda _p="": (_ for _ in ()).throw(EOFError()))
-    assert proposals_cmd.cmd_proposals(_args("rollback")) == 0
-    assert [m for m, _p, _b in sent] == ["GET"]
+def test_a_role_that_may_not_write_is_told_so(monkeypatch, capsys) -> None:
+    from superlocalmemory.cli import daemon
+
+    _wire(monkeypatch)
+    real = daemon.daemon_request
+
+    def refusing(method, path, body=None, **flags):
+        if method == "POST":
+            raise daemon.DaemonRefused(403, path)
+        return real(method, path, body, **flags)
+
+    monkeypatch.setattr(daemon, "daemon_request", refusing)
+    assert proposals_cmd.cmd_proposals(_args("apply")) == 1
+    assert "your role" in capsys.readouterr().err
 
 
 def test_a_conflict_is_reported_as_a_refusal(monkeypatch, capsys) -> None:
     from superlocalmemory.cli import daemon
 
-    _wire(monkeypatch, answers=["y"])
+    _wire(monkeypatch)
     real = daemon.daemon_request
 
     def refusing(method, path, body=None, **flags):

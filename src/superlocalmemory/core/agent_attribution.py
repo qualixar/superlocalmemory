@@ -30,12 +30,11 @@ from __future__ import annotations
 from typing import Any
 
 CONNECTION_HEADER = "X-SLM-Connection-Agent"
-#: Whether the client process sat at an interactive terminal (WS-5, instruction
-#: firewall): ``tty`` or ``no_tty``. Believed only from a capability holder, like
-#: the connection name, and used only when the save names no agent at all.
-SHELL_HEADER = "X-SLM-Client-Shell"
-SHELL_TTY = "shell:tty"
-SHELL_NO_TTY = "shell:no_tty"
+#: Which of SuperLocalMemory's own doors made the call: ``mcp``, ``cli`` or ``dashboard``
+#: (D-49). It is recorded and shown, never a credential and never a claim about a person.
+CHANNEL_HEADER = "X-SLM-Channel"
+#: The raw signal a dashboard save records as ``agent_id_source`` (``trust/origin_class``).
+DASHBOARD_SOURCE = "dashboard"
 #: Not a connection: the stdio sentinel when no agent was configured.
 UNNAMED = "mcp_client"
 
@@ -64,42 +63,36 @@ def forwarded_headers(capability: str | None) -> dict[str, str]:
     return {CONNECTION_HEADER: agent} if agent and capability is not None else {}
 
 
-def shell_headers(capability: str | None) -> dict[str, str]:
-    """The terminal header a daemon request carries (only with the capability).
+def client_channel() -> str:
+    """``mcp`` inside an MCP server process, else ``cli`` (this process's own door)."""
+    import os
 
-    ``tty`` when this process's standard input and output are an interactive
-    terminal, ``no_tty`` otherwise (a script, a hook, an agent's shell tool, the
-    daemon itself). A closed or odd stream counts as no terminal.
+    return "mcp" if os.environ.get("SLM_CLIENT_CHANNEL", "").strip().lower() == "mcp" else "cli"
+
+
+def channel_headers(capability: str | None) -> dict[str, str]:
+    """The channel header a daemon request carries (only with the capability)."""
+    return {CHANNEL_HEADER: client_channel()} if capability is not None else {}
+
+
+def dashboard_signal(value: str, trusted_actor_id: str) -> str | None:
+    """``dashboard`` when the page's own door made this save, else ``None``.
+
+    The dashboard presents the install token (a ``local-capability:`` actor) and names its
+    channel. The daemon capability, a remote key or a bare header does not make a dashboard
+    save, so no other client can mint the one signal that reads as the user's own words.
     """
-    if capability is None:
-        return {}
-    import sys
-
-    try:
-        tty = bool(sys.stdin is not None and sys.stdin.isatty()
-                   and sys.stdout is not None and sys.stdout.isatty())
-    except (ValueError, OSError):
-        tty = False
-    return {SHELL_HEADER: "tty" if tty else "no_tty"}
-
-
-def shell_signal(value: str, trusted_actor_id: str) -> str | None:
-    """``shell:tty`` / ``shell:no_tty`` from a request's header, or ``None``.
-
-    Believed only from a daemon-capability caller; anything else (the dashboard,
-    a remote app, a forged header) says nothing, so the save is judged as before.
-    """
-    if not str(trusted_actor_id or "").startswith("daemon-capability:"):
+    if (value or "").strip().lower() != DASHBOARD_SOURCE:
         return None
-    return {"tty": SHELL_TTY, "no_tty": SHELL_NO_TTY}.get((value or "").strip().lower())
+    return DASHBOARD_SOURCE if str(trusted_actor_id or "").startswith("local-capability:") else None
 
 
-def bind(metadata: dict[str, Any], connection: str, shell: str | None = None) -> dict[str, Any]:
+def bind(metadata: dict[str, Any], connection: str, via: str | None = None) -> dict[str, Any]:
     """``metadata`` with the agent fields set from ``connection`` (may be ``""``).
 
-    ``shell`` (``shell_signal``) is recorded as ``agent_id_source`` only when the
-    save names no agent at all: it is the one thing left to say how the saver
-    identified itself (``trust/origin_class``, row ``remember.shell_no_tty``).
+    ``via`` (``dashboard_signal``) is recorded as ``agent_id_source`` only when the save
+    names no agent at all: it is the one positive signal left of a user's own statement
+    (``trust/origin_class``, row ``remember.dashboard``).
     """
     out = dict(metadata)
     # A caller cannot set these itself: they say how far the name is believed.
@@ -113,8 +106,8 @@ def bind(metadata: dict[str, Any], connection: str, shell: str | None = None) ->
             out["claimed_agent_id"] = claimed
     elif claimed:
         out["agent_id_source"] = "claimed"
-    elif shell:
-        out["agent_id_source"] = shell
+    elif via:
+        out["agent_id_source"] = via
     return out
 
 
@@ -158,7 +151,7 @@ def write_speaker(explicit: str, metadata: dict[str, Any] | None) -> tuple[str, 
 
 
 __all__ = [
-    "CONNECTION_HEADER", "SHELL_HEADER", "SHELL_NO_TTY", "SHELL_TTY", "UNNAMED", "audit_fields",
-    "bind", "connection_agent", "forwarded_headers", "shell_headers", "shell_signal",
-    "write_speaker",
+    "CHANNEL_HEADER", "CONNECTION_HEADER", "DASHBOARD_SOURCE", "UNNAMED", "audit_fields", "bind",
+    "channel_headers", "client_channel", "connection_agent", "dashboard_signal",
+    "forwarded_headers", "write_speaker",
 ]

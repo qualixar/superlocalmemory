@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from superlocalmemory.core.feature_flags import FlagState, write_flag
+from superlocalmemory.core.feature_flags import FeatureFlags, FlagState, write_flag
 from superlocalmemory.hooks import event_delivery as ed
 from superlocalmemory.hooks import stop_outcome_hook as stop
 from superlocalmemory.outcomes import usage
@@ -185,7 +185,12 @@ def _delivered_now(store, tmp_path) -> str:
     return a
 
 
+def test_usage_detection_is_on_by_default(tmp_path) -> None:
+    assert FeatureFlags(tmp_path, environ={}).enabled("outcomes.usage")
+
+
 def test_the_hook_sends_nothing_while_usage_detection_is_off(store, tmp_path) -> None:
+    write_flag(tmp_path, "outcomes.usage", FlagState.OFF)
     _delivered_now(store, tmp_path)
     assert stop.overlap_events({"last_assistant_message": REPLY}, "conv-1", "default") == []
 

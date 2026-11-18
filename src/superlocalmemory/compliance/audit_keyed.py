@@ -20,6 +20,19 @@ key cannot be checked by HMAC any more (the key is gone, nothing is re-keyed); t
 and prev-links are still checked and they are counted ``keyed_unverified``. Plain links
 before the anchor stay verifiable by their plain hash.
 
+*The current key must vouch for the past (A-13).* A link keyed under a key this process does
+not hold cannot be checked by HMAC, and a label in the file proves nothing: someone with the file
+and no key can give every link, and the anchor, a made-up key id and rewrite an entry, and the
+order, the prev-links and the external anchor all still agree. So when the verifier **does** hold
+a key, a link under any other key id passes only if a *later anchor keyed under the verifier's
+own key* stands behind it: that anchor's HMAC covers the hash of the entry before it, which is the
+head of everything written earlier. A chain whose foreign-keyed links no such anchor follows fails
+(the reason says so). The daemon writes that anchor at its next audit entry after a key change, so
+after a lost key the check reads "waiting" (failed) until then. A verifier that holds no key says
+nothing about foreign links beyond order, and the report counts them ``keyed_unverified``.
+What this cannot do: check the *content* of links made under a key that is gone (only the head they
+ended on is vouched for), or notice a keyed span rewritten as plain version-2 links.
+
 Pure functions; the chain itself is ``compliance/audit.py``.
 """
 
@@ -67,6 +80,17 @@ class Tally:
     anchors: int = 0
     seen_keyed: bool = False
     active_key: str | None = None  # the key id the latest anchor declared
+    unvouched: int = 0           # links under another key, no anchor of ours behind them yet
+    first_unvouched: int | None = None  # entry id of the first of them
+
+    def unvouched_failure(self) -> tuple[int | None, str] | None:
+        """The failure to report at the end of a walk with a key in hand, or ``None``."""
+        if not self.unvouched:
+            return None
+        return (self.first_unvouched,
+                f"{self.unvouched} keyed entries are under a key this computer does not hold, and "
+                "no anchor under your current key vouches for them: the chain may have been "
+                "relabelled. After a lost key the daemon writes that anchor at its next entry.")
 
     def as_report(self) -> dict[str, int]:
         return {"keyed": self.keyed, "keyed_unverified": self.keyed_unverified,
@@ -99,8 +123,14 @@ def check_row(row: dict, signer: Any, tally: Tally) -> str | None:
     elif key_id != tally.active_key:
         return "a keyed entry carries a key that no anchor declares"
     tally.seen_keyed = True
-    if signer is None or key_id != signer.key_id:
+    if signer is None:
         tally.keyed_unverified += 1
+        return None
+    if key_id != signer.key_id:
+        tally.keyed_unverified += 1
+        if not tally.unvouched:
+            tally.first_unvouched = row.get("id")
+        tally.unvouched += 1
         return None
     expected = keyed_hash(signer, row["prev_hash"], row["operation"], row["agent_id"] or "",
                           row["profile_id"] or "", row["content_hash"] or "", row["timestamp"],
@@ -108,6 +138,8 @@ def check_row(row: dict, signer: Any, tally: Tally) -> str | None:
     if expected != row["event_hash"]:
         return "the entry's fields do not match its keyed hash"
     tally.keyed += 1
+    if row.get("operation") == ANCHOR_OPERATION:  # keyed under our key: it stands behind the past
+        tally.unvouched, tally.first_unvouched = 0, None
     return None
 
 

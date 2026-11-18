@@ -39,7 +39,8 @@ def _store(db, text, origin=None, *, memory_id=None):
 
 
 def _person():
-    return fo.Origin("remember_http", "verbatim", source_type="http", role="user")
+    return fo.Origin("remember_http", "verbatim", source_type="http", role="user",
+                     agent_id_source="dashboard")
 
 
 def _web(**kw):
@@ -85,7 +86,7 @@ def test_a_fact_with_no_origin_row_is_unknown(db) -> None:
     fact = _store(db, "Saved before origins were kept.")
     db.execute("DELETE FROM fact_origin WHERE fact_id = ?", (fact.fact_id,))
     got = ft.compute(_query(db), fact.fact_id)
-    assert got == ft.Trust("unknown", "unknown", "v2:no_origin_row")
+    assert got == ft.Trust("unknown", "unknown", "v3:no_origin_row")
 
 
 def test_a_fact_that_does_not_exist_has_no_trust(db) -> None:
@@ -96,7 +97,7 @@ def test_a_persons_fact_is_user_direct_with_its_own_taint(db) -> None:
     fact = _store(db, "I prefer tea.", _person())
     got = ft.compute(_query(db), fact.fact_id)
     assert (got.origin_class, got.taint_class, got.basis) == (
-        "user_direct", "user_direct", "v2:remember.person")
+        "user_direct", "user_direct", "v3:remember.dashboard")
 
 
 def test_a_correction_inherits_the_taint_of_what_it_corrects(db) -> None:
@@ -186,7 +187,7 @@ def test_with_the_flag_off_a_save_computes_nothing(db) -> None:
 def test_with_the_flag_observing_admission_records_the_class(db, monkeypatch, state) -> None:
     monkeypatch.setenv(FLAG, state)
     fact = _store(db, "I prefer tea.", _person())
-    assert _rows(db) == {fact.fact_id: ("user_direct", "user_direct", "v2:remember.person")}
+    assert _rows(db) == {fact.fact_id: ("user_direct", "user_direct", "v3:remember.dashboard")}
 
 
 def test_the_kill_switch_stops_admission(db, monkeypatch) -> None:
@@ -241,7 +242,7 @@ def test_the_batch_marks_facts_saved_before_origins_unknown(db) -> None:
     fact = _store(db, "Saved before origins were kept.")
     db.execute("DELETE FROM fact_origin WHERE fact_id = ?", (fact.fact_id,))
     ft.run_batch(db)
-    assert _rows(db)[fact.fact_id] == ("unknown", "unknown", "v2:no_origin_row")
+    assert _rows(db)[fact.fact_id] == ("unknown", "unknown", "v3:no_origin_row")
 
 
 def test_the_batch_is_the_step_only_while_the_flag_observes(db, monkeypatch) -> None:
@@ -262,7 +263,7 @@ def test_origin_of_reads_the_row_or_computes_without_writing(db) -> None:
     fact = _store(db, "Mail about tea.", _web())
     with db.raw_connection() as conn:
         got = ft.origin_of(conn, fact.fact_id)
-    assert got["class"] == "web" and got["label"] == "a web page" and got["basis"].startswith("v2:")
+    assert got["class"] == "web" and got["label"] == "a web page" and got["basis"].startswith("v3:")
     assert _rows(db) == {}  # computed, not stored
     assert ft.origin_of(sqlite3.connect(":memory:"), "x") is None
 

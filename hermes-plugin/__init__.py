@@ -255,7 +255,7 @@ class SlmHermesPlugin:
 
     def _overlap(self, kwargs: dict) -> None:
         """W3: score this turn's reply against the memories delivered in the
-        session (opt-in ``outcomes.usage``; checked inside ``slm``). The reply goes
+        session (``outcomes.usage``, on by default; checked inside ``slm``). The reply goes
         to the local ``slm`` process on stdin and never further; only memory ids and
         scores are stored. Local mode only; never raises."""
         reply = kwargs.get("assistant_response")

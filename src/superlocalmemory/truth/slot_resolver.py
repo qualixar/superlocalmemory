@@ -196,7 +196,7 @@ def resolve_fact(conn: sqlite3.Connection, *, fact_id: str, profile_id: str, sco
     ``taint`` is the ``trust.taint`` state (``off``, ``shadow``, ``on``, M-15). On,
     a dispute against a head the new fact's origin does not reach (or either
     side ``unknown``) is relabelled ``origin_below_head``: no judge answers it
-    and only a person settles it. Shadow only reports what it would have done.
+    and only a recorded decision by a caller settles it (D-49). Shadow only reports what it would have done.
     Off, nothing changes.
     """
     key = slot_keys.extract(content, resolve_subject=resolve_subject, explicit=explicit_key,

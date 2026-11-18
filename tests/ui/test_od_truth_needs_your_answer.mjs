@@ -71,7 +71,7 @@ describe('Needs your answer card', () => {
     const d = page({ disputes: [DISPUTE], changed_sources: [] }, posts);
     await d.window.SLMTruth.reload(); await flush();
     buttons(d, 'Keep this one')[0].click(); await flush();
-    assert.deepEqual(posts, [{ url: '/api/disputes/d1/settle', body: { keep: 'new', channel: 'dashboard' } }]);
+    assert.deepEqual(posts, [{ url: '/api/disputes/d1/settle', body: { keep: 'new' } }]);
     assert.match(d.window.document.body.textContent, /The other memory was retired; you can undo it/);
   });
 
@@ -239,7 +239,7 @@ describe('Audit questions card', () => {
     const d = auditPage({ count: 1, items: [AUDIT_ITEM] }, posts);
     await d.window.SLMTruth.audit(); await flush();
     buttons(d, 'B gives a new value')[0].click(); await flush();
-    assert.deepEqual(posts, [{ url: '/api/audit/h1/answer', body: { label: 'replaces', channel: 'dashboard' } }]);
+    assert.deepEqual(posts, [{ url: '/api/audit/h1/answer', body: { label: 'replaces' } }]);
     assert.equal(d.window.document.getElementById('dash-audit-card').hidden, true);
   });
 

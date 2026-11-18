@@ -169,12 +169,25 @@ def test_an_approved_memory_is_never_recomputed_downward(db, monkeypatch) -> Non
                       (evil,))[0]["taint_class"] == "user_confirmed"
 
 
-@pytest.mark.parametrize("door", ["mcp", "agent", "http", "", "hook", "claude"])
-def test_an_agent_has_no_door(db, monkeypatch, door) -> None:
+@pytest.mark.parametrize("door", ["mcp", "cli", "http", "dashboard"])
+def test_any_caller_through_any_channel_may_promote(db, monkeypatch, door) -> None:
+    """D-49: there is no person-only door. The channel is recorded, not checked for a person."""
     monkeypatch.setenv(TAINT, "on")
     evil = save(db, EVIL, TOOL, kind="rule")
     with db.raw_connection() as conn:
-        with pytest.raises(ValueError, match="person"):
+        done = firewall.approve(conn, evil, by="agent:claude", channel=door)
+    assert done["now"] == "user_confirmed" and done["channel"] == door
+    row = db.execute("SELECT decided_by, decided_channel FROM trust_approvals WHERE fact_id = ?",
+                     (evil,))[0]
+    assert (row["decided_by"], row["decided_channel"]) == ("agent:claude", door)
+
+
+@pytest.mark.parametrize("door", ["", "agent", "hook", "person"])
+def test_a_channel_that_is_not_one_of_the_four_is_refused(db, monkeypatch, door) -> None:
+    monkeypatch.setenv(TAINT, "on")
+    evil = save(db, EVIL, TOOL, kind="rule")
+    with db.raw_connection() as conn:
+        with pytest.raises(ValueError, match="channel"):
             firewall.approve(conn, evil, by="claude", channel=door)
     assert db.execute("SELECT COUNT(*) AS n FROM trust_approvals")[0]["n"] == 0
     assert db.execute("SELECT taint_class FROM fact_trust WHERE fact_id = ?",

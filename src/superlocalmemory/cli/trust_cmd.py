@@ -1,22 +1,24 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""``slm trust``: memories that wait for your OK before they can be instructions (WS-5).
+"""``slm trust``: memories that wait for a promotion before they can be instructions (WS-5, D-49).
 
-    slm trust pending [--json]          # what is waiting (anyone, including an agent)
+    slm trust pending [--json]          # what is waiting
     slm trust status [--json]           # is the firewall acting; how many wait
-    slm trust approve FACT_ID [...]     # you, at a terminal
-    slm trust approve --all             # everything listed, one answer (you, at a terminal)
+    slm trust promote FACT_ID [...]     # one explicit call releases a memory (alias: approve)
+    slm trust promote --all             # everything listed, one call
+    slm trust withdraw FACT_ID [...]    # take a promotion back
 
 A memory is data. It becomes an instruction when SuperLocalMemory puts it somewhere an
-agent obeys it: a pin, a standing rule or decision, your core memory, the start of every
+agent obeys it: a pin, a standing rule or decision, core memory, the start of every
 session. With ``trust.taint`` on, a memory that came from a tool's output, a web page,
 another agent's message, an import, a model's text, an agent's own words, or from before
-4.2.30, cannot be one of those until you approve it. It is still found by recall, as
-evidence. ``pending`` lists what is waiting and why.
+4.2.30 (and was not already a pin or rule then), cannot be one of those by itself. It is
+still found by recall, as evidence. ``pending`` lists what is waiting and why.
 
-Approving asks a person: it refuses to run without an interactive terminal, so a script
-or an agent cannot approve in your place (the same rule as ``slm audit``). An agent reads
-``slm trust pending --json`` and tells you what waits.
+Any caller may promote: an agent, a script or a person. Nothing asks for a terminal or a
+confirmation, because nothing here may need a person to work. Every promotion is recorded
+(who, channel ``cli``, when), listed on the dashboard under "Recent decisions by your agents",
+and ``withdraw`` takes it back. Promote text from an untrusted source only on purpose.
 """
 
 from __future__ import annotations
@@ -28,27 +30,33 @@ from typing import Any
 
 from superlocalmemory.cli.corrections_cmd import _daemon, _out, _refused
 
-_SUBS = ("pending", "status", "approve")
+_SUBS = ("pending", "status", "promote", "approve", "withdraw")
 
 
 def register_trust_parsers(sub: Any) -> None:
     """Attach ``slm trust``. Called from cli/main.py."""
-    p = sub.add_parser("trust", help="Memories waiting for your OK before they can be "
-                                     "instructions: pending, status, approve")
+    p = sub.add_parser("trust", help="Memories waiting for a promotion before they can be "
+                                     "instructions: pending, status, promote, withdraw")
     tsub = p.add_subparsers(dest="trust_command")
-    ls = tsub.add_parser("pending", help="What is waiting for your OK (the default)")
+    ls = tsub.add_parser("pending", help="What is waiting for a promotion (the default)")
     ls.add_argument("--limit", type=int, default=50, help="How many, newest first (1-200)")
     ls.add_argument("--profile", default="", help="Profile (default: the active one)")
     ls.add_argument("--json", action="store_true", help="machine-readable output")
     st = tsub.add_parser("status", help="Is the firewall acting, and how many memories wait")
     st.add_argument("--profile", default="")
     st.add_argument("--json", action="store_true")
-    ap = tsub.add_parser("approve", help="Approve memories so they may be instructions "
-                                         "(you, at a terminal)")
-    ap.add_argument("fact_ids", nargs="*", help="Memory ids (see slm trust pending)")
-    ap.add_argument("--all", action="store_true", help="Approve everything that is listed")
-    ap.add_argument("--profile", default="")
-    ap.add_argument("--json", action="store_true")
+    for name, text in (("promote", "Promote memories on purpose so they may be instructions "
+                                   "(recorded; undo with withdraw)"),
+                       ("approve", "Same as promote")):
+        ap = tsub.add_parser(name, help=text)
+        ap.add_argument("fact_ids", nargs="*", help="Memory ids (see slm trust pending)")
+        ap.add_argument("--all", action="store_true", help="Promote everything that is listed")
+        ap.add_argument("--profile", default="")
+        ap.add_argument("--json", action="store_true")
+    wd = tsub.add_parser("withdraw", help="Take a promotion back")
+    wd.add_argument("fact_ids", nargs="+", help="Memory ids")
+    wd.add_argument("--profile", default="")
+    wd.add_argument("--json", action="store_true")
 
 
 def _fetch(path: str) -> Any:
@@ -72,14 +80,13 @@ def _show(item: dict) -> None:
         print(f"    This memory {wanted}.")
 
 
-def _confirm(question: str) -> bool:
-    try:
-        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
-    except EOFError:
-        return False
-
-
 def _who() -> str:
+    """A client name for the record: the agent's own id when it set one, else this user's name."""
+    import os
+
+    name = os.environ.get("SLM_AGENT_ID", "").strip()
+    if name:
+        return f"agent:{name}"
     try:
         import getpass
 
@@ -88,7 +95,7 @@ def _who() -> str:
         return "local user"
 
 
-def _approve(args: Namespace, command: str, profile: str, use_json: bool) -> int:
+def _decide(args: Namespace, command: str, profile: str, use_json: bool, action: str) -> int:
     from superlocalmemory.cli.daemon import (
         DaemonNotFound,
         DaemonRefused,
@@ -97,57 +104,56 @@ def _approve(args: Namespace, command: str, profile: str, use_json: bool) -> int
     )
 
     ids = list(dict.fromkeys(args.fact_ids or []))
-    if bool(ids) == bool(args.all):
-        return _refused(command, "Name the memories to approve, or use --all (not both).",
-                        use_json, "INVALID")
-    items = _listed(profile)
-    if args.all and not items:
-        print("Nothing is waiting for your OK.")
+    every = bool(getattr(args, "all", False))
+    if bool(ids) == every:
+        return _refused(command, "Name the memories, or use --all (not both).", use_json,
+                        "INVALID")
+    items = _listed(profile) if action == "promote" else {}
+    if every and not items:
+        print("Nothing is waiting for a promotion.")
         return 0
-    for fact_id in (items if args.all else ids):
-        if fact_id in items:
-            _show(items[fact_id])
-    question = (f"Approve all {len(items)} of these?" if args.all
-                else f"Approve {len(ids)} memor{'y' if len(ids) == 1 else 'ies'} so they may be "
-                     "instructions?")
-    if not _confirm(question):
-        print("Nothing was changed.")
-        return 0
-    body = {"channel": "cli", "by": _who(), **({"profile_id": profile} if profile else {})}
-    targets = ["/api/trust/approve-all"] if args.all else [
-        f"/api/trust/approve/{urllib.parse.quote(i, safe='')}" for i in ids]
+    if not use_json:
+        for fact_id in (items if every else ids):
+            if fact_id in items:
+                _show(items[fact_id])
+    body = {"by": _who(), **({"profile_id": profile} if profile else {})}
+    verb = "withdraw" if action == "withdraw" else "promote"
+    targets = [f"/api/trust/{verb}-all"] if every else [
+        f"/api/trust/{verb}/{urllib.parse.quote(i, safe='')}" for i in ids]
     results = []
     try:
         for path in targets:
             results.append(daemon_request("POST", path, body, preserve_not_found=True,
                                           preserve_unprocessable=True))
     except DaemonRefused:
-        return _refused(command, "SuperLocalMemory refused: approval is given by a person at "
-                                 "a terminal on this computer.", use_json, "NEEDS_A_PERSON")
+        return _refused(command, "SuperLocalMemory refused: your role on this workspace does "
+                                 "not allow changing memories.", use_json, "FORBIDDEN")
     except DaemonUnprocessable as exc:
         return _refused(command, exc.message, use_json, exc.code)
     except DaemonNotFound as exc:
         return _refused(command, exc.error_message or exc.message, use_json, "NOT_FOUND")
     if not all(isinstance(r, dict) and r.get("success") for r in results):
-        return _refused(command, "SLM did not approve everything; run slm trust pending.",
-                        use_json)
+        return _refused(command, "SLM did not finish; run slm trust pending.", use_json)
     done = sum(int(r.get("approved", 1)) for r in results)
     if use_json:
-        _out(command, True, data={"approved": done, "results": results})
+        _out(command, True, data={"changed": done, "results": results})
+    elif action == "withdraw":
+        print(f"Withdrew {done}. They are back under their own origin.")
     else:
-        print(f"Approved {done}. They may now be pins, rules and part of your core memory.")
+        print(f"Promoted {done}. They may now be pins, rules and part of core memory. "
+              "Recorded; undo with: slm trust withdraw FACT_ID")
     return 0
 
 
 def _render(result: dict) -> None:
     items = result.get("items") or []
     if not items:
-        print("Nothing is waiting for your OK.")
+        print("Nothing is waiting for a promotion.")
     for item in items:
         _show(item)
     if items:
-        print(f"{result['count']} waiting. Approve with: slm trust approve FACT_ID "
-              "(or --all), at a terminal")
+        print(f"{result['count']} waiting. Promote on purpose with: slm trust promote FACT_ID "
+              "(or --all)")
     if not result.get("acting"):
         print("(The firewall is not acting yet: trust.taint is off or in shadow, so nothing "
               "is held back. This is what it would hold.)")
@@ -161,10 +167,6 @@ def cmd_trust(args: Namespace) -> int:
     use_json = bool(getattr(args, "json", False))
     command = f"trust {sub}"
     profile = (getattr(args, "profile", "") or "").strip()
-    if sub == "approve" and not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return _refused(command, "slm trust approve asks a person at a terminal; it cannot "
-                                 "be done by a script or an agent. Use slm trust pending "
-                                 "--json to read what is waiting.", use_json, "NEEDS_A_PERSON")
     limit = int(getattr(args, "limit", 50))
     if sub == "pending" and not 1 <= limit <= 200:
         return _refused(command, "--limit must be from 1 to 200", use_json, "INVALID")
@@ -173,8 +175,9 @@ def cmd_trust(args: Namespace) -> int:
     if not _daemon():
         _daemon_unavailable(command, use_json)
         return 1
-    if sub == "approve":
-        return _approve(args, command, profile, use_json)
+    if sub in ("promote", "approve", "withdraw"):
+        return _decide(args, command, profile, use_json,
+                       "withdraw" if sub == "withdraw" else "promote")
     from superlocalmemory.cli.daemon import DaemonNotFound, DaemonUnprocessable
 
     query = {"profile_id": profile} if profile else {}
@@ -195,7 +198,7 @@ def cmd_trust(args: Namespace) -> int:
     elif sub == "status":
         print(f"Instruction firewall (trust.taint): {result['taint']}; secret screen "
               f"(trust.secret_screen): {result['secret_screen']}")
-        print(f"{result['waiting']} waiting for your OK, {result['approved']} approved by you; "
+        print(f"{result['waiting']} waiting for a promotion, {result['approved']} promoted; "
               f"{result['unclassified']} not yet classified.")
     else:
         _render(result)

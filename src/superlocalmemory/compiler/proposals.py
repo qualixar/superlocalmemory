@@ -6,7 +6,8 @@ A set holds proposals of four kinds (``retire``, ``merge``, ``edit_derived``,
 ``create_page``). Nothing in it touches a memory until the whole set is applied,
 and applying needs a basis (I-10):
 
-* a **person's approval** (``Basis.person``: who and through which door), or
+* a **recorded decision by a caller** (``Basis.decision``: who, an agent id, a client name or
+  ``dashboard``, and the channel: ``mcp``, ``cli``, ``http`` or ``dashboard``; D-49), or
 * a **certificate id** / **rule-certificate id** of an open ``judge_certificates``
   row that covers the kind of change (retire: SLOT_RELATION ``replaces``; merge:
   DUPLICATE ``duplicate``; edit and page: CITATION_SUPPORT ``supported``),
@@ -20,9 +21,11 @@ or merge proposal creates its ledger cases when it is applied, and a case that
 already exists can be adopted as a retire proposal (``adopt_case``) or shown as
 one (``case_as_proposal``).
 
-Whether a caller is a person is decided by the door (``slm proposals`` at an
-interactive terminal, the dashboard on this computer), never here: this module
-only refuses to act without a basis.
+Any caller may decide (an agent, a script, a person on the dashboard): nothing here asks
+whether a person is behind the call. This module refuses to act without a basis, writes each
+decision to the decision log (``core/decisions``) with who, channel and time, and an applied
+set can always be rolled back through the same doors. Sets decided before 4.2.30 carry the
+basis kind ``person``; it is still read as a decision.
 """
 
 from __future__ import annotations
@@ -43,11 +46,14 @@ from superlocalmemory.compiler.proposal_kinds import (
     load_optional_handlers,
 )
 from superlocalmemory.compiler.versions import select_rows as _select
+from superlocalmemory.core import decisions
 
 PROPOSED, APPLIED, ROLLED_BACK, REJECTED = "proposed", "applied", "rolled_back", "rejected"
-PERSON, CERTIFICATE, RULE_CERTIFICATE = "person", "certificate", "rule_certificate"
-#: Doors where a person can sit: the terminal and the dashboard.
-PERSON_CHANNELS = frozenset({"cli", "dashboard"})
+DECISION, CERTIFICATE, RULE_CERTIFICATE = "decision", "certificate", "rule_certificate"
+#: The basis kind sets decided before D-49 carry; read as a decision.
+PERSON = "person"
+#: Channels a decision can arrive through (recorded, never a claim about who is behind it).
+CHANNELS = frozenset(decisions.CHANNELS)
 #: Which certified verdict covers each kind of change (question id, verdict).
 COVERS: dict[str, tuple[str, str]] = {
     "retire": ("SLOT_RELATION", "replaces"),
@@ -69,7 +75,7 @@ class StateRefused(ProposalError):
 
 @dataclass(frozen=True)
 class Basis:
-    """Why a change may happen: a person's approval, a certificate or a rule certificate."""
+    """Why a change may happen: a caller's recorded decision, a certificate or a rule certificate."""
 
     kind: str
     ref: str
@@ -77,8 +83,10 @@ class Basis:
     channel: str = ""
 
     @classmethod
-    def person(cls, actor: str, channel: str) -> Basis:
-        return cls(PERSON, f"{actor}@{channel}", actor, channel)
+    def decision(cls, actor: str, channel: str) -> Basis:
+        return cls(DECISION, f"{actor}@{channel}", actor, channel)
+
+    person = decision  # the name before D-49; the same recorded decision
 
     @classmethod
     def certificate(cls, cert_id: str) -> Basis:
@@ -107,11 +115,11 @@ def check_basis(conn: Any, profile_id: str, basis: Basis | None, kinds: Sequence
     """Raise :class:`BasisRefused` unless ``basis`` lawfully covers every kind (I-10)."""
     if basis is None:
         raise BasisRefused("A change needs a certificate id, a rule-certificate id or a "
-                           "person's approval. Nothing was changed.")
-    if basis.kind == PERSON:
-        if not basis.actor or not _ID.match(basis.actor) or basis.channel not in PERSON_CHANNELS:
-            raise BasisRefused("A person's approval names who approved and the terminal or "
-                               "dashboard they used. Nothing was changed.")
+                           "recorded decision. Nothing was changed.")
+    if basis.kind in (DECISION, PERSON):
+        if not basis.actor or not _ID.match(basis.actor) or basis.channel not in CHANNELS:
+            raise BasisRefused("A decision names who decided and the channel it came through "
+                               "(mcp, cli, http or dashboard). Nothing was changed.")
         return
     if basis.kind not in (CERTIFICATE, RULE_CERTIFICATE) or not basis.ref:
         raise BasisRefused("Unknown basis. Nothing was changed.")
@@ -223,7 +231,7 @@ def count_pending(conn: Any, profile_id: str) -> int:
 
 
 def _actor_for(basis: Basis) -> tuple[str, str, str]:
-    if basis.kind == PERSON:
+    if basis.kind in (DECISION, PERSON):
         return basis.actor, "host_authenticated", "trusted"
     return "slm-compiler", "system", "canonical_writer"
 
@@ -267,11 +275,30 @@ def apply_set(conn: Any, *, profile_id: str, set_id: str, basis: Basis | None,
             (basis.kind, basis.ref, basis.actor or None, basis.channel or None, now, now, set_id))
 
     _run_atomically(conn, work)
+    _record(conn, profile_id, set_id, "apply", basis, members, row["title"])
     return get_set(conn, profile_id, set_id)
 
 
+def _record(conn: Any, profile_id: str, set_id: str, action: str, basis: Basis,
+            members: Sequence[Mapping[str, Any]], title: str = "") -> None:
+    """Write the decision to the log (a certificate-based change has no caller to name)."""
+    if basis.kind not in (DECISION, PERSON):
+        return
+    who = decisions.Decider(basis.actor, basis.channel)
+    if action == "rollback":
+        before = decisions.open_decision(conn, profile_id, decisions.PROPOSAL, set_id)
+        if before is not None:
+            decisions.mark_undone(conn, before["decision_id"], who)
+    kinds = ", ".join(sorted({str(m["kind"]) for m in members})) or "changes"
+    label = {"apply": "Applied", "reject": "Declined", "rollback": "Rolled back"}[action]
+    decisions.log(conn, profile_id=profile_id, kind=decisions.PROPOSAL, subject_id=set_id,
+                  action=action, decider=who,
+                  summary=f"{label} a set of proposed changes ({kinds})"
+                          + (f": {title[:80]}" if title else ""))
+
+
 def reject_set(conn: Any, *, profile_id: str, set_id: str, actor: str, channel: str) -> dict:
-    """Decline a ``proposed`` set. Changes no memory; needs a named person at a door."""
+    """Decline a ``proposed`` set. Changes no memory; recorded with who and the channel."""
     row = _set_row(conn, profile_id, set_id)
     check_basis(conn, profile_id, Basis.person(actor, channel), [])
     if row["state"] != PROPOSED:
@@ -292,6 +319,7 @@ def reject_set(conn: Any, *, profile_id: str, set_id: str, actor: str, channel: 
                      (actor, channel, now, set_id))
 
     _run_atomically(conn, work)
+    _record(conn, profile_id, set_id, "reject", Basis.decision(actor, channel), [], row["title"])
     return get_set(conn, profile_id, set_id)
 
 
@@ -318,6 +346,7 @@ def rollback_set(conn: Any, *, profile_id: str, set_id: str, basis: Basis | None
                      "WHERE set_id = ?", (now, set_id))
 
     _run_atomically(conn, work)
+    _record(conn, profile_id, set_id, "rollback", basis, members, row["title"])
     return get_set(conn, profile_id, set_id)
 
 
@@ -356,7 +385,7 @@ def case_as_proposal(conn: Any, profile_id: str, case_id: str) -> dict:
 
 
 __all__ = ["APPLIED", "Basis", "BasisRefused", "CERTIFICATE", "COVERS", "HANDLERS", "PERSON",
-           "PERSON_CHANNELS", "PROPOSED", "ProposalError", "REJECTED", "ROLLED_BACK",
+           "CHANNELS", "DECISION", "PROPOSED", "ProposalError", "REJECTED", "ROLLED_BACK",
            "RULE_CERTIFICATE", "StateRefused", "adopt_case", "apply_set", "case_as_proposal",
            "check_basis", "count_pending", "create_set", "get_set", "list_sets", "reject_set",
            "rollback_set"]

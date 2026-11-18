@@ -77,7 +77,7 @@ def test_rolling_back_a_retire_restores_every_touched_row_exactly(store, conn) -
                                   proposals=[_retire(ids)])
     assert _snapshot(db) == before  # proposing changes nothing
     done = proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
-    assert done["state"] == "applied" and done["basis"] == {"kind": "person", "ref": "alice@cli"}
+    assert done["state"] == "applied" and done["basis"] == {"kind": "decision", "ref": "alice@cli"}
     assert _snapshot(db) != before  # the old memory is retired
     assert _case_states(db) == ["applied"]
     proposals.rollback_set(conn, profile_id=PROFILE, set_id=set_id, basis=PERSON)
@@ -147,14 +147,14 @@ def test_applying_without_a_basis_is_refused_and_changes_nothing(store, conn) ->
     set_id = proposals.create_set(conn, profile_id=PROFILE, origin="dream",
                                   proposals=[_retire(ids)])
     before = _snapshot(db)
-    with pytest.raises(BasisRefused, match="certificate id, a rule-certificate id or a person"):
+    with pytest.raises(BasisRefused, match="certificate id, a rule-certificate id or a recorded decision"):
         proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id, basis=None)
     assert _snapshot(db) == before and _case_states(db) == []
     assert proposals.get_set(conn, PROFILE, set_id)["state"] == "proposed"
 
 
-@pytest.mark.parametrize("basis", [Basis.person("", "cli"), Basis.person("alice", "agent"),
-                                   Basis("person", "x"), Basis("whim", "x"),
+@pytest.mark.parametrize("basis", [Basis.person("", "cli"), Basis.person("alice", "person"),
+                                   Basis.person("alice", "agent"), Basis("person", "x"), Basis("whim", "x"),
                                    Basis.certificate("")])
 def test_a_basis_that_names_no_person_or_certificate_is_refused(store, conn, basis) -> None:
     _db, ids = store

@@ -24,7 +24,7 @@ def test_external_edit_is_a_channel_with_a_reasoned_class() -> None:
     assert "external_edit" in fact_origin.CHANNELS
     fact_origin.Origin("external_edit", "verbatim")  # accepted
     got = oc.classify(oc.Signals(channel="external_edit", transform="verbatim", role="user"))
-    assert got == oc.Classified(oc.AGENT_INFERRED, "v2:edit.external")
+    assert got == oc.Classified(oc.AGENT_INFERRED, "v3:edit.external")
     row = next(r for r in oc.ROWS if r.row_id == "edit.external")
     assert "close to user_direct" in row.why and "tool or an agent" in row.why
     assert "user_confirmed" in row.why  # the approval is what raises it

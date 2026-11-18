@@ -263,6 +263,33 @@ def record_case(conn: sqlite3.Connection, revision_id: str, case_id: str) -> Non
 RESOLUTIONS = ("a", "b", "both", "same", "unrelated")
 
 
+def _apply_resolution(conn: sqlite3.Connection, resolution: str, slot_id: str, rev_a: str,
+                      rev_b: str, reason_code: str, version: int, now: str) -> tuple[str, ...]:
+    """Write the slot's side of a resolution; returns the fact ids the caller must retire."""
+    winner, loser = {"a": (rev_a, rev_b), "b": (rev_b, rev_a)}.get(resolution, (None, None))
+    if winner is not None:
+        conn.execute("UPDATE slot_revisions SET state = 'head', superseded_by = NULL "
+                     "WHERE revision_id = ?", (winner,))
+        # An older value keeping the head ends where the next value in time begins,
+        # which may be a value the head itself superseded (I-05: no overlaps).
+        after = (_successor_in_time(conn, slot_id, loser) or winner
+                 if reason_code in OLDER_REASONS and winner == rev_a else winner)
+        conn.execute("UPDATE slot_revisions SET state = 'superseded', superseded_by = ? "
+                     "WHERE revision_id = ?", (after, loser))
+        _move_head(conn, slot_id, version, winner, "current", now)
+        return (conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
+                             (loser,)).fetchone()[0],)
+    if resolution in ("both", "same"):
+        state = "duplicate" if resolution == "same" else "compatible"
+        conn.execute("UPDATE slot_revisions SET state = ? WHERE revision_id = ?",
+                     (state, rev_b))
+    else:  # unrelated: the key was wrong (R-22)
+        conn.execute("UPDATE slot_revisions SET state = 'unbound', superseded_by = NULL, "
+                     "reason_code = 'keying_error' WHERE revision_id = ?", (rev_b,))
+    _move_head(conn, slot_id, version, rev_a, "current", now)
+    return ()
+
+
 def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, *,
                     resolved_by: str) -> tuple[str, ...]:
     """Settle an open dispute. Returns the fact ids the caller must retire.
@@ -291,30 +318,8 @@ def resolve_dispute(conn: sqlite3.Connection, dispute_id: str, resolution: str, 
         # a value that is no longer current. Nothing is written here, so the caller
         # can roll back anything it did first and then ``dismiss_dispute``.
         raise StaleDisputeError(f"dispute {dispute_id} no longer names the current value")
-    version = int(version)
-    winner, loser = {"a": (rev_a, rev_b), "b": (rev_b, rev_a)}.get(resolution, (None, None))
-    retire: tuple[str, ...] = ()
-    if winner is not None:
-        conn.execute("UPDATE slot_revisions SET state = 'head', superseded_by = NULL "
-                     "WHERE revision_id = ?", (winner,))
-        # An older value keeping the head ends where the next value in time begins,
-        # which may be a value the head itself superseded (I-05: no overlaps).
-        after = (_successor_in_time(conn, slot_id, loser) or winner
-                 if reason_code in OLDER_REASONS and winner == rev_a else winner)
-        conn.execute("UPDATE slot_revisions SET state = 'superseded', superseded_by = ? "
-                     "WHERE revision_id = ?", (after, loser))
-        _move_head(conn, slot_id, version, winner, "current", now)
-        retire = (conn.execute("SELECT fact_id FROM slot_revisions WHERE revision_id = ?",
-                               (loser,)).fetchone()[0],)
-    elif resolution in ("both", "same"):
-        state = "duplicate" if resolution == "same" else "compatible"
-        conn.execute("UPDATE slot_revisions SET state = ? WHERE revision_id = ?",
-                     (state, rev_b))
-        _move_head(conn, slot_id, version, rev_a, "current", now)
-    else:  # unrelated: the key was wrong (R-22)
-        conn.execute("UPDATE slot_revisions SET state = 'unbound', superseded_by = NULL, "
-                     "reason_code = 'keying_error' WHERE revision_id = ?", (rev_b,))
-        _move_head(conn, slot_id, version, rev_a, "current", now)
+    retire = _apply_resolution(conn, resolution, slot_id, rev_a, rev_b, reason_code,
+                               int(version), now)
     conn.execute("UPDATE slot_disputes SET state = 'resolved', resolution = ?, resolved_by = ?, "
                  "resolved_at = ? WHERE dispute_id = ?", (resolution, resolved_by, now,
                                                          dispute_id))

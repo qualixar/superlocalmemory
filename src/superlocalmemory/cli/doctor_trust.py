@@ -7,8 +7,9 @@ with a timeout (the daemon holds its own copy; a hook never asks). It never crea
 Without a key it still reports counts and says why nothing was verified; a modified fact is
 reported by id, never by text.
 
-Both checks only report. A modified signature or a broken keyed link exits non-zero from
-``--truth`` (the store's own evidence says something changed); unsigned facts, signatures
+Both checks only report. A modified signature, a removed signature (an unsigned memory the
+signing mark says was signed: A-12), a missing or forged signing mark, or a broken keyed link
+exits non-zero from ``--truth`` (the store's own evidence says something changed); unsigned facts, signatures
 under another key and plain links after keying began are reported and are not failures.
 """
 
@@ -59,6 +60,15 @@ def lines(sig: dict[str, Any], audit: dict[str, Any]) -> list[str]:
                    + (f" ({', '.join(sig['modified_ids'])})" if sig["modified_ids"] else "")
                    + f", {sig['signed_under_another_key']} signed under another key (cannot be "
                    f"checked), {sig['moved_by_a_fold']} waiting to be signed again after a profile move.")
+    if sig.get("signature_missing"):
+        out.append(f"  FAILED: {sig['signature_missing']} memories were signed and no longer have "
+                   "their signature: it was removed, so they may have been changed ("
+                   + ", ".join(sig["missing_ids"]) + "). Look at them (`slm why <id>`), then "
+                   "`slm signing resign` signs them again as they are.")
+    if sig.get("record") in (signatures.RECORD_MISSING, signatures.RECORD_FORGED):
+        out.append(f"  FAILED: {sig['record_words']}")
+    elif sig.get("record") == signatures.RECORD_OTHER_KEY:
+        out.append(f"  {sig['record_words']}")
     if not audit.get("present"):
         out.append("Audit chain: no file next to this store.")
         return out
@@ -78,7 +88,9 @@ def lines(sig: dict[str, Any], audit: dict[str, Any]) -> list[str]:
 
 
 def failed(sig: dict[str, Any], audit: dict[str, Any]) -> bool:
-    return bool(sig["modified"]) or (audit.get("present") is True and audit.get("ok") is False)
+    return (bool(sig["modified"]) or bool(sig.get("signature_missing"))
+            or sig.get("record") in (signatures.RECORD_MISSING, signatures.RECORD_FORGED)
+            or (audit.get("present") is True and audit.get("ok") is False))
 
 
 __all__ = ["audit_section", "failed", "lines", "read_key", "signatures_section"]

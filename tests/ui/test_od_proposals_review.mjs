@@ -73,12 +73,12 @@ describe('Proposed changes card', () => {
     assert.equal(buttons(d, 'Reject').length, 1);
   });
 
-  it('Apply sends the dashboard channel to the shared route and confirms', async () => {
+  it('Apply goes to the shared route (the daemon records the dashboard channel) and confirms', async () => {
     const posts = [];
     const d = page({}, posts);
     await d.window.SLMProposals.reload(); await flush();
     buttons(d, 'Apply')[0].click(); await flush();
-    assert.deepEqual(posts, [{ url: '/api/proposals/s1/apply', body: { channel: 'dashboard' } }]);
+    assert.deepEqual(posts, [{ url: '/api/proposals/s1/apply', body: {} }]);
     assert.match(d.window.document.body.textContent, /Applied\. You can undo it below\./);
   });
 
@@ -87,7 +87,7 @@ describe('Proposed changes card', () => {
     const d = page({}, posts);
     await d.window.SLMProposals.reload(); await flush();
     buttons(d, 'Reject')[0].click(); await flush();
-    assert.deepEqual(posts, [{ url: '/api/proposals/s1/reject', body: { channel: 'dashboard' } }]);
+    assert.deepEqual(posts, [{ url: '/api/proposals/s1/reject', body: {} }]);
     assert.match(d.window.document.body.textContent, /Rejected\. Nothing was changed\./);
   });
 
@@ -99,7 +99,7 @@ describe('Proposed changes card', () => {
     assert.match(d.window.document.body.textContent, /Undo puts back exactly what it replaced/);
     assert.equal(buttons(d, 'Apply').length, 0);
     buttons(d, 'Undo')[0].click(); await flush();
-    assert.deepEqual(posts, [{ url: '/api/proposals/s0/rollback', body: { channel: 'dashboard' } }]);
+    assert.deepEqual(posts, [{ url: '/api/proposals/s0/rollback', body: {} }]);
     assert.match(d.window.document.body.textContent, /Everything it replaced is back as it was/);
   });
 

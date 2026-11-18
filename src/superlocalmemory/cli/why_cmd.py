@@ -71,7 +71,7 @@ def cmd_why(args: Namespace) -> None:
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         json_print("why", data=report, next_actions=[
-            {"command": "slm trust pending", "description": "Memories waiting for your OK"},
+            {"command": "slm trust pending", "description": "Memories held back until promoted"},
             {"command": "slm disputes", "description": "Disputes that need your answer"},
         ])
         return

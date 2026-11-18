@@ -100,7 +100,7 @@ def _settled_by_a_person(db, old, new) -> None:
                              "2026-11-14T00:00:00+00:00").outcome == "dispute"
     with db.raw_connection() as conn:
         assert slot_store.resolve_dispute(conn, _dispute(db)[0], "b",
-                                          resolved_by="person:alex") == (old,)
+                                          resolved_by="alice@cli") == (old,)
 
 
 def _reconcile(db, auto_apply=True):

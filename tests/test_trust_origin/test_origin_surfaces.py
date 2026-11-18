@@ -89,7 +89,7 @@ def test_origin_and_the_truth_notes_are_independent(store, monkeypatch) -> None:
 def test_why_copies_the_origin_and_never_reads_a_database() -> None:
     item = {"fact_id": "f", "age_label": "2 days ago",
             "origin": {"class": "web", "taint": "web", "label": "a web page",
-                       "taint_label": "a web page", "basis": "v2:adapter.service"}}
+                       "taint_label": "a web page", "basis": "v3:adapter.service"}}
     block = why(item)
     assert block["origin"] == {"class": "web", "taint": "web", "label": "a web page"}
     assert block["standing"] == "current" and block["said"] == "2 days ago"
@@ -147,4 +147,4 @@ def test_origin_of_is_what_slm_why_will_call(store) -> None:
     db, mine, *_ = store
     with db.raw_connection() as conn:
         got = fact_trust.origin_of(conn, mine)
-    assert got["class"] == "user_direct" and got["basis"] == "v2:remember.person"
+    assert got["class"] == "user_direct" and got["basis"] == "v3:remember.dashboard"

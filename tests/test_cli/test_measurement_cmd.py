@@ -37,7 +37,7 @@ def test_status_prints_the_notice_the_first_time_only(_home, capsys) -> None:
     measurement_cmd.cmd_measurement(_args())
     second = capsys.readouterr().out
     assert "SuperLocalMemory now measures" not in second
-    assert "Withholding: on" in second and "Usage check: off" in second
+    assert "Withholding: on" in second and "Usage check: on" in second
 
 
 def test_status_json_carries_the_notice_but_does_not_count_as_seen(_home, capsys) -> None:
@@ -68,7 +68,8 @@ def test_off_with_receipts_turns_the_receipts_off_too(_home) -> None:
 def test_off_json_names_what_changed(_home, capsys) -> None:
     measurement_cmd.cmd_measurement(_args("off", json=True))
     data = json.loads(capsys.readouterr().out)["data"]
-    assert data["changed"] == {"outcomes.holdout": "off", "outcomes.swaps": "off"}
+    assert data["changed"] == {"outcomes.holdout": "off", "outcomes.swaps": "off",
+                              "outcomes.usage": "off"}
     assert data["measuring"] is False
 
 
@@ -137,3 +138,55 @@ def test_cmd_setup_and_upgrade_hosts_call_it() -> None:
 
     assert "announce_if_pending" in inspect.getsource(commands.cmd_setup)
     assert "announce_if_pending" in inspect.getsource(host_upgrades.cmd_upgrade_hosts)
+
+
+class _Tty:
+    def __init__(self, tty: bool) -> None:
+        self.tty, self.text = tty, ""
+
+    def isatty(self) -> bool:
+        return self.tty
+
+    def write(self, text: str) -> int:
+        self.text += text
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+
+def _terminal(monkeypatch, tty=True):
+    err = _Tty(tty)
+    monkeypatch.setattr(sys, "stderr", err)
+    monkeypatch.setattr(sys, "stdin", _Tty(tty))
+    return err
+
+
+def test_the_first_terminal_run_after_an_upgrade_shows_the_notice_once(_home, monkeypatch) -> None:
+    err = _terminal(monkeypatch)
+    assert measurement_cmd.announce_on_terminal(["slm", "recall", "x"]) is True
+    assert "slm measurement off" in err.text and "usage" in err.text.lower()
+    assert disclosure.pending(_home) is False
+    assert measurement_cmd.announce_on_terminal(["slm", "recall", "x"]) is False
+
+
+@pytest.mark.parametrize("argv", [["slm", "mcp"], ["slm", "hook", "x"], ["slm", "recall", "--json"],
+                                  ["slm", "daemon", "serve"], ["slm", "measurement"], ["slm"]])
+def test_machine_and_measurement_commands_never_print_it(_home, monkeypatch, argv) -> None:
+    err = _terminal(monkeypatch)
+    assert measurement_cmd.announce_on_terminal(argv) is False and err.text == ""
+    assert disclosure.pending(_home) is True
+
+
+def test_a_script_without_a_terminal_never_gets_it_and_it_gates_nothing(_home, monkeypatch) -> None:
+    err = _terminal(monkeypatch, tty=False)
+    assert measurement_cmd.announce_on_terminal(["slm", "recall", "x"]) is False
+    assert err.text == "" and FeatureFlags(_home, environ={}).enabled("outcomes.holdout")
+
+
+def test_main_calls_it_after_the_upgrade_banner() -> None:
+    import inspect
+
+    from superlocalmemory.cli import main
+
+    assert "announce_on_terminal(sys.argv)" in inspect.getsource(main.main)

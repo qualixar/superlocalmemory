@@ -90,6 +90,10 @@
 
   function harmWords(h) {
     var count = (h && h.would_withhold_count) || 0;
+    // Nothing testable (no memory was both shown and left out often enough, or the report could not
+    // be read) is not the same as "tested and fine": say so instead of claiming a result.
+    if (!count && !(h && h.tests > 0)) return 'Not testable yet: no memory has been left out often ' +
+      'enough to compare. This check only watches; nothing is ever withheld by it in this version.';
     if (!count) return 'No memory has been measured as making an agent worse. This check only watches; ' +
       'nothing is ever withheld by it in this version.';
     return plural(count, 'memory', 'memories') + ' would be withheld if the harm check acted, because ' +

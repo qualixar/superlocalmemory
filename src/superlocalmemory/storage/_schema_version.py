@@ -87,7 +87,8 @@ from pathlib import Path
 #: M081 (trust approvals: what the instruction firewall withheld, WS-5) is additive, floor 51.
 #: M082 (fact signatures: one keychain-keyed HMAC per fact, WS-5, D-16) is additive, floor 51.
 #: M083 (compiled pages, citations and the Markdown projection's records, WS-6) is additive, floor 51.
-SUPPORTED_SCHEMA_VERSION: int = 83
+#: M084 (decision log: who decided what, through which channel, and the undo, D-49) is additive, floor 51.
+SUPPORTED_SCHEMA_VERSION: int = 84
 
 
 class SchemaVersionError(RuntimeError):

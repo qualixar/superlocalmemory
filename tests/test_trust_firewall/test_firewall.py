@@ -216,7 +216,7 @@ def test_a_pin_of_an_untrusted_memory_is_refused_and_recorded(db, monkeypatch) -
     monkeypatch.setenv(TAINT, "on")
     held = _pin_needs_approval(db, page)
     assert held["success"] is False and held["needs_approval"] is True
-    assert "slm trust approve" in held["error"] and held["taint"] == "web"
+    assert "promote" in held["error"] and held["taint"] == "web"
     assert _pin_needs_approval(db, mine) is None
     rows = db.execute("SELECT fact_id, wanted, state FROM trust_approvals")
     assert [tuple(r) for r in rows] == [(page, "pin", "pending")]

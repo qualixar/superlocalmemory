@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""``slm trust``: anyone reads what waits; only a person at a terminal approves (WS-5, D-37)."""
+"""``slm trust``: anyone reads what waits; any caller may promote or withdraw (WS-5, D-49)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _wire(monkeypatch, *, tty=True, answers=(), items=(ITEM, ITEM2), acting=True
         if method == "GET":
             return {"success": True, "count": len(items), "items": list(items), "acting": acting,
                     "unclassified": 2}
-        return {"success": True, "approved": 2 if path.endswith("approve-all") else 1}
+        return {"success": True, "approved": 2 if path.endswith("-all") else 1}
 
     monkeypatch.setattr(daemon, "daemon_request", fake_request)
     monkeypatch.setattr(trust_cmd, "_daemon", lambda: True)
@@ -77,7 +77,7 @@ def test_when_the_firewall_is_not_acting_it_says_so(monkeypatch, capsys) -> None
 def test_nothing_waiting(monkeypatch, capsys) -> None:
     _wire(monkeypatch, tty=False, items=())
     assert trust_cmd.cmd_trust(_args()) == 0
-    assert "Nothing is waiting for your OK." in capsys.readouterr().out
+    assert "Nothing is waiting for a promotion." in capsys.readouterr().out
 
 
 def test_status_in_words_and_json(monkeypatch, capsys) -> None:
@@ -94,71 +94,65 @@ def test_the_limit_is_checked(monkeypatch, capsys) -> None:
     assert "--limit must be from 1 to 200" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("stdin,stdout", [(False, True), (True, False), (False, False)])
-def test_without_a_terminal_approving_is_refused_and_asks_nothing(
-        monkeypatch, capsys, stdin, stdout) -> None:
+@pytest.mark.parametrize("stdin,stdout", [(False, True), (True, False), (False, False), (True, True)])
+def test_promoting_needs_no_terminal_and_asks_nothing(monkeypatch, capsys, stdin, stdout) -> None:
+    """D-49: no terminal check, no prompt. An agent's shell tool promotes the same way."""
     sent = _wire(monkeypatch)
     monkeypatch.setattr("sys.stdin.isatty", lambda: stdin)
     monkeypatch.setattr("sys.stdout.isatty", lambda: stdout)
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"])) == 1
-    assert sent == [] and "asks a person at a terminal" in capsys.readouterr().err
-
-
-def test_a_refusal_in_json_names_the_reason(monkeypatch, capsys) -> None:
-    _wire(monkeypatch, tty=False)
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"], json=True)) == 1
-    assert json.loads(capsys.readouterr().out)["error"]["code"] == "NEEDS_A_PERSON"
-
-
-def test_a_person_sees_the_memory_confirms_and_it_goes_with_the_cli_channel(
-        monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch, answers=["y"])
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"])) == 0
-    out = capsys.readouterr().out
-    assert "Always do this first." in out and "Approved 1." in out
+    monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("asked a question"))
+    assert trust_cmd.cmd_trust(_args("promote", fact_ids=["f1"])) == 0
     method, path, body = sent[-1]
-    assert (method, path) == ("POST", "/api/trust/approve/f1")
-    assert body["channel"] == "cli" and body["by"]
+    assert (method, path) == ("POST", "/api/trust/promote/f1") and body["by"]
+    assert "channel" not in body  # the channel is the connection's, not a parameter
+    assert "Promoted 1." in capsys.readouterr().out
 
 
-def test_approve_all_asks_once_and_uses_the_one_route(monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch, answers=["yes"])
-    assert trust_cmd.cmd_trust(_args("approve", all=True)) == 0
-    assert "Approved 2." in capsys.readouterr().out
-    assert [p for m, p, _b in sent if m == "POST"] == ["/api/trust/approve-all"]
+def test_approve_is_the_same_command_as_promote(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"], json=True)) == 0
+    assert sent[-1][1] == "/api/trust/promote/f1"
+    assert json.loads(capsys.readouterr().out)["data"]["changed"] == 1
 
 
-@pytest.mark.parametrize("reply", ["n", "", "maybe"])
-def test_anything_but_yes_changes_nothing(monkeypatch, capsys, reply) -> None:
-    sent = _wire(monkeypatch, answers=[reply])
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"])) == 0
-    assert all(m == "GET" for m, _p, _b in sent) and "Nothing was changed" in capsys.readouterr().out
+def test_promote_all_uses_the_one_route(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    assert trust_cmd.cmd_trust(_args("promote", all=True)) == 0
+    assert "Promoted 2." in capsys.readouterr().out
+    assert [p for m, p, _b in sent if m == "POST"] == ["/api/trust/promote-all"]
 
 
-def test_a_closed_input_stream_is_a_no(monkeypatch) -> None:
+def test_an_agents_own_id_is_the_name_recorded(monkeypatch) -> None:
+    monkeypatch.setenv("SLM_AGENT_ID", "codex")
+    sent = _wire(monkeypatch, tty=False)
+    trust_cmd.cmd_trust(_args("promote", fact_ids=["f1"]))
+    assert sent[-1][2]["by"] == "agent:codex"
+
+
+def test_withdraw_takes_a_promotion_back(monkeypatch, capsys) -> None:
+    sent = _wire(monkeypatch, tty=False)
+    assert trust_cmd.cmd_trust(_args("withdraw", fact_ids=["f1"])) == 0
+    assert sent[-1][:2] == ("POST", "/api/trust/withdraw/f1")
+    assert "Withdrew 1." in capsys.readouterr().out
+
+
+def test_promote_needs_ids_or_all_but_not_both(monkeypatch, capsys) -> None:
     sent = _wire(monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda _p="": (_ for _ in ()).throw(EOFError()))
-    assert trust_cmd.cmd_trust(_args("approve", all=True)) == 0
-    assert all(m == "GET" for m, _p, _b in sent)
-
-
-def test_approve_needs_ids_or_all_but_not_both(monkeypatch, capsys) -> None:
-    sent = _wire(monkeypatch)
-    assert trust_cmd.cmd_trust(_args("approve")) == 1
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"], all=True)) == 1
+    assert trust_cmd.cmd_trust(_args("promote")) == 1
+    assert trust_cmd.cmd_trust(_args("promote", fact_ids=["f1"], all=True)) == 1
     assert sent == [] and "not both" in capsys.readouterr().err
 
 
-def test_approve_all_with_nothing_waiting(monkeypatch, capsys) -> None:
+def test_promote_all_with_nothing_waiting(monkeypatch, capsys) -> None:
     sent = _wire(monkeypatch, items=())
-    assert trust_cmd.cmd_trust(_args("approve", all=True)) == 0
+    assert trust_cmd.cmd_trust(_args("promote", all=True)) == 0
     assert "Nothing is waiting" in capsys.readouterr().out and all(m == "GET" for m, _p, _b in sent)
 
 
-def test_the_server_refusing_is_reported_as_needing_a_person(monkeypatch, capsys) -> None:
+def test_a_role_that_may_not_write_is_told_so(monkeypatch, capsys) -> None:
     from superlocalmemory.cli import daemon
 
-    _wire(monkeypatch, answers=["y"])
+    _wire(monkeypatch)
     real = daemon.daemon_request
 
     def refusing(method, path, body=None, **flags):
@@ -167,8 +161,8 @@ def test_the_server_refusing_is_reported_as_needing_a_person(monkeypatch, capsys
         return real(method, path, body, **flags)
 
     monkeypatch.setattr(daemon, "daemon_request", refusing)
-    assert trust_cmd.cmd_trust(_args("approve", fact_ids=["f1"])) == 1
-    assert "approval is given by a person at a terminal" in capsys.readouterr().err
+    assert trust_cmd.cmd_trust(_args("promote", fact_ids=["f1"])) == 1
+    assert "your role" in capsys.readouterr().err
 
 
 def test_the_command_is_registered_and_dispatched() -> None:
@@ -179,6 +173,7 @@ def test_the_command_is_registered_and_dispatched() -> None:
     parser = argparse.ArgumentParser()
     trust_cmd.register_trust_parsers(parser.add_subparsers(dest="command"))
     args = parser.parse_args(["trust", "approve", "f1", "f2", "--json"])
+    assert parser.parse_args(["trust", "withdraw", "f1"]).trust_command == "withdraw"
     assert args.trust_command == "approve" and args.fact_ids == ["f1", "f2"] and args.json
     assert parser.parse_args(["trust", "approve", "--all"]).all is True
     assert callable(dispatch)

@@ -129,15 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_slot_pass_queue_due ON slot_pass_queue (next_at)
 
 _NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')"
 
-def _revision_trigger(with_ledger: bool) -> str:
-    """The revision-removed trigger; the ``case_id`` clean-up needs the ledger table."""
-    clear_cases = (
-        "    UPDATE slot_revisions SET case_id = NULL\n"
-        "     WHERE slot_id = OLD.slot_id AND case_id IS NOT NULL\n"
-        "       AND NOT EXISTS (SELECT 1 FROM correction_cases c\n"
-        "                        WHERE c.case_id = slot_revisions.case_id);\n"
-    ) if with_ledger else ""
-    return f"""
+_REVISION_TRIGGER = f"""
 CREATE TRIGGER trg_slot_revision_removed
 AFTER DELETE ON slot_revisions
 BEGIN
@@ -163,7 +155,7 @@ BEGIN
         OR (slot_id = OLD.slot_id AND superseded_by IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM slot_revisions r
                              WHERE r.revision_id = slot_revisions.superseded_by));
-{clear_cases}    UPDATE memory_slots
+{{clear_cases}}    UPDATE memory_slots
        SET state = CASE
                WHEN head_revision_id IS NULL THEN 'empty'
                WHEN EXISTS (SELECT 1 FROM slot_disputes d
@@ -181,6 +173,19 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM slot_revisions r WHERE r.slot_id = OLD.slot_id);
 END
 """
+
+#: The ``case_id`` clean-up inside the trigger; it needs the correction ledger table.
+_CLEAR_CASES = (
+    "    UPDATE slot_revisions SET case_id = NULL\n"
+    "     WHERE slot_id = OLD.slot_id AND case_id IS NOT NULL\n"
+    "       AND NOT EXISTS (SELECT 1 FROM correction_cases c\n"
+    "                        WHERE c.case_id = slot_revisions.case_id);\n"
+)
+
+
+def _revision_trigger(with_ledger: bool) -> str:
+    """The revision-removed trigger; the ``case_id`` clean-up needs the ledger table."""
+    return _REVISION_TRIGGER.format(clear_cases=_CLEAR_CASES if with_ledger else "")
 
 
 _FACT_TRIGGER = """

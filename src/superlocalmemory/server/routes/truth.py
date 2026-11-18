@@ -4,8 +4,13 @@
 
 ``GET /api/truth/attention`` feeds the dashboard's "Needs your answer" card;
 ``slm disputes`` and the MCP ``list_disputes`` tool read ``GET /api/disputes``.
-``POST /api/disputes/{id}/settle`` is the one door for a person's answer, from an
-agent (MCP ``settle_dispute``), the CLI or the dashboard (``truth/disputes.settle``).
+``POST /api/disputes/{id}/settle`` is the one door for an answer, from an agent (MCP
+``settle_dispute``), the CLI, a script or the dashboard (``truth/disputes.settle``), and
+``POST /api/disputes/{id}/reopen`` takes it back. Any caller may decide (D-49); who (an agent
+id, a client name, ``dashboard``), the channel and the time come from the connection and the
+credential (``server/decision_door.py``), never from a parameter, and are recorded.
+``GET /api/audit/pending`` and ``POST /api/audit/{id}/answer|retract`` are the blind audit
+queue for any labeller (``core/audit_review``).
 ``GET /api/truth/facts/{fact_id}`` feeds the memory detail and
 ``GET /api/truth/checks`` the Health page.
 ``POST /api/changed-sources/{fact_id}/still-true`` records that someone looked at
@@ -33,7 +38,15 @@ _MAX_LIMIT = 200
 
 class SettleRequest(BaseModel):
     keep: str = Field(min_length=1, max_length=128)
-    channel: str = Field(default="http", max_length=16)
+    #: Legacy fields: the channel comes from the connection, ``by`` is only a client name.
+    channel: str = Field(default="", max_length=16)
+    by: str = Field(default="", max_length=80)
+    profile_id: str | None = None
+
+
+class ReopenRequest(BaseModel):
+    channel: str = Field(default="", max_length=16)
+    by: str = Field(default="", max_length=80)
     profile_id: str | None = None
 
 
@@ -127,6 +140,7 @@ def _sides(engine: Any, dispute_id: str, profile: str) -> list[str]:
 @router.post("/api/disputes/{dispute_id}/settle")
 def settle_dispute(request: Request, dispute_id: str, body: SettleRequest, caller_view: str = ""):
     from superlocalmemory.core.mutations import purge_profile_context_cache
+    from superlocalmemory.server import decision_door
     from superlocalmemory.server.routes import memories as m
     from superlocalmemory.truth import disputes
 
@@ -134,6 +148,7 @@ def settle_dispute(request: Request, dispute_id: str, body: SettleRequest, calle
         profile = m._routed_profile(body.profile_id)
         engine, target, ctx = m._authorize_memory_mutation(
             request, "update", dispute_id, run_pre_hook=False, profile=profile)
+        who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
         sides = _sides(engine, dispute_id, target)
         if not sides:
             raise HTTPException(404, detail="Dispute not found")
@@ -141,8 +156,7 @@ def settle_dispute(request: Request, dispute_id: str, body: SettleRequest, calle
         try:
             with engine._db.raw_connection() as conn:
                 result = disputes.settle(conn, profile_id=target, dispute_id=dispute_id,
-                                         keep=body.keep, channel=body.channel,
-                                         actor=str(ctx.get("agent_id") or ""))
+                                         keep=body.keep, channel=who.channel, actor=who.actor)
         except disputes.SettleRefused as exc:
             raise HTTPException(422, detail=f"{exc}. Nothing was changed.") from None
         except LookupError:
@@ -160,6 +174,45 @@ def settle_dispute(request: Request, dispute_id: str, body: SettleRequest, calle
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Dispute settle error")
+
+
+@router.post("/api/disputes/{dispute_id}/reopen")
+def reopen_dispute(request: Request, dispute_id: str, body: ReopenRequest | None = None,
+                   caller_view: str = ""):
+    """Take a settled dispute's answer back: the retired memory returns, the question is open."""
+    from superlocalmemory.core.mutations import purge_profile_context_cache
+    from superlocalmemory.server import decision_door
+    from superlocalmemory.server.routes import memories as m
+    from superlocalmemory.truth import disputes
+
+    body = body or ReopenRequest()
+    try:
+        profile = m._routed_profile(body.profile_id)
+        engine, target, ctx = m._authorize_memory_mutation(
+            request, "update", dispute_id, run_pre_hook=False, profile=profile)
+        who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
+        sides = _sides(engine, dispute_id, target)
+        if not sides:
+            raise HTTPException(404, detail="No settled dispute of that id")
+        m._refuse_if_hidden(caller_view, engine, target, sides, "Dispute not found")
+        try:
+            with engine._db.raw_connection() as conn:
+                result = disputes.reopen(conn, profile_id=target, dispute_id=dispute_id,
+                                         channel=who.channel, actor=who.actor)
+        except disputes.ReopenRefused as exc:
+            raise HTTPException(409, detail=f"{exc} Nothing was changed.") from None
+        except LookupError:
+            raise HTTPException(404, detail="No settled dispute of that id") from None
+        purge_profile_context_cache(engine, target)
+        m._announce("memory.updated", {"dispute_id": dispute_id, "profile_id": target,
+                                       "status": "reopened"}, ctx["agent_id"])
+        return {"success": True, "profile_id": target, **result}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Dispute reopen error")
 
 
 @router.post("/api/changed-sources/{fact_id}/still-true")
@@ -261,29 +314,36 @@ def truth_checks(request: Request, profile_id: str = ""):
 
 class AuditAnswer(BaseModel):
     label: str = Field(min_length=1, max_length=32)
-    channel: str = Field(default="dashboard", max_length=16)
+    #: The labelling agent's own model id (D-49): its label counts toward a certificate cell
+    #: only when this differs from the judged tier's model. Empty: recorded, never counted.
+    model: str = Field(default="", max_length=80)
+    #: Legacy fields: the channel comes from the connection, ``by`` is only a client name.
+    channel: str = Field(default="", max_length=16)
+    by: str = Field(default="", max_length=80)
     profile_id: str | None = None
 
 
-def _local_only(caller_view: str) -> None:
-    """Audits are a person on this machine (core/audit_review.py): never a remote app."""
-    if (caller_view or "").strip():
-        raise HTTPException(403, detail="Audits are answered on this computer only")
+class AuditRetract(BaseModel):
+    channel: str = Field(default="", max_length=16)
+    by: str = Field(default="", max_length=80)
+    profile_id: str | None = None
 
 
 @router.get("/api/audit/pending")
-def audit_pending(request: Request, limit: int = 10, profile_id: str = "", caller_view: str = ""):
-    """Pairs drawn for a blind audit, without any judge's verdict (W2, R-16)."""
+def audit_pending(request: Request, limit: int = 10, profile_id: str = "", model: str = ""):
+    """Pairs drawn for a blind audit, without any judge's verdict or model (W2, R-16).
+
+    ``model`` is the asking agent's own model id: pairs only that model judged are left out,
+    since its label could not count (D-49)."""
     from superlocalmemory.core import audit_review
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     try:
         profile = m._routed_profile(profile_id)
         engine, target = m._authorize_review_read(request, profile)
         conn = _read(engine)
         try:
-            items = audit_review.pending(conn, target, limit)
+            items = audit_review.pending(conn, target, limit, labeller_model=model)
             count = audit_review.pending_count(conn, target)
         finally:
             conn.close()
@@ -297,29 +357,63 @@ def audit_pending(request: Request, limit: int = 10, profile_id: str = "", calle
 
 
 @router.post("/api/audit/{item_id}/answer")
-def audit_answer(request: Request, item_id: str, body: AuditAnswer, caller_view: str = ""):
-    """A person's blind answer for one pair; written to every drawn receipt of it."""
+def audit_answer(request: Request, item_id: str, body: AuditAnswer):
+    """Any caller's blind answer for one pair; written to every drawn receipt of it.
+
+    The labeller kind is ``person`` only for the dashboard's own door, otherwise ``agent``
+    (its ``model`` decides whether the label counts toward a certificate)."""
     from superlocalmemory.core import audit_review
+    from superlocalmemory.server import decision_door
     from superlocalmemory.server.routes import memories as m
 
-    _local_only(caller_view)
     try:
         profile = m._routed_profile(body.profile_id)
         engine, target, ctx = m._authorize_memory_mutation(
             request, "update", item_id, run_pre_hook=False, profile=profile)
+        who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
+        kind = "person" if who.channel == "dashboard" else "agent"
         try:
             with engine._db.raw_connection() as conn:
-                written = audit_review.answer(conn, profile_id=target, item_id=item_id,
-                                              label=body.label, channel=body.channel,
-                                              actor=str(ctx.get("agent_id") or ""))
+                done = audit_review.answer(conn, profile_id=target, item_id=item_id,
+                                           label=body.label, channel=who.channel,
+                                           actor=who.actor, kind=kind, model=body.model)
         except LookupError:
             raise HTTPException(404, detail="Nothing waiting for that item") from None
         except ValueError as exc:
             raise HTTPException(422, detail=f"{exc}. Nothing was written.") from None
-        return {"success": True, "profile_id": target, "item_id": item_id, "labelled": written}
+        return {"success": True, "profile_id": target, "item_id": item_id,
+                "labeller_kind": kind, **done}
     except HTTPException:
         raise
     except m._UnknownRoutedProfile as exc:
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Audit answer error")
+
+
+@router.post("/api/audit/{item_id}/retract")
+def audit_retract(request: Request, item_id: str, body: AuditRetract | None = None):
+    """Take a blind label back: its receipts wait for a label again."""
+    from superlocalmemory.core import audit_review
+    from superlocalmemory.server import decision_door
+    from superlocalmemory.server.routes import memories as m
+
+    body = body or AuditRetract()
+    try:
+        profile = m._routed_profile(body.profile_id)
+        engine, target, ctx = m._authorize_memory_mutation(
+            request, "update", item_id, run_pre_hook=False, profile=profile)
+        who = decision_door.decider_for(request, str(ctx.get("agent_id") or ""), body.by)
+        try:
+            with engine._db.raw_connection() as conn:
+                done = audit_review.retract(conn, profile_id=target, item_id=item_id,
+                                            channel=who.channel, actor=who.actor)
+        except LookupError:
+            raise HTTPException(404, detail="No label of that item to retract") from None
+        return {"success": True, "profile_id": target, "item_id": item_id, **done}
+    except HTTPException:
+        raise
+    except m._UnknownRoutedProfile as exc:
+        return m._unknown_profile_response(exc.profile_id)
+    except Exception as exc:
+        raise m._canonical_mutation_error(exc, "Audit retract error")

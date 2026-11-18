@@ -1,16 +1,19 @@
-// od-trust.js: the Dashboard home "Waiting for your OK" card (4.2.30, WS-5, D-37).
+// od-trust.js: the Dashboard home "Held back from instructions" card (4.2.30, WS-5, D-49).
 //
 // A memory is data. It becomes an instruction when SuperLocalMemory puts it where an
 // agent obeys it: a pin, a standing rule, your core memory, the start of every session.
 // A memory that came from a tool's output, a web page, another agent, an import, a
-// model's text, an agent's own words, or from before 4.2.30, may not become one until
-// you approve it. This card lists those memories in plain words (only once the firewall
-// is switched on or in shadow; off, nothing is held back and the card stays hidden):
-//   - Approve : it may now be an instruction (recorded: who, when, through the dashboard).
-//   - Approve all : everything listed, one answer (the old memories of a store).
-// Nothing is ever deleted here; a memory you do not approve is still found by recall, as
-// evidence. Every answer goes to the routes `slm trust approve` uses
-// (POST /api/trust/approve/{fact}, /api/trust/approve-all) with the channel "dashboard".
+// model's text, an agent's own words, or from before 4.2.30, does not become one by itself.
+// This card lists those memories in plain words (only once the firewall is switched on or in
+// shadow; off, nothing is held back and the card stays hidden). Nothing here needs you: an
+// agent can promote a memory with one explicit call, and you can too:
+//   - Promote : it may now be an instruction (recorded: who, when, through the dashboard;
+//     "Recent decisions by your agents" lists it with an Undo).
+//   - Promote all : everything listed, one call (the old memories of a store).
+// Nothing is ever deleted here; a memory that is not promoted is still found by recall, as
+// evidence. Every call goes to the routes `slm trust promote` uses
+// (POST /api/trust/promote/{fact}, /api/trust/promote-all); the page's own door is recorded
+// by the daemon (the X-SLM-Channel header the dashboard's fetch adds), not sent in the body.
 // Memory text is only ever set with textContent. The card hides itself when nothing waits.
 (function () {
   'use strict';
@@ -43,7 +46,7 @@
     return fetch(path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'dashboard', by: 'dashboard' })
+      body: JSON.stringify({})
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok || !j.success) throw new Error(detailOf(j, 'That did not work (HTTP ' + r.status + ').'));
@@ -80,12 +83,12 @@
     row.appendChild(el('p', 'dash-card-meta',
       'From ' + (FROM_WORDS[item.origin_class] || item.origin || 'an unknown source') +
       (words ? '. This memory ' + words + '.' : '.') +
-      ' Until you approve it, agents are not told to follow it.'));
+      ' Until it is promoted, agents are not told to follow it.'));
     var actions = el('div', 'truth-actions');
-    actions.appendChild(button('Approve', 'primary', function () {
+    actions.appendChild(button('Promote', 'primary', function () {
       busy(row, true);
-      post('/api/trust/approve/' + encodeURIComponent(item.fact_id)).then(
-        function () { done(row, 'Approved. It may now be a pin, a rule or part of your core memory.'); },
+      post('/api/trust/promote/' + encodeURIComponent(item.fact_id)).then(
+        function () { done(row, 'Promoted. It may now be a pin, a rule or part of your core memory. You can undo it under Recent decisions.'); },
         function (e) { failed(row, e); });
     }));
     row.appendChild(actions);
@@ -102,16 +105,16 @@
     if (badge) badge.textContent = count ? String(count) : '';
     if (!items.length) return;
     b.appendChild(el('p', 'dash-card-meta', acting
-      ? 'These memories asked to be instructions, but did not come from you. Approve the ones you trust.'
+      ? 'These memories asked to be instructions, but did not come from you, so they are held back. Promote the ones you trust, on purpose.'
       : 'The instruction firewall is not switched on yet, so nothing is held back. This is what it would hold.'));
     if (items.length > 1) {
       var all = el('div', 'truth-actions');
-      all.appendChild(button('Approve all ' + count, 'ghost', function (btn) {
+      all.appendChild(button('Promote all ' + count, 'ghost', function (btn) {
         btn.disabled = true;
-        post('/api/trust/approve-all').then(
+        post('/api/trust/promote-all').then(
           function (j) {
             b.textContent = '';
-            b.appendChild(el('p', 'dash-card-meta tone-ok', 'Approved ' + (j.approved || count) + '.'));
+            b.appendChild(el('p', 'dash-card-meta tone-ok', 'Promoted ' + (j.approved || count) + '.'));
             setTimeout(load, 1200);
           },
           function (e) { btn.disabled = false; failed(b, e); });

@@ -13,7 +13,7 @@ from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 from superlocalmemory.truth.invariants import open_read_only
 from tests.test_core.test_coverage_backfill import _db
 
-NOW = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
+NOW = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)  # after the facts' real save time, on any day
 
 
 @pytest.fixture(autouse=True)
@@ -232,12 +232,15 @@ def test_gates_report_the_two_numbers_and_list_only_visible_memories(db, monkeyp
     monkeypatch.setattr(memory_report, "_need_gate", lambda c, p, w: {
         "turns": 40, "skipped": 12, "alpha": 0.05, "rules_bound": 0.03})
     monkeypatch.setattr(memory_report, "_harm_gate", lambda c, p, w, h: {
-        "state": "off", "tests": 4, "would_withhold": [ok.fact_id, hid.fact_id, "not-a-fact"]})
+        "state": "off", "tests": 4, "facts_both_arms": 4, "facts_ever_left_out": 6,
+        "would_withhold": [ok.fact_id, hid.fact_id, "not-a-fact"]})
     conn = open_read_only(str(db.db_path))
     got = delivered.gates(conn, "default", now=NOW, hidden=lambda ids: {i for i in ids if i == hid.fact_id})
     conn.close()
     assert got["need_gate"]["skipped"] == 12 and got["need_gate"]["turns"] == 40
     assert got["need_gate"]["rules_bound"] == 0.03
     assert got["harm_gate"]["acting"] is False and got["harm_gate"]["would_withhold_count"] == 1
+    assert got["harm_gate"]["tests"] == 4 and got["harm_gate"]["facts_both_arms"] == 4
+    assert got["harm_gate"]["facts_ever_left_out"] == 6
     assert [x["preview"] for x in got["harm_gate"]["would_withhold"]] == ["Harmful visible."]
     assert "Harmful hidden" not in str(got)

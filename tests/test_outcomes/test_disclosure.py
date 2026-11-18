@@ -79,6 +79,23 @@ def test_the_notice_says_what_how_often_and_how_to_turn_it_off() -> None:
         assert jargon not in words
 
 
+def test_the_notice_says_usage_detection_is_on_and_what_it_compares() -> None:
+    words = disclosure.text().lower()
+    assert "reply" in words and "memories it was given" in words
+    assert "ids and scores only" in words and "this computer" in words
+    assert "stay off unless" not in words  # usage detection is on (D-49); only the need check is off
+    assert "need" in words and "off" in words
+
+
+def test_the_notice_is_informational_and_gates_nothing() -> None:
+    import inspect
+
+    from superlocalmemory.core import feature_flags
+
+    assert "pending" not in inspect.getsource(feature_flags)  # no flag reads the notice
+    assert "informational" in disclosure.__doc__.lower()
+
+
 def test_the_notice_numbers_follow_the_design_constants(monkeypatch) -> None:
     from superlocalmemory.outcomes import randomiser, swaps
 

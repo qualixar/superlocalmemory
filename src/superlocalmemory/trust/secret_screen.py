@@ -27,6 +27,10 @@ States: ``off`` (the default) changes nothing; ``shadow`` counts what would be
 screened and logs the counts, changing nothing; ``on`` screens. The kill switch
 reads as off. A screen that cannot run while it is ``on`` refuses the save
 (the error propagates) rather than storing the text in clear.
+
+The side fields of a save (``slot``, ``slot_value`` and every cue) are screened too, by
+:func:`screen_field`, at the daemon's save route and at the engine's slot door: they are
+stored outside the memory text, so ``prepare_for_save`` never sees them.
 """
 
 from __future__ import annotations
@@ -126,6 +130,27 @@ def screen_tree(value: Any) -> tuple[Any, Counter]:
     return value, Counter()
 
 
+def screen_field(text: str | None) -> str | None:
+    """One caller-supplied side field (a slot, a slot value, a cue) as the flag says: replaced
+    when the screen is on, counted when in shadow, as written when off. ``None`` stays ``None``.
+
+    These fields travel outside the memory text (reserved ``_slm_*`` metadata, the cue table),
+    so the text screen never sees them; every door that stores one calls this first
+    (Fable audit A-11). A screen that cannot run while on raises: the save is refused.
+    """
+    mode = state()
+    if mode is FlagState.OFF or not isinstance(text, str):
+        return text
+    got = screen(text)
+    note(got.counts, acting=mode is FlagState.ON)
+    return got.text if mode is FlagState.ON else text
+
+
+def screen_fields(texts: list[str] | None) -> list[str] | None:
+    """:func:`screen_field` over a list (cue specs); ``None`` stays ``None``."""
+    return None if texts is None else [screen_field(t) for t in texts]
+
+
 def note(counts: Mapping[str, int], *, acting: bool) -> None:
     """One log line with counts per type: never the text, never a value."""
     if not counts:
@@ -135,4 +160,5 @@ def note(counts: Mapping[str, int], *, acting: bool) -> None:
                 "replaced" if acting else "would replace", sum(counts.values()), kinds)
 
 
-__all__ = ["FLAG", "Screened", "note", "screen", "screen_tree", "state", "types_in"]
+__all__ = ["FLAG", "Screened", "note", "screen", "screen_field", "screen_fields", "screen_tree",
+           "state", "types_in"]

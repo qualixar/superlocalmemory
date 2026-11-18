@@ -38,7 +38,7 @@
     off: 'The instruction firewall is off, so nothing is held back from being an instruction.',
     shadow: 'The instruction firewall is watching: it shows what it would hold back, and holds nothing yet.',
     on: 'The instruction firewall is on: a memory from a tool, a web page or another agent cannot become ' +
-        'a rule or part of your core memory until you approve it.'
+        'a rule or part of your core memory by itself; one explicit, recorded call promotes it.'
   };
 
   function goToWaiting() {
@@ -60,10 +60,10 @@
   }
 
   function renderWaiting(list, fw) {
-    title(list, 'Waiting for your OK');
+    title(list, 'Held back from instructions');
     list.appendChild(el('p', 'dash-card-meta', FIREWALL[fw.state] || FIREWALL.off));
-    var r = row(list, plural(fw.waiting || 0, 'memory is', 'memories are') + ' waiting for your OK' +
-      (fw.approved ? '; ' + fw.approved + ' approved by you' : '') + '.');
+    var r = row(list, plural(fw.waiting || 0, 'memory is', 'memories are') + ' held back' +
+      (fw.approved ? '; ' + fw.approved + ' promoted' : '') + '.');
     if (fw.waiting && fw.state !== 'off') {
       var b = el('button', 'btn sm ghost', 'Review them');
       b.type = 'button';

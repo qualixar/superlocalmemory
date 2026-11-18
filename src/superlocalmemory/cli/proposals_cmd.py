@@ -4,20 +4,20 @@
 
     slm proposals [list] [--state proposed|applied|rolled_back|rejected|all] [--json]
     slm proposals show SET_ID [--json]
-    slm proposals apply SET_ID        # you, at a terminal
-    slm proposals reject SET_ID       # you, at a terminal
-    slm proposals rollback SET_ID     # you, at a terminal
+    slm proposals apply SET_ID        # any caller; recorded (who, channel cli, when)
+    slm proposals reject SET_ID
+    slm proposals rollback SET_ID     # undo an applied set exactly
 
 A set is a group of changes that is decided together: retire an older memory,
 merge duplicates, rewrite a derived summary. Nothing in it touches your memory
-until you apply it, and applying is all-or-nothing. ``rollback`` undoes an
+until it is applied, and applying is all-or-nothing. ``rollback`` undoes an
 applied set exactly, restoring each thing it replaced.
 
-``list`` and ``show`` work anywhere, with ``--json`` for agents. ``apply``,
-``reject`` and ``rollback`` ask a person: they refuse to run without an
-interactive terminal, so a script or an agent cannot decide in your place (the
-same rule as ``slm audit``). Everything runs inside SLM, which stays the only
-writer of its store.
+Any caller may decide (D-49): an agent, a script or a person. Nothing asks for a terminal
+or a confirmation, because nothing here may need a person to work. Each decision is
+recorded (who, channel, when), listed on the dashboard under "Recent decisions by your
+agents", and an applied set is always undone with ``rollback``. ``--json`` is for agents.
+Everything runs inside SLM, which stays the only writer of its store.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from typing import Any
 
 from superlocalmemory.cli.corrections_cmd import _daemon, _out, _refused
 
-_DECISIONS = {"apply": "Apply these changes?", "reject": "Decline these changes?",
-              "rollback": "Undo these changes?"}
+_DECISIONS = {"apply": "Apply these changes", "reject": "Decline these changes",
+              "rollback": "Undo these changes"}
 _DONE = {"apply": "Applied. Undo it any time with: slm proposals rollback {id}",
          "reject": "Declined. Nothing was changed.",
          "rollback": "Undone. Everything it replaced is back as it was."}
@@ -51,9 +51,9 @@ def register_proposals_parsers(sub: Any) -> None:
     sh.add_argument("set_id")
     sh.add_argument("--profile", default="")
     sh.add_argument("--json", action="store_true")
-    for name, text in (("apply", "Apply a set (you, at a terminal)"),
-                       ("reject", "Decline a set (you, at a terminal)"),
-                       ("rollback", "Undo an applied set exactly (you, at a terminal)")):
+    for name, text in (("apply", "Apply a set (recorded; undo with rollback)"),
+                       ("reject", "Decline a set"),
+                       ("rollback", "Undo an applied set exactly")):
         d = psub.add_parser(name, help=text)
         d.add_argument("set_id")
         d.add_argument("--profile", default="")
@@ -75,11 +75,19 @@ def _fetch(path: str, **flags: Any) -> Any:
                           **flags)
 
 
-def _confirm(action: str) -> bool:
+def _who() -> str:
+    """A client name for the record: the agent's own id when it set one, else the user's name."""
+    import os
+
+    name = os.environ.get("SLM_AGENT_ID", "").strip()
+    if name:
+        return f"agent:{name}"
     try:
-        return input(f"{_DECISIONS[action]} [y/N] ").strip().lower() in ("y", "yes")
-    except EOFError:
-        return False
+        import getpass
+
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - a name is a courtesy, never a reason to fail
+        return "local user"
 
 
 def _decide(args: Namespace, command: str, action: str, profile: str, use_json: bool) -> int:
@@ -99,16 +107,13 @@ def _decide(args: Namespace, command: str, action: str, profile: str, use_json: 
             return _refused(command, "No such proposed change", use_json, "NOT_FOUND")
         if not use_json:
             _render_set(shown["set"])
-        if not _confirm(action):
-            print("Nothing was changed.")
-            return 0
-        body = {"channel": "cli", **({"profile_id": profile} if profile else {})}
+        body = {"by": _who(), **({"profile_id": profile} if profile else {})}
         result = daemon_request("POST", f"/api/proposals/{quoted}/{action}", body,
                                 preserve_conflict=True, preserve_not_found=True,
                                 preserve_unprocessable=True)
     except DaemonRefused:
-        return _refused(command, "SuperLocalMemory refused: decisions are made by a person on "
-                                 "this computer.", use_json, "NEEDS_A_PERSON")
+        return _refused(command, "SuperLocalMemory refused: your role on this workspace does "
+                                 "not allow changing memories.", use_json, "FORBIDDEN")
     except DaemonConflict as exc:
         return _refused(command, exc.detail, use_json)
     except DaemonUnprocessable as exc:
@@ -130,10 +135,6 @@ def cmd_proposals(args: Namespace) -> int:
     use_json = bool(getattr(args, "json", False))
     command = f"proposals {sub}"
     profile = (getattr(args, "profile", "") or "").strip()
-    if sub in _DECISIONS and not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return _refused(command, f"slm proposals {sub} asks a person at a terminal; it cannot be "
-                                 "done by a script or an agent. Use slm proposals list --json "
-                                 "to read what is waiting.", use_json, "NEEDS_A_PERSON")
     limit = int(getattr(args, "limit", 50))
     if sub == "list" and not 1 <= limit <= 200:
         return _refused(command, "--limit must be from 1 to 200", use_json, "INVALID")

@@ -916,6 +916,13 @@ class EngineRecallAdapter:
         )
         with lease:
             out = self._recall(query, limit=limit, session_id=session_id)
+        from superlocalmemory.core import recall_deadline
+
+        if recall_deadline.expired():
+            # The hook stopped waiting before this finished: the agent got nothing, so no
+            # receipt (it would say "delivered") and no swap (A-14, D-47).
+            logger.info("hook recall finished after its client's deadline: nothing recorded")
+            return {"ok": False, "error": "deadline_passed", "results": []}
         out = self._not_yet_shown(out, session_id)
         swap = self._swap(out)
         if swap is not None and swap.at is not None:
@@ -4932,6 +4939,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
         "insights", "timeline", "abstraction", "integrity", "overtaken", "truth", "outcomes",
         "proposals", "trust", "trust_why", "delivered", "trust_overview", "whatsnew", "wiki",
+        "decisions",
     ):
         try:
             _mod = __import__(
@@ -5642,12 +5650,16 @@ def _register_daemon_routes(application: FastAPI) -> None:
         # A slot claim too (D-36): a malformed one is refused before anything is
         # journaled, never stored as a memory with no claim.
         slot_claim = None
+        # The side fields are stored outside the memory text, so the text screen never sees
+        # them: screen them here, before they are encoded or journaled (Fable audit A-11).
+        from superlocalmemory.trust.secret_screen import screen_field, screen_fields
+
         if req.slot is not None or req.slot_value is not None:
             from superlocalmemory.truth.slot_claims import encode as encode_slot_claim
             from superlocalmemory.truth.slot_keys import SlotSpecError
 
             try:
-                slot_claim = encode_slot_claim(req.slot, req.slot_value)
+                slot_claim = encode_slot_claim(screen_field(req.slot), screen_field(req.slot_value))
             except SlotSpecError as exc:
                 raise HTTPException(
                     422, detail={"code": "INVALID_SLOT", "message": str(exc)}) from exc
@@ -5658,7 +5670,7 @@ def _register_daemon_routes(application: FastAPI) -> None:
             from superlocalmemory.core.cue_triggers import CueError, parse_cues
 
             try:
-                cue_specs = [c.spec for c in parse_cues(req.cues)]
+                cue_specs = [c.spec for c in parse_cues(screen_fields(req.cues))]
             except CueError as exc:
                 raise HTTPException(
                     422, detail={"code": "INVALID_CUE", "message": str(exc)}) from exc
@@ -5734,12 +5746,12 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 meta.update(strip_reserved_metadata(extra))
             # Who saved it: the connection's agent when a capability holder
             # names it, else the claimed label, marked as claimed (L-15).
-            from superlocalmemory.core.agent_attribution import SHELL_HEADER, shell_signal
+            from superlocalmemory.core.agent_attribution import CHANNEL_HEADER, dashboard_signal
             from superlocalmemory.core.agent_attribution import bind as _bind_agent
 
             meta = _bind_agent(
                 meta, _trusted_connection_agent(request, trusted_actor_id),
-                shell_signal(request.headers.get(SHELL_HEADER, ""), trusted_actor_id))
+                dashboard_signal(request.headers.get(CHANNEL_HEADER, ""), trusted_actor_id))
             from superlocalmemory.core.agent_attribution import write_speaker
 
             _write_speaker = write_speaker(req.speaker, meta)

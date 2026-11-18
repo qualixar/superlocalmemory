@@ -282,17 +282,24 @@ def eprocess_certificate(scores: Sequence[float], wrong: Sequence[bool], *, alph
     return Certificate(chosen, alpha, delta, at, revoked, tuple(tested), start=start)
 
 
+#: Which audit labels count toward a certificate cell (D-49), for a query over
+#: ``judge_receipts r`` joined to ``judge_labels l``: a person's label always counts; an
+#: agent's counts only when it named its model and that model is not the judged tier's, so a
+#: judge never grades itself. Labels written before the columns existed read as a person's.
+COUNTING_LABEL = ("(l.labeller_kind = 'person' OR "
+                  "(l.labeller_model <> '' AND l.labeller_model <> r.model))")
+
 #: The tier's inbox: every pair drawn for the inbox sample (one keyed draw per
 #: pair, W0-05: a per-receipt draw over-samples pairs several tiers answered)
 #: that reached this tier, once per pair hash, blindly audited. The base rate.
 _INBOX = """
 SELECT r.inputs_hash, l.label FROM judge_receipts r
-  JOIN judge_labels l ON l.receipt_id = r.receipt_id
+  JOIN judge_labels l ON l.receipt_id = r.receipt_id AND {counting}
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ? AND r.population = ?
    AND r.tier_index >= (SELECT COALESCE(MIN(t.tier_index), 0) FROM judge_receipts t
                          WHERE t.profile_id = r.profile_id AND t.tier = ? AND t.model = ?)
    AND r.inbox_selected = 1 AND l.source = 'audit' AND l.blind = 1
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 #: Every drawn receipt of the cell, in the order it was decided, with its blind
 #: audit labels if any (W0-03). The labeller's order and choice never matter:
@@ -300,12 +307,12 @@ SELECT r.inputs_hash, l.label FROM judge_receipts r
 _DRAWN = """
 SELECT r.receipt_id, r.confidence, l.label, r.inputs_hash FROM judge_receipts r
   LEFT JOIN judge_labels l ON l.receipt_id = r.receipt_id
-       AND l.source = 'audit' AND l.blind = 1
+       AND l.source = 'audit' AND l.blind = 1 AND {counting}
  WHERE r.profile_id = ? AND r.question_id = ? AND r.question_version = ?
    AND r.tier = ? AND r.model = ? AND r.verdict = ? AND r.population = ?
    AND r.batching_regime = ? AND r.audit_selected = 1 AND r.decided_at > ?
  ORDER BY r.decided_at, r.receipt_id
-"""
+""".replace("{counting}", COUNTING_LABEL)
 
 #: A labeller who cannot decide says so; it counts as an error, never as a skip.
 CANNOT_TELL = "cannot_tell"

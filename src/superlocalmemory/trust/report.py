@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""The Trust section of Memory Health (WS-5): origins, what waits for a person, secrets held back.
+"""The Trust section of Memory Health (WS-5, D-49): origins, what is held back until promoted,
+the decisions callers made, secrets held back.
 
 Read-only and fail-open: a store missing a table reports that part as empty. Counts only:
 no memory text and never the value of a credential. The count of credentials is taken from
@@ -15,6 +16,7 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
+from superlocalmemory.core import decisions
 from superlocalmemory.trust import firewall, secret_screen
 from superlocalmemory.trust import origin_class as oc
 
@@ -70,6 +72,14 @@ def origins(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
     return {name: int(n) for name, n in sorted(rows, key=position)}
 
 
+def _cues_would_hold(slm_home: Path | None) -> int:
+    """Cue deliveries the firewall would have held while it was in shadow (a count)."""
+    from superlocalmemory.hooks import cue_hook
+    from superlocalmemory.infra.data_root import canonical_data_root
+
+    return cue_hook.shadow_held(slm_home or canonical_data_root())
+
+
 def build(conn: sqlite3.Connection, profile_id: str, *, slm_home: Path | None = None) -> dict:
     """The Trust section (JSON-ready); ``{}`` only if nothing at all could be read."""
     out: dict = {}
@@ -80,12 +90,14 @@ def build(conn: sqlite3.Connection, profile_id: str, *, slm_home: Path | None = 
         out["approved"] = counts["approved"]
         queue = firewall.pending(conn, profile_id, WAITING_SHOWN)
         out["unclassified"] = queue["unclassified"]
-        # What an agent needs to tell the person: which memories wait and why (never approve).
+        # Which memories are held back and why; any caller may promote one on purpose.
         out["waiting_items"] = [
             {"fact_id": i["fact_id"], "origin": i["origin_class"], "wanted": i["wanted"],
              "preview": i["preview"][:120]} for i in queue["items"]]
         out["origins"] = origins(conn, profile_id)
         out["secrets_held_back"] = placeholders(conn, profile_id)
+        out["cues_would_hold"] = _cues_would_hold(slm_home)
+        out["decisions"] = decisions.counts(conn, profile_id)
     except Exception:  # noqa: BLE001 - this section never breaks the report
         logger.debug("trust section unreadable", exc_info=True)
     return out
@@ -99,15 +111,22 @@ def describe(section: dict) -> list[str]:
              f"{section.get('secret_screen', 'unknown')}"]
     if section.get("taint") == "off" and section.get("waiting"):
         # Nothing is held while the firewall is off: say what it would hold.
-        lines.append(f"  Would wait for your OK if the firewall were on: {section['waiting']}; "
-                     f"approved by you: {section.get('approved', 0)}")
+        lines.append(f"  Would be held back if the firewall were on: {section['waiting']}; "
+                     f"promoted: {section.get('approved', 0)}")
     elif section.get("waiting") or section.get("approved"):
-        lines.append(f"  Waiting for your OK: {section.get('waiting', 0)}; approved by you: "
+        lines.append(f"  Held back until promoted: {section.get('waiting', 0)}; promoted: "
                      f"{section.get('approved', 0)}")
     if section.get("waiting"):
-        lines.append("  See them with: slm trust pending (approving is yours, at a terminal)")
+        lines.append("  See them with: slm trust pending. Promote one on purpose with: "
+                     "slm trust promote FACT_ID (recorded, and it can be withdrawn)")
+    if section.get("taint") == "shadow" and section.get("cues_would_hold"):
+        lines.append(f"  Cue deliveries the firewall would have held: {section['cues_would_hold']}")
     if section.get("unclassified"):
         lines.append(f"  Not yet classified by origin: {section['unclassified']}")
+    made = section.get("decisions") or {}
+    if made.get("total"):
+        lines.append(f"  Decisions by your agents: {made['total']} recorded, {made.get('undone', 0)} "
+                     "undone (the dashboard lists them with an Undo)")
     held = section.get("secrets_held_back") or {}
     if held.get("by_type"):
         kinds = ", ".join(f"{k} {n}" for k, n in held["by_type"].items())

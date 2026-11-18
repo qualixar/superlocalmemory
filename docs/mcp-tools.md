@@ -295,7 +295,7 @@ text.
 
 ### `list_disputes`
 
-What needs the user's answer: open disputes (two memories that state different
+What needs an answer: open disputes (two memories that state different
 values of the same thing, both sides newest first, each with when it was said)
 and memories whose source file changed or went missing. Recall results carry
 the same information as `disputes` and `source` on the memories they return.
@@ -304,16 +304,27 @@ the same information as `disputes` and `source` on the memories they return.
 |-----------|------|-------------|
 | `limit` | integer | Max items of each kind (default 50, up to 200) |
 | `profile_id` | string | List this profile's items |
+| `audit` | boolean | List the blind audit queue instead: two memories and the question a judge was asked, never its answer |
+| `model` | string | With `audit`: your own model id; pairs only that model judged are left out |
 
 ### `settle_dispute`
 
-Record the user's answer to one dispute. Settle only with the user's answer.
+Settle one dispute, or take a decision back. Any caller may decide (D-49): the decision is
+recorded with your agent id, the `mcp` channel and the time, is listed on the dashboard
+under **Recent decisions by your agents**, and `keep="reopen"` undoes it. Decide on evidence
+(the sides' dates and sources, the user's words); when you cannot tell, ask or leave it open.
+
+Blind audit labels use the same tool: `dispute_id="audit:<item_id>"` (from
+`list_disputes(audit=true)`) and `keep` an option label or `cannot_tell`; `keep="retract"`
+takes your label back. Pass `model`, your own model id: a label counts toward a judge's
+certificate only when it differs from the judged tier's model.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `dispute_id` | string, required | From `list_disputes` or a recall result's `disputes` |
 | `keep` | string, required | The `fact_id` of the side that is true now (the other memory is retired and can be rolled back with `review_correction`), `both`, or `unrelated` |
 | `profile_id` | string | Profile the dispute belongs to |
+| `model` | string | For an audit label: your own model id |
 
 ### `delete_memory`
 
@@ -382,12 +393,13 @@ See [Memory kinds](memory-kinds.md) for what the nine kinds mean.
 ### `core_memory`
 
 Manage the explicit pin set: `core_memory(action, fact_id, profile_id)` with
-`action` of `pin`, `unpin` or `list`. A pinned memory is always injected. With the instruction
+`action` of `pin`, `unpin`, `list`, `promote` or `withdraw`. A pinned memory is always injected. With the instruction
 firewall on (`trust.taint`), pinning a memory whose taint is below `system` is refused:
 `{"success": false, "needs_approval": true, "taint": ..., "error": ...}`. The request is
-recorded and shows in the dashboard's **Waiting for your OK** card and in `slm trust pending`;
-only the user approves it (`slm trust approve` at a terminal), and the pin is then applied.
-An agent has no tool to approve.
+recorded and shows in the dashboard's **Held back from instructions** card and in
+`slm trust pending`. One explicit `core_memory(action="promote", fact_id)` (or `pin` with
+`promote=true`) releases it and applies the pin; the promotion is recorded with your agent id
+and the `mcp` channel, and `action="withdraw"` takes it back (D-49).
 
 ---
 

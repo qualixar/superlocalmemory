@@ -14,7 +14,9 @@ from tests.test_trust_signing.conftest import SIGNING
 
 TAINT = "SLM_FEATURE_TRUST_TAINT"
 WEB = fo.Origin("ingest_adapter", "verbatim", source_type="gmail")
-PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user")
+# The dashboard's own door is the one positive signal of a user's own words (D-49).
+PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user",
+                  agent_id_source="dashboard")
 
 
 def _save(db, text, origin=None, **kw):
@@ -64,7 +66,7 @@ def test_origin_class_signals_the_mapping_row_and_the_reason_it_exists(db) -> No
     got = why.explain(_ro(db), fact.fact_id)["origin"]
     assert got["taint"] == "web" and got["label"] == "a web page"
     assert got["signals"]["channel"] == "ingest_adapter" and got["signals"]["source_type"] == "gmail"
-    assert got["rule"]["row"] and got["rule"]["why"] and got["rule"]["mapping"] == "v2"
+    assert got["rule"]["row"] and got["rule"]["why"] and got["rule"]["mapping"] == "v3"
     assert got["words"] == "This memory is a web page."
 
 

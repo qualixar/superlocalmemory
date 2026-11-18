@@ -81,10 +81,10 @@
   function settle(row, dispute, keep) {
     busy(row, true);
     post('/api/disputes/' + encodeURIComponent(dispute.dispute_id) + '/settle',
-         { keep: keep, channel: 'dashboard' })
+         { keep: keep })
       .then(function (r) {
         var retired = (r.retired || []).length;
-        done(row, retired ? 'Done. The other memory was retired; you can undo it under Corrections.'
+        done(row, retired ? 'Done. The other memory was retired; you can undo it under Recent decisions.'
                           : 'Done. Both memories stay.');
       }, function (e) { failed(row, e); });
   }
@@ -407,7 +407,7 @@
   function auditAnswer(item, label) {
     var b = $('dash-audit-body');
     if (b) busy(b, true);
-    post('/api/audit/' + encodeURIComponent(item.item_id) + '/answer', { label: label, channel: 'dashboard' })
+    post('/api/audit/' + encodeURIComponent(item.item_id) + '/answer', { label: label })
       .then(function () {
         audit.items.shift();
         audit.count = Math.max(0, audit.count - 1);

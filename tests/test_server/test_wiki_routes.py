@@ -84,17 +84,14 @@ def test_a_sentence_whose_memory_changed_is_withheld_when_the_page_is_read(seede
     assert page["stale"] and page["withheld"]["count"] == 1 and len(page["sentences"]) == 2
 
 
-def test_a_remote_app_can_neither_read_nor_write(seeded, monkeypatch) -> None:
+def test_a_caller_view_parameter_decides_nothing(seeded, monkeypatch) -> None:
+    """D-49: locality is the connection's, never a query parameter the caller sends."""
     client, app, _ids = seeded
     _flag(monkeypatch, "on")
     _publish(app)
     remote = {"caller_view": "remote"}
-    assert client.get("/api/wiki/pages", params=remote).status_code == 403
-    assert client.get("/api/wiki/diff", params=remote).status_code == 403
-    for path in ("build", "rebuild", "sync"):
-        r = client.post(f"/api/wiki/{path}", params=remote, json={"channel": "cli"})
-        assert r.status_code == 403
-    assert client.get("/api/wiki/pages/x", params=remote).status_code == 403
+    assert client.get("/api/wiki/pages", params=remote).status_code == 200
+    assert client.get("/api/wiki/diff", params=remote).status_code == 200
 
 
 def test_build_is_refused_while_the_wiki_is_off_and_only_reports_in_shadow(seeded, wiki_env,
@@ -113,12 +110,9 @@ def test_build_is_refused_while_the_wiki_is_off_and_only_reports_in_shadow(seede
     assert client.post("/api/wiki/build", json={}).json()["unchanged"]
 
 
-def test_rebuild_is_a_persons_and_compiles_then_projects(seeded, wiki_env, monkeypatch) -> None:
+def test_rebuild_is_a_recorded_decision_and_compiles_then_projects(seeded, wiki_env, monkeypatch) -> None:
     client, app, _ids = seeded
     _flag(monkeypatch, "on")
-    refused = client.post("/api/wiki/rebuild", json={"channel": "agent"})
-    assert refused.status_code == 403
-    assert client.get("/api/wiki/pages").json()["pages"] == []
     r = client.post("/api/wiki/rebuild", json={"channel": "dashboard"})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -126,7 +120,7 @@ def test_rebuild_is_a_persons_and_compiles_then_projects(seeded, wiki_env, monke
     listed = client.get("/api/wiki/pages").json()
     assert len(listed["pages"]) == 1
     done = client.get(f"/api/proposals/{body['set_id']}").json()["set"]
-    assert done["state"] == "applied" and done["basis"]["kind"] == "person"
+    assert done["state"] == "applied" and done["basis"]["kind"] == "decision"
     again = client.post("/api/wiki/rebuild", json={"channel": "cli"}).json()
     assert again["pages"] == 0 and again["set_id"] is None
 
@@ -143,7 +137,6 @@ def test_sync_reads_an_edit_as_a_proposal_and_a_deleted_line_as_nothing(seeded, 
     db = app.state.engine._db
     live_before = db.execute("SELECT COUNT(*) FROM fact_temporal_validity "
                              "WHERE system_expired_at IS NULL")[0][0]
-    assert client.post("/api/wiki/sync", json={"channel": "agent"}).status_code == 403
     r = client.post("/api/wiki/sync", json={"channel": "cli"})
     assert r.status_code == 200, r.text
     body = r.json()

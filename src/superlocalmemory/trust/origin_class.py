@@ -27,19 +27,16 @@ signals; then the ``transform`` may only lower it (a model that rewrote the
 text can no longer vouch for who said it). Every row says why in its
 ``why``. Nothing here reads a database or memory text.
 
-The shell door (package B): the command line carries no agent id, and neither
-does an agent that runs ``slm remember`` through a shell. What tells them apart
-is whether the caller sat at an interactive terminal: the client sends that
-fact with every daemon request (``agent_attribution.SHELL_HEADER``) and the
-daemon records it as the raw signal ``agent_id_source`` = ``shell:tty`` or
-``shell:no_tty``. A save with no agent id, role ``user`` and ``shell:no_tty`` is
-not a person's statement (row ``remember.shell_no_tty``, ``agent_inferred``).
-``shell:tty`` and a save with no shell signal (the dashboard, a browser) stay
-``user_direct``. Honest limits: a terminal is evidence, not proof (an agent that
-allocates a pseudo-terminal looks like a person), and facts saved before this
-change carry no such signal and are not reclassified: they keep the class they
-were computed with, and a store that has not computed one yet reads them with the
-mapping as it is now.
+Fails closed (D-49): no signal is never the trusted case. A save is ``user_direct`` only
+with positive evidence, the dashboard's own door (the raw signal ``agent_id_source`` =
+``dashboard``, recorded by the daemon when the page's install-token request names the
+dashboard channel), and then only with no agent id and role ``user``. A save from the command
+line, a script, a hook or an agent's shell has no such signal and is ``agent_inferred``. The
+old terminal check (``shell:tty``) was removed rather than patched: any local process can send
+or omit a header, so it proved nothing. The dashboard signal is a recorded label of the door
+used, not a claim that a person is present. What a promotion changes is not here: an explicit
+promotion call (``trust/firewall``) is what lifts a memory above its class, and it is recorded.
+Facts classified under mapping ``v2`` are recomputed under ``v3`` by the background batch.
 """
 
 from __future__ import annotations
@@ -47,9 +44,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-#: The raw signals the shell door records (``agent_id_source``), see the module text.
-SHELL_TTY = "shell:tty"
-SHELL_NO_TTY = "shell:no_tty"
+#: The raw signal the dashboard's own door records (``agent_id_source``), see the module text.
+DASHBOARD_SOURCE = "dashboard"
 
 USER_DIRECT = "user_direct"
 USER_CONFIRMED = "user_confirmed"
@@ -84,7 +80,7 @@ LABELS: Mapping[str, str] = {
 
 #: The mapping version, the prefix of every ``basis``. A change to :data:`ROWS`
 #: or to the caps bumps it, and the background batch recomputes older rows.
-VERSION = "v2"
+VERSION = "v3"
 
 
 def rank_of(name: str) -> int | None:
@@ -129,7 +125,7 @@ class Signals:
     speaker: str | None = None
     role: str | None = None
     #: How the saver identified itself (``fact_origin.agent_id_source``): ``connection``,
-    #: ``claimed``, or, for a save with no agent at all, ``shell:tty`` / ``shell:no_tty``.
+    #: ``claimed``, or, for a save with no agent at all, ``dashboard`` (the page's own door).
     agent_id_source: str | None = None
 
 
@@ -152,14 +148,10 @@ def _in(*channels: str) -> Callable[[Signals], bool]:
     return lambda s: s.channel in channels
 
 
-def _a_person(s: Signals) -> bool:
-    """A save with no agent behind it that the request marks as the user's own."""
-    return not s.agent_id and not s.speaker and (s.role or "").lower() == "user"
-
-
-def _from_a_shell_without_a_terminal(s: Signals) -> bool:
-    """A save through the command line (or any daemon client) that had no terminal."""
-    return not s.agent_id and (s.agent_id_source or "") == SHELL_NO_TTY
+def _from_the_dashboard(s: Signals) -> bool:
+    """A save with no agent behind it, role user, through the dashboard's own door (D-49)."""
+    return (not s.agent_id and not s.speaker and (s.role or "").lower() == "user"
+            and (s.agent_id_source or "") == DASHBOARD_SOURCE)
 
 
 def _source_has(*words: str) -> Callable[[Signals], bool]:
@@ -176,19 +168,15 @@ ROWS: tuple[Row, ...] = (
         "text taken from a web page is whatever the page said, however it got here"),
     Row("source.tool", _source_has("tool", "bash", "shell", "command", "exec"), TOOL_OUTPUT,
         "the output of a command or tool is data the tool returned, not a statement"),
-    Row("remember.shell_no_tty", lambda s: s.channel in ("remember_http", "python_api")
-        and _from_a_shell_without_a_terminal(s), AGENT_INFERRED,
-        "a save through the command line whose standard input was not an interactive "
-        "terminal: a script, a hook or an agent's shell tool typed it, not the user (a "
-        "person at a terminal is `shell:tty`; the dashboard sends no shell signal)"),
-    Row("remember.person", lambda s: s.channel in ("remember_http", "python_api")
-        and _a_person(s), USER_DIRECT,
-        "a save with no agent id and role user, from a terminal or the dashboard, is the "
-        "user's own statement (a terminal is evidence, not proof: an agent that allocates "
-        "a pseudo-terminal looks the same)"),
+    Row("remember.dashboard", lambda s: s.channel in ("remember_http", "python_api")
+        and _from_the_dashboard(s), USER_DIRECT,
+        "a save typed into the dashboard: no agent id, role user and the dashboard's own door "
+        "(the one positive signal of a user's statement; it records the door, it does not "
+        "prove a person)"),
     Row("remember.agent", _in("remember_http", "python_api"), AGENT_INFERRED,
-        "a save that names an agent, a non-human speaker or no role is the agent's own "
-        "words: it may restate the user, or a tool, or guess"),
+        "every other save through the shared route (an agent's call, the command line, a "
+        "script, a hook) is the caller's own words: it may restate the user, or a tool, or "
+        "guess, and no signal says otherwise, so it fails closed"),
     Row("hook.file_change", _in("hook_file_change"), TOOL_OUTPUT,
         "built from a tool event: the file path and edit come from the tool, not the user"),
     Row("hook.session_summary", _in("hook_session_summary"), AGENT_INFERRED,
@@ -252,8 +240,8 @@ def classify(signals: Signals) -> Classified:
     return Classified(final, f"{VERSION}:{row.row_id}{suffix}")
 
 
-__all__ = ["AGENT_INFERRED", "CLASSES", "Classified", "IMPORTED_FILE", "LABELS", "MESH_PEER",
-           "MODEL_GENERATED", "ORDER", "ROWS", "Row", "SHELL_NO_TTY", "SHELL_TTY", "SYSTEM",
+__all__ = ["AGENT_INFERRED", "CLASSES", "Classified", "DASHBOARD_SOURCE", "IMPORTED_FILE", "LABELS", "MESH_PEER",
+           "MODEL_GENERATED", "ORDER", "ROWS", "Row", "SYSTEM",
            "Signals", "TOOL_OUTPUT",
            "UNKNOWN", "USER_CONFIRMED", "USER_DIRECT", "VERSION", "WEB", "at_least", "classify",
            "join", "join_all", "label", "rank_of"]

@@ -47,6 +47,10 @@ def test_m082_is_deferred_additive_and_repairable() -> None:
     assert not M082.verify(conn)
     M082.repair(conn)
     assert M082.verify(conn)
+    conn.execute("DROP TABLE signing_progress")  # a store whose M082 ran before the mark existed
+    assert not M082.verify(conn)
+    M082.repair(conn)
+    assert M082.verify(conn)
 
 
 def test_the_profile_fold_moves_signatures() -> None:

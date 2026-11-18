@@ -55,7 +55,9 @@ def test_the_words_for_a_terminal(db, monkeypatch) -> None:
         lines = report.describe(report.build(conn, "default"))
     text = "\n".join(lines)
     assert "instruction firewall on" in text and "secret screen on" in text
-    assert "Waiting for your OK: 2" in text
+    assert "Held back until promoted: 2" in text
+    assert "slm trust promote" in text and "recorded" in text
+    assert "your OK" not in text and "at a terminal" not in text
     assert "Credentials stored as placeholders: AWS 1, GITHUB 2" in text
     assert report.describe({}) == []
 
@@ -122,8 +124,38 @@ def test_with_the_firewall_off_nothing_is_said_to_wait() -> None:
 
     off = "\n".join(report.describe({"taint": "off", "secret_screen": "off", "waiting": 31,
                                      "approved": 0}))
-    assert "Would wait for your OK if the firewall were on: 31" in off
-    assert "Waiting for your OK: 31" not in off
+    assert "Would be held back if the firewall were on: 31" in off
+    assert "Held back until promoted: 31" not in off
     on = "\n".join(report.describe({"taint": "on", "secret_screen": "off", "waiting": 3,
                                     "approved": 1}))
-    assert "Waiting for your OK: 3; approved by you: 1" in on
+    assert "Held back until promoted: 3; promoted: 1" in on
+
+
+def test_memory_health_counts_the_decisions_agents_made(db, monkeypatch) -> None:
+    from superlocalmemory.trust import firewall
+
+    monkeypatch.setenv(TAINT, "on")
+    fact = save(db, "Pinned from a page.", WEB, pinned=True)
+    with connect(db) as conn:
+        assert report.build(conn, "default")["decisions"] == {"total": 0, "undone": 0, "open": 0}
+        assert not any("Decisions" in x for x in report.describe(report.build(conn, "default")))
+        firewall.approve(conn, fact, by="agent:claude-code", channel="mcp")
+        section = report.build(conn, "default")
+        conn.commit()
+    assert section["decisions"] == {"total": 1, "undone": 0, "open": 1}
+    line = [x for x in report.describe(section) if "Decisions" in x]
+    assert line == ["  Decisions by your agents: 1 recorded, 0 undone (the dashboard lists them with an Undo)"]
+
+
+def test_the_decisions_line_counts_what_was_undone(db, monkeypatch) -> None:
+    from superlocalmemory.trust import firewall
+
+    monkeypatch.setenv(TAINT, "on")
+    fact = save(db, "Pinned from a page.", WEB, pinned=True)
+    with connect(db) as conn:
+        firewall.approve(conn, fact, by="agent:claude-code", channel="mcp")
+        firewall.withdraw(conn, fact, by="dashboard", channel="dashboard")
+        section = report.build(conn, "default")
+        conn.commit()
+    assert section["decisions"]["undone"] == 1
+    assert any("1 undone" in x for x in report.describe(section))

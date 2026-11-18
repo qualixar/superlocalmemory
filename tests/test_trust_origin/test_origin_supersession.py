@@ -26,7 +26,8 @@ OLD = "The release cadence of SLM is one release every week"
 NEW = "The release cadence of SLM is one big release"
 ON = {"judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"}
 
-PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user")
+PERSON = fo.Origin("remember_http", "verbatim", source_type="http", role="user",
+                  agent_id_source="dashboard")
 AGENT = fo.Origin("remember_http", "verbatim", source_type="http", role="assistant",
                   agent_id="claude")
 WEB = fo.Origin("ingest_adapter", "verbatim", source_type="gmail")

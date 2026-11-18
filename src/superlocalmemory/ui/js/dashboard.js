@@ -548,7 +548,7 @@ document.getElementById('quick-store-btn')?.addEventListener('click', async func
         if (!token) throw new Error('local write credential unavailable');
         var r = await fetch('/remember', {
             method: 'POST', credentials: 'same-origin',
-            headers: {'Content-Type': 'application/json', 'X-Install-Token': token},
+            headers: {'Content-Type': 'application/json', 'X-Install-Token': token, 'X-SLM-Channel': 'dashboard'},
             body: JSON.stringify({content: content})
         });
         if (!r.ok) {

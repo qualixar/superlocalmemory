@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from superlocalmemory.truth import slot_store
 
 GONE = "gone"
-#: A dispute only a person settles, and the label a rollback writes.
+#: A dispute only a recorded decision settles, and the label a rollback writes.
 ROLLED_BACK = "rolled_back"
 ROLLBACK_SOURCE = "rollback"
 

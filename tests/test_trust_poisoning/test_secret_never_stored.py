@@ -160,3 +160,78 @@ def test_a_screen_that_cannot_run_refuses_the_save_instead_of_storing_clear(
     assert r.status_code >= 400
     _checkpoint(engine_with_mock_deps)
     assert _everywhere(home, secret) == []
+
+
+# -- A-11 (Fable audit): the side fields of ``remember`` are screened too --------------------------
+
+def _post(engine, **fields):
+    with _client(engine) as client:
+        r = client.post("/remember?wait=true", json={"idempotency_key": fields.pop("key"), **fields})
+    return r
+
+
+def test_a_secret_in_slot_value_is_stored_only_as_a_placeholder(
+        home, engine_with_mock_deps, monkeypatch) -> None:
+    monkeypatch.setenv(FLAG, "on")
+    secret = fake.github()
+    r = _post(engine_with_mock_deps, key="sv-1", slot="staging/deploy_token", slot_value=secret,
+              content="The deploy token for staging was rotated today.")
+    assert r.status_code == 200, r.text[:300]
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret) == []
+    meta = " ".join(r["metadata_json"] for r in engine_with_mock_deps._db.execute(
+        "SELECT metadata_json FROM memories"))
+    assert "[REDACTED:GITHUB:" in meta  # the claim survives, as a placeholder
+
+
+def test_a_secret_in_the_slot_spec_never_reaches_the_store(
+        home, engine_with_mock_deps, monkeypatch) -> None:
+    monkeypatch.setenv(FLAG, "on")
+    secret = fake.aws()
+    r = _post(engine_with_mock_deps, key="ss-1", slot=f"bucket/{secret}", slot_value="rotated",
+              content="The bucket key was rotated on Friday by the ops team.")
+    assert r.status_code in (200, 422), r.text[:300]  # stored as a placeholder, or refused
+    assert secret not in r.text
+    print("SLOT SPEC STATUS", r.status_code)
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret) == []
+
+
+def test_a_secret_in_a_cue_pattern_is_stored_only_as_a_placeholder(
+        home, engine_with_mock_deps, monkeypatch) -> None:
+    monkeypatch.setenv(FLAG, "on")
+    secret = fake.github()
+    r = _post(engine_with_mock_deps, key="cu-1", cues=[f"error:{secret}"],
+              content="When this error shows, restart the staging worker pool.")
+    assert r.status_code == 200, r.text[:300]
+    assert secret not in r.text
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret) == []
+    from superlocalmemory.core import cue_binding
+
+    with engine_with_mock_deps._db.raw_connection() as conn:
+        cue_binding.bind_explicit(conn)  # the maintenance pass that turns the metadata into rows
+        conn.commit()
+    pats = [r["pattern"] for r in engine_with_mock_deps._db.execute("SELECT pattern FROM memory_cues")]
+    assert pats and all("[REDACTED:GITHUB:" in p for p in pats)  # the cue survives, screened
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret) == []
+
+
+def test_the_python_api_door_screens_the_slot_too(home, engine_with_mock_deps, monkeypatch) -> None:
+    monkeypatch.setenv(FLAG, "on")
+    secret = fake.github()
+    engine_with_mock_deps.store("The deploy token for staging was rotated today.",
+                                slot="staging/deploy_token", slot_value=secret)
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret) == []
+
+
+def test_with_the_screen_off_the_side_fields_are_stored_as_written(
+        home, engine_with_mock_deps) -> None:
+    secret = fake.github()
+    r = _post(engine_with_mock_deps, key="off-sv", slot="staging/deploy_token", slot_value=secret,
+              cues=[f"error:{secret}"], content="The deploy token for staging was rotated today.")
+    assert r.status_code == 200, r.text[:300]
+    _checkpoint(engine_with_mock_deps)
+    assert _everywhere(home, secret), "the screen is off: the test must see what is stored"
