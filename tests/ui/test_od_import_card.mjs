@@ -130,6 +130,14 @@ describe('Import card', () => {
     assert.equal(p.calls.filter((c) => c.method === 'POST').length, 0);
   });
 
+  it('an unexpected server failure is said in plain words, never as the internal label', async () => {
+    const p = page({ 'POST /api/import/preview': () => reply(500, { detail: 'Import preview error' }) });
+    await p.dom.window.SLMImport.reload(); await flush();
+    pick(p); await flush(80);
+    assert.match(p.text(), /Something went wrong on this computer, so nothing was saved\./);
+    assert.doesNotMatch(p.text(), /Import preview error/);
+  });
+
   it('shows the server\'s plain refusal and never parses it as HTML', async () => {
     const p = page({ 'POST /api/import/preview': () => reply(422, { detail: 'That file is not in a format <img src=x onerror=alert(1)> I know.' }) });
     await p.dom.window.SLMImport.reload(); await flush();

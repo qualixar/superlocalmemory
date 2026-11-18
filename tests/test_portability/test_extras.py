@@ -172,3 +172,17 @@ def test_with_a_cap_of_zero_every_contradiction_is_unlisted_and_the_slot_is_curr
     head = dict(world.db.execute("SELECT r.fact_id FROM memory_slots s JOIN slot_revisions r ON "
                                  "r.revision_id = s.head_revision_id")[0])["fact_id"]
     assert head == old and run["saved_items"] == 1
+
+
+def test_the_left_out_line_reads_right_for_a_count_of_one() -> None:
+    """A reason word is a plural phrase: the count follows it, never "1 copies of ..."."""
+    from types import SimpleNamespace
+
+    from superlocalmemory.portability import summary
+
+    parsed = SimpleNamespace(format="chatgpt", items=[], dates=("", ""), conversations=2,
+                             skipped={"duplicate": 1, "empty": 2}, notes=[])
+    text = summary.describe(parsed, {})["summary"]
+    assert "copies of something already in this file: 1" in text
+    assert "empty messages or entries: 2" in text
+    assert "1 copies" not in text

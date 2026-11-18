@@ -59,10 +59,12 @@ def describe(parsed: Parsed, left_out: dict[str, int]) -> dict[str, Any]:
     for key, n in left_out.items():
         merged[key] = merged.get(key, 0) + n
     merged.pop("empty_conversation", None)
-    also = [f"{n:,} {SKIP_WORDS.get(k, k)}" for k, n in sorted(merged.items(), key=lambda kv: -kv[1])
+    # The reason words are plural noun phrases, so the count follows them ("copies of something
+    # already in this file: 1"): it reads right for one as for many.
+    also = [f"{SKIP_WORDS.get(k, k)}: {n:,}" for k, n in sorted(merged.items(), key=lambda kv: -kv[1])
             if n]
     if also:
-        sentences.append("Also left out: " + ", ".join(also) + ".")
+        sentences.append("Also left out — " + "; ".join(also) + ".")
     sentences.extend(parsed.notes)
     return {
         "format": parsed.format, "label": label, "conversations": parsed.conversations,

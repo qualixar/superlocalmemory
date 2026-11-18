@@ -40,6 +40,8 @@
     b.addEventListener('click', function (e) { e.preventDefault(); onClick(b); });
     return b;
   }
+  var UNEXPECTED = 'Something went wrong on this computer, so nothing was saved. Please try again. ' +
+    'If it keeps happening, SuperLocalMemory\'s log has the details.';
   function detailOf(json, fallback) {
     var d = json && (json.detail || json.error);
     if (d && typeof d === 'object') d = d.message || d.code;
@@ -60,7 +62,10 @@
     return fetch(url, init).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok || !j.success) {
-          var e = new Error(detailOf(j, 'That did not work. Please try again.'));
+          // A refusal (4xx) carries plain words written for people. An unexpected failure
+          // (5xx) carries an internal label such as "Import preview error": never show that.
+          var e = new Error(r.status >= 500 ? UNEXPECTED
+                                            : detailOf(j, 'That did not work. Please try again.'));
           e.status = r.status;
           throw e;
         }
