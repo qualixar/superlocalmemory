@@ -97,7 +97,7 @@ def test_the_full_hook_suite_survives_the_rewrite():
     names = {_hook_name(c) for c in _slm_hook_commands(BUILT_PLUGIN / "hooks" / "hooks.json")}
     assert names == {
         "mandate", "start", "checkpoint", "post_tool_outcome", "user_prompt_rehash",
-        "topic_shift", "stop", "stop_outcome", "before_web",
+        "topic_shift", "stop", "stop_outcome", "before_web", "auto_recall",
     }
 
 

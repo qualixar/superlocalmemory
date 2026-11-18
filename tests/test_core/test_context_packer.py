@@ -154,3 +154,31 @@ def test_units_never_lose_text() -> None:
         text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 40)))
         # every visible character survives, in order (whitespace-only pieces may go)
         assert "".join("".join(cp.units(text)).split()) == "".join(text.split())
+
+
+# -- the sycophancy rule (WS-4) -------------------------------------------------------------------
+
+def test_an_opinion_is_shown_as_a_view_never_as_evidence() -> None:
+    label = cp.standing(_mem(memory_kind="opinion"))
+    assert cp.VIEW_LABEL in label and "do not defer" in label
+    assert cp.VIEW_LABEL not in cp.standing(_mem(memory_kind="rule"))
+    out = render_context([_mem(memory_kind="opinion")], mode="B", wrap=True)
+    assert cp.VIEW_LABEL in out
+
+
+def test_annotate_reads_each_memorys_kind_from_the_store(tmp_path, monkeypatch) -> None:
+    import sqlite3
+
+    from superlocalmemory.truth import recall_notes
+
+    db = tmp_path / "memory.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE atomic_facts (fact_id TEXT, memory_kind TEXT)")
+    conn.executemany("INSERT INTO atomic_facts VALUES (?, ?)",
+                     [("f1", "opinion"), ("f9", None)])
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(recall_notes, "annotate", lambda db, pid, results, **kw: results)
+    a, b = cp.annotate([_mem(), _mem(fact_id="f9")], db, "default")
+    assert a.memory_kind == "opinion" and b.memory_kind == ""
+    assert cp.annotate([_mem()], tmp_path / "missing.db", "default")[0].memory_kind == ""

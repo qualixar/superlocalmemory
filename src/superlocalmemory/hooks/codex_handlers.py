@@ -38,7 +38,7 @@ from superlocalmemory.hooks.hook_deadline import (
 )
 
 START_DEADLINE_S = 10.0  # + interpreter start, well under the 15 s host limit
-PROMPT_DEADLINE_S = 3.5
+PROMPT_DEADLINE_S = 5.5
 STOP_DEADLINE_S = 9.0
 WATCHDOG_GRACE_S = 1.0
 _SESSION_INIT_UNAVAILABLE = "SLM session_init unavailable"
@@ -252,7 +252,8 @@ def _prompt_output(parts: list[str]) -> str:
 
 
 def hook_codex_prompt() -> None:
-    """Codex prompt event: topic-shift and re-query signals, in parallel, bounded."""
+    """Codex prompt event: per-prompt recall (behind the need gate, W3-7d) and the
+    topic-shift and re-query signals, in parallel, bounded."""
     deadline = HookDeadline(PROMPT_DEADLINE_S)
     registry = ChildRegistry()
     watchdog = Watchdog(PROMPT_DEADLINE_S + 0.5, lambda: "{}", registry=registry).start()
@@ -268,7 +269,7 @@ def hook_codex_prompt() -> None:
             parts[action] = _context_from(result.stdout) if result.returncode == 0 else ""
 
         workers = [threading.Thread(target=_run, args=(a,), daemon=True)
-                   for a in ("user_prompt_rehash", "topic_shift")]
+                   for a in ("auto_recall", "user_prompt_rehash", "topic_shift")]
         for worker in workers:
             worker.start()
         for worker in workers:
@@ -277,7 +278,8 @@ def hook_codex_prompt() -> None:
     except Exception:
         pass
     finally:
-        watchdog.emit(_prompt_output([parts.get("user_prompt_rehash", ""),
+        watchdog.emit(_prompt_output([parts.get("auto_recall", ""),
+                                      parts.get("user_prompt_rehash", ""),
                                       parts.get("topic_shift", "")]))
         watchdog.cancel()
 

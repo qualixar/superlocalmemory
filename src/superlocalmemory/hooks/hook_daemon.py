@@ -50,6 +50,11 @@ _SUN_PATH_MAX = 107 if sys.platform.startswith("linux") else 103
 
 #: A request is one JSON line: a prompt, or a batch of hook events (4.2.8).
 _MAX_REQUEST_BYTES = 1024 * 1024
+
+#: Routing only (W3-7d): the longest the daemon waits for a per-prompt answer.
+#: Shorter than the client's wait (``auto_recall_hook.CLIENT_BUDGET_S``), so an
+#: answer the client gave up on is never logged as delivered.
+PROMPT_BUDGET_S = 4.0
 #: Request type for hook events handed to the daemon's single writer.
 HOOK_EVENTS_TYPE = "hook_events"
 
@@ -139,8 +144,11 @@ class HookDaemon:
         self,
         sock_path: Path | None = None,
         queue_db_path: Path | None = None,
+        recall_adapter=None,
     ) -> None:
         self._sock_path = sock_path or _default_sock_path()
+        #: The daemon's recall adapter; it lends the need gate (W3-7d, M-16).
+        self._adapter = recall_adapter
         self._queue_db_path = queue_db_path or _default_queue_db_path()
         self._running = False
         self._stop_event = threading.Event()
@@ -292,13 +300,22 @@ class HookDaemon:
         if not prompt or not isinstance(prompt, str):
             return {}
 
-        if _is_ack(prompt) or _switched_off():
+        if _switched_off():
+            return {}
+        gated = self._gate(prompt)
+        if gated is None and _is_ack(prompt):
+            return {}  # no gate (no store): the old acknowledgement rule only
+        if gated is not None and gated[2] is None:
+            return {}  # per-prompt recall is off (flag off or kill switch)
+        if gated is not None and not gated[2].recall:
+            self._log_turn(gated, session_id, prompt, None)
             return {}
 
+        envelope: dict = {}
+        query_id = None
         try:
             mode = _detect_mode()
-            timeout = _get_mode_timeout(mode)
-            stall_timeout = max(timeout - 5.0, 5.0)
+            timeout = min(_get_mode_timeout(mode), PROMPT_BUDGET_S)
 
             request_id = self._queue.enqueue(
                 query=prompt,
@@ -307,18 +324,42 @@ class HookDaemon:
                 agent_id="hook_daemon",
                 session_id=session_id,
                 priority="high",
-                stall_timeout_s=stall_timeout,
+                stall_timeout_s=timeout,
             )
 
             result = self._queue.poll_result(request_id, timeout_s=timeout)
 
             if isinstance(result, dict) and result.get("ok") is not False:
+                query_id = result.get("query_id") or None
                 results = result.get("results", [])
                 if results:
-                    return _format_envelope(results, response=result)
-            return {}
+                    envelope = _format_envelope(results, response=result)
         except (QueueTimeoutError, Exception):
-            return {}
+            envelope = {}
+        if gated is not None:
+            self._log_turn(gated, session_id, prompt, query_id)
+        return envelope
+
+    def _gate(self, prompt: str):
+        """(gate, profile id, decision), or None when no store is behind the daemon."""
+        try:
+            lent = self._adapter.need_gate() if self._adapter is not None else None
+            if lent is None:
+                return None
+            gate, profile_id = lent
+            return gate, profile_id, gate.decide(prompt, profile_id)
+        except Exception:  # noqa: BLE001 - a broken gate never blocks recall
+            logger.info("need gate unavailable", exc_info=True)
+            return None
+
+    @staticmethod
+    def _log_turn(gated, session_id: str, prompt: str, query_id: str | None) -> None:
+        gate, profile_id, decision = gated
+        try:
+            gate.record(decision, profile_id=profile_id, session_id=session_id or None,
+                        prompt=prompt, recall_query_id=query_id)
+        except Exception:  # noqa: BLE001 - logging a turn never breaks the hook
+            logger.info("need-gate turn not logged", exc_info=True)
 
 
 def _accept_hook_events(payload: dict) -> dict:

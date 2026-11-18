@@ -104,6 +104,7 @@ def test_the_prompt_hook_entry_point_carries_the_verdict(monkeypatch, capsys):
 
     results = [{"content": "JWT with 1h expiry", "score": 0.9, "fact_id": "f0"}]
     monkeypatch.setattr(auto_recall_hook, "_try_socket_first", lambda *a, **k: None)
+    monkeypatch.setattr(auto_recall_hook, "_per_prompt_off", lambda: False)  # D-47: switched on
     monkeypatch.setattr(auto_recall_hook, "_do_recall_response",
                         lambda *a, **k: dict(JUDGED_OUT, results=results))
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(

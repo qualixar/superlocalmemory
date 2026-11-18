@@ -44,7 +44,7 @@ def hook_definitions() -> dict[str, list[dict[str, Any]]]:
     return {
         "SessionStart": [entry("slm hook codex-start", timeout=15, status="Loading SLM context")],
         "PostToolUse": [entry("slm hook checkpoint", matcher="Edit|Write", timeout=5)],
-        "UserPromptSubmit": [entry("slm hook codex-prompt", timeout=5)],
+        "UserPromptSubmit": [entry("slm hook codex-prompt", timeout=7)],
         "Stop": [entry("slm hook codex-stop", timeout=12, status="Saving SLM checkpoint")],
     }
 

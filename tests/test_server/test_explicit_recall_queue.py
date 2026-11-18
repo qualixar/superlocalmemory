@@ -20,6 +20,12 @@ from superlocalmemory.server import profile_runtime, recall_core, recall_fallbac
 from superlocalmemory.server.recall_ingress import explicit_scope
 from superlocalmemory.storage import write_generation
 
+
+def _bare(results):
+    """Results without the W3-7b ``why`` receipt every answer now carries."""
+    return [{k: v for k, v in r.items() if k != "why"} if isinstance(r, dict) else r
+            for r in results]
+
 SNAP = SimpleNamespace(profile_id="default", generation=1)
 
 
@@ -78,7 +84,7 @@ def test_a_full_house_says_busy_and_never_guesses(monkeypatch, runtime):
 
     out = asyncio.run(run())
     assert out["code"] == "RECALL_BUSY" and out["retryable"] is True
-    assert out["retry_after_s"] >= 1 and out["results"] == []
+    assert out["retry_after_s"] >= 1 and _bare(out["results"]) == []
     assert "ask again" in out["message"].lower()
     runtime.assert_not_called()  # no keyword fallback
     engine_call.assert_not_called()
@@ -101,7 +107,7 @@ def test_a_queued_question_runs_when_a_slot_frees(monkeypatch, runtime):
         return await task
 
     out = asyncio.run(run())
-    assert out["results"] == [{"content": "checked answer"}]
+    assert _bare(out["results"]) == [{"content": "checked answer"}]
     runtime.assert_not_called()
 
 
@@ -114,7 +120,7 @@ def test_a_slow_run_is_waited_for_within_its_grace(monkeypatch, runtime):
     monkeypatch.setattr(recall_core, "_envelope", lambda *a: _answer())
     monkeypatch.setattr(recall_core, "effective_budget_s", lambda call: 0.1)
     out = asyncio.run(recall_core.run_recall(object(), _call(), app_state=SimpleNamespace()))
-    assert out["results"] == [{"content": "checked answer"}]
+    assert _bare(out["results"]) == [{"content": "checked answer"}]
     runtime.assert_not_called()
 
 
@@ -159,9 +165,9 @@ def test_identical_questions_in_flight_share_one_run(monkeypatch, runtime):
 
     outs = asyncio.run(run())
     assert len(runs) == 1
-    assert all(o["results"] == [{"content": "checked answer"}] for o in outs)
+    assert all(_bare(o["results"]) == [{"content": "checked answer"}] for o in outs)
     outs[0]["results"].append("mutated")  # callers get their own copies
-    assert outs[1]["results"] == [{"content": "checked answer"}]
+    assert _bare(outs[1]["results"]) == [{"content": "checked answer"}]
 
 
 def test_an_answer_is_kept_until_a_write(monkeypatch, runtime):
@@ -179,11 +185,11 @@ def test_an_answer_is_kept_until_a_write(monkeypatch, runtime):
     first = ask()
     second = ask()
     assert len(runs) == 1 and second["cache"] == "hit"
-    assert second["results"] == first["results"]
+    assert _bare(second["results"]) == _bare(first["results"])
     write_generation.bump()  # anything written: the kept answer is gone
     third = ask()
     assert len(runs) == 2 and "cache" not in third
-    assert third["results"] == [{"content": "run 2"}]
+    assert _bare(third["results"]) == [{"content": "run 2"}]
 
 
 def test_degraded_answers_and_other_sessions_are_not_shared(monkeypatch, runtime):
@@ -341,7 +347,7 @@ def test_an_overrun_answers_with_labelled_keyword_matches_not_503(monkeypatch, r
     finally:
         release.set()
     assert out["answerability"] == "unjudged"
-    assert out["results"] == [{"content": "keyword guess"}]
+    assert _bare(out["results"]) == [{"content": "keyword guess"}]
     assert "keyword" in out["answer_check_note"].lower()
     runtime.assert_called_once()
     assert elapsed < 1.5  # answered near its own ceiling, not after the stuck run

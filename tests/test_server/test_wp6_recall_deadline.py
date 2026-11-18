@@ -12,6 +12,12 @@ from unittest.mock import Mock
 from superlocalmemory.server import recall_core
 
 
+def _bare(results):
+    """Results without the W3-7b ``why`` receipt every answer now carries."""
+    return [{k: v for k, v in r.items() if k != "why"} if isinstance(r, dict) else r
+            for r in results]
+
+
 def test_default_and_override_cannot_exceed_three_seconds(monkeypatch):
     monkeypatch.delenv("SLM_SEARCH_RECALL_TIMEOUT_S", raising=False)
     assert recall_core.recall_budget_s() <= 3
@@ -198,7 +204,7 @@ def test_the_keyword_fallback_keeps_its_floor_after_a_short_budget(monkeypatch):
         call = recall_core.RecallCall("a question?", 3, "", "test", True, skip_answer_check=True)
         started = time.monotonic()
         result = await recall_core.run_recall(object(), call, app_state=SimpleNamespace())
-        assert result["results"] == [{"content": "checked source"}]
+        assert _bare(result["results"]) == [{"content": "checked source"}]
         assert time.monotonic() - started < recall_core.RECALL_BUDGET_FLOOR_S
 
     asyncio.run(run())

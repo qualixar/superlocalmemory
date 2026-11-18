@@ -137,7 +137,34 @@ def build(conn: sqlite3.Connection, profile_id: str, *, as_of: datetime | None =
         "certificates": certificates,
         "second_opinions": second,
         "learning": _learning(conn, profile_id, slm_home),
+        "need_gate": _need_gate(conn, profile_id, when),
+        "harm_gate": _harm_gate(conn, profile_id, when, slm_home),
     }
+
+
+def _harm_gate(conn: sqlite3.Connection, profile_id: str, when: datetime,
+               slm_home: Path | None) -> dict:
+    """W3-9 (D-15, M-14): memories shown to make the agent worse, in shadow."""
+    from superlocalmemory.core import harm_gate
+    from superlocalmemory.core.feature_flags import FeatureFlags
+
+    try:
+        state = FeatureFlags(slm_home).state("delivery.harm_gate").value
+        return harm_gate.report(conn, profile_id, as_of=when, state=state)
+    except Exception:  # noqa: BLE001 - this section never breaks the report
+        logger.debug("harm gate unreadable", exc_info=True)
+        return {}
+
+
+def _need_gate(conn: sqlite3.Connection, profile_id: str, when: datetime) -> dict:
+    """W3-7d (M-16): the per-prompt need gate's log, threshold and rule bound."""
+    from superlocalmemory.core import need_gate
+
+    try:
+        return need_gate.report(conn, profile_id, now=when)
+    except Exception:  # noqa: BLE001 - this section never breaks the report
+        logger.debug("need gate unreadable", exc_info=True)
+        return {"turns": None}
 
 
 # -- plain words, for people ------------------------------------------------------------------------
@@ -203,6 +230,12 @@ def describe(report: dict) -> list[str]:
         for item in learning["learners"]:
             lines.append(f"    {item['name']}: {item['state'].replace('_', ' ')} "
                          f"({item['reason']})")
+    from superlocalmemory.core import need_gate
+
+    lines.extend("  " + line for line in need_gate.describe(report.get("need_gate") or {}))
+    from superlocalmemory.core import harm_gate
+
+    lines.extend("  " + line for line in harm_gate.describe(report.get("harm_gate") or {}))
     return lines
 
 

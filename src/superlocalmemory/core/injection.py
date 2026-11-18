@@ -213,6 +213,9 @@ class InjectableMemory:
     disputed: bool = False
     other_side: str = ""
     source_state: str = ""
+    #: The memory's kind ("opinion", "rule", ...); "" when unknown. An opinion
+    #: is labelled as a view, not a checked fact (the sycophancy rule, WS-4).
+    memory_kind: str = ""
 
 
 #: The only support label that may enter an agent's context unasked.

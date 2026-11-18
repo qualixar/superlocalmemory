@@ -23,6 +23,12 @@ import pytest
 from superlocalmemory.server import profile_runtime, recall_core, recall_fallback, recall_ingress
 from superlocalmemory.server.recall_ingress import explicit_scope
 
+
+def _bare(results):
+    """Results without the W3-7b ``why`` receipt every answer now carries."""
+    return [{k: v for k, v in r.items() if k != "why"} if isinstance(r, dict) else r
+            for r in results]
+
 SNAP = SimpleNamespace(profile_id="default", generation=1)
 KEYWORD = {"results": [{"content": "SLM 4.2.2 released"}], "retrieval_mode": "degraded_lexical"}
 
@@ -82,7 +88,7 @@ def test_a_hook_whose_recall_overruns_still_gets_keyword_matches(monkeypatch):
 
     out = _under_ingress_clock(_call(fast=False, skip_answer_check=True, depth=0), 1.0)
     assert out["_elapsed"] < 1.05  # the hook's clock still holds
-    assert out["results"] == KEYWORD["results"]
+    assert _bare(out["results"]) == KEYWORD["results"]
     assert out["answerability"] == "unjudged"
 
 
@@ -97,7 +103,7 @@ def test_a_hook_whose_recall_finishes_gets_the_full_answer(monkeypatch):
     monkeypatch.setattr(recall_core, "effective_budget_s", lambda call: 1.0)
 
     out = _under_ingress_clock(_call(fast=False, skip_answer_check=True), 1.0)
-    assert out["results"] == [{"content": "full"}]
+    assert _bare(out["results"]) == [{"content": "full"}]
 
 
 def test_session_init_gets_the_full_clock_but_is_never_judged():
@@ -126,4 +132,4 @@ def test_a_slow_keyword_fallback_on_a_loaded_machine_still_answers(monkeypatch):
     monkeypatch.setattr(recall_fallback, "recall_keyword_fallback", keyword)
     monkeypatch.setattr(recall_core, "effective_budget_s", lambda call: 1.0)
     out = _under_ingress_clock(_call(fast=False, skip_answer_check=True), 1.0)
-    assert out["results"] == KEYWORD["results"] and out["_elapsed"] < 1.05
+    assert _bare(out["results"]) == KEYWORD["results"] and out["_elapsed"] < 1.05

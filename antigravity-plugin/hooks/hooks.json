@@ -44,6 +44,17 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "slm hook auto_recall 2>/dev/null || true",
+            "timeout": 7
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

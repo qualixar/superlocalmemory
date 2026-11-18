@@ -72,6 +72,13 @@ def pack_text(text: str, max_tokens: int) -> Packed:
     return Packed((head.rstrip() + mark)[:limit], True)
 
 
+#: The sycophancy rule (WS-4; PersistBench, research frontier §11: a stored
+#: view makes models agree instead of answer): a remembered opinion or
+#: preference is shown as what someone said, never as evidence it is right.
+OPINION_KIND = "opinion"
+VIEW_LABEL = "a view or preference someone stated, not a checked fact: weigh it, do not defer to it"
+
+
 def standing(memory) -> str:
     """The unit's label: age, dispute, source state (empty when there is none)."""
     from superlocalmemory.core.injection import sanitize_untrusted_content
@@ -90,6 +97,8 @@ def standing(memory) -> str:
     state = getattr(memory, "source_state", "")
     if state in ("changed", "missing"):
         parts.append(f"its source file is {state}: re-read it before relying on this")
+    if getattr(memory, "memory_kind", "") == OPINION_KIND:
+        parts.append(VIEW_LABEL)
     return f" [{'; '.join(parts)}]" if parts else ""
 
 
@@ -107,6 +116,7 @@ def annotate(memories: list, db_path: Path | str | None, profile_id: str, *,
                                       slm_home=slm_home)
     except Exception:  # noqa: BLE001 - presentation only
         return memories
+    kinds = _kinds(db_path, [m.fact_id for m in memories])
     out = []
     for memory, note in zip(memories, notes, strict=True):
         changes = {}
@@ -116,8 +126,31 @@ def annotate(memories: list, db_path: Path | str | None, profile_id: str, *,
         state = (note.get("source") or {}).get("state")
         if state:
             changes["source_state"] = str(state)
+        kind = kinds.get(memory.fact_id)
+        if kind and not getattr(memory, "memory_kind", ""):
+            changes["memory_kind"] = kind
         out.append(replace(memory, **changes) if changes else memory)
     return out
+
+
+def _kinds(db_path: Path | str, fact_ids: list[str]) -> dict[str, str]:
+    """Each fact's memory kind, read-only; nothing on any error."""
+    ids = [f for f in fact_ids if f]
+    if not ids:
+        return {}
+    try:
+        from superlocalmemory.truth.invariants import open_read_only
+
+        conn = open_read_only(str(db_path))
+        try:
+            marks = ", ".join("?" * len(ids))
+            return {r[0]: r[1] for r in conn.execute(
+                f"SELECT fact_id, memory_kind FROM atomic_facts WHERE fact_id IN ({marks})"
+                " AND memory_kind IS NOT NULL", ids)}
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - presentation only
+        return {}
 
 
 def _other_side(fact_id: str, disputes: list[dict]) -> str:
@@ -128,5 +161,5 @@ def _other_side(fact_id: str, disputes: list[dict]) -> str:
     return ""
 
 
-__all__ = ["CUT_MARK", "CUT_MID_MARK", "OTHER_SIDE_CHARS", "SHORT_MARK", "Packed", "annotate", "pack_text",
-           "standing", "units"]
+__all__ = ["CUT_MARK", "CUT_MID_MARK", "OPINION_KIND", "OTHER_SIDE_CHARS", "SHORT_MARK",
+           "VIEW_LABEL", "Packed", "annotate", "pack_text", "standing", "units"]

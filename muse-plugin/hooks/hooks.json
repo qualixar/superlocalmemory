@@ -68,6 +68,15 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/slm-run\" hook auto_recall || true",
+            "timeout": 7
+          }
+        ]
       }
     ],
     "Stop": [

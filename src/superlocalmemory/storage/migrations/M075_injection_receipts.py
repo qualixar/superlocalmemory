@@ -30,6 +30,13 @@ engine's own id for the answer a pull delivered (the ``query_id`` on the
 recall envelope, the key the learning layer logs its features under), so a
 ranker can learn from what agents used of exactly that answer.
 
+``need_turns`` (W3-7d, M-16, also amended in place) is the need gate's log:
+one row per prompt the per-prompt hook saw, with the rule that skipped it (if
+any), its score, the threshold in force, whether it was recalled (and whether
+only to learn), the logged probability of what happened, and the recall
+engine's id for the answer, which joins it to its delivery and usage. A keyed
+prompt digest, never the prompt.
+
 The swap columns (W3-6d, D-46, also amended in place) record a pull's logged
 adjacent swap: the keyed draw, the share it was compared with, and ``swap_at``
 = k when positions k and k + 1 traded places (receipt positions are as shown).
@@ -107,7 +114,24 @@ CREATE TABLE IF NOT EXISTS injection_usage (
     observed_at TEXT NOT NULL,
     PRIMARY KEY (delivery_id, fact_id, signal)
 );
-CREATE INDEX IF NOT EXISTS idx_injection_usage_fact ON injection_usage (fact_id)
+CREATE INDEX IF NOT EXISTS idx_injection_usage_fact ON injection_usage (fact_id);
+CREATE TABLE IF NOT EXISTS need_turns (
+    turn_id         TEXT PRIMARY KEY,
+    profile_id      TEXT NOT NULL,
+    session_id      TEXT,
+    at              TEXT NOT NULL,
+    prompt_digest   TEXT,
+    rule            TEXT,
+    score           REAL NOT NULL CHECK (score >= 0 AND score <= 1),
+    threshold       REAL,
+    acting          INTEGER NOT NULL DEFAULT 1 CHECK (acting IN (0, 1)),
+    recalled        INTEGER NOT NULL CHECK (recalled IN (0, 1)),
+    explored        INTEGER NOT NULL CHECK (explored IN (0, 1)),
+    propensity      REAL NOT NULL CHECK (propensity >= 0 AND propensity <= 1),
+    recall_query_id TEXT,
+    CHECK (explored = 0 OR recalled = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_need_turns_profile ON need_turns (profile_id, at)
 """
 
 _FACT_TRIGGER = """
@@ -163,7 +187,7 @@ def verify(conn: sqlite3.Connection) -> bool:
         return False
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     if not {"injection_deliveries", "injection_receipts", "injection_usage",
-            "idx_injection_deliveries_recall_query"} <= names:
+            "idx_injection_deliveries_recall_query", "need_turns"} <= names:
         return False
     if not _has_facts(conn):
         return True

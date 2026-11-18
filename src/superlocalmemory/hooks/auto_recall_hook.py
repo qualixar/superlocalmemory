@@ -34,6 +34,11 @@ import sys
 
 _DEFAULT_LIMIT = 15           # raised from 3 for formatter candidate pool
 
+#: Routing only (W3-7d): how long the per-prompt hook waits for the daemon's
+#: socket before it injects nothing. The hook's own limit in ``hooks.json`` is
+#: 7 s; the daemon stops waiting at 4 s (``hook_daemon.PROMPT_BUDGET_S``).
+CLIENT_BUDGET_S = 5.0
+
 _MODE_TIMEOUTS = {
     "A": 10.0,
     "B": 25.0,
@@ -86,7 +91,7 @@ def _try_socket_first(prompt: str, session_id: str) -> dict | None:
         response = try_socket_recall(
             prompt=prompt,
             session_id=session_id,
-            timeout=_get_mode_timeout(_detect_mode()),
+            timeout=CLIENT_BUDGET_S,
         )
         if response is None or not isinstance(response, dict):
             return None
@@ -127,8 +132,8 @@ def _do_recall_response(query: str, limit: int = _DEFAULT_LIMIT,
         from superlocalmemory.core.recall_queue import RecallQueue
 
         mode = _detect_mode()
-        timeout = _get_mode_timeout(mode)
-        stall_timeout = max(timeout - 5.0, 5.0)
+        timeout = min(_get_mode_timeout(mode), CLIENT_BUDGET_S)
+        stall_timeout = timeout
         db_path = _get_queue_db_path()
         queue = RecallQueue(db_path)
 
@@ -192,7 +197,7 @@ def _fallback_response(query: str, limit: int, session_id: str) -> dict | None:
             "depth": "0",
             "via": "hook",  # W3-1: names the injection receipt's path
         })
-        data = daemon_request("GET", f"/recall?{params}", timeout_seconds=5.0)
+        data = daemon_request("GET", f"/recall?{params}", timeout_seconds=CLIENT_BUDGET_S / 2)
         if not isinstance(data, dict):
             return None
         results = data.get("results", [])
@@ -268,6 +273,19 @@ def _switched_off() -> bool:
         return False
 
 
+def _per_prompt_off() -> bool:
+    """W3-7d (D-47): ``delivery.need_gate`` is off (the default) or the kill
+    switch is on, so this hook answers ``{}`` before reaching the daemon.
+    Fails closed: an unreadable flag means off."""
+    try:
+        from superlocalmemory.core.need_gate import flag_state
+        from superlocalmemory.infra.data_root import canonical_data_root
+
+        return flag_state(canonical_data_root()) is None
+    except Exception:
+        return True
+
+
 def main() -> int:
     try:
         raw = sys.stdin.read()
@@ -296,10 +314,12 @@ def main() -> int:
         sys.stdout.write("{}")
         return 0
 
-    if _is_ack(prompt) or _switched_off():
+    if _switched_off() or _per_prompt_off():
         sys.stdout.write("{}")
         return 0
 
+    # W3-7d: the daemon's need gate decides and logs every prompt, the obvious
+    # ones too (their miss rate is measured), so they go to the socket as well.
     try:
         socket_result = _try_socket_first(prompt, session_id)
         if socket_result is not None:
@@ -307,6 +327,17 @@ def main() -> int:
             return 0
     except Exception:
         pass
+
+    # No socket: the gate's rules, without its log or its score.
+    try:
+        from superlocalmemory.core.need_gate import rule
+
+        skip = rule(prompt) is not None
+    except Exception:
+        skip = _is_ack(prompt)
+    if skip:
+        sys.stdout.write("{}")
+        return 0
 
     try:
         results = _do_recall(prompt, limit=_DEFAULT_LIMIT, session_id=session_id)

@@ -881,6 +881,22 @@ class EngineRecallAdapter:
     def __init__(self, engine, profile_runtime=None) -> None:
         self._engine = engine
         self._profile_runtime = profile_runtime
+        self._gate = None
+        self._gate_paths: tuple[str, str] | None = None
+
+    def need_gate(self):
+        """(need gate, profile id) for the current engine, or None without a
+        real store (W3-7d, M-16). One gate per store, so its cache survives."""
+        from superlocalmemory.core.need_gate import Gate
+        from superlocalmemory.outcomes import receipts
+
+        home, db_path = receipts.engine_paths(self._engine)
+        if home is None or db_path is None:
+            return None
+        paths = (str(home), str(db_path))
+        if self._gate is None or self._gate_paths != paths:
+            self._gate, self._gate_paths = Gate(home, db_path), paths
+        return self._gate, str(getattr(self._engine, "profile_id", "") or "default")
 
     def set_engine(self, engine) -> None:
         """Replace the engine while the profile runtime is exclusive."""
@@ -896,6 +912,7 @@ class EngineRecallAdapter:
         )
         with lease:
             out = self._recall(query, limit=limit, session_id=session_id)
+        out = self._not_yet_shown(out, session_id)
         swap = self._swap(out)
         if swap is not None and swap.at is not None:
             from superlocalmemory.outcomes import swaps
@@ -903,6 +920,32 @@ class EngineRecallAdapter:
             out = {**out, "results": swaps.apply(out.get("results") or [], swap)}
         self._receipt(query, session_id, out, swap)
         return out
+
+    def _not_yet_shown(self, out: dict, session_id: str) -> dict:
+        """WS-4: a hook never re-injects a memory this conversation already got
+        (from any delivery: session start, an earlier prompt, an explicit
+        recall). Read from the delivery receipts; on any failure nothing is
+        dropped. The receipt then records only what is still delivered."""
+        results = out.get("results") or []
+        if not results or not session_id:
+            return out
+        try:
+            from superlocalmemory.core.need_gate import shown_in_session
+            from superlocalmemory.outcomes import receipts
+
+            _home, db_path = receipts.engine_paths(self._engine)
+            if db_path is None:
+                return out
+            shown = shown_in_session(
+                db_path, str(getattr(self._engine, "profile_id", "") or ""), session_id)
+        except Exception as exc:  # noqa: BLE001 - fail open: show, never hide
+            logger.info("already-shown check skipped: %s", exc)
+            return out
+        if not shown:
+            return out
+        kept = [r for r in results if str(r.get("fact_id") or "") not in shown]
+        return {**out, "results": kept, "result_count": len(kept),
+                "already_shown": len(results) - len(kept)}
 
     def _swap(self, out: dict):
         """D-46: this hook answer's logged adjacent swap, or None."""
@@ -3245,7 +3288,8 @@ async def lifespan(application: FastAPI):
             # Eliminates Python subprocess startup for each recall hook call.
             try:
                 from superlocalmemory.hooks.hook_daemon import HookDaemon
-                _hook_daemon = HookDaemon(queue_db_path=_queue_db)
+                _hook_daemon = HookDaemon(queue_db_path=_queue_db,
+                                          recall_adapter=_engine_recall_adapter)
                 _hook_daemon.start()
                 application.state.hook_daemon = _hook_daemon
             except Exception as _hd_exc:

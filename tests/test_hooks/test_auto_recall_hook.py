@@ -54,8 +54,12 @@ def _run_hook(prompt: str, tmp_path: Path, **env_overrides) -> dict:
 
     payload = json.dumps({"prompt": prompt, "session_id": "test-session"})
     captured = StringIO()
+    # W3-7d (D-47): per-prompt recall is off unless ``delivery.need_gate`` is
+    # on; these tests exercise the hook with it on.
     with patch("superlocalmemory.hooks.auto_recall_hook._try_socket_first",
                return_value=None), \
+         patch("superlocalmemory.hooks.auto_recall_hook._per_prompt_off",
+               return_value=env_overrides.get("off", False)), \
          patch("sys.stdin", StringIO(payload)), \
          patch("sys.stdout", captured):
         exit_code = main()
@@ -65,6 +69,33 @@ def _run_hook(prompt: str, tmp_path: Path, **env_overrides) -> dict:
     if not output.strip():
         return {}
     return json.loads(output)
+
+
+def test_with_the_need_gate_off_the_hook_recalls_nothing(tmp_path: Path) -> None:
+    """D-47: 4.2.30 ships dark; the registered hook is inert until switched on."""
+    with patch("superlocalmemory.hooks.auto_recall_hook._do_recall") as recall:
+        assert _run_hook("What is the SLM recall queue architecture?", tmp_path,
+                         off=True) == {}
+    recall.assert_not_called()
+
+
+def test_the_flag_read_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    from superlocalmemory.core.feature_flags import FlagState, write_flag
+    from superlocalmemory.hooks import auto_recall_hook as hook
+
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    assert hook._per_prompt_off() is True
+    write_flag(tmp_path, "delivery.need_gate", FlagState.ON)
+    assert hook._per_prompt_off() is False
+    monkeypatch.setenv("SLM_4230_OFF", "1")
+    assert hook._per_prompt_off() is True
+
+    def broken(_home):
+        raise OSError("unreadable")
+
+    monkeypatch.delenv("SLM_4230_OFF")
+    monkeypatch.setattr("superlocalmemory.core.need_gate.flag_state", broken)
+    assert hook._per_prompt_off() is True
 
 
 @pytest.mark.parametrize("prompt", _ACK_PROMPTS)
