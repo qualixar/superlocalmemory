@@ -42,8 +42,17 @@
       line: 'Open any memory to see where it came from and which conversations it was shown in.',
       pane: 'memories-pane', paneLabel: 'Open Memories' },
     { id: 'proposals', title: 'Proposed changes',
-      line: 'SuperLocalMemory can suggest tidy-ups, such as merging duplicates, for you to apply, with an undo.',
-      doc: 'cli-reference.md' }
+      line: 'SuperLocalMemory can suggest tidy-ups, such as merging duplicates, that your agents or you apply, with an undo.',
+      doc: 'cli-reference.md' },
+    { id: 'wiki', title: 'Living wiki',
+      line: 'Pages built only from your memories, with every sentence linked to the memory it came from.',
+      doc: 'living-wiki.md' },
+    { id: 'import', title: 'Bring memories from other apps',
+      line: 'Import what ChatGPT, Claude, Mem0, Letta or your Markdown notes remember. You see a preview first, and one Undo removes the whole import.',
+      doc: 'importing.md' },
+    { id: 'decisions', title: 'Your agents decide, and you can undo',
+      line: 'Agents can settle disputes and apply changes themselves. Each decision is listed on the Dashboard with an Undo.',
+      pane: 'dashboard-pane', paneLabel: 'Open the Dashboard' }
   ];
 
   function el(tag, cls, text) {

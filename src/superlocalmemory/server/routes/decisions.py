@@ -119,10 +119,3 @@ def undo_decision(request: Request, decision_id: str, body: UndoRequest | None =
         return m._unknown_profile_response(exc.profile_id)
     except Exception as exc:
         raise m._canonical_mutation_error(exc, "Decision undo error")
-
-
-# WS-9: an import is a decision (kind ``import``), so its routes live beside the decision log's and
-# ride on this module's registration in the daemon. Nothing else here depends on them.
-from superlocalmemory.server.routes.portability import router as _import_router  # noqa: E402
-
-router.include_router(_import_router)

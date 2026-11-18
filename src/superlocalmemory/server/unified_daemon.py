@@ -4008,6 +4008,16 @@ async def lifespan(application: FastAPI):
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("enrichment pool shutdown failed (non-fatal): %s", exc)
 
+    # WS-9: stop running import jobs before the engine closes (they save through it).
+    # Only if the import pack was ever loaded: no lazy import on the shutdown path. A run
+    # cut short here is closed with a plain note on the next read; undo still works.
+    _import_jobs = sys.modules.get("superlocalmemory.portability.jobs")
+    if _import_jobs is not None:
+        try:
+            _import_jobs.JOBS.stop_all(timeout=3.0)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("import jobs shutdown failed (non-fatal): %s", exc)
+
     try:
         from superlocalmemory.server.routes.memory_kinds import stop_backfill
         kind_runner_stopped = stop_backfill(application)
@@ -4941,7 +4951,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         "learning", "learning_readiness", "lifecycle", "behavioral", "compliance",
         "insights", "timeline", "abstraction", "integrity", "overtaken", "truth", "outcomes",
         "proposals", "trust", "trust_why", "delivered", "trust_overview", "whatsnew", "wiki",
-        "decisions",
+        "decisions", "portability",
     ):
         try:
             _mod = __import__(

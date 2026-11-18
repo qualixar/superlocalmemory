@@ -32,6 +32,9 @@ ENTRIES: dict[str, str | None] = {
     "signing": "trust.signing",
     "why": None,
     "proposals": "compiler.dream",
+    "wiki": "compiler.wiki",
+    "import": "portability.import",
+    "decisions": None,  # D-49: agents decide; always available, no switch
 }
 
 
