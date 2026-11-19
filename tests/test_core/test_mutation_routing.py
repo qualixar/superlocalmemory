@@ -48,6 +48,7 @@ def test_the_routable_kinds_are_exactly_those_with_a_routed_route() -> None:
         CommandKind.DELETE_FACT,
         CommandKind.PROPOSE_CORRECTION,
         CommandKind.SET_FACT_KIND,
+        CommandKind.PROMOTE_DECLARED,  # 4.2.30: POST /remember with a ``profile_id`` and a kind
     })
 
 

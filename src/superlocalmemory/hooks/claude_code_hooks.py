@@ -54,6 +54,11 @@ _START_MARKER = _DEFAULT_START_MARKER
 # Tools that the gate should block (everything except SLM/ToolSearch)
 _GATED_TOOLS = "Bash|Read|Write|Edit|Glob|Grep|Agent|WebFetch|WebSearch|NotebookEdit"
 
+# 4.2.30 cue hook: tool cues before the tool, error cues after. The same matchers
+# as plugin-src/hooks/hooks.json (tests/test_hooks/test_host_hook_upgrade.py).
+_CUE_BEFORE_TOOLS = "Write|Edit|MultiEdit|Bash"
+_CUE_AFTER_TOOLS = "Write|Edit|MultiEdit|NotebookEdit|Bash"
+
 
 def _version_dir() -> Path:
     """Resolve hook metadata under the selected data root.
@@ -222,6 +227,18 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                     }
                 ],
             },
+            # 4.2.30 - error cues after a tool ran (the plugin's hooks.json
+            # declares the same entry; a test keeps the two equal).
+            {
+                "matcher": _CUE_AFTER_TOOLS,
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": _wrap_python_cmd("cue"),
+                        "timeout": 5,
+                    }
+                ],
+            },
         ],
         "UserPromptSubmit": [
             # LLD-09 Track A.2 — re-query detection.
@@ -246,6 +263,17 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                         "type": "command",
                         "command": _wrap_python_cmd("topic_shift"),
                         "timeout": 3,
+                    }
+                ]
+            },
+            # 4.2.30 - per-prompt recall (behind the need gate; one recall per
+            # prompt even when the plugin's copy of this hook also runs).
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": _wrap_python_cmd("auto_recall"),
+                        "timeout": 7,
                     }
                 ]
             },
@@ -295,7 +323,18 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
                     "timeout": 5,
                 }
             ],
-        }
+        },
+        # 4.2.30 - tool cues before a tool runs.
+        {
+            "matcher": _CUE_BEFORE_TOOLS,
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": _wrap_python_cmd("cue"),
+                    "timeout": 5,
+                }
+            ],
+        },
     ]
 
     if include_gate:
@@ -327,16 +366,23 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
 # Identify SLM hooks in existing settings
 # ---------------------------------------------------------------------------
 
+def _is_slm_command(cmd: object) -> bool:
+    """True for a command SLM wrote: its ``slm hook`` launcher or its session markers."""
+    text = str(cmd)
+    return ("slm hook" in text
+            or "slm session close" in text
+            or "slm-session" in text
+            or ".superlocalmemory/hooks/" in text
+            or "slm-session-initialized" in text)
+
+
 def _is_slm_hook_entry(entry: dict) -> bool:
     """Check if a hook entry belongs to SLM."""
-    for hook in entry.get("hooks", []):
-        cmd = hook.get("command", "")
-        if ("slm hook" in cmd
-                or "slm-session" in cmd
-                or ".superlocalmemory/hooks/" in cmd
-                or "slm-session-initialized" in cmd):
-            return True
-    return False
+    hooks = entry.get("hooks", []) if isinstance(entry, dict) else []
+    if not isinstance(hooks, list):
+        return False
+    return any(isinstance(hook, dict) and _is_slm_command(hook.get("command", ""))
+               for hook in hooks)
 
 
 # ---------------------------------------------------------------------------
@@ -344,17 +390,40 @@ def _is_slm_hook_entry(entry: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 def _merge_hooks(settings: dict, hook_defs: dict) -> dict:
-    """Merge SLM hooks into settings, preserving all non-SLM hooks."""
-    if "hooks" not in settings:
-        settings["hooks"] = {}
+    """Return ``settings`` with SLM's hooks replaced and added, every other entry kept.
 
+    Replacement and addition only (4.2.30): an SLM entry is swapped where it stood,
+    a missing one is added, and the user's own hooks, other keys and key order are
+    left exactly as they were. Pure: the argument is not changed.
+    """
+    from superlocalmemory.hooks._hook_merge import replace_owned
+
+    hooks = settings.get("hooks")
+    merged_hooks = dict(hooks) if isinstance(hooks, dict) else {}
     for hook_type, slm_entries in hook_defs.items():
-        existing = settings["hooks"].get(hook_type, [])
-        cleaned = [e for e in existing if not _is_slm_hook_entry(e)]
-        cleaned.extend(slm_entries)
-        settings["hooks"][hook_type] = cleaned
+        existing = merged_hooks.get(hook_type, [])
+        merged_hooks[hook_type] = replace_owned(
+            existing if isinstance(existing, list) else [], slm_entries, _is_slm_command)
+    return {**settings, "hooks": merged_hooks}
 
-    return settings
+
+def settings_have_slm_hooks(settings: dict) -> bool:
+    """True when ``settings`` already holds at least one SLM hook entry."""
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return False
+    return any(isinstance(entries, list) and any(_is_slm_hook_entry(e) for e in entries)
+               for entries in hooks.values())
+
+
+def settings_have_gate(settings: dict) -> bool:
+    """True when the experimental PreToolUse gate is among the SLM entries."""
+    entries = (settings.get("hooks") or {}).get("PreToolUse", [])
+    return any(
+        _is_slm_hook_entry(e) and any(
+            "Call mcp__superlocalmemory__session_init first" in str(h.get("command", ""))
+            for h in e.get("hooks", []) if isinstance(h, dict))
+        for e in entries if isinstance(e, dict))
 
 
 def _remove_slm_hooks(settings: dict) -> dict:

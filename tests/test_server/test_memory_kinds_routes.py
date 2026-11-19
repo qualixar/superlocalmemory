@@ -40,7 +40,7 @@ class _Runtime:
         self.db = db
         self.calls: list = []
 
-    def set_fact_kinds(self, profile_id, items, *, idempotency_key=None):
+    def set_fact_kinds(self, profile_id, items, *, idempotency_key=None, promote_as=None):
         from superlocalmemory.core.remember_runtime import _set_fact_kinds
         from superlocalmemory.storage.memory_kinds import parse_kind
 
@@ -48,7 +48,10 @@ class _Runtime:
         self.calls.append((profile_id, pairs))
         with self.db.raw_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            return _set_fact_kinds(self.db, profile_id, {"items": pairs}, connection=conn)
+            payload = {"items": pairs}
+            if promote_as:
+                payload["promote_by"], payload["promote_channel"] = promote_as
+            return _set_fact_kinds(self.db, profile_id, payload, connection=conn)
 
 
 class _Judge:

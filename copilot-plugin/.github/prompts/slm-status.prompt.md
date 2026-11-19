@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Health and optimization stats for SuperLocalMemory — call slm_optimize_stats() for live compression and cache counters (compress_runs, tokens_saved_compress, cache_proxy_hits, cache_proxy_misses, cache_kv_hits, cache_kv_misses); run slm status [--json] for system state (mode, profile, DB size, fact/entity/edge counts) and slm doctor [--json] for preflight including the "Optimize (Surface B)" health line; use together to confirm optimization is actually saving tokens.
-version: "4.2.19"
+version: "4.2.30"
 agent: agent
 tools:
   - slm_optimize_stats
@@ -394,7 +394,10 @@ promote; the promotion is recorded (who, channel, time), listed under **Recent d
 agents**, and `slm trust withdraw FACT_ID` takes it back. Promote only what you have checked the
 user wants as an instruction. `data.unclassified` is the number of memories not yet given an
 origin class; they stay held until the background batch runs. Memories already pinned or marked as rules before
-4.2.30 stay so (recorded as promoted before 4.2.30).
+4.2.30 stay so (recorded as promoted before 4.2.30). Saving or confirming a memory as a rule or
+decision is itself a recorded promotion (an agent's own words only, undone from **Recent
+decisions**), while text from a web page, a tool, a peer or an import stays held and the
+background classifier never promotes.
 `trust.secret_screen` is separate: it stores a detected credential as `[REDACTED:TYPE:LAST4]`,
 and `data.trust.secrets_held_back.by_type` counts them (never a value).
 
@@ -431,4 +434,4 @@ and `data.trust.secrets_held_back.by_type` counts them (never a value).
 
 ---
 
-SuperLocalMemory v4.2.19 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.30 · Qualixar · AGPL-3.0-or-later

@@ -253,16 +253,39 @@ def _set_kinds(request: Request, profile_id: str, pairs: list[tuple[str, str]]) 
     )
 
     runtime = _canonical_mutation_runtime(request)
+    extra = _promote_as(request, pairs)
     try:
         receipt = runtime.set_fact_kinds(profile_id, pairs,
-                                         idempotency_key=_mutation_idempotency_key(request))
+                                         idempotency_key=_mutation_idempotency_key(request),
+                                         **extra)
     except ValueError as exc:
         raise invalid_kind_http(InvalidKind(str(exc))) from exc
     except Exception as exc:  # noqa: BLE001 — typed mapping, never a traceback
         raise _canonical_mutation_error(exc, "Could not change the memory kind") from exc
     if not receipt.get("ok", False) and not receipt.get("facts"):
         raise HTTPException(409, detail="Memory kinds are not available on this store yet.")
+    if receipt.get("promoted"):  # session start must not serve a context cached before it
+        from superlocalmemory.core.mutations import purge_profile_context_cache
+
+        purge_profile_context_cache(_engine(request), profile_id)
     return list(receipt.get("facts") or [])
+
+
+def _promote_as(request: Request, pairs: list[tuple[str, str]]) -> dict[str, Any]:
+    """``{"promote_as": (actor, channel)}`` when a rule or decision is being confirmed and the
+    firewall acts: the caller's own door, taken from the connection (``decision_door``), never
+    from a parameter (``trust/declared_promotion``). Empty otherwise."""
+    from superlocalmemory.trust import declared_promotion
+
+    if not any(declared_promotion.wanted(kind) for _fact, kind in pairs):
+        return {}
+    from superlocalmemory.server import decision_door
+
+    actor = write_identity.require_write_actor(
+        request, getattr(request.app.state, "daemon_descriptor", None),
+        actor_kind="memory-kinds")
+    who = decision_door.decider_for(request, str(actor or ""), "")
+    return {"promote_as": (who.actor, who.channel)}
 
 
 def _authorize(request: Request, fact_id: str,

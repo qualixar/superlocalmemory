@@ -59,6 +59,11 @@ def cmd_upgrade_hosts(args: Namespace) -> None:
         status = result.get("status", "error")
         detail = result.get("detail", "")
         print(f"  [{status}] {host}: {detail}")
+        commands = plugin_update_commands(host)
+        if commands:
+            note = ("if you use its plugin, its hooks and skills update only through the host: "
+                    if host != "hermes" else "its plugin code (and the overlap hook) updates only by reinstalling it: ")
+            print(f"      {note}{'  &&  '.join(commands)}")
 
     _report_reconnect_apps(targets if apply else [])
 
@@ -105,9 +110,13 @@ def _detected_hosts(home: Path | None = None) -> list[str]:
     # the durable evidence that its SLM integration exists; upgrading the
     # plugin remains an explicit Claude Code marketplace action.
     try:
-        from superlocalmemory.hooks.claude_code_hooks import check_status
+        from superlocalmemory.hooks.claude_code_hooks import (
+            _read_settings,
+            check_status,
+            settings_have_slm_hooks,
+        )
 
-        if check_status().get("installed"):
+        if check_status().get("installed") or settings_have_slm_hooks(_read_settings()):
             detected.append("claude-code")
     except Exception:
         pass
@@ -208,13 +217,108 @@ def hermes_plugin_finding() -> tuple[str, str, str] | None:
             "session tracking and turn capture are off", "slm upgrade-hosts --host hermes --apply")
 
 
+def _hook_upgrade():
+    from superlocalmemory.hooks import host_hook_upgrade
+
+    return host_hook_upgrade
+
+
+def _version() -> str:
+    from superlocalmemory import __version__
+
+    return __version__
+
+
+#: What a hook-file result means, in plain words, for the upgrade line.
+_HOOK_WORDS = {
+    "updated": "SLM entries replaced or added, your other hooks untouched",
+    "would-update": "SLM entries would be replaced or added, your other hooks untouched",
+    "current": "already current",
+    "not-integrated": "no SLM hooks there, so none added (`slm codex install` adds them)",
+    "skipped": "left alone (you removed SLM hooks)",
+    "error": "could not be read",
+}
+
+_HOOK_STATUS = {"updated": "updated", "would-update": "preview", "current": "verified",
+                "not-integrated": "verified", "skipped": "verified", "error": "blocked"}
+
+
+def _hook_file_result(result: dict[str, Any], label: str, add_hint: str) -> dict[str, str]:
+    status = result["status"]
+    detail = f"{label}: {_HOOK_WORDS[status]}"
+    if status == "not-integrated":
+        detail = f"{label}: no SLM hooks there, so none added ({add_hint})"
+    if status == "error":
+        detail = f"{label}: {result['detail']}; the file was not changed"
+    if result.get("backup"):
+        detail += f" (backup {Path(result['backup']).name})"
+    return {"status": _HOOK_STATUS[status], "detail": detail}
+
+
+#: Hosts whose hooks come from a host-managed plugin. SLM cannot write those files, so the
+#: exact command that moves each to the running version is printed instead (docs/plugins.md).
+def plugin_update_commands(host: str, version: str | None = None) -> list[str]:
+    """The commands that pick up this release's plugin hooks on ``host`` (empty: none)."""
+    version = version or _version()
+    repo = "https://github.com/qualixar/superlocalmemory.git"
+    table = {
+        "claude-code": ["claude plugin marketplace update qualixar",
+                        "claude plugin update superlocalmemory@qualixar"],
+        "codex": ["codex plugin marketplace add qualixar/superlocalmemory --ref main",
+                  "codex plugin add superlocalmemory-codex@qualixar"],
+        "antigravity": ['agy plugin install "$(npm root -g)/superlocalmemory/antigravity-plugin"'],
+        "muse": ['muse plugins install "$(npm root -g)/superlocalmemory/muse-plugin"',
+                 "muse plugins approve superlocalmemory"],
+        "hermes": [f"hermes plugins install '{repo}#hermes-plugin' --force --ref "
+                   f"\"$(git ls-remote {repo} 'refs/tags/v{version}^{{}}' | cut -f1)\""],
+    }
+    return list(table.get(host, []))
+
+
+def host_hooks_finding() -> tuple[str, str, str]:
+    """``slm doctor``: whether SLM's own hook entries are current, per host file (read-only)."""
+    results = _hook_upgrade().upgrade_all(version=_version(), apply=False)
+    names = {"claude-code": "Claude Code settings.json", "codex": "Codex hooks.json"}
+    stale = [h for h, r in results.items() if r["status"] == "would-update"]
+    broken = [h for h, r in results.items() if r["status"] == "error"]
+    current = [h for h, r in results.items() if r["status"] == "current"]
+    if stale:
+        fixes = "  &&  ".join(f"slm upgrade-hosts --host {h} --apply" for h in stale)
+        return ("WARN", "SLM hooks are older than this release in: "
+                + ", ".join(names[h] for h in stale)
+                + " (the daemon refreshes them by itself once per version; your own hooks are never touched)",
+                fixes)
+    if broken:
+        return ("WARN", "could not read " + ", ".join(names[h] for h in broken)
+                + "; SLM hooks there were not checked", "fix the file, then run `slm upgrade-hosts --apply --host "
+                + broken[0] + "`")
+    if current:
+        return "PASS", "SLM hooks are current in: " + ", ".join(names[h] for h in current), ""
+    return ("PASS", "no SLM hooks in Claude Code settings.json or Codex hooks.json "
+            "(plugin hosts take hooks from their plugin)", "")
+
+
+def plugin_hosts_finding() -> tuple[str, str, str] | None:
+    """``slm doctor``: the exact command each connected plugin host needs for this release."""
+    lines = []
+    for host in _detected_hosts():
+        commands = plugin_update_commands(host)
+        if commands:
+            lines.append(f"{host}: " + "  &&  ".join(commands))
+    if not lines:
+        return None
+    return ("PASS", "plugin hosts pick up this release's hooks only through their own plugin; "
+            "if you use a plugin there, run: " + " | ".join(lines), "")
+
+
 def _upgrade_host(host: str, *, apply: bool, already_integrated: bool) -> dict[str, str]:
     """Refresh assets without degrading a working, host-specific MCP block."""
     if host == "claude-code":
-        return {
-            "status": "plugin-managed",
-            "detail": "run `claude plugin update superlocalmemory@qualixar` in Claude Code",
-        }
+        return _hook_file_result(
+            _hook_upgrade().upgrade_claude_settings(version=_version(), apply=apply),
+            "Claude Code settings.json",
+            "`slm hooks install` adds them, or use the Claude Code plugin",
+        )
 
     if host == "hermes":
         if already_integrated:
@@ -233,10 +337,10 @@ def _upgrade_host(host: str, *, apply: bool, already_integrated: bool) -> dict[s
 
     if host == "codex" and already_integrated:
         from superlocalmemory.hooks.codex_assets import install_assets
-        from superlocalmemory.hooks.codex_hooks import install_hooks
 
-        assets, hooks = install_assets(dry_run=not apply), install_hooks(dry_run=not apply)
-        if not assets.get("success") or not hooks.get("success"):
+        assets = install_assets(dry_run=not apply)
+        hooks = _hook_upgrade().upgrade_codex_hooks(version=_version(), apply=apply)
+        if not assets.get("success") or hooks["status"] == "error":
             return {"status": "blocked", "detail": "could not refresh SLM-owned Codex assets"}
         action = "would refresh" if not apply else "refreshed"
         # Name what is actually written.  Saying "refreshed skills" while the
@@ -250,7 +354,7 @@ def _upgrade_host(host: str, *, apply: bool, already_integrated: bool) -> dict[s
         detail = f"{action} {len(written)} skill file(s) and {len(agents_written)} subagent file(s)"
         if written:
             detail += f" under {Path(written[0]).parent.parent}"
-        detail += "; hooks refreshed; MCP block preserved"
+        detail += f"; hooks: {_HOOK_WORDS[hooks['status']]}; MCP block preserved"
         if preserved:
             names = ", ".join(Path(x).name for x in preserved)
             detail += f"; preserved {len(preserved)} subagent file(s) not written by SLM ({names})"
@@ -280,4 +384,4 @@ def _upgrade_host(host: str, *, apply: bool, already_integrated: bool) -> dict[s
     return {"status": "updated", "detail": f"SLM MCP block {action}"}
 
 
-__all__ = ("cmd_upgrade_hosts", "validate_upgrade_request")
+__all__ = ("cmd_upgrade_hosts", "plugin_update_commands", "validate_upgrade_request")

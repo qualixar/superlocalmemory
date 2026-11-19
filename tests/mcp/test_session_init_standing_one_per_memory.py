@@ -19,22 +19,20 @@ import pytest
 
 from superlocalmemory.core import standing_rules
 from superlocalmemory.mcp.tools_active import register_active_tools
-from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
+from tests.helpers.agent_rule import agent_stores, firewall_on  # noqa: F401
 from tests.mcp.test_session_init_prospective_surface import (
     _FakeRecallResponse,
     _patches,
     _ToolServer,
 )
+from tests.test_core.test_coverage_backfill import _db as _migrated_store
 
+# Every test here runs with the origin firewall ON: the rules are saved as an agent saves them
+# (``tests/helpers/agent_rule.py``), which is what promotes a confirmed rule.
+pytestmark = pytest.mark.usefixtures("firewall_on")
 
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """These tests are about what session start selects, not the origin firewall: they save through agent
-    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
-    tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
 RULE = ("RULE: never put a real name in a video prompt. Prompts naming a person were "
         "rejected. They cost him credits. Test one prompt before a batch.")
@@ -45,9 +43,7 @@ SENTENCES = ["RULE: never put a real name in a video prompt.",
 
 @pytest.fixture()
 def db(tmp_path) -> DatabaseManager:
-    mgr = DatabaseManager(tmp_path / "memory.db")
-    mgr.initialize(schema)
-    return mgr
+    return _migrated_store(tmp_path / "memory.db")  # origins, trust and the decision log exist
 
 
 def _memory(db, content: str, facts: list[str], *, kind="rule",
@@ -59,7 +55,7 @@ def _memory(db, content: str, facts: list[str], *, kind="rule",
         fact = AtomicFact(profile_id="default", memory_id=memory_id, content=text,
                           fact_type=FactType.SEMANTIC, created_at=created)
         fact.memory_kind, fact.memory_kind_source = kind, "caller"
-        db.store_fact(fact)
+        agent_stores(db, fact)
     return memory_id
 
 

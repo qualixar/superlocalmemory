@@ -26,3 +26,13 @@ def test_the_daemon_loop_does_nothing_here():
 
     out = asyncio.run(media_auto.run(None, first_delay_s=0.0))
     assert out.label == "disabled"
+
+
+def test_tests_never_reach_the_real_keychain() -> None:
+    """A test process (and every daemon it starts) must never make macOS show a keychain dialog."""
+    import os
+
+    import keyring
+
+    assert os.environ.get("PYTHON_KEYRING_BACKEND") == "keyring.backends.fail.Keyring"
+    assert type(keyring.get_keyring()).__module__ == "keyring.backends.fail"

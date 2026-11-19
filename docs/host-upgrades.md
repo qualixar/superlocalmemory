@@ -1,9 +1,10 @@
 # Host Integration Upgrades
 
 Updating SuperLocalMemory updates the SLM executable. It does **not** silently
-rewrite an AI application's configuration, hooks, plugin state, or workspace
+rewrite an AI application's configuration, plugin state, or workspace
 instructions. Those files belong to the operator and may contain unrelated
-tools, policies, or credentials.
+tools, policies, or credentials. The one exception is SLM's own hook entries,
+which are replaced and added in place, never touching anything else (see below).
 
 Use the consented host-upgrade flow after upgrading through npm, pip, or a
 repository checkout:
@@ -42,10 +43,13 @@ verified and left intact so host-specific command paths, environment variables,
 and unrelated MCP servers are not downgraded. For Codex, it may refresh only
 SLM-owned skills, agents, and lifecycle hooks; the MCP block remains intact.
 
-Claude Code's SLM integration is a marketplace plugin. Refresh it through
-Claude Code's own plugin manager:
+If you installed SLM's hooks into Claude Code's `settings.json`
+(`slm hooks install`), `slm upgrade-hosts --host claude-code --apply` refreshes
+only those entries. If you use the Claude Code marketplace plugin instead, refresh
+it through Claude Code's own plugin manager:
 
 ```bash
+claude plugin marketplace update qualixar
 claude plugin update superlocalmemory@qualixar
 ```
 
@@ -54,6 +58,28 @@ Then restart the affected host application. Finally verify the local runtime:
 ```bash
 slm doctor
 ```
+
+## SLM's own hooks upgrade by themselves (4.2.30)
+
+Hooks already live in people's harnesses, so an upgrade only ever **replaces SLM's own
+hook entries and adds missing ones**. It never replaces a whole file, and never changes
+another hook, setting, or the order of keys. It happens once per installed version,
+in the SLM background service, a few minutes after start-up settles, for two files:
+Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
+
+- Only a file that **already holds SLM hook entries** is touched. A file with none is left
+  exactly as it is, and SLM never creates one.
+- The first change to a file keeps a copy next to it: `settings.json.bak-slm-<version>`.
+- A file that already holds the current entries is not written again.
+- A file that cannot be read is reported and left alone; the upgrade tries again next start.
+- `SLM_NO_HOOK_UPGRADE=1` turns the automatic upgrade off. The marker
+  `hooks-upgraded.json` in the SLM data folder records the version that ran.
+- On demand: `slm upgrade-hosts --host claude-code --apply` (or `--host codex`) does the
+  same thing, and `slm doctor` says per file whether SLM's hooks are current.
+
+Hosts that take hooks from a plugin (the Claude Code plugin, the Codex plugin, Hermes,
+Antigravity, Muse) belong to the host, so SLM does not write them. `slm upgrade-hosts` and
+`slm doctor` print the exact command each one needs to pick up the new version.
 
 ## Your memory store after an upgrade
 

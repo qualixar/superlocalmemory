@@ -28,6 +28,12 @@ puts the memory back under its own class and takes back the pin the promotion ap
 safety is the rule above plus the record, which the dashboard lists ("Recent decisions by your
 agents") so nobody is needed for anything to work.
 
+**Saving or confirming a rule or decision is that promotion** (owner decision, 19 Nov): when a
+caller saves a memory with the declared kind ``rule`` or ``decision``, or confirms a fact's kind as
+one, ``trust/declared_promotion`` calls :func:`approve` for each fact whose taint is exactly
+``agent_inferred``, as the caller's own actor and channel. Anything below that class stays held, and
+the background classifier never promotes.
+
 **Grandfathered:** a memory saved before 4.2.30 has no origin row (``unknown``). If it was
 already a pin, a standing rule or a decision, it stays one: the first classification records
 that it was promoted before 4.2.30 (origin ``unknown``, basis ``confirmed:grandfathered``)
@@ -330,11 +336,14 @@ def _came_from(taint: str) -> str:
     return _CAME_FROM.get(taint, _CAME_FROM[oc.UNKNOWN])
 
 
-def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) -> dict:
+def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str,
+            lead: str = "Promoted a memory", via: str = "") -> dict:
     """One explicit promotion of one memory by any caller (D-49). Recorded and reversible.
 
     ``by`` is who (an agent id, a client name, ``dashboard``) and ``channel`` one of
-    :data:`CHANNELS`. Raises ``ValueError`` for a channel that is not one of them,
+    :data:`CHANNELS`. ``lead`` opens the plain-words summary of the decision log and ``via``
+    names the door when it is not the promotion call itself (``trust/declared_promotion``:
+    saving or confirming a rule or decision). Raises ``ValueError`` for a channel that is not one of them,
     ``LookupError`` for a memory that does not exist. Returns what it did.
     """
     if channel not in CHANNELS:
@@ -369,9 +378,10 @@ def approve(conn: sqlite3.Connection, fact_id: str, *, by: str, channel: str) ->
     decisions.log(
         conn, profile_id=profile, kind=decisions.PROMOTION, subject_id=fact_id, action="promote",
         decider=decisions.Decider(who, channel),
-        summary=f"Promoted a memory so agents may follow it ({_came_from(before['taint'])})",
+        summary=f"{lead} so agents may follow it ({_came_from(before['taint'])})",
         detail={"was_origin": before["class"], "was_taint": before["taint"],
-                "was_basis": before["basis"], "applied": applied, "wanted": waiting})
+                "was_basis": before["basis"], "applied": applied, "wanted": waiting,
+                **({"via": via} if via else {})})
     return {"fact_id": fact_id, "was": before["taint"], "now": oc.USER_CONFIRMED,
             "applied": applied, "wanted": waiting, "decided_at": when, "actor": who,
             "channel": channel}

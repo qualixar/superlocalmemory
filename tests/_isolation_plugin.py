@@ -128,6 +128,15 @@ else:
     # computer (4.2.30). No test or CI run may ever start that: the daemon loop reads this and stays idle.
     # Tests of the automatic path pass their own environment to ``media_auto.tick``.
     os.environ["SLM_NO_AUTO_DOWNLOAD"] = "1"
+    # The daemon upgrades SLM's own hook entries in the host files once per version (4.2.30). A test
+    # run must never do that to a real settings file; tests of the upgrade pass their own ``env``.
+    os.environ["SLM_NO_HOOK_UPGRADE"] = "1"
+    # Tests point HOME at a temporary folder, so the macOS keychain library would look for a login
+    # keychain that is not there and macOS shows a "keychain not found" dialog to the person at the
+    # computer (19 Nov 2026, once trust.signing was on by default). Every test process and every
+    # daemon a test starts gets the keyring that refuses without asking the operating system;
+    # tests of keychain logic use their own fakes.
+    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
     # No test may register a real login service. A test HOME keeps the plist
     # out of the user's LaunchAgents, but ``launchctl load`` still hands the job
     # to the user's launchd, which keeps its daemon running (and restarts it)

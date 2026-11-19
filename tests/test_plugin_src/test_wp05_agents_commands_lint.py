@@ -103,6 +103,7 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "loop",   # slm loop demo|history|show — bounded loops (v3.8.0)
         # 4.2.14 store upkeep, all real top-level commands (slm <cmd> --help):
         "corrections",  # overtaken | restore-overtaken | dismiss
+        "cues",  # list (4.2.30)
         "ops",          # list | resolve | repair-saves | status
         "config",       # get | set
         "restart",

@@ -483,6 +483,9 @@ class CanonicalRememberRuntime:
             self.coordinator.register_handler(
                 CommandKind.REPLACE_BY_CALLER, self._handle_mutation,
             )
+            self.coordinator.register_handler(
+                CommandKind.PROMOTE_DECLARED, self._handle_mutation,
+            )
             self.coordinator.start()
             self._writer_open = True
             self.replay_pending()
@@ -573,6 +576,7 @@ class CanonicalRememberRuntime:
         # Before the journal marks it committed, so a crash in between replays
         # the replacement too (it is idempotent, keyed on the operation id).
         self._apply_replacement(request, receipt)
+        self._apply_promotion(request, receipt)
         return receipt
 
     def _apply_replacement(
@@ -608,6 +612,39 @@ class CanonicalRememberRuntime:
         else:
             logger.warning("a deferred save did not replace what it named: %s",
                            result.get("reason"))
+
+    def _apply_promotion(
+        self, request: RememberRequest, receipt: Mapping[str, Any],
+    ) -> None:
+        """Promote what a save declared as a rule or decision, after a background commit.
+
+        A foreground save is answered by the daemon, which promotes right after the receipt;
+        a save accepted under contention or recovered after a restart has no caller waiting,
+        so it is promoted here as the actor and channel journaled with it. Idempotent and
+        never raises: the save stands either way (see ``trust/declared_promotion``).
+        """
+        if not (request.promote_by and request.promote_channel):
+            return
+        from superlocalmemory.storage.memory_kinds import METADATA_KEY
+
+        kind = str(dict(request.metadata).get(METADATA_KEY) or "")
+        try:
+            done = self.promote_declared(
+                request.profile_id, list(receipt.get("fact_ids") or ()), kind,
+                by=request.promote_by, channel=request.promote_channel,
+                idempotency_key=promotion_key(
+                    request.profile_id, str(receipt.get("operation_id") or "")),
+            )
+            if done.get("promoted"):
+                from types import SimpleNamespace
+
+                from superlocalmemory.core.mutations import purge_profile_context_cache
+
+                with self._binding_lock:
+                    db = self._db
+                purge_profile_context_cache(SimpleNamespace(_db=db), request.profile_id)
+        except Exception as exc:  # noqa: BLE001 - the save stands; the promotion can be redone
+            logger.warning("a deferred save was not promoted (%s)", type(exc).__name__)
 
     def rebind_engine(self, engine: Any) -> None:
         """Atomically follow a drained daemon mode/profile transition."""
@@ -768,6 +805,7 @@ class CanonicalRememberRuntime:
                 )
                 return
         self._apply_replacement(request, receipt)
+        self._apply_promotion(request, receipt)
 
     def delete_fact(
         self, profile_id: str, fact_id: str, *, idempotency_key: str | None = None,
@@ -841,8 +879,14 @@ class CanonicalRememberRuntime:
         actor_id: str,
         event_valid_until: str | None = None,
         idempotency_key: str | None = None,
+        promote_as: tuple[str, str] | None = None,
     ) -> Mapping[str, Any]:
-        """Apply, reject, or roll back one server-authorized correction case."""
+        """Apply, reject, or roll back one server-authorized correction case.
+
+        ``promote_as`` is ``(actor, channel)`` of whoever acts, from the connection: an applied
+        correction of a trusted rule promotes its successor as them, and a rollback takes that
+        back (``trust/declared_promotion``).
+        """
         command = {
             "apply": CommandKind.APPLY_CORRECTION,
             "reject": CommandKind.REJECT_CORRECTION,
@@ -850,17 +894,15 @@ class CanonicalRememberRuntime:
         }.get(action)
         if command is None:
             raise ValueError("correction action must be apply, reject, or rollback")
-        return self._submit_mutation(
-            command,
-            profile_id,
-            {
-                "case_id": case_id,
-                "expected_version": expected_version,
-                "trusted_actor_id": actor_id,
-                "event_valid_until": event_valid_until,
-            },
-            idempotency_key=idempotency_key,
-        )
+        payload: dict[str, Any] = {
+            "case_id": case_id,
+            "expected_version": expected_version,
+            "trusted_actor_id": actor_id,
+            "event_valid_until": event_valid_until,
+        }
+        if promote_as and command is not CommandKind.REJECT_CORRECTION:
+            payload["promote_by"], payload["promote_channel"] = promote_as
+        return self._submit_mutation(command, profile_id, payload, idempotency_key=idempotency_key)
 
     def archive_fact(
         self, profile_id: str, fact_id: str, *, idempotency_key: str | None = None,
@@ -915,11 +957,16 @@ class CanonicalRememberRuntime:
         items: Sequence[tuple[str, str]],
         *,
         idempotency_key: str | None = None,
+        promote_as: tuple[str, str] | None = None,
     ) -> Mapping[str, Any]:
         """Set the kind of 1-200 facts in this profile, as the user's choice.
 
         Every kind is checked before anything is submitted: one unknown kind
         rejects the whole request rather than changing some of the facts.
+
+        ``promote_as`` is ``(actor, channel)`` of the caller, taken from the connection by
+        the route: with it, a fact confirmed as a rule or decision whose taint is an agent's
+        own words is promoted in the same transaction (``trust/declared_promotion``).
         """
         from superlocalmemory.storage.memory_kinds import parse_kind
 
@@ -932,12 +979,38 @@ class CanonicalRememberRuntime:
             if not isinstance(fact_id, str) or not fact_id or kind is None:
                 raise ValueError(f"not a fact id and memory kind: {fact_id!r}, {value!r}")
             checked.append([fact_id, kind.value])
+        payload: dict[str, Any] = {"items": checked}
+        if promote_as:
+            payload["promote_by"], payload["promote_channel"] = promote_as
         return self._submit_mutation(
             CommandKind.SET_FACT_KIND,
             profile_id,
-            {"items": checked},
+            payload,
             idempotency_key=idempotency_key,
         )
+
+    def promote_declared(
+        self,
+        profile_id: str,
+        fact_ids: Sequence[str],
+        kind: str,
+        *,
+        by: str,
+        channel: str,
+        idempotency_key: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Promote the facts of a save that declared ``kind`` (a rule or decision).
+
+        One writer transaction, after the save committed: each fact whose taint is an agent's
+        own words is promoted as ``by`` through ``channel``; others are left as they are.
+        """
+        return _thaw_command_value(self._submit_mutation(
+            CommandKind.PROMOTE_DECLARED,
+            profile_id,
+            {"fact_ids": [str(f) for f in fact_ids], "kind": kind,
+             "promote_by": by, "promote_channel": channel},
+            idempotency_key=idempotency_key,
+        ))
 
     def replace_by_caller(
         self,
@@ -1207,6 +1280,12 @@ def _materialization_is_not_available(_operation: IngestionOperation) -> list[st
 _FACT_UPDATE_COLUMNS = frozenset({"content", "embedding", "fisher_mean", "fisher_variance"})
 
 
+def promotion_key(profile_id: str, operation_id: str) -> str:
+    """The idempotency key of a save's promotion: one per save, whoever asks for it."""
+    return "promote:" + hashlib.sha256(
+        f"{profile_id}\0{operation_id}".encode("utf-8")).hexdigest()[:48]
+
+
 def _json_roundtrip(value: Mapping[str, Any]) -> dict[str, Any]:
     """Reject non-command data before it reaches the writer thread."""
     try:
@@ -1256,6 +1335,8 @@ def _execute_mutation(
         from superlocalmemory.core.remember_replaces import apply_replacement
 
         return apply_replacement(connection, profile_id, payload)
+    if kind is CommandKind.PROMOTE_DECLARED:
+        return _promote_declared(profile_id, payload, connection=connection)
     fact_id = _payload_text(payload, "fact_id")
     if kind is CommandKind.DELETE_FACT:
         return _delete_fact(db, fact_id, profile_id)
@@ -1291,9 +1372,33 @@ def _set_fact_kinds(
             items.append((str(pair[0]), kind))
     results = MemoryKindStore(db).set_kinds(connection, profile_id, items, actor="user")
     # A fact owned by another profile comes back "not found" and is untouched.
-    return {"ok": True, "operation_id": "set_fact_kind",
-            "changed": sum(1 for r in results if r.get("ok")),
-            "facts": [dict(r) for r in results]}
+    receipt = {"ok": True, "operation_id": "set_fact_kind",
+               "changed": sum(1 for r in results if r.get("ok")),
+               "facts": [dict(r) for r in results]}
+    by, channel = payload.get("promote_by"), payload.get("promote_channel")
+    if by and channel:  # confirming a rule or decision is its recorded promotion
+        from superlocalmemory.trust import declared_promotion
+
+        done = declared_promotion.promote(
+            connection, profile_id,
+            [(r["fact_id"], kind.value) for r, (_f, kind) in zip(results, items) if r.get("ok")],
+            by=str(by), channel=str(channel), how=declared_promotion.CONFIRMED)
+        receipt["promoted"], receipt["held"] = done["promoted"], done["held"]
+    return receipt
+
+
+def _promote_declared(
+    profile_id: str, payload: Mapping[str, Any], *, connection: Any,
+) -> dict[str, Any]:
+    """Writer-transaction body for ``CommandKind.PROMOTE_DECLARED``."""
+    from superlocalmemory.trust import declared_promotion
+
+    kind = _payload_text(payload, "kind")
+    done = declared_promotion.promote(
+        connection, profile_id, [(str(f), kind) for f in payload.get("fact_ids") or ()],
+        by=_payload_text(payload, "promote_by"),
+        channel=_payload_text(payload, "promote_channel"), how=declared_promotion.SAVED)
+    return {"ok": True, "operation_id": "promote_declared", **done}
 
 
 def _delete_fact(db: DatabaseManager, fact_id: str, profile_id: str) -> dict[str, Any]:
@@ -1539,6 +1644,17 @@ def _transition_correction(
 
         for edited in (case.predecessor_fact_id, case.successor_fact_id):
             user_unmark_on_connection(connection, edited, profile_id)
+    by, channel = payload.get("promote_by"), payload.get("promote_channel")
+    if by and channel:  # a corrected rule keeps working; its rollback takes that back
+        from superlocalmemory.trust import declared_promotion
+
+        if kind is CommandKind.APPLY_CORRECTION:
+            declared_promotion.inherit(
+                connection, profile_id, case.predecessor_fact_id, case.successor_fact_id,
+                by=str(by), channel=str(channel))
+        elif kind is CommandKind.ROLLBACK_CORRECTION:
+            declared_promotion.take_back(
+                connection, profile_id, case.successor_fact_id, by=str(by), channel=str(channel))
     return {
         "ok": True,
         "operation_id": f"correction:{to_status}:{case.case_id}",

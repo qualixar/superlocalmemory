@@ -3629,6 +3629,18 @@ async def lifespan(application: FastAPI):
             name="media-auto-setup",
         )
 
+    # SLM's own hook entries in the host files (Claude Code settings.json, the Codex user
+    # hooks.json) are brought to this version once per version: replace and add SLM entries only,
+    # never another entry, never a file that holds no SLM hook (4.2.30). Only here, in the real
+    # daemon: never a hook or a recall. ``SLM_NO_HOOK_UPGRADE=1`` turns it off.
+    _hook_up_task = getattr(application.state, "_host_hook_upgrade_task", None)
+    if _hook_up_task is None or _hook_up_task.done():
+        from superlocalmemory.hooks import host_hook_upgrade
+
+        application.state._host_hook_upgrade_task = asyncio.create_task(
+            host_hook_upgrade.run(), name="host-hook-upgrade"
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3803,6 +3815,13 @@ async def lifespan(application: FastAPI):
         _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
         if _upload_hk is not None and not _upload_hk.done():
             _upload_hk.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _hook_up = getattr(application.state, "_host_hook_upgrade_task", None)
+        if _hook_up is not None and not _hook_up.done():
+            _hook_up.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 
@@ -5922,6 +5941,20 @@ def _register_daemon_routes(application: FastAPI) -> None:
                         f"{_correct_decision.reason}"
                     )
 
+            # A rule or decision declared on the save is its explicit promotion for the
+            # instruction firewall (trust/declared_promotion): who and which door come from
+            # the connection, never from the body, and are journaled with the save so a
+            # deferred commit promotes it too.
+            _promote_as = None
+            if declared_kind is not None:
+                from superlocalmemory.trust import declared_promotion
+
+                if declared_promotion.wanted(declared_kind.value):
+                    from superlocalmemory.server import decision_door
+
+                    _who = decision_door.decider_for(request, trusted_actor_id, "")
+                    _promote_as = (_who.actor, _who.channel)
+
             admission = RememberRequest(
                 content=prepared.text,
                 profile_id=write_profile,
@@ -5942,6 +5975,8 @@ def _register_daemon_routes(application: FastAPI) -> None:
                 # is accepted (202), the replacement is applied when the
                 # background commit lands rather than silently dropped.
                 replaces=replaces_id or "",
+                promote_by=_promote_as[0] if _promote_as else "",
+                promote_channel=_promote_as[1] if _promote_as else "",
             )
             actor = Actor(
                 principal_id=trusted_actor_id,
@@ -5984,6 +6019,21 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     trusted_actor_id=trusted_actor_id,
                     routed=bool(req_profile),
                 )
+            if _promote_as is not None:
+                from superlocalmemory.core.mutations import purge_profile_context_cache
+                from superlocalmemory.core.remember_runtime import promotion_key
+
+                try:  # the save stands either way; a failed promotion is logged, never raised
+                    _promoted = await asyncio.to_thread(
+                        runtime.promote_declared, write_profile, fact_ids,
+                        declared_kind.value, by=_promote_as[0], channel=_promote_as[1],
+                        idempotency_key=promotion_key(
+                            write_profile, str(payload.get("operation_id") or "")))
+                    if _promoted.get("promoted"):
+                        purge_profile_context_cache(engine, write_profile)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("declared %s was saved but not promoted (%s)",
+                                   declared_kind.value, type(exc).__name__)
 
             # The durable receipt is already committed above; nothing below can
             # fail this write. What remains is the window in which the memory can

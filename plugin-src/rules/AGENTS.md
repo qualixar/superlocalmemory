@@ -47,6 +47,7 @@ Call `session_init(project_path, query, max_results, max_age_days)` **once** at 
 - **Ask why before you rely on a memory** — `slm why FACT_ID --json` (or `fetch(fact_ids, why=true)`) says where a memory came from, whether the instruction firewall holds it back, whether its signature still matches (`trust.signing`: detects a copy of the files changed without the user's login session; it does not stop a process running as the user) and when agents were shown it and why. Read-only. `slm signing resign --yes` signs again what a lost key signed; it is a recorded decision, so look at the listed memories first.
 - **Consent to send memories off the computer is the user's** — `slm consent give` asks a person at a terminal, and the dashboard asks the owner. Never give it for the user; you may show `slm consent --json`, explain what it sends, and run `slm consent withdraw <purpose>` when the user asks you to stop it.
 - **Turning measurement off is the user's choice** — SLM measures whether memory helps: receipts, usage detection (your reply is compared with the memories you were given; ids and scores only, this computer only), and in a small share of session starts one memory left out, and in a few recalls two neighbouring results swapped (ids and numbers, this computer only). `slm measurement status --json` shows it and carries the notice. Never switch it off on your own initiative; run `slm measurement off` (or `on`) only when the user asks, and pass on the notice if `pending` is true.
+- **Flags, imports and cues** — `slm flags` shows every 4.2.30 flag and its state (`slm flags set <flag> on|shadow|off`; `slm flags kill on` switches every 4.2.30 subsystem off at once, and the user decides that). `slm import preview FILE` says what a file holds without saving anything; `slm import run FILE` imports it in the background, recorded, and `slm import undo` takes a whole import back. `slm cues list --json` shows the cues that bring memories back, each with the memory it belongs to.
 - **Incomplete is not empty** — if `channel_status` shows `error`, `timeout`, `no_embedding` or `warming` for a channel, the answer is incomplete; say so instead of reporting "no memories found".
 
 ---
@@ -207,4 +208,4 @@ Using this memory from a web assistant or another computer: see the slm-web-acce
 - **slm-governance-advisor** — scope/role compliance, retention and lifecycle, GDPR
 - **slm-loop-runner** — bounded, gate-verified loops (the `/slm-loop` command delegates to it)
 
-SuperLocalMemory v4.2.19 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.30 · Qualixar · AGPL-3.0-or-later

@@ -1829,6 +1829,20 @@ def edit_memory(request: Request, fact_id: str, caller_view: str = ""):
         return _routed_mutation_error(exc, profile, "Edit error")
 
 
+def _correction_promote_as(request: Request, actor_id: str, action: str) -> dict:
+    """``{"promote_as": (actor, channel)}`` for an apply or rollback: who acts and through which
+    door, from the connection (``decision_door``), never from a parameter. A corrected rule keeps
+    its promotion (``trust/declared_promotion.inherit``); a rollback takes it back."""
+    from superlocalmemory.trust import firewall
+
+    if action not in {"apply", "rollback"} or not (action == "rollback" or firewall.active()):
+        return {}
+    from superlocalmemory.server import decision_door
+
+    who = decision_door.decider_for(request, str(actor_id or ""), "")
+    return {"promote_as": (who.actor, who.channel)}
+
+
 @router.post("/api/corrections/{case_id}/{action}")
 def review_correction(request: Request, case_id: str, action: str, caller_view: str = ""):
     """Apply, reject, or roll back a correction case.
@@ -1876,6 +1890,7 @@ def review_correction(request: Request, case_id: str, action: str, caller_view: 
             actor_id=hook_context["agent_id"],
             event_valid_until=event_valid_until,
             idempotency_key=_mutation_idempotency_key(request),
+            **_correction_promote_as(request, hook_context["agent_id"], action),
         )
         if not result.get("ok"):
             raise HTTPException(404, detail="Correction case not found")

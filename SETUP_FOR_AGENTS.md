@@ -300,3 +300,26 @@ slm media enable --yes     Turn them on (the user's choice, Step 5b)
 slm team status            Company-mode login requirement
 slm restart                Nuclear restart (kill orphans, start fresh)
 ```
+
+### New in 4.2.30
+
+After you upgrade, `slm upgrade-hosts` shows what each connected app needs, and
+`slm upgrade-hosts --apply --host <name>` refreshes SLM's own hook entries in Claude Code's
+`settings.json` and Codex's `hooks.json` without touching your other hooks. The daemon does the
+same once per version by itself (`SLM_NO_HOOK_UPGRADE=1` turns that off). Plugin apps (Claude Code
+plugin, Codex plugin, Hermes, Antigravity, Muse) update through their own plugin command, which
+`slm upgrade-hosts` and `slm doctor` print. New commands (each takes `--help`):
+
+```
+slm flags                        # every 4.2.30 flag and its state; `slm flags set <flag> on|shadow|off`; `slm flags kill on` switches every 4.2.30 subsystem off at once
+slm disputes list                # open disputes and changed source files; `settle`, `reopen`, `still-true`
+slm audit --list --json          # blind audit questions to label with your own model id (`--answer ITEM_ID LABEL --model ID`)
+slm proposals list               # proposed memory changes; `show`, `apply`, `reject`, `rollback`
+slm wiki status                  # compiled pages and edits waiting; `diff`, `build`, `rebuild`, `sync`, `dir`
+slm import preview FILE          # what a file holds, nothing saved; `run`, `status`, `list`, `cancel`, `undo`
+slm trust pending                # memories held back from becoming instructions; `promote`, `withdraw`, `status`
+slm why FACT_ID --json           # where a memory came from and when agents were shown it; read-only
+slm signing status               # is signing available; `resign` signs again what a lost key signed
+slm measurement status --json    # what SLM measures about whether memory helps; `on` and `off` only when the user asks
+slm cues list --json             # the cues that bring memories back, with the memory each belongs to
+```

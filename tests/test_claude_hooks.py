@@ -132,8 +132,10 @@ class TestHookDefinitions:
         # WebSearch/WebFetch. The gate entry is added on top only when
         # include_gate=True (see test_with_gate).
         assert "PreToolUse" in defs
-        assert len(defs["PreToolUse"]) == 1
+        # 4.2.30: before_web, then the tool cue.
+        assert len(defs["PreToolUse"]) == 2
         assert defs["PreToolUse"][0]["matcher"] == "WebSearch|WebFetch"
+        assert "hook cue" in defs["PreToolUse"][1]["hooks"][0]["command"]
 
     def test_with_gate(self):
         defs = hooks_mod._hook_definitions(include_gate=True)
@@ -142,21 +144,24 @@ class TestHookDefinitions:
         # PreToolUse entries:
         #   [0] gate (matcher _GATED_TOOLS)
         #   [1] before_web (matcher WebSearch|WebFetch)
-        assert len(defs["PreToolUse"]) == 2
+        #   [2] cue (4.2.30)
+        assert len(defs["PreToolUse"]) == 3
         # PostToolUse entries:
         #   [0] init-done (matcher mcp__superlocalmemory__session_init)
         #   [1] checkpoint (matcher Write|Edit)
         #   [2] post_tool_outcome (LLD-09 Track A.2 — all gated tools)
-        assert len(defs["PostToolUse"]) == 3
+        #   [3] cue (4.2.30)
+        assert len(defs["PostToolUse"]) == 4
 
     def test_default_userpromptsubmit_includes_topic_shift(self):
         """v3.4.43: UserPromptSubmit should fire user_prompt_rehash AND topic_shift."""
         defs = hooks_mod._hook_definitions(include_gate=False)
         ups = defs["UserPromptSubmit"]
-        assert len(ups) == 2
+        assert len(ups) == 3  # 4.2.30 adds auto_recall
         cmds = [m["hooks"][0]["command"] for m in ups]
         assert any("user_prompt_rehash" in c for c in cmds)
         assert any("topic_shift" in c for c in cmds)
+        assert any("auto_recall" in c for c in cmds)
 
     def test_default_pretooluse_includes_before_web(self):
         """v3.4.43: PreToolUse should include before_web for WebSearch/WebFetch."""
@@ -216,7 +221,7 @@ class TestHookDefinitions:
         # The gate-specific entry (matcher _GATED_TOOLS) is NOT added unless
         # include_gate=True. Verify only the before_web entry is present.
         assert "PreToolUse" in defs
-        assert len(defs["PreToolUse"]) == 1
+        assert len(defs["PreToolUse"]) == 2  # before_web + the 4.2.30 cue
         assert defs["PreToolUse"][0]["matcher"] == "WebSearch|WebFetch"
 
 
@@ -545,9 +550,10 @@ class TestAutoInstallIfNeeded:
         assert result["gate_enabled"] is False
         data = _read_settings(settings_path)
         pre = data.get("hooks", {}).get("PreToolUse", [])
-        # Exactly 1 entry (pre-web recall), no gate.
-        assert len(pre) == 1
+        # Pre-web recall and the 4.2.30 cue, no gate.
+        assert len(pre) == 2
         assert pre[0]["matcher"] == "WebSearch|WebFetch"
+        assert all("session_init first" not in json.dumps(e) for e in pre)
 
     def test_auto_install_clears_disabled_on_install(self, disabled_file):
         """install_hooks clears .hooks-disabled, but auto_install never
@@ -748,10 +754,12 @@ class TestEdgeCases:
 
         post = result["hooks"]["PostToolUse"]
         commands = [e["hooks"][0]["command"] for e in post]
-        # non-SLM preserved in order, SLM old replaced by new at end
+        # 4.2.30: replacement in place. The user's entries keep their order and
+        # the SLM entries stand where the old SLM entry stood.
         assert commands[0] == "eslint $FILE"
-        assert commands[1] == "black $FILE"
-        assert "slm hook" in commands[2]
+        assert "slm hook checkpoint" in commands[1]
+        assert commands[-1] == "black $FILE"
+        assert sum("slm hook" in c for c in commands) == 3
 
     def test_settings_json_pretty_formatted(self, settings_path):
         """settings.json should be pretty-printed (indent=2)."""

@@ -152,6 +152,10 @@ class RememberRequest:
     #: What this save retires once committed (``remember(..., replaces=)``).
     #: Journaled with the save so a deferred or replayed commit applies it.
     replaces: str = ""
+    #: Who and which door, when this save declared a rule or decision and should be promoted
+    #: once committed (``trust/declared_promotion``). Journaled with the save, like ``replaces``.
+    promote_by: str = ""
+    promote_channel: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.content, str) or not self.content.strip():
@@ -193,6 +197,9 @@ class RememberRequest:
             # Only when set: every request hash journaled before this field
             # existed is unchanged, so retries across an upgrade still match.
             payload["replaces"] = self.replaces
+        if self.promote_by and self.promote_channel:  # same rule: older hashes are unchanged
+            payload["promote_by"] = self.promote_by
+            payload["promote_channel"] = self.promote_channel
         return payload
 
     @classmethod
@@ -211,6 +218,8 @@ class RememberRequest:
             speaker=str(payload.get("speaker") or ""),
             role=str(payload.get("role") or "user"),
             replaces=str(payload.get("replaces") or ""),
+            promote_by=str(payload.get("promote_by") or ""),
+            promote_channel=str(payload.get("promote_channel") or ""),
         )
 
 

@@ -36,6 +36,9 @@ ROUTABLE_MUTATIONS: frozenset[CommandKind] = frozenset({
     CommandKind.DELETE_FACT,
     CommandKind.PROPOSE_CORRECTION,
     CommandKind.SET_FACT_KIND,
+    # 4.2.30: the promotion a save declared as a rule or decision carries, for POST /remember
+    # with a ``profile_id`` (the save and its promotion go to the same profile).
+    CommandKind.PROMOTE_DECLARED,
 })
 
 

@@ -42,3 +42,21 @@ This project is indexed by GitNexus as **superlocalmemory** (41723 symbols, 8026
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## SuperLocalMemory 4.2.30 commands
+
+```bash
+slm flags                        # every 4.2.30 flag and its state; `slm flags set <flag> on|shadow|off`; `slm flags kill on` switches every 4.2.30 subsystem off at once
+slm disputes list                # open disputes and changed source files; `settle`, `reopen`, `still-true`
+slm audit --list --json          # blind audit questions to label with your own model id (`--answer ITEM_ID LABEL --model ID`)
+slm proposals list               # proposed memory changes; `show`, `apply`, `reject`, `rollback`
+slm wiki status                  # compiled pages and edits waiting; `diff`, `build`, `rebuild`, `sync`, `dir`
+slm import preview FILE          # what a file holds, nothing saved; `run`, `status`, `list`, `cancel`, `undo`
+slm trust pending                # memories held back from becoming instructions; `promote`, `withdraw`, `status`
+slm why FACT_ID --json           # where a memory came from and when agents were shown it; read-only
+slm signing status               # is signing available; `resign` signs again what a lost key signed
+slm measurement status --json    # what SLM measures about whether memory helps; `on` and `off` only when the user asks
+slm cues list --json             # the cues that bring memories back, with the memory each belongs to
+```
+
+Run `slm <command> --help` for the exact options.

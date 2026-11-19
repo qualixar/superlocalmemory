@@ -112,6 +112,8 @@ class CommandKind(StrEnum):
     SET_FACT_SCOPE = "set_fact_scope"
     SET_FACT_KIND = "set_fact_kind"
     REPLACE_BY_CALLER = "replace_by_caller"
+    #: A save declared as a rule or decision promotes its facts (``trust/declared_promotion``).
+    PROMOTE_DECLARED = "promote_declared"
 
 
 JsonValue = None | bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]

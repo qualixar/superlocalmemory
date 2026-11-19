@@ -101,6 +101,7 @@ def _read(path: Path) -> dict[str, Any]:
 
 
 def _write_atomic(path: Path, data: dict[str, Any]) -> None:
+    path = path.resolve()  # a symlinked hooks.json keeps its link
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".slm_tmp")
     try:
@@ -118,29 +119,54 @@ def _backup_once(path: Path) -> None:
         backup.write_bytes(path.read_bytes())
 
 
+def merged_hooks_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Return ``data`` with SLM's Codex hooks replaced and added, nothing else changed.
+
+    Replacement and addition only (4.2.30): an SLM-owned entry (found by its marker, or one
+    of the retired SLM commands) is swapped where it stood, so a changed timeout lands; a
+    missing one is added; user hooks, other keys and key order stay. Pure.
+    """
+    from superlocalmemory.hooks._hook_merge import replace_owned
+
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks.json 'hooks' field must be an object")
+    merged = dict(hooks)
+    for event, entries in hook_definitions().items():
+        existing = merged.get(event, [])
+        if not isinstance(existing, list):
+            raise ValueError(f"hooks.json '{event}' field must be a list")
+        merged[event] = replace_owned(existing, entries, _is_slm_command)
+    return {**data, "hooks": merged}
+
+
+def has_slm_entries(data: dict[str, Any]) -> bool:
+    """True when the file already holds an SLM-owned Codex hook (the user opted in)."""
+    from superlocalmemory.hooks._hook_merge import has_owned
+
+    hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+    return isinstance(hooks, dict) and any(
+        has_owned(entries, _is_slm_command) for entries in hooks.values())
+
+
 def install_hooks(*, hooks_path: Path = DEFAULT_HOOKS_PATH, dry_run: bool = False) -> dict[str, Any]:
-    """Merge portable SLM entries into Codex hooks.json without clobbering it."""
+    """Merge portable SLM entries into Codex hooks.json without clobbering it.
+
+    Replaces SLM-owned entries in place and adds missing ones; a file that already
+    holds the current entries is not rewritten (same bytes, same mtime).
+    """
     try:
         data = _read(hooks_path)
-        hooks = data.setdefault("hooks", {})
-        if not isinstance(hooks, dict):
-            raise ValueError("hooks.json 'hooks' field must be an object")
-        added: list[str] = []
-        for event, entries in hook_definitions().items():
-            existing = hooks.setdefault(event, [])
-            if not isinstance(existing, list):
-                raise ValueError(f"hooks.json '{event}' field must be a list")
-            # Retire only known obsolete SLM commands, including when they
-            # share a matcher group with unrelated user hooks.
-            retained, _ = _remove_owned_commands(existing)
-            hooks[event] = existing = retained
-            if not any(is_slm_hook_entry(entry) for entry in existing):
-                existing.extend(entries)
-                added.append(event)
-        if not dry_run:
+        merged = merged_hooks_data(data)
+        before = data.get("hooks", {})
+        added = [event for event, entries in merged["hooks"].items()
+                 if entries != before.get(event)]
+        changed = merged != data or not hooks_path.exists()
+        if changed and not dry_run:
             _backup_once(hooks_path)
-            _write_atomic(hooks_path, data)
-        return {"success": True, "hooks_added": added, "path": str(hooks_path), "dry_run": dry_run}
+            _write_atomic(hooks_path, merged)
+        return {"success": True, "hooks_added": added, "path": str(hooks_path),
+                "dry_run": dry_run, "changed": changed}
     except Exception as exc:
         return {"success": False, "errors": [f"Codex hooks update failed: {exc}"], "path": str(hooks_path)}
 
