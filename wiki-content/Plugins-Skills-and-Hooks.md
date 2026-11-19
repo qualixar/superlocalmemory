@@ -10,7 +10,7 @@ Install SLM first ([Installation](Installation)). The npm package carries every 
 |---|---|---|
 | Claude Code | `plugin/`, listed by `.claude-plugin/marketplace.json` | `claude plugin marketplace add qualixar/superlocalmemory`, then `claude plugin install superlocalmemory@qualixar` |
 | Cursor-format hosts (Grok Bot, Cursor) | `cursor-plugin/`, listed by `.cursor-plugin/marketplace.json` | Add the `qualixar` marketplace in the host's Plugins screen, then add `superlocalmemory`; in Cursor you can also copy `cursor-plugin/` to `~/.cursor/plugins/local/superlocalmemory` |
-| Codex | `codex-plugin/` | `slm connect codex`, then `slm codex install`; or `codex plugin marketplace add qualixar/superlocalmemory --ref main` and `codex plugin add superlocalmemory-codex@qualixar` |
+| Codex | `codex-plugin/` | `slm connect codex`, then `slm codex install`; or `codex plugin marketplace add qualixar/superlocalmemory --ref main` and `codex plugin add superlocalmemory-codex@qualixar`; to update, `codex plugin marketplace upgrade qualixar` first |
 | GitHub Copilot (VS Code) | `copilot-plugin/` | `slm connect vscode-copilot --here` from the project root, then copy `copilot-plugin/.github/` into your project's `.github/` |
 | Hermes | `hermes-plugin/` | `hermes plugins install 'https://github.com/qualixar/superlocalmemory.git#hermes-plugin'`, then `slm upgrade-hosts --host hermes --apply` |
 | Antigravity (`agy`) | `antigravity-plugin/` | `agy plugin install "$(npm root -g)/superlocalmemory/antigravity-plugin"` |

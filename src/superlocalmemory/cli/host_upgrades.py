@@ -264,7 +264,9 @@ def plugin_update_commands(host: str, version: str | None = None) -> list[str]:
     table = {
         "claude-code": ["claude plugin marketplace update qualixar",
                         "claude plugin update superlocalmemory@qualixar"],
+        # `add` keeps an existing snapshot as it was ("already added"); `upgrade` refreshes it.
         "codex": ["codex plugin marketplace add qualixar/superlocalmemory --ref main",
+                  "codex plugin marketplace upgrade qualixar",
                   "codex plugin add superlocalmemory-codex@qualixar"],
         "antigravity": ['agy plugin install "$(npm root -g)/superlocalmemory/antigravity-plugin"'],
         "muse": ['muse plugins install "$(npm root -g)/superlocalmemory/muse-plugin"',

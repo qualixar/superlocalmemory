@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
-from pathlib import Path
 
 import pytest
 
@@ -165,3 +164,16 @@ def test_slm_doctor_prints_the_host_hooks_and_plugin_host_rows(monkeypatch) -> N
     assert "Host hooks: SLM hooks are older in: Claude Code settings.json" in out
     assert "Fix: slm upgrade-hosts --host claude-code --apply" in out
     assert "Plugin hosts: muse: muse plugins install x" in out
+
+
+def test_codex_plugin_update_refreshes_the_marketplace_snapshot() -> None:
+    """`codex plugin marketplace add` leaves an existing snapshot as it was ("already
+    added"), so an upgrading user re-installed the old plugin (found on the author's Mac
+    after 4.2.30: the cache stayed at 4.2.19). `upgrade` refreshes the snapshot; `add`
+    first keeps the same commands working for someone who never added it."""
+    cmds = host_upgrades.plugin_update_commands("codex", "9.9.9")
+    assert cmds == [
+        "codex plugin marketplace add qualixar/superlocalmemory --ref main",
+        "codex plugin marketplace upgrade qualixar",
+        "codex plugin add superlocalmemory-codex@qualixar",
+    ]
