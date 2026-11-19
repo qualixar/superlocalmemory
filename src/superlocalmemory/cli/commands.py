@@ -4336,6 +4336,15 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             f"could not be measured: {_mh_exc}",
         )
 
+    try:  # 4.2.30: are SLM's own hooks current in the host files SLM maintains?
+        from superlocalmemory.cli.host_upgrades import host_hooks_finding, plugin_hosts_finding
+        _check("Host hooks", *host_hooks_finding())
+        _ph = plugin_hosts_finding()
+        if _ph is not None:
+            _check("Plugin hosts", *_ph)
+    except Exception as _hh_exc:  # noqa: BLE001 — a report must not break doctor
+        _check("Host hooks", "WARN", f"could not be checked: {_hh_exc}")
+
     from superlocalmemory.cli.doctor_mcp import connected_apps_finding
     _check("Connected MCP apps", *connected_apps_finding())
 
@@ -4346,15 +4355,6 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             _check("Hermes plugin access", _hermes[0], _hermes[1], fix=_hermes[2])
     except Exception as _hp_exc:  # noqa: BLE001 — a report must not break doctor
         _check("Hermes plugin access", "WARN", f"could not be checked: {_hp_exc}")
-
-    try:  # 4.2.30: are SLM's own hooks current in the host files SLM maintains?
-        from superlocalmemory.cli.host_upgrades import host_hooks_finding, plugin_hosts_finding
-        _check("Host hooks", *host_hooks_finding())
-        _ph = plugin_hosts_finding()
-        if _ph is not None:
-            _check("Plugin hosts", *_ph)
-    except Exception as _hh_exc:  # noqa: BLE001 — a report must not break doctor
-        _check("Host hooks", "WARN", f"could not be checked: {_hh_exc}")
 
     refile_data = None
     if getattr(args, "refile_hidden", False):
