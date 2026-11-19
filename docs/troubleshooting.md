@@ -227,6 +227,17 @@ slm restart
 Schema migrations are additive and forward-only: there is no rollback command. To go back,
 restore the restore point (`slm db restore <point_id>`) or a verified complete backup.
 
+### `slm doctor` reports failed saves
+
+A save moves from queryable to complete in the background. When a step fails five times, the save goes to the failed list, which `slm doctor` counts as "Failed saves" and `slm ops list` shows with its error. The memory itself is still saved and found by recall; what failed is the background enrichment.
+
+Before 4.2.30 two errors on that list could never clear, however often you retried them (GitHub issue #325):
+
+- `incomplete derivation stages: embeddings`: the save's embeddings were written a moment after the save, and a retry never looked again.
+- `external projection facts are missing`: one of the save's memories was archived later and was counted as lost.
+
+From 4.2.30 a retry clears both, and you do not need to run anything. After the upgrade, SLM retries these saves by itself in the background: up to 20 every five minutes, each one once per version, and never while the kill switch is on. To retry one at once, run `slm ops resolve <id> --action retry`. A save whose memory is really gone, or sits in another profile, stays on the list, because that is a real fault worth a look.
+
 ### "Database is locked"
 
 Close all IDE sessions that might be accessing SLM, then retry:

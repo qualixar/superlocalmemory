@@ -31,6 +31,8 @@
 
 **Agents forget everything between sessions. The usual fix — a vector store with a save button — makes it worse:** it always returns *something*, even when nothing it holds answers the question, and your agent builds on it. This is a memory **brain**, not a bucket: it understands what was saved (who, what, when, which project), keeps it true over time, governs who may see it, and refuses to bluff. Four arXiv papers describe how it works.
 
+SuperLocalMemory is long-term memory for AI agents and an MCP memory server that runs on your own computer. Its hooks hand your agent the right memories before each prompt, at session start and right before the step a memory is about, and it keeps learning from what your agents actually use. Bring your history along from ChatGPT, Claude, Mem0, Letta or your `AGENTS.md` and `CLAUDE.md` files, and undo the whole import with one click if you change your mind.
+
 In Mode A, core remember and recall make no model-provider call: no API key, no cloud account, no Docker. Anything that sends data out is a choice you make, and the docs say exactly what goes.
 
 ## Install
@@ -103,6 +105,23 @@ $ slm recall "which port does staging postgres use"
 ```
 
 Real output from a fresh Mode A install, trimmed. Scores rank memories; they are not probabilities.
+
+## New in 4.2.30
+
+Everything below is on by default, each part has its own off switch (`slm flags`), and one kill switch, `slm flags kill on`, turns all of it off without a downgrade. [Full release notes](https://github.com/qualixar/superlocalmemory/blob/main/CHANGELOG.md)
+
+- **Memory before every prompt.** A per-prompt hook asks memory before your agent answers, but only when the prompt needs it: greetings, arithmetic and slash commands are skipped, and a memory the conversation already has is never repeated.
+- **Cues.** Save a memory with a file pattern, a command, an error text, a repository or a date, and it comes back right before or after that step. Editing a file that memories came from warns that they may be out of date.
+- **Faster, and it says why.** On a real 45,295-memory store, an agent's recall took a median of 0.98 s against 2.2 to 2.4 s on 4.2.19, and the per-prompt hook 0.53 s. Every result says which channels found it, whether it was judged supported, and whether it is current, disputed or from a file that changed.
+- **Disputes instead of silent overwrites.** When two memories give different values for the same thing, recall shows both sides, newest first, until an agent or you settle it.
+- **Import from other apps.** ChatGPT and Claude exports, Mem0, Letta `.af` files and plain Markdown: preview first, run in the background, undo the whole run at once.
+- **A living wiki.** `slm wiki` writes Markdown pages in which every sentence is quoted from a memory it cites; your edits come back as proposals, never as silent writes.
+- **Where every memory came from.** Each memory records how it arrived, from your own words down to a model's rewrite. A minimal instruction firewall stops text from a web page, tool output or an import from becoming a pinned rule by itself. It hides nothing: every memory still reaches recall, session start and learning.
+- **Agents decide, and every decision can be undone.** Settling a dispute, an import, an applied proposal: each is recorded with who, which channel and when, and the dashboard lists them with an Undo button.
+- **Judges that earn trust.** Questions such as "are these two memories duplicates" go to rules, then Laya on your Mac, then Jev online (only after your consent). A judge acts only once blind audit labels support it at a stated error rate.
+- **Does memory help? Measured.** SLM keeps receipts (ids and scores, never text) of what it gave your agents and reports with confidence intervals whether memories helped: `slm health --memory`. All of it stays on your computer, and `slm measurement off` stops it.
+- **Safer by default.** Credentials in saved text are replaced with a typed placeholder before storage, and memories are signed with a key from your operating system's keychain to detect tampering by a synced copy or disk image.
+- **Pictures and documents set themselves up** on computers with 16 GB of memory or more, one download at a time and never under memory pressure; one click on smaller ones.
 
 ## Why SuperLocalMemory: twelve superpowers
 
@@ -210,6 +229,10 @@ Restart the app after adding SuperLocalMemory. Then ask it something like *"What
 | **Corrections** | `--replaces` retires an old fact, kept and undoable; edits go through reviewed corrections with rollback | [Corrections](https://github.com/qualixar/superlocalmemory/blob/main/docs/reviewed-corrections.md) |
 | **Summaries and saved views** | Session, day and project summaries that cite their memory ids; saved views like "what did I ship this week" | [Recall](https://github.com/qualixar/superlocalmemory/blob/main/docs/recall.md#summaries) |
 | **Prompt-injection defence** | Recalled text is treated as untrusted evidence: secrets redacted, forged markers neutralised, provenance attached | [Security](https://github.com/qualixar/superlocalmemory/blob/main/SECURITY.md) |
+| **Memory before every prompt** | A hook asks memory before the agent answers, only when the prompt needs it; the skip threshold is set from your own prompts so that at most 10% of those that needed memory are skipped | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#memory-on-every-prompt-and-reminders-on-cues) |
+| **Cues** | `slm remember --cue` ties a memory to a file pattern, command, error, repository or date; it returns right before or after that step, at most once per conversation | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#memory-on-every-prompt-and-reminders-on-cues) |
+| **Why it came back** | Every result names the channels that found it, the answer check's verdict, and whether it is current, disputed or from a file that changed since | [Recall](https://github.com/qualixar/superlocalmemory/blob/main/docs/recall.md) |
+| **Disputes** | Two memories that disagree about one thing are shown side by side until settled (`slm disputes`, MCP `settle_dispute`, the dashboard); a settled dispute can be rolled back | [CLI](https://github.com/qualixar/superlocalmemory/blob/main/docs/cli-reference.md) |
 
 ### The answer check: Laya and Jev
 
@@ -244,6 +267,7 @@ The verdict is one input to the support decision, with its own time budget, and 
 | **Document health check** | Finds pages with no readable text, documents linked to nothing, duplicate pages and documents whose facts were contradicted | [Pictures and documents](https://github.com/qualixar/superlocalmemory/blob/main/docs/pictures-and-documents.md) |
 | **Folders and Obsidian vaults** | `slm sources add ~/Notes --kind obsidian` mirrors Markdown, canvas files, PDFs and images into memory, read-only, after showing what it would read | [CLI](https://github.com/qualixar/superlocalmemory/blob/main/docs/cli-reference.md) |
 | **From ChatGPT and your phone** | Attach a file in ChatGPT, or ask any connected web app for a one-time upload link that streams the file straight to your computer | [Web access](https://github.com/qualixar/superlocalmemory/blob/main/docs/remote-access/hosts.md) |
+| **Import from other memory apps** | ChatGPT and Claude exports, Mem0, Letta `.af` files, OKF folders and Markdown such as `AGENTS.md`: preview, a cancellable background run, and one Undo for the whole run. Imports never overwrite what you saved; a contradiction opens a dispute | [Importing](https://github.com/qualixar/superlocalmemory/blob/main/docs/importing.md) |
 | **Your data stays yours** | Pictures live in their own store and never leave your computer; erasing a memory erases its picture. Set up by itself on 16 GB of memory or more, one click on a smaller computer | [Compliance](https://github.com/qualixar/superlocalmemory/blob/main/docs/compliance.md) |
 
 ### Memory health
@@ -254,6 +278,8 @@ The verdict is one input to the support decision, with its own time budget, and 
 | **Fix and Undo** | Repairs that move or delete anything — junk entity links, hidden memories still in use, saves that didn't finish — wait for your **Fix**; every run can be undone | [Memory health](https://github.com/qualixar/superlocalmemory/blob/main/docs/memory-health.md) |
 | **Stub badge** | Receipts and session boilerplate stay listed with a **stub** badge but never become answers | [Memory health](https://github.com/qualixar/superlocalmemory/blob/main/docs/memory-health.md) |
 | **Store health** | `slm doctor` shows how findable and described your memories are; `slm db integrity` and `slm db repair` (with undo) keep the store sound | [Troubleshooting](https://github.com/qualixar/superlocalmemory/blob/main/docs/troubleshooting.md) |
+| **Does memory help?** | `slm health --memory` reports how often each memory is used and the measured effect of giving it to an agent, with confidence intervals and at least 20 sessions per arm before any claim | [What SLM measures](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#what-slm-measures) |
+| **Saves that heal themselves** | A save that failed for a reason a newer version fixes is retried in the background, a few at a time, once per version | [Troubleshooting](https://github.com/qualixar/superlocalmemory/blob/main/docs/troubleshooting.md#slm-doctor-reports-failed-saves) |
 
 ### The living brain
 
@@ -261,9 +287,22 @@ The verdict is one input to the support decision, with its own time budget, and 
 |---|---|---|
 | **Knowledge graph** | People, projects and tools resolved from your memories, with aliases, scenes and timelines; the Entity Explorer shows how what you know changed | [Architecture](https://github.com/qualixar/superlocalmemory/blob/main/docs/ARCHITECTURE.md) |
 | **Code graph** | Index a repository, then ask for blast radius, callers and code search by meaning | [MCP tools](https://github.com/qualixar/superlocalmemory/blob/main/docs/mcp-tools.md) |
+| **Living wiki** | `slm wiki` compiles pages on the current state, a family of decisions or a topic; every sentence quotes a memory it cites and is re-checked on every read, and your edits come back as proposals | [Living wiki](https://github.com/qualixar/superlocalmemory/blob/main/docs/living-wiki.md) |
 | **Forgetting that helps** | An Ebbinghaus retention cycle and Langevin lifecycle move neglected memories toward archive; fading memories are quantized to fewer bits and folded into one gist | [Research](#research) |
 | **Learning to rank (opt-in)** | A bandit and a learning-to-rank model learn from outcomes; a new ranker is promoted only on a statistically valid win and rolled back automatically if it gets worse | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md) |
 | **Soft prompts and skill evolution (opt-in)** | Stable behaviour patterns become soft prompts for new sessions; agent skills are measured and revised under blind verification | [Skill evolution](https://github.com/qualixar/superlocalmemory/blob/main/docs/skill-evolution.md) |
+
+### Trust, decisions and the kill switch
+
+| Control | What it does | Docs |
+|---|---|---|
+| **Where a memory came from** | Every memory is classed by how it arrived, from your own words to a model's rewrite; `slm why FACT_ID` shows its origin, signature, disputes and the last times an agent was shown it | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#where-a-memory-came-from-and-what-may-replace-it-trusttaint) |
+| **Minimal instruction firewall** | Text from a web page, tool output, another agent or an import cannot by itself become a pinned rule or core block until one recorded promotion. Nothing is hidden from recall or learning | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#the-instruction-firewall-trusttaint-on) |
+| **Secret screen** | Anything shaped like a credential is replaced with a typed placeholder such as `[REDACTED:GITHUB:ab12]` before it is stored | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md) |
+| **Signed memories** | Each memory is signed with a key from the operating system's keychain; `slm doctor --truth` names any memory changed outside SLM | [Signed memories](https://github.com/qualixar/superlocalmemory/blob/main/docs/signed-memories.md) |
+| **Judges and audits** | Rules, then Laya, then Jev answer typed questions about memories; a judge acts only after blind audit labels support it (73 clean labels before it may retire anything) | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md) |
+| **Decision log with Undo** | Every decision by an agent or a person is recorded with who, channel and time, and listed on the dashboard with Undo | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md) |
+| **Kill switch** | `slm flags kill on` stops every 4.2.30 pass and makes reads behave as before, without a downgrade | [Configuration](https://github.com/qualixar/superlocalmemory/blob/main/docs/configuration.md#the-kill-switch-d-23) |
 
 ### Governance and compliance
 
@@ -353,6 +392,7 @@ Nothing leaves your computer unless you turn on a feature that sends it, and eac
 | What leaves | Only when |
 |---|---|
 | A question and the top three memories | You turn on Jev, the online answer check, and tick its consent |
+| A pair of memories, one pair per request | The judges may ask Jev about duplicates or replacements, only after you run `slm consent give judge_ladder_hosted` yourself |
 | Memory text | You choose Mode C, a cloud embedder or reranker, a model on another computer, or Jev kind typing (its own consent) |
 | Encrypted backup files | You connect GitHub or Google Drive backup |
 | Mesh messages | You configure mesh peers, or allow a web app to message your bots |
@@ -360,7 +400,7 @@ Nothing leaves your computer unless you turn on a feature that sends it, and eac
 
 Pictures, documents, Laya and Mode A never send anything. Secrets in memory text are redacted on every outbound path.
 
-**What SLM measures.** To find out whether memory really helps your agents, SLM keeps a receipt on your computer each time it hands them memories: ids, rank, score and the logged chance of each choice, never your text, and SLM sends none of it anywhere. By default, in about 1 in 10 session starts it leaves one memory out at random (never pinned or standing rules, core blocks, explicit recall, cues or lease warnings), and in about 1 in 20 of an agent's recalls it swaps two neighbouring results. Turn the withholding and swapping off with `slm measurement off` or in the dashboard under Settings, "Help SLM measure what works"; `slm measurement status` shows the details. [Security policy](https://github.com/qualixar/superlocalmemory/blob/main/SECURITY.md)
+**What SLM measures.** To find out whether memory really helps your agents, SLM keeps a receipt on your computer each time it hands them memories: ids, rank, score and the logged chance of each choice, never your text, and SLM sends none of it anywhere. By default, in about 1 in 10 session starts it leaves one memory out at random (never pinned or standing rules, core blocks, explicit recall, cues or lease warnings), and in about 1 in 20 of an agent's recalls it swaps two neighbouring results. Turn the withholding and swapping off with `slm measurement off` or in the dashboard under Settings, "Help SLM measure what works"; `slm measurement off --receipts` stops the receipts too, and `slm measurement status` shows the details. [Security policy](https://github.com/qualixar/superlocalmemory/blob/main/SECURITY.md)
 
 ## Benchmarks
 
@@ -399,7 +439,7 @@ slm restart && slm doctor
 slm upgrade-hosts                 # preview plugin and IDE updates; nothing changes until you --apply
 ```
 
-Upgrades never move or delete memory, and a store update takes a restore point first. [Host upgrades](https://github.com/qualixar/superlocalmemory/blob/main/docs/host-upgrades.md)
+Upgrades never move or delete memory. Store migrations run by themselves the first time the new version starts, after a verified restore point: on a copy of a 45,286-memory store the 4.2.30 upgrade took about 37 seconds, 35 of them the safety copy. New hooks reach your agents by themselves too: SLM replaces only its own entries in a hooks file, adds the missing ones, keeps every other hook and setting exactly as it was, and writes a backup first. Where the SLM plugin carries the hooks, your settings file is not touched. `SLM_NO_HOOK_UPGRADE=1` turns that step off, and `slm db prepare-downgrade` prepares the store before going back to an older version. [Host upgrades](https://github.com/qualixar/superlocalmemory/blob/main/docs/host-upgrades.md)
 
 ## Platform support
 
