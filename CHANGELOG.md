@@ -5,6 +5,17 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.31] — Hooks that fit their time limits and find SLM's tools
+
+A small release of three fixes found on a real Mac the day after 4.2.30. Nothing changes in the store, and there is nothing to run.
+
+### Fixed
+
+- The memory check before a web search no longer times out. Claude Code stops a hook after 5 seconds, and this one could take 6: it waited up to 3 seconds for SLM's fast recall, then ran a second, slower recall with its own 3 seconds. In one day of Claude Code sessions it was 42 of 50 hook timeouts, each shown as a hook failure notice. The whole hook now ends within 4 seconds, and the slower recall runs only when the fast one cannot answer. Measured on a 45,000-memory store, it now takes 1.3 to 2.8 seconds.
+- The same hook no longer replaces "nothing relevant" with weak matches. The fast recall shows only memories the answer check supports, as the per-prompt hook does; when it found nothing relevant, the hook used to run the slower recall and add up to 3,000 characters of loosely related memories to the agent's context. That answer now stands.
+- SLM's hints work when SLM comes from the Claude Code plugin. There its tools are named `mcp__plugin_superlocalmemory_superlocalmemory__<tool>`, but the session-start hint asked for `mcp__superlocalmemory__session_init` by exact name, which a plugin-only install does not have, so the agent could not load the tool. The hints now search for `superlocalmemory session_init`, which finds it under either name, and the optional session gate lets both names through.
+- `slm doctor` and `slm upgrade-hosts` print a Codex plugin update that works. `codex plugin marketplace add` keeps an existing copy of the marketplace, so on its own it installed the old plugin again; the commands now include `codex plugin marketplace upgrade qualixar`.
+
 ## [4.2.30] — Measurement, a trust layer, disputes and imports
 
 This release adds a way to measure whether memory helps the agents that use it, a layer that records where each memory came from, disputes between memories that say different things, a judge ladder with audits, a living wiki, importing from other apps, picture and document models that set themselves up, and one kill switch that turns all of it off. Everything new is on by default.

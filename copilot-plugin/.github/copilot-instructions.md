@@ -1,7 +1,7 @@
 <!-- SLM-START -->
-<!-- SuperLocalMemory v4.2.30 — managed block. Edit outside these markers; this section is regenerated. -->
+<!-- SuperLocalMemory v4.2.31 — managed block. Edit outside these markers; this section is regenerated. -->
 
-<!-- BEGIN SuperLocalMemory v4.2.30 -->
+<!-- BEGIN SuperLocalMemory v4.2.31 -->
 
 ## SuperLocalMemory (SLM) — Agent Rules
 
@@ -63,8 +63,8 @@ slm-recall · slm-remember · slm-session · slm-status · slm-cache · slm-comp
 ### Subagents
 slm-memory-advisor (memory decisions, session hygiene, scope/profile guidance) · slm-optimize-advisor (context compression + KV cache) · slm-governance-advisor (scope/roles/compliance/GDPR) · slm-loop-runner (bounded, gate-verified loops)
 
-<!-- END SuperLocalMemory v4.2.30 -->
+<!-- END SuperLocalMemory v4.2.31 -->
 
-SuperLocalMemory v4.2.30 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.31 · Qualixar · AGPL-3.0-or-later
 
 <!-- SLM-END -->
