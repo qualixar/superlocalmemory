@@ -132,6 +132,33 @@ def _upgrade_file(
 
 # -- the two hosts --------------------------------------------------------------------------
 
+_PLUGIN_PREFIX = "superlocalmemory@"
+
+
+def claude_plugin_present(settings_path: Path) -> bool:
+    """True when SLM's Claude Code plugin is enabled in this settings file or installed beside it.
+
+    Reads only: ``enabledPlugins`` in the same file, then ``plugins/installed_plugins.json`` in the
+    same Claude folder. An unreadable file answers False here (the merge path then reads it again
+    and reports its own error).
+    """
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        enabled = settings.get("enabledPlugins") if isinstance(settings, dict) else None
+        if isinstance(enabled, dict) and any(
+                str(k).startswith(_PLUGIN_PREFIX) and v for k, v in enabled.items()):
+            return True
+    except (OSError, ValueError):
+        pass
+    try:
+        listed = json.loads((settings_path.parent / "plugins" / "installed_plugins.json")
+                            .read_text(encoding="utf-8"))
+        plugins = listed.get("plugins", listed) if isinstance(listed, dict) else {}
+        return isinstance(plugins, dict) and any(str(k).startswith(_PLUGIN_PREFIX) for k in plugins)
+    except (OSError, ValueError):
+        return False
+
+
 def upgrade_claude_settings(path: Path | None = None, *, version: str, apply: bool = True) -> Result:
     """Claude Code ``settings.json``: SLM entries replaced and added, the rest untouched."""
     from superlocalmemory.hooks import claude_code_hooks as claude
@@ -139,6 +166,12 @@ def upgrade_claude_settings(path: Path | None = None, *, version: str, apply: bo
     target = path or claude.CLAUDE_SETTINGS
     if claude._disabled_file().exists():
         return _result("skipped", "hooks were removed with `slm hooks remove`", target)
+    if claude_plugin_present(target):
+        # Found on the owner's Mac, 19 Nov 2026: a leftover `slm session close` entry made the
+        # file count as SLM-installed and the full set was added beside the plugin's own hooks,
+        # so every SLM hook would have run twice. With the plugin, the plugin owns SLM's hooks.
+        return _result("plugin-managed", "SLM's hooks come from the Claude Code plugin; "
+                       "settings.json left untouched", target)
 
     def merge(settings: dict) -> dict:
         return claude._merge_hooks(

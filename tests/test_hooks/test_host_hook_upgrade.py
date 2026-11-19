@@ -507,3 +507,56 @@ def test_the_daemon_starts_and_stops_the_task() -> None:
     for module in ("hook_handlers", "auto_recall_hook", "cue_hook"):
         text = (ROOT / "src" / "superlocalmemory" / "hooks" / f"{module}.py").read_text()
         assert "host_hook_upgrade" not in text, module
+
+
+# -- the Claude Code plugin owns SLM's hooks (found on the owner's Mac, 19 Nov 2026) ----------
+
+def _owner_like_settings(tmp_path, *, enabled: bool):
+    import json as _json
+
+    settings = {
+        "enabledPlugins": {"superlocalmemory@qualixar": True} if enabled else {},
+        "hooks": {
+            "Stop": [{"hooks": [{"type": "command", "command": "slm session close 2>/dev/null || true"}]}],
+            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "my-own-guard.sh"}]}],
+            "PostToolUse": [],
+        },
+    }
+    path = tmp_path / "settings.json"
+    path.write_text(_json.dumps(settings, indent=2), encoding="utf-8")
+    return path
+
+
+def test_with_the_slm_plugin_enabled_settings_json_is_left_exactly_as_it_was(tmp_path):
+    from superlocalmemory.hooks import host_hook_upgrade as up
+
+    path = _owner_like_settings(tmp_path, enabled=True)
+    before = path.read_bytes()
+    res = up.upgrade_claude_settings(path, version="4.2.30")
+    assert res["status"] == "plugin-managed"
+    assert path.read_bytes() == before
+    assert not list(tmp_path.glob("settings.json.bak-slm-*"))
+
+
+def test_an_installed_plugin_listed_beside_the_settings_also_counts(tmp_path):
+    import json as _json
+
+    from superlocalmemory.hooks import host_hook_upgrade as up
+
+    path = _owner_like_settings(tmp_path, enabled=False)
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "installed_plugins.json").write_text(
+        _json.dumps({"version": 2, "plugins": {"superlocalmemory@qualixar": [{}]}}), encoding="utf-8")
+    before = path.read_bytes()
+    assert up.upgrade_claude_settings(path, version="4.2.30")["status"] == "plugin-managed"
+    assert path.read_bytes() == before
+
+
+def test_without_the_plugin_a_settings_install_is_still_upgraded(tmp_path):
+    from superlocalmemory.hooks import host_hook_upgrade as up
+
+    path = _owner_like_settings(tmp_path, enabled=False)
+    res = up.upgrade_claude_settings(path, version="4.2.30")
+    assert res["status"] == "updated"
+    text = path.read_text(encoding="utf-8")
+    assert "slm hook cue" in text and "my-own-guard.sh" in text
