@@ -60,8 +60,9 @@ slm update <fact_id> "<content>" --json   # Update a memory
 
 ### Pictures, documents and folders (4.1.25, optional)
 
-Off by default. Needs a computer with 16 GB of memory and downloads about 1.5 GB.
-Ask the user before turning it on.
+On a computer with 16 GB of memory or more, SLM sets it up by itself in the background
+when it is idle (about 3.9 GB of models, one at a time). On a smaller computer it is one
+click (`slm media enable`), with a note that it may be slow. A user's "off" is kept.
 
 ```bash
 slm media status --json                   # is it on, and how is set-up going

@@ -63,15 +63,15 @@ describe('Documents & Images pane', () => {
         assert.equal(h.calls.filter(c => c.url.startsWith('/api/v3/documents')).length, 0);
     });
 
-    it('off on a computer with under 16 GB: the message shows and Turn on is disabled', async () => {
-        const message = 'Images and documents need a computer with at least 16 GB of memory; this one has 8.0 GB. '
-            + 'Your text memories keep working.';
-        const h = setup({ on: false, offExtra: { ram_ok: false, ram_message: message } });
+    it('off on a computer with under 16 GB: the warning shows and Turn on works (one click, never refused)', async () => {
+        const message = 'This computer has 8.0 GB of memory; pictures and documents may be slow and the models '
+            + 'are released when memory runs low.';
+        const h = setup({ on: false, offExtra: { ram_ok: true, ram_message: '', mode: 'one_click', ram_warning: message } });
         await h.open();
         assert.ok(h.pane.textContent.includes(message));
         assert.match(h.pane.textContent, /Turn on images and documents/);
         const turnOn = Array.from(h.pane.querySelectorAll('button')).find(b => b.textContent === 'Turn on');
-        assert.equal(turnOn.disabled, true);
+        assert.equal(turnOn.disabled, false);
     });
 
     it('on: upload control, documents and lint are requested', async () => {

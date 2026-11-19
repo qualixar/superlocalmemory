@@ -6,6 +6,16 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _flags_the_old_default_assumed_off(monkeypatch):
+    """Two 4.2.30 flags are on by default now and change what these tests see: ``media.regions`` makes the
+    reader return page boxes (the fake readers here return none) and ``trust.secret_screen`` strips a key
+    from the words before they are queued. These tests are about the plain read and the stored words, so both
+    are set off explicitly; the tests of the regions and of the screen turn their own flag on."""
+    monkeypatch.setenv("SLM_FEATURE_MEDIA_REGIONS", "off")
+    monkeypatch.setenv("SLM_FEATURE_TRUST_SECRET_SCREEN", "off")
+
+
 @pytest.fixture(scope="session")
 def pdf_python(tmp_path_factory):
     """An interpreter with pypdfium2 and Pillow, for the real PDF tests.

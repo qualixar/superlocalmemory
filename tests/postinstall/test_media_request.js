@@ -208,10 +208,10 @@ test('the npm hook prints the what is new banner, from the shared module', () =>
   assert.equal(require(INSTALLER).printWhatsNew, media.printWhatsNew);
 });
 
-const REFUSAL_4 = 'Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. '
-  + 'Your text memories keep working.';
+const WARNING_4 = 'This computer has 4.0 GB of memory; pictures and documents may be slow and the models are '
+  + 'released when memory runs low.';
 
-test('a small machine is told once, is not asked, and nothing is recorded', async () => {
+test('a small machine is warned once, may be asked, and the request is recorded (one click, never refused)', async () => {
   const dir = tmp();
   const lines = [];
   let asked = 0;
@@ -219,22 +219,22 @@ test('a small machine is told once, is not asked, and nothing is recorded', asyn
     args: {}, env: {}, slmDir: dir, interactive: true, ask: async () => { asked += 1; return true; },
     log: (l) => lines.push(l), totalMem: 4 * GIB,
   });
-  assert.equal(ok, false);
-  assert.equal(asked, 0, 'a machine that will be refused is never asked');
-  assert.equal(lines.filter((l) => l.includes(REFUSAL_4)).length, 1);
-  assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+  assert.equal(ok, true);
+  assert.equal(asked, 1, 'a small machine is asked, not refused');
+  assert.equal(lines.filter((l) => l.includes(WARNING_4)).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
 });
 
-test('a flag or the environment on a small machine records nothing and says why', async () => {
+test('a flag or the environment on a small machine records the request and warns', async () => {
   const dir = tmp();
   const lines = [];
   const ok = await media.handleMediaChoice({
     args: { media: true }, env: { SLM_ENABLE_MEDIA: '1' }, slmDir: dir, interactive: false,
     log: (l) => lines.push(l), totalMem: 6 * GIB,
   });
-  assert.equal(ok, false);
-  assert.equal(lines.filter((l) => /at least 16 GB of memory; this one has 6\.0 GB/.test(l)).length, 1);
-  assert.equal(fs.existsSync(path.join(dir, 'features.json')), false);
+  assert.equal(ok, true);
+  assert.equal(lines.filter((l) => /This computer has 6\.0 GB of memory/.test(l)).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
 });
 
 test('a machine with enough memory is not refused, and nothing is shown when nobody asked', async () => {
@@ -252,7 +252,7 @@ test('a machine with enough memory is not refused, and nothing is shown when nob
   assert.deepEqual(quiet, []);
 });
 
-test('the developer override lets a small machine ask and record, with a warning', async () => {
+test('the developer override takes the automatic path: it records and shows no memory warning', async () => {
   const dir = tmp();
   const lines = [];
   const ok = await media.handleMediaChoice({
@@ -260,17 +260,18 @@ test('the developer override lets a small machine ask and record, with a warning
     log: (l) => lines.push(l), totalMem: 4 * GIB,
   });
   assert.equal(ok, true);
-  assert.ok(lines.some((l) => /SLM_MEDIA_ALLOW_LOW_RAM/.test(l)));
+  assert.ok(!lines.some((l) => /GB of memory/.test(l)));
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'features.json'), 'utf8')).media.requested, true);
 });
 
-test('ramRefusal mirrors the Python gate: 15 GiB threshold, unknown allowed, only "1" overrides', () => {
+test('ramRefusal never refuses; ramWarning mirrors the Python policy: 15 GiB threshold, unknown quiet, only "1" overrides', () => {
   assert.equal(media.MIN_RAM_BYTES, 15 * GIB);
-  assert.equal(media.ramRefusal(0, {}), '');
-  assert.equal(media.ramRefusal(15 * GIB, {}), '');
-  assert.equal(media.ramRefusal(Math.floor(15.6 * GIB), {}), '');
-  assert.equal(media.ramRefusal(15 * GIB - 1, {}).includes('at least 16 GB'), true);
-  assert.equal(media.ramRefusal(4 * GIB, {}), REFUSAL_4);
-  assert.equal(media.ramRefusal(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: '1' }), '');
-  assert.notEqual(media.ramRefusal(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: 'true' }), '');
+  assert.equal(media.ramRefusal(4 * GIB, {}), '');
+  assert.equal(media.ramWarning(0, {}), '');
+  assert.equal(media.ramWarning(15 * GIB, {}), '');
+  assert.equal(media.ramWarning(Math.floor(15.6 * GIB), {}), '');
+  assert.equal(media.ramWarning(15 * GIB - 1, {}).includes('pictures and documents may be slow'), true);
+  assert.equal(media.ramWarning(4 * GIB, {}), WARNING_4);
+  assert.equal(media.ramWarning(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: '1' }), '');
+  assert.notEqual(media.ramWarning(4 * GIB, { SLM_MEDIA_ALLOW_LOW_RAM: 'true' }), '');
 });

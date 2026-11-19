@@ -155,9 +155,10 @@ def test_a_changed_source_file_is_labelled(db, monkeypatch) -> None:
     assert "source file has changed" in memory["why"]["words"]
 
 
-def test_the_origin_is_named_only_while_the_origin_work_is_on(db, monkeypatch) -> None:
+def test_the_origin_is_named_only_while_the_origin_work_is_not_off(db, monkeypatch) -> None:
     fact = _fact(db, "From somewhere.")
     _deliver(db, fact, delivery="d1")
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")  # on by default; a person's own off
     assert _read(db)["groups"][0]["deliveries"][0]["memories"][0]["why"]["origin"] is None
     monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "shadow")
     memory = _read(db)["groups"][0]["deliveries"][0]["memories"][0]

@@ -1,6 +1,6 @@
 # Pictures and Documents
 
-SLM can remember screenshots, photos and PDFs and find them later by describing what they show: "the slide with the quarterly numbers", "the error dialog from the deploy". A picture model (Google's EmbeddingGemma 2) runs on your computer, OCR reads the text inside pictures, and each PDF page is indexed by both its picture and its text. No generative model looks at your files. The feature is off until you turn it on, and turning it on does not touch your existing memories or their embeddings: pictures and pages are added next to them, in their own database.
+SLM can remember screenshots, photos and PDFs and find them later by describing what they show: "the slide with the quarterly numbers", "the error dialog from the deploy". A picture model (Google's EmbeddingGemma 2) runs on your computer, OCR reads the text inside pictures, and each PDF page is indexed by both its picture and its text. No generative model looks at your files. The feature is on by default: on a computer with 16 GB of memory or more SLM sets it up by itself, a few minutes after it starts and when the computer is idle; on a smaller one you tap one button. Setting it up does not touch your existing memories or their embeddings: pictures and pages are added next to them, in their own database.
 
 Text keeps its own model, so turning this on never changes how your text is searched ([Embedding Models](Embedding-Models)).
 
@@ -10,12 +10,12 @@ Turn it on in the dashboard (**Documents & Images**), in the npm installer or up
 
 | | |
 |---|---|
-| Memory (RAM) | 16 GB minimum. Computers sold as 16 GB report a little less, so the check passes from 15 GiB. |
+| Memory (RAM) | 16 GB or more for the automatic set-up (computers sold as 16 GB report a little less, so it starts from 15 GiB); below that it is one click, with a warning. |
 | Disk | About 1.5 GB for the models, plus what you save (up to 2 GB per profile). |
 | Systems | macOS on Apple Silicon, Windows x64, Linux x86_64 and Linux ARM64 (aarch64) with a glibc such as Debian, Ubuntu or Fedora. Python 3.12, 3.13 or 3.14. |
 | Not supported | Windows on ARM and Intel Macs. Text memory works there as before. |
 
-Below 16 GB the switch is refused with the reason, because the picture model and a large PDF together can push a smaller machine into swapping. Your text memories keep working. If you accept that risk, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from and turn the feature on again; SLM logs a warning each time.
+Below 16 GB nothing downloads by itself and the switch is never refused: you tap one button and read "This computer has 8.0 GB of memory; pictures and documents may be slow and the models are released when memory runs low." The picture model and a large PDF together can push a smaller machine into swapping, which is why SLM gives the models back when memory runs low. A part you turn off (`slm media disable`, the dashboard switch) stays off: the automatic set-up never turns it on again. Developers can set `SLM_MEDIA_ALLOW_LOW_RAM=1` to take the automatic path on a small machine, and `SLM_NO_AUTO_DOWNLOAD=1` stops the automatic download.
 
 ## Saving a picture
 
@@ -139,7 +139,7 @@ A web app can save a picture or PDF in two ways. ChatGPT can hand over an attach
 | `slm media disable` | Turns it off; memories are kept (`--remove-files` also deletes the downloaded models) |
 | `slm media gc` | Reports picture records whose memory is gone, files with no record and pictures not yet linked; `--apply` fixes them. It never deletes a memory and only touches stored picture files |
 | `slm media repair` | Re-reads kept pictures into the current picture index, after a model change or a "can't be found by what it shows yet" message; `--dry-run` only counts them |
-| `slm media pack status`, `enable captions\|documents\|regions`, `disable ...` | The optional models: a short description of each picture (0.5 GB download), a larger model for scanned pages (1.9 GB) and "where text was found" (no download). Each is off until you turn it on, the size is shown first and nothing downloads without a yes; `enable` asks, `--yes` skips the question |
+| `slm media pack status`, `enable captions\|documents\|regions`, `disable ...` | The optional models: a short description of each picture (0.5 GB download), a larger model for scanned pages (1.9 GB) and "where text was found" (no download). Both models are on by default and download by themselves on 16 GB or more; below that `enable` is the one click (it shows the size and asks, `--yes` skips the question) and a part you disabled stays off |
 | `slm sources add PATH` | Connects a folder or Obsidian vault after a preview and your confirmation |
 | `slm sources list`, `report`, `rescan`, `remove` | Manage connected folders |
 
@@ -147,7 +147,7 @@ After `enable`, restart SLM (`slm restart`, or the dashboard button) so the pict
 
 ## Better pictures and documents (optional)
 
-Under **Documents & Images** the card **Better pictures and documents** has three switches, all off until you turn them on. **Describe pictures** writes a short description of each picture you save, on every system, and shows it under the line "Description written by a model" so you can tell it from your own words; a description that fails never stops the picture being saved. **Read scanned documents better** reads scanned pages with a larger model and falls back to the standard reader for any page it cannot read. **Remember where text was found** keeps the page and place the text came from, so a memory's **Why was this shown?** can say "from page 3, top left". The two models download only when you say yes, with the size shown first (0.5 GB and 1.9 GB), and each runs alone and is released a minute after its last use. Turning one off keeps your memories. Full guide: `docs/media-pack.md` in the repository.
+Under **Documents & Images** the card **Better pictures and documents** has three switches, all on by default. **Describe pictures** writes a short description of each picture you save, on every system, and shows it under the line "Description written by a model" so you can tell it from your own words; a description that fails never stops the picture being saved. **Read scanned documents better** reads scanned pages with a larger model and falls back to the standard reader for any page it cannot read. **Remember where text was found** keeps the page and place the text came from, so a memory's **Why was this shown?** can say "from page 3, top left". The two models download by themselves on a computer with 16 GB or more, one at a time (0.5 GB and 1.9 GB; below 16 GB you tap one button and the size is shown first), and each runs alone and is released a minute after its last use. Turning one off keeps your memories. Full guide: `docs/media-pack.md` in the repository.
 
 ## Exports and erasure
 

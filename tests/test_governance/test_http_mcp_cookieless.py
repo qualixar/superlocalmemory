@@ -20,6 +20,11 @@ def test_cookieless_personal_switch_has_connection_continuity(store, monkeypatch
 
     rbac, _ = store
     rbac.set_require_login(False)
+    # The MCP server caches one engine per process. An earlier test in the same worker can leave
+    # it on another workspace (or on another test's data folder), so start from a fresh one and
+    # leave none behind.
+    srv.reset_engine()
+    monkeypatch.setattr(srv, "_engine", None)
     engine = srv.get_engine()
     monkeypatch.setattr("superlocalmemory.cli.daemon.is_daemon_running", lambda: False)
     probe = SLMFastMCP("cookie-less owner")

@@ -8,7 +8,7 @@ SLM installs as a single `slm` command, either through npm (which gives it a pri
 |---|---|---|
 | Python | 3.12, 3.13 or 3.14 (`requires-python >=3.12,<3.15`) | `python3 --version` |
 | Node.js and npm | Node 18 or later and npm 9 or later, only for the npm route | `node --version` |
-| Memory | The wizard recommends 4 GB or more; images and documents need 16 GB | |
+| Memory | The wizard recommends 4 GB or more; images and documents set up by themselves from 16 GB (one click below) | |
 | Disk | About 500 MB for the embedding model and 130 MB for the reranker, both downloaded once | |
 
 On Apple Silicon, setup also installs the on-device answer check (about 1.1 GB) by default, in unattended runs too; opt out with `slm setup --no-laya` or `SLM_SKIP_LAYA=1`. Other optional downloads are asked about separately: a compression model (about 560 MB) and images and documents (about 1.5 GB, see [Pictures and Documents](Pictures-and-Documents)).
@@ -46,7 +46,7 @@ I am using. When you finish, run slm doctor and tell me in plain words what work
 
 ```bash
 curl -fsSLo get-slm.sh https://raw.githubusercontent.com/qualixar/superlocalmemory/main/scripts/get-slm.sh && sh get-slm.sh
-sh get-slm.sh --media      # the same, and also turn on pictures and documents (needs 16 GB RAM)
+sh get-slm.sh --media      # the same, and also turn on pictures and documents (automatic from 16 GB RAM, one click below)
 ```
 
 A Windows version of the script exists in the repository (`scripts/get-slm.ps1`), but the supported Windows routes are the agent prompt, npm and pip.

@@ -78,10 +78,13 @@ def test_the_pins_and_the_words_for_the_size():
     assert mp.CAPTIONS.native_class == "Florence2ForConditionalGeneration"
 
 
-def test_every_part_is_off_by_default_and_creates_nothing(root):
+def test_every_part_is_on_by_default_but_nothing_is_downloaded_or_created_by_reading(root):
     shown = mp.status_all(root, env=_Env(root / "runtimes" / "media"))
     assert [p["pack"] for p in shown] == ["captions", "documents", "regions"]
-    assert all(p["state"] == "off" and p["enabled"] is False for p in shown)
+    assert all(p["enabled"] is True for p in shown)          # the flags default to on (19 Nov)
+    models = [p for p in shown if p["pack"] != "regions"]
+    assert all(p["state"] == "off" and p["installed"] is False for p in models)  # no model, so nothing acts
+    assert not any(mp.is_active(p["pack"], root) for p in models)
     assert not any(root.iterdir())  # reading the state wrote and created nothing
 
 
@@ -128,7 +131,8 @@ def test_a_failed_download_leaves_the_flag_off_and_says_so_in_words(root, media_
     got = mp.enable("captions", data_root=root, env=media_on, model_source=Failing(), background=False)
     assert got["state"] == "failed" and "connection" in got["error"].lower()
     assert "10.0.0.9" not in json.dumps(got)  # the detail goes to the log, not to the person
-    assert not FeatureFlags(root).enabled("media.captions") and not mp.installed(mp.CAPTIONS, root)
+    assert not mp.installed(mp.CAPTIONS, root) and not mp.is_active("captions", root)  # the flag is on by default,
+    assert FeatureFlags(root).enabled("media.captions")  # but with no model nothing acts
 
 
 def test_a_download_that_raises_is_a_plain_failure(root, media_on):
@@ -173,13 +177,15 @@ def test_enable_is_refused_without_room_on_the_disk(root, media_on, monkeypatch)
     assert "free disk space" in got["refused"] and "GB" in got["refused"]
 
 
-def test_a_small_computer_is_refused_with_the_standard_words(root, media_on, monkeypatch):
+def test_a_small_computer_is_not_refused_and_the_status_carries_the_one_click_warning(root, media_on, monkeypatch,
+                                                                                      fake_model):
     monkeypatch.delenv("SLM_MEDIA_ALLOW_LOW_RAM")
     from superlocalmemory.runtimes import managed_env
 
     monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 8 * 1024 ** 3)
-    got = mp.enable("captions", data_root=root, env=media_on, model_source=_BoomSource(), background=False)
-    assert "16 GB" in got["refused"]
+    got = mp.enable("captions", data_root=root, env=media_on, model_source=fake_model, background=False)
+    assert "refused" not in got and got["installed"] and got["enabled"]
+    assert got["mode"] == "one_click" and got["warning"].startswith("This computer has 8.0 GB of memory")
 
 
 # -- turning off ------------------------------------------------------------------------

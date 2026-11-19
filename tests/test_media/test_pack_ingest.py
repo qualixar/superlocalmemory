@@ -32,9 +32,10 @@ BOXES = [{"text": "Invoice 42 total", "bbox": [0.05, 0.05, 0.45, 0.12]},
 def root(tmp_path, monkeypatch):
     r = tmp_path / "slm"
     monkeypatch.setenv("SLM_DATA_DIR", str(r))
-    for name in ("SLM_FEATURE_MEDIA_CAPTIONS", "SLM_FEATURE_MEDIA_REGIONS", "SLM_FEATURE_MEDIA_DOCUMENT_PACK",
-                 "SLM_4230_OFF"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("SLM_4230_OFF", raising=False)
+    # The parts are on by default; these tests start from a person's own "off" and turn on the part each is about.
+    for name in ("SLM_FEATURE_MEDIA_CAPTIONS", "SLM_FEATURE_MEDIA_REGIONS", "SLM_FEATURE_MEDIA_DOCUMENT_PACK"):
+        monkeypatch.setenv(name, "off")
     return r
 
 

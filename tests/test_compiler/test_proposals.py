@@ -178,7 +178,7 @@ def test_a_certificate_acts_only_while_auto_apply_is_on(store, conn) -> None:
     cert = _certificate(db)
     set_id = proposals.create_set(conn, profile_id=PROFILE, origin="dream",
                                   proposals=[_retire(ids)])
-    off = FeatureFlags(file_values={}, environ={})
+    off = FeatureFlags(file_values={"compiler.auto_apply": "off"}, environ={})  # a person's own off
     with pytest.raises(BasisRefused, match="compiler.auto_apply"):
         proposals.apply_set(conn, profile_id=PROFILE, set_id=set_id,
                             basis=Basis.certificate(cert), flags=off)

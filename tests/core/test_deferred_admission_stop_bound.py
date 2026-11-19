@@ -102,9 +102,12 @@ def test_stop_does_not_ride_out_the_unbounded_busy_wait(tmp_path: Path) -> None:
         blocker.rollback()
         blocker.close()
 
-    # The bookkeeping stamp must give up well inside its own short deadline,
-    # not ride out the writer's full unbounded busy window.
-    assert elapsed < _BOOKKEEPING_DEADLINE_SECONDS + 1.5, (
+    # The bookkeeping stamp must give up near its own short deadline, not ride
+    # out the writer's full unbounded busy window. One deadline here is about
+    # 2.2 s; a slow CI runner overshoots SQLite's busy-handler sleeps to about
+    # 3.9 s, so the slack is 2.5 s. The bug itself is caught by the assertion
+    # below (never as slow as the old unbounded wait).
+    assert elapsed < _BOOKKEEPING_DEADLINE_SECONDS + 2.5, (
         f"stop() took {elapsed:.2f}s -- still riding out the unbounded "
         f"({_UNBOUNDED_BUSY_SECONDS}s) busy wait"
     )

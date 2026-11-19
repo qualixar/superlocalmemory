@@ -211,11 +211,7 @@ def test_enable_refuses_cleanly_when_this_python_cannot_load_extensions(root, mo
     assert env.installs == 0
 
 
-# -- the 16 GB gate -----------------------------------------------------------------
-
-LOW_RAM_MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 8.0 GB. "
-                   "Your text memories keep working.")
-
+# -- a small computer is one click, never refused ---------------------------------
 
 @pytest.fixture()
 def small_machine(monkeypatch):
@@ -225,19 +221,29 @@ def small_machine(monkeypatch):
     monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 8 * 1024 ** 3)
 
 
-def test_enable_is_refused_below_16_gb_before_anything_is_written(root, small_machine):
+@needs_vec
+def test_enable_below_16_gb_is_the_one_click_path_and_is_not_refused(root, small_machine):
     env = FakeEnv()
     out = features.enable_media(source="cli", env=env, data_root=root)
-    assert out["enabled"] is False and out["refused"] == "low_ram" and out["error"] == LOW_RAM_MESSAGE
-    assert not features.features_path(root).exists() and not media_db_path(root).exists()
-    assert env.installs == 0 and features.media_enabled(root) is False
+    assert "refused" not in out and "error" not in out and out["enabled"] is True
+    assert features.media_enabled(root) is True and media_db_path(root).exists()
+    env.done.wait(5)
+    assert env.installs == 1
 
 
 @needs_vec
-def test_the_developer_override_lets_a_small_machine_turn_it_on(root, small_machine, monkeypatch):
-    monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
-    out = features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=root)
-    assert "refused" not in out
+def test_turning_it_off_is_remembered_and_turning_it_on_again_forgets_it(root):
+    assert features.media_opted_out(root) is False  # never asked is not "turned off"
+    features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=root)
+    assert features.media_opted_out(root) is False
+    features.disable_media(env=FakeEnv(), data_root=root)
+    assert features.media_opted_out(root) is True and features.media_enabled(root) is False
+    features.enable_media(source="dashboard", start_install=False, env=FakeEnv(), data_root=root)
+    assert features.media_opted_out(root) is False and features.media_enabled(root) is True
+
+
+def test_the_automatic_source_is_known_to_the_module_but_not_to_the_web_routes():
+    assert "auto" in features.SOURCES
 
 
 @needs_vec

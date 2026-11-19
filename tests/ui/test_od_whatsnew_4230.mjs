@@ -1,7 +1,8 @@
 /**
- * The 4.2.30 "What memory can do now" card (§8.10.3 l): one plain line for each new feature that is
- * not yet turned on, each with a link; a feature that is on is not offered; it hides when nothing is
- * left, when dismissed, or when the state cannot be read.
+ * The 4.2.30 "What memory can do now" card (§8.10.3 l): one plain line for each new feature, each with a
+ * link. Every feature is on by default (19 Nov 2026), so a feature that is on says "On by default" and one
+ * a person turned off shows the switch to turn it on again; it hides when dismissed or when the state
+ * cannot be read.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,19 +65,32 @@ describe('What memory can do now card (4.2.30)', () => {
     assert.match(d.host.textContent, /one Undo removes the whole import/);
   });
 
-  it('does not offer what is already on', async () => {
+  it('says "On by default" for a feature that is on, and keeps every entry listed', async () => {
     const d = await page(state(['need_gate', 'origin', 'firewall', 'signing']));
-    assert.deepEqual(entries(d), ['cues', 'measurement', 'secrets', 'why', 'proposals', 'wiki', 'import',
-      'media_packs', 'decisions']);
+    assert.equal(entries(d).length, 13);
+    const text = (id) => d.host.querySelector(`[data-entry="${id}"]`).textContent;
+    assert.match(text('need_gate'), /On by default\./);
+    assert.match(text('signing'), /On by default\./);
+    assert.doesNotMatch(text('cues'), /On by default/);  // this one reads as turned off
+    assert.match(text('cues'), /Turned off\. Turn on: slm flags set delivery\.cues on/);
   });
 
-  it('shows the plain switch for a feature with a flag and none for one without', async () => {
+  it('shows the plain switch for a feature that is off and nothing for one without a flag', async () => {
     const d = await page(state());
     const how = (id) => d.host.querySelector(`[data-entry="${id}"] .od-whatsnew-how`);
-    assert.equal(how('need_gate').textContent.trim(), 'slm flags set delivery.need_gate on');
-    assert.equal(how('signing').textContent.trim(), 'slm flags set trust.signing on');
+    assert.equal(how('need_gate').textContent.trim(), 'Turned off. Turn on: slm flags set delivery.need_gate on');
+    assert.equal(how('signing').textContent.trim(), 'Turned off. Turn on: slm flags set trust.signing on');
     assert.equal(how('why'), null);
     assert.equal(how('measurement'), null);
+  });
+
+  it('says the pictures and documents models set themselves up on 16 GB, one click below', async () => {
+    const d = await page(state(['media_packs']));
+    const text = d.host.querySelector('[data-entry="media_packs"]').textContent;
+    assert.match(text, /download by themselves/);
+    assert.match(text, /16 GB of memory or more/);
+    assert.match(text, /one button/);
+    assert.doesNotMatch(text, /off until you turn it on/);
   });
 
   it('links to a guide that opens safely, or to the page of this dashboard that has the card', async () => {
@@ -91,9 +105,10 @@ describe('What memory can do now card (4.2.30)', () => {
     assert.deepEqual(nav, ['settings-pane', 'memories-pane']);
   });
 
-  it('hides itself when everything is on', async () => {
+  it('stays visible with every entry when everything is on (it says so, it does not hide)', async () => {
     const d = await page(state(Object.keys(FLAGS)));
-    assert.equal(d.host.textContent, '');
+    assert.equal(entries(d).length, 13);
+    assert.equal(d.host.querySelectorAll('.od-whatsnew-state').length, 10);  // the ten entries that have a flag
   });
 
   it('says the kill switch is on, and why nothing works yet', async () => {

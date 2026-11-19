@@ -201,65 +201,31 @@ def test_media_line_unsupported_and_failed():
     assert "set-up failed" in line and "slm doctor" in line
 
 
-MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. "
-           "Your text memories keep working.")
+WARNING = ("This computer has 4.0 GB of memory; pictures and documents may be slow and the models are "
+           "released when memory runs low.")
 
 
 def _small_machine(state):
-    media = dict(STATUS["media"], ram_ok=False, ram_message=MESSAGE)
+    media = dict(STATUS["media"], ram_ok=True, ram_message="", mode="one_click", ram_warning=WARNING)
     state["reply"] = {"media": media, "mesh": STATUS["mesh"]}
 
 
-@pytest.mark.parametrize("yes", [False, True])
-def test_enable_on_a_small_machine_prints_the_message_exits_nonzero_and_asks_nothing(daemon, monkeypatch, capsys, yes):
+def test_enable_on_a_small_machine_prints_the_warning_and_goes_on_to_ask(daemon, monkeypatch, capsys):
     seen, state = daemon
     _small_machine(state)
-    _tty(monkeypatch, True)
-
-    def no_prompt(*_a):
-        raise AssertionError("must not ask to turn on a machine that will be refused")
-
-    monkeypatch.setattr("builtins.input", no_prompt)
-    with pytest.raises(SystemExit) as exc:
-        media_cmd.cmd_media(_args(media_command="enable", yes=yes))
-    assert exc.value.code not in (0, None)
+    _tty(monkeypatch, False)
+    media_cmd.cmd_media(_args(media_command="enable", yes=True))
     out = capsys.readouterr().out
-    assert MESSAGE in out and "Turn on" not in out and "1.5 GB" not in out
-    assert not any(m == "POST" for m, *_ in seen)
+    assert WARNING in out and "1.5 GB" in out
+    assert any(m == "POST" for m, *_ in seen)  # one click: it is turned on, not refused
 
 
-def test_enable_on_a_small_machine_in_json_is_an_error_object(daemon, monkeypatch, capsys):
-    _, state = daemon
-    _small_machine(state)
-    _tty(monkeypatch, False)
-    with pytest.raises(SystemExit) as exc:
-        media_cmd.cmd_media(_args(media_command="enable", yes=True, json=True))
-    assert exc.value.code not in (0, None)
-    out = json.loads(capsys.readouterr().out)
-    assert out["success"] is False and out["error"]["message"] == MESSAGE
-
-
-def test_a_refusal_that_arrives_with_the_turn_on_request_is_printed_too(daemon, monkeypatch, capsys):
-    from superlocalmemory.cli.daemon import DaemonConflict
-
-    def conflict(method, path, body=None, **_kw):
-        if method == "POST":
-            raise DaemonConflict(MESSAGE)
-        return STATUS
-
-    monkeypatch.setattr(media_cmd, "daemon_request", conflict)
-    _tty(monkeypatch, False)
-    with pytest.raises(SystemExit) as exc:
-        media_cmd.cmd_media(_args(media_command="enable", yes=True))
-    assert exc.value.code not in (0, None)
-    assert MESSAGE in capsys.readouterr().out
-
-
-def test_status_on_a_small_machine_still_works(daemon, capsys):
+def test_status_on_a_small_machine_shows_the_warning(daemon, capsys):
     _, state = daemon
     _small_machine(state)
     media_cmd.cmd_media(_args())
-    assert "Images & documents:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Images & documents:" in out and WARNING in out
 
 
 def test_enable_prints_no_memory_line_on_a_big_machine(daemon, monkeypatch, capsys):

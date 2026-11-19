@@ -46,7 +46,7 @@ CONFIRMED = "confirmed"
 Query = Callable[[str, tuple], Sequence[Sequence[Any]]]
 
 _ORIGIN = ("SELECT f.memory_id, o.channel, o.transform, o.source_type, o.agent_id, o.speaker, "
-           "o.role, o.parent_memory_id, o.parent_fact_id, o.agent_id_source "
+           "o.role, o.parent_memory_id, o.parent_fact_id, o.agent_id_source, f.created_at "
            "FROM atomic_facts f LEFT JOIN fact_origin o ON o.fact_id = f.fact_id "
            "WHERE f.fact_id = ?")
 _MEMORY_SOURCES = ("SELECT f.fact_id FROM atomic_facts f JOIN fact_origin o ON "
@@ -67,14 +67,53 @@ class Trust:
                 "basis": self.basis}
 
 
+#: ``fact_origin`` (M074) is written for every save from the moment it exists on a store, so a
+#: fact created before it was applied here was saved by a release before 4.2.30.
+_ORIGIN_MIGRATION = "M074_fact_origin"
+_CUTOFF_SQL = "SELECT applied_at FROM migration_log WHERE name = ?"
+#: Rows are only appended, so the first by rowid is the earliest recorded (no scan, no index).
+_FIRST_ORIGIN_SQL = "SELECT recorded_at FROM fact_origin ORDER BY rowid LIMIT 1"
+
+
+def legacy_cutoff(query: Query) -> str | None:
+    """When this store started recording origins (ISO UTC), or ``None`` if it cannot be read.
+
+    ``None`` grandfathers nothing: an unreadable log never makes a fact trusted (fails closed).
+    """
+    try:
+        rows = query(_CUTOFF_SQL, (_ORIGIN_MIGRATION,))
+    except Exception:  # noqa: BLE001 - no migration_log: nothing is grandfathered
+        return None
+    value = str(rows[0][0]).replace(" ", "T", 1) if rows and rows[0][0] else None
+    if value is None:
+        return None
+    try:  # the log's time moves on when a migration is repaired; the first origin row does not
+        first = query(_FIRST_ORIGIN_SQL, ())
+    except Exception:  # noqa: BLE001
+        first = []
+    if first and first[0][0]:
+        value = min(value, str(first[0][0]).replace(" ", "T", 1))
+    return value
+
+
+def is_legacy(query: Query, created_at: object) -> bool:
+    """True for a fact created before this store started recording origins."""
+    cutoff = legacy_cutoff(query)
+    if not (cutoff and created_at):
+        return False
+    return str(created_at).replace(" ", "T", 1) < cutoff.replace(" ", "T", 1)
+
+
 def _node(query: Query, fact_id: str) -> tuple[Trust, list[str]] | None:
     """The fact's own class (taint not yet joined) and its parent fact ids; ``None`` if erased."""
     rows = query(_ORIGIN, (fact_id,))
     if not rows:
         return None
     (memory_id, channel, transform, source_type, agent_id, speaker, role, p_mem, p_fact,
-     id_source) = rows[0]
-    if channel is None:  # no origin row: saved before 4.2.30
+     id_source, created_at) = rows[0]
+    if channel is None and is_legacy(query, created_at):  # saved before this store took 4.2.30
+        own = oc.Classified(oc.LEGACY, f"{oc.VERSION}:before_4230")
+    elif channel is None:  # no origin row after the upgrade: nothing vouches for it
         own = oc.Classified(oc.UNKNOWN, f"{oc.VERSION}:no_origin_row")
     else:
         own = oc.classify(oc.Signals(channel=channel, transform=transform or "unknown",

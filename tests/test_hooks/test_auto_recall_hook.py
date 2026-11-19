@@ -84,6 +84,8 @@ def test_the_flag_read_fails_closed(tmp_path: Path, monkeypatch) -> None:
     from superlocalmemory.hooks import auto_recall_hook as hook
 
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    assert hook._per_prompt_off() is False  # on by default
+    write_flag(tmp_path, "delivery.need_gate", FlagState.OFF)  # a person's own off
     assert hook._per_prompt_off() is True
     write_flag(tmp_path, "delivery.need_gate", FlagState.ON)
     assert hook._per_prompt_off() is False

@@ -31,7 +31,7 @@ from tests.test_trust_firewall.conftest import (
     save,
 )
 
-TRUSTED_NAMES = ["user_direct", "user_confirmed", "system"]
+TRUSTED_NAMES = ["user_direct", "user_confirmed", "system", "legacy"]
 
 
 def _through(db, clause, params=()):
@@ -44,7 +44,7 @@ def _through(db, clause, params=()):
 def test_the_floor_is_system_in_the_m15_order() -> None:
     assert firewall.FLOOR == "system"
     assert firewall.TRUSTED == tuple(TRUSTED_NAMES)
-    for name in oc.ORDER:
+    for name in (*oc.ORDER, oc.LEGACY):
         assert firewall.is_trusted_taint(name) == (name in TRUSTED_NAMES), name
     for bad in ("unknown", "", None, "made-up"):
         assert not firewall.is_trusted_taint(bad)

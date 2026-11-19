@@ -11,6 +11,7 @@ import pytest
 
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.trust import signing_key as sk
+from tests.helpers.flag_baseline import off_except
 from tests.test_trust_signing.conftest import FakeKeychain
 
 
@@ -128,7 +129,7 @@ class Counting:
 
 
 def _flags(**env):
-    return lambda home: FeatureFlags(home, environ=env, file_values={})
+    return lambda home: FeatureFlags(home, environ=env, file_values=off_except())
 
 
 def test_with_the_flag_off_the_keychain_is_not_asked(tmp_path) -> None:

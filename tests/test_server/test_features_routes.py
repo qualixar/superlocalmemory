@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -190,8 +192,8 @@ def test_reading_the_ram_block_creates_nothing(ctx, monkeypatch):
     assert list(root.iterdir()) == [] and worker_client._CLIENTS == {}
 
 
-LOW_RAM_MESSAGE = ("Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. "
-                   "Your text memories keep working.")
+WARNING_8 = ("This computer has 4.0 GB of memory; pictures and documents may be slow and the models are "
+             "released when memory runs low.")
 
 
 def _machine_with(env, monkeypatch, gib):
@@ -200,27 +202,36 @@ def _machine_with(env, monkeypatch, gib):
                                                    "ram_bytes": int(gib * 1024 ** 3)})
 
 
-def test_a_small_machine_reports_not_ok_with_the_message_in_the_features_reply(ctx, monkeypatch):
+def test_a_small_machine_is_never_not_ok_it_gets_the_one_click_warning(ctx, monkeypatch):
     client, _root, env, _calls = ctx
     _machine_with(env, monkeypatch, 4)
     media = client.get("/api/v3/features").json()["media"]
-    assert media["ram_ok"] is False and media["ram_message"] == LOW_RAM_MESSAGE
-    assert "ram_warning" not in media
+    assert media["ram_ok"] is True and media["ram_message"] == ""
+    assert media["mode"] == "one_click" and media["ram_warning"] == WARNING_8
+    assert "one click" in media["words"].lower()
 
 
-def test_a_big_machine_is_ok_with_no_message(ctx, monkeypatch):
+def test_a_big_machine_is_automatic_with_no_warning(ctx, monkeypatch):
     client, _root, env, _calls = ctx
     _machine_with(env, monkeypatch, 16)
     media = client.get("/api/v3/features").json()["media"]
-    assert media["ram_ok"] is True and media["ram_message"] == ""
+    assert media["ram_ok"] is True and media["mode"] == "auto" and media["ram_warning"] == ""
+    assert "by itself" in media["words"]
 
 
-def test_the_developer_override_makes_a_small_machine_ok(ctx, monkeypatch):
+def test_the_developer_override_makes_a_small_machine_automatic(ctx, monkeypatch):
     client, _root, env, _calls = ctx
     _machine_with(env, monkeypatch, 4)
     monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
     media = client.get("/api/v3/features").json()["media"]
-    assert media["ram_ok"] is True and media["ram_message"] == ""
+    assert media["mode"] == "auto" and media["ram_warning"] == ""
+
+
+def test_a_media_switched_off_by_a_person_reads_turned_off_by_you(ctx):
+    client, root, _env, _calls = ctx
+    (root / "features.json").write_text(json.dumps({"media": {"enabled": False, "opted_out": True}}))
+    media = client.get("/api/v3/features").json()["media"]
+    assert media["opted_out"] is True and media["words"] == "Turned off by you"
 
 
 def test_a_refused_enable_is_409_with_the_view_carrying_the_reason(ctx, monkeypatch):
@@ -229,12 +240,13 @@ def test_a_refused_enable_is_409_with_the_view_carrying_the_reason(ctx, monkeypa
     def refuse(**kw):
         calls["enable"].append(kw)
         return {"enabled": False, "env": env.status().to_dict(), "precheck": env.precheck(), "media_db": False,
-                "error": LOW_RAM_MESSAGE, "refused": "low_ram"}
+                "error": "This computer cannot run it.", "refused": "low_ram"}
 
     monkeypatch.setattr(feat, "enable_media", refuse)
     response = client.post("/api/v3/features/media/enable", json={"yes": True}, headers=AUTH)
     assert response.status_code == 409
     media = response.json()["media"]
-    assert media["error"] == LOW_RAM_MESSAGE and media["refused"] == "low_ram" and media["enabled"] is False
-    assert response.json()["detail"] == LOW_RAM_MESSAGE
+    assert media["error"] == "This computer cannot run it." and media["refused"] == "low_ram"
+    assert media["enabled"] is False
+    assert response.json()["detail"] == "This computer cannot run it."
 

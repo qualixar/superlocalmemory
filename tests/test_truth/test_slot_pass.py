@@ -9,6 +9,7 @@ import pytest
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_core.test_coverage_backfill import _db
 
 OLD = "The release cadence of SLM is one release every week"
@@ -25,7 +26,7 @@ def _fact(db, content: str, created: str) -> str:
 
 
 def _flags(**states: str) -> FeatureFlags:
-    return FeatureFlags(file_values=states, environ={})
+    return FeatureFlags(file_values=off_except(states), environ={})
 
 
 def _retired(db, fact_id: str) -> tuple:

@@ -13,6 +13,7 @@ from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_ladder import JudgeLadder
 from superlocalmemory.truth.dispute_pass import DisputePass
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_core.test_coverage_backfill import _db
 from tests.test_truth.test_dispute_pass import Fixed
 from tests.test_truth.test_slot_pass import _fact, _flags
@@ -29,7 +30,7 @@ def judged(tmp_path):
     old = _fact(db, "The release cadence of SLM is one release every week", "2026-03-01T00:00:00Z")
     new = _fact(db, "The release cadence of SLM is one big release", "2026-11-14T00:00:00Z")
     SlotPass(db, _flags(**{"truth.slots": "shadow"}), state_dir=tmp_path).run()
-    flags = FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={})
+    flags = FeatureFlags(file_values=off_except({"judge.ladder": "shadow"}), environ={})
     DisputePass(db, flags, JudgeLadder([Fixed("same", 0.4), Other("replaces", 0.95)])).run()
     db.execute("UPDATE judge_receipts SET audit_selected = 1 WHERE verdict NOT IN "
                "('no_answer', 'tier_failed', 'abstain')")

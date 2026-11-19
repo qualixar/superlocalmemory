@@ -28,7 +28,7 @@ from superlocalmemory.runtimes.managed_env import ManagedEnv
 logger = logging.getLogger(__name__)
 
 FEATURES_FILE = "features.json"
-SOURCES = ("cli", "dashboard", "npm", "api")
+SOURCES = ("cli", "dashboard", "npm", "api", "auto")
 INSTALL_THREAD_NAME = "media-env-install"
 LOW_RAM_REFUSED = "low_ram"
 
@@ -80,6 +80,14 @@ def media_requested(data_root: str | Path | None = None) -> bool:
     """True when the installer recorded a request that no one has acted on yet."""
     media = read_features(data_root)["media"]
     return bool(media.get("requested")) and not media.get("enabled")
+
+
+def media_opted_out(data_root: str | Path | None = None) -> bool:
+    """True when someone turned images and documents off on purpose (``disable_media``).
+
+    The automatic set-up (``runtimes/media_auto``) never undoes this; ``enable_media`` clears it.
+    """
+    return bool(read_features(data_root)["media"].get("opted_out"))
 
 
 def engine_upgrade_requested(data_root: str | Path | None = None) -> bool:
@@ -205,18 +213,11 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
                  data_root: str | Path | None = None) -> dict[str, Any]:
     """Turn images and documents on: save the choice, create media.db, start the install.
 
-    Refused on a computer with less than 16 GB of memory (``media_env.media_ram_refusal``):
-    nothing is written or created, and the status carries ``refused: "low_ram"`` and the
-    plain-language reason in ``error``.
+    Never refused for memory: below 16 GB this is the one-click path (``media_env.media_policy``
+    carries the plain warning the surfaces show). A person turning it on clears an earlier "off".
     """
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    from superlocalmemory.runtimes.media_env import media_ram_message
-
-    refusal = media_ram_message()
-    if refusal:
-        return {**media_feature_status(data_root, env=env), "enabled": False,
-                "error": refusal, "refused": LOW_RAM_REFUSED}
     from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
     try:
@@ -265,6 +266,7 @@ def disable_media(*, remove_files: bool = False, env: ManagedEnv | None = None,
     """Turn the feature off. Memories and media.db are kept; model files only if asked."""
     data = read_features(data_root)
     data["media"]["enabled"] = False
+    data["media"]["opted_out"] = True  # a choice: the automatic set-up never undoes it
     data["media"].pop("requested", None)  # turning it off also withdraws an unanswered request
     try:
         _write_features(data_root, data)

@@ -79,8 +79,8 @@ to `settle_dispute`; never settle one on a guess.
 SuperLocalMemory can keep pictures and PDFs (`remember_media`,
 `remember_document`, `get_media`, `media_status`) and lets bots message each
 other (`mesh_peers`, `mesh_send`, `mesh_inbox`, `mesh_wait`). None of these is in
-the 18-tool core set this plugin ships, and pictures need a computer with 16 GB
-of memory and a 1.5 GB download, which a shared bot computer rarely has. Do not
+the 18-tool core set this plugin ships, and pictures set up by themselves only on a computer with 16 GB
+of memory (a 1.5 GB download), which a shared bot computer rarely has. Do not
 look for these tools here and do not report them as broken. If the user wants
 them, the answer is a different setup: the `full` tool set
 (`SLM_MCP_PROFILE=full`, the user's decision) plus `slm media enable` on a

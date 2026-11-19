@@ -3,9 +3,13 @@
 """Feature flags for the 4.2.30 subsystems: off, shadow or on.
 
 Every new subsystem in 4.2.30 (slots, leases, the judge ladder, receipts, the
-need gate, the taint firewall...) ships behind one flag so it can be turned off
+need gate, the taint firewall...) sits behind one flag so it can be turned off
 on its own, and so it can run in *shadow*: compute and record its decision
-without acting on it. Shadow readings are how a subsystem earns its default.
+without acting on it. Every flag is **on by default** (Varun, 19 Nov: "every
+feature we are enabling should be on by default for my end users"); a gate that
+needs a statistical basis it does not have yet (labels, certificates, an anytime
+bound) acts exactly as before until the basis exists. A person's explicit off
+(``features.json``, ``SLM_FEATURE_<ID>=off``) and the kill switch still win.
 
 Flags live in their own file, ``<SLM_HOME>/features.json``, not in
 ``config.json``. ``config.json`` is rewritten whole by mode switches and the
@@ -60,17 +64,19 @@ class Flag:
 
 #: The registry. Adding a subsystem means adding its flag here first.
 FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
-    Flag("truth.slots", "WS-1", FlagState.OFF,
+    Flag("truth.slots", "WS-1", FlagState.ON,
          "Bind facts to slots and decide supersede / compatible / dispute"),
-    Flag("truth.slots.auto_apply", "WS-1", FlagState.OFF,
+    Flag("truth.slots.auto_apply", "WS-1", FlagState.ON,
          "Apply deterministic slot supersessions through the correction ledger",
          shadowable=False),
-    Flag("truth.leases", "WS-1", FlagState.OFF,
+    Flag("truth.leases", "WS-1", FlagState.ON,
          "Record source fingerprints and flag facts whose source changed"),
-    Flag("judge.ladder", "WS-2", FlagState.OFF,
+    Flag("judge.ladder", "WS-2", FlagState.ON,
          "Route typed memory questions through the judge ladder"),
-    # D-22: measurement starts at W0, on by default (ids only, local). With
-    # withholding and swaps (below) these are the only flags not "off".
+    # D-22: measurement starts at W0, on by default (ids only, local). Since 19 Nov (Varun: "every
+    # feature we are enabling should be on by default for my end users") every flag defaults to on;
+    # a gate that needs a statistical basis it does not have yet acts exactly as before until the
+    # basis exists, and the kill switch (``SLM_4230_OFF``) or a person's own off still wins.
     Flag("outcomes.receipts", "WS-3", FlagState.ON,
          "Write an injection receipt for every delivery (ids only, local)"),
     # D-49 (Varun, 18 Nov): usage detection is on by default. Without it withholding and
@@ -97,48 +103,51 @@ FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
          "Swap two neighbouring results in a small logged share of agents' recalls "
          "(nothing withheld) to measure how much attention each position gets",
          shadowable=False),
-    Flag("delivery.need_gate", "WS-4", FlagState.OFF,
+    Flag("delivery.need_gate", "WS-4", FlagState.ON,
          "Decide per prompt whether memory is needed before recalling (shadow: the fixed "
          "rules still skip, the score never skips and the threshold is only logged, and "
          "memories are still injected on the other prompts, because labels need deliveries)"),
-    Flag("delivery.cues", "WS-4", FlagState.OFF,
+    Flag("delivery.cues", "WS-4", FlagState.ON,
          "Fire prospective memories on cues (file path, tool, error, repository, date)"),
-    Flag("delivery.harm_gate", "WS-4", FlagState.OFF,
+    Flag("delivery.harm_gate", "WS-4", FlagState.ON,
          "Withhold memories whose expected value is negative"),
-    Flag("trust.taint", "WS-5", FlagState.OFF,
+    Flag("trust.taint", "WS-5", FlagState.ON,
          "Track origin class and keep untrusted text out of instructions"),
-    Flag("trust.secret_screen", "WS-5", FlagState.OFF,
+    Flag("trust.secret_screen", "WS-5", FlagState.ON,
          "Screen saves for credentials before they are stored"),
-    Flag("trust.signing", "WS-5", FlagState.OFF,
+    Flag("trust.signing", "WS-5", FlagState.ON,
          "Sign facts and key the audit chain"),
-    Flag("compiler.auto_apply", "WS-6", FlagState.OFF,
+    Flag("compiler.auto_apply", "WS-6", FlagState.ON,
          "Apply deterministic-safe compiler proposals without review",
          shadowable=False),
-    Flag("compiler.dream", "WS-6", FlagState.OFF,
+    Flag("compiler.dream", "WS-6", FlagState.ON,
          "Dream cycle: in the background, lint the store and propose extractive pages and "
          "duplicate merges to the review queue (nothing is applied)",
          shadowable=False),
-    Flag("compiler.wiki", "WS-6", FlagState.OFF,
+    Flag("compiler.wiki", "WS-6", FlagState.ON,
          "Project the compiled pages to a Markdown folder and read edits back as proposals "
          "(shadow: show what would be written, write nothing)"),
-    # D-19: the portability pack is optional and ships dark. On, a caller may preview, run and
-    # undo an import of a ChatGPT, Claude, Mem0, Letta, OKF or Markdown export (WS-9). Nothing
-    # runs in shadow: an import either happens or it does not.
-    Flag("portability.import", "WS-9", FlagState.OFF,
+    # D-19, then "on by default" (Varun, 19 Nov): a caller may preview, run and undo an import of a
+    # ChatGPT, Claude, Mem0, Letta, OKF or Markdown export (WS-9). Nothing runs on its own; an
+    # import happens only when someone starts one. Nothing runs in shadow either.
+    Flag("portability.import", "WS-9", FlagState.ON,
          "Import memories and conversations from ChatGPT, Claude, Mem0, Letta, OKF and "
          "Markdown files (preview, run in the background, undo the whole run)",
          shadowable=False),
-    # D-19: the multimodal pack is optional and ships dark (WS-8). Each flag also needs its model
-    # downloaded on purpose (``slm media pack enable``): nothing downloads from a hook or a recall.
-    Flag("media.captions", "WS-8", FlagState.OFF,
+    # D-19, then "on by default" (Varun, 19 Nov): the multimodal pack (WS-8). The flag is on, but a
+    # part only acts once its model is on this computer. The running daemon downloads the models by
+    # itself on a computer with 16 GB or more (``runtimes/media_auto``); on a smaller one a person
+    # taps one button (``slm media pack enable``). Nothing downloads from a hook or a recall, and a
+    # part someone turned off stays off.
+    Flag("media.captions", "WS-8", FlagState.ON,
          "Describe each saved picture in a few words with a small local model, on every platform "
          "(the description is marked as written by a model; a failure never blocks the save)",
          shadowable=False),
-    Flag("media.document_pack", "WS-8", FlagState.OFF,
+    Flag("media.document_pack", "WS-8", FlagState.ON,
          "Read scanned document pages with the PaddleOCR-VL model instead of the default reader "
          "(the default reader stays as the fallback)",
          shadowable=False),
-    Flag("media.regions", "WS-8", FlagState.OFF,
+    Flag("media.regions", "WS-8", FlagState.ON,
          "Keep the page and the box each picture text came from, and show it in why "
          "(\"from page 3, top left\")",
          shadowable=False),

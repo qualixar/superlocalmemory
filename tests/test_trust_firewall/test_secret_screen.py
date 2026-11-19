@@ -25,7 +25,7 @@ FLAG = env_name("trust.secret_screen")
 def _own_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "slm-home"))
     monkeypatch.delenv(KILL_ENV, raising=False)
-    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.setenv(FLAG, "off")  # on by default; each test turns it on or to shadow itself
 
 
 def _on(monkeypatch, value="on"):
@@ -128,9 +128,10 @@ def test_an_unreadable_flag_file_reads_as_off(monkeypatch, tmp_path) -> None:
     assert secret in prepare_user_text(None, f"key {secret} here").text
 
 
-def test_the_file_flag_turns_it_on(tmp_path) -> None:
+def test_the_file_flag_turns_it_on(tmp_path, monkeypatch) -> None:
     from superlocalmemory.core.feature_flags import FlagState, write_flag
 
+    monkeypatch.delenv(FLAG)  # the suite's own baseline is an environment "off", which outranks the file
     home = tmp_path / "slm-home"
     home.mkdir()
     write_flag(home, "trust.secret_screen", FlagState.ON)

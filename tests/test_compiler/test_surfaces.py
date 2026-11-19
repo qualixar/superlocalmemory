@@ -33,10 +33,11 @@ def test_external_edit_is_a_channel_with_a_reasoned_class() -> None:
     assert not oc.at_least(oc.AGENT_INFERRED, oc.USER_DIRECT)
 
 
-def test_flags_are_registered_off_and_the_dream_cycle_has_no_shadow() -> None:
-    assert FLAGS["compiler.dream"].default is FlagState.OFF and not FLAGS["compiler.dream"].shadowable
-    assert FLAGS["compiler.wiki"].default is FlagState.OFF and FLAGS["compiler.wiki"].shadowable
-    assert FLAGS["compiler.auto_apply"].default is FlagState.OFF
+def test_flags_are_registered_on_and_the_dream_cycle_has_no_shadow() -> None:
+    # On by default since 19 Nov 2026 (every 4.2.30 flag); the dream cycle and auto-apply have no shadow.
+    assert FLAGS["compiler.dream"].default is FlagState.ON and not FLAGS["compiler.dream"].shadowable
+    assert FLAGS["compiler.wiki"].default is FlagState.ON and FLAGS["compiler.wiki"].shadowable
+    assert FLAGS["compiler.auto_apply"].default is FlagState.ON
 
 
 @pytest.fixture

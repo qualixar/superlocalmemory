@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from superlocalmemory.truth import slot_repair
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_truth.test_slot_pass import (
     _dispute,
     _fact,
@@ -132,7 +133,7 @@ def test_the_dispute_pass_leaves_a_rolled_back_dispute_to_a_person(store) -> Non
     db, old, new, _tmp = store
     _two_values(db, old, new)
     db.execute("UPDATE slot_disputes SET reason_code = 'rolled_back'")
-    counts = DisputePass(db, FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={}),
+    counts = DisputePass(db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow"}), environ={}),
                          JudgeLadder([RulesTier()])).run()
     assert counts == {} and db.execute("SELECT COUNT(*) AS n FROM judge_receipts")[0]["n"] == 0
 

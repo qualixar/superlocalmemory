@@ -134,49 +134,51 @@ describe('turn-on card', () => {
     });
 });
 
-describe('the 16 GB gate on the turn-on card', () => {
-    const MESSAGE = 'Images and documents need a computer with at least 16 GB of memory; this one has 4.0 GB. '
-        + 'Your text memories keep working.';
-    const SMALL = { enabled: false, ram_ok: false, ram_message: MESSAGE };
+describe('16 GB and more is automatic, less is one click (never refused)', () => {
+    const WARNING = 'This computer has 4.0 GB of memory; pictures and documents may be slow and the models '
+        + 'are released when memory runs low.';
+    const SMALL = { enabled: false, ram_ok: true, ram_message: '', mode: 'one_click', ram_warning: WARNING };
 
-    it('shows the message, keeps the rest of the card, and disables Turn on', async () => {
+    it('a small computer shows the warning, keeps the rest of the card and the button works', async () => {
         const h = setup(SMALL);
         await h.mount();
-        assert.ok(h.host.textContent.includes(MESSAGE));
+        assert.ok(h.host.textContent.includes(WARNING));
         assert.match(h.host.textContent, /Turn on images and documents/);
         assert.match(h.host.textContent, /2\.8 GB/);
-        assert.equal(btn(h, 'Turn on').disabled, true);
-    });
-
-    it('a click on the disabled button asks and sends nothing', async () => {
-        const h = setup(SMALL);
-        await h.mount();
+        assert.equal(btn(h, 'Turn on').disabled, false);
         btn(h, 'Turn on').click();
         await flushPromises();
-        assert.equal(h.confirms.length, 0);
-        assert.equal(writes(h).length, 0);
+        assert.equal(h.confirms.length, 1);  // one click, then the usual confirmation
     });
 
-    it('a machine with enough memory (or an older daemon that says nothing) can turn it on', async () => {
-        for (const media of [{ enabled: false, ram_ok: true, ram_message: '' }, { enabled: false }]) {
-            const h = setup(media);
-            await h.mount();
-            assert.equal(btn(h, 'Turn on').disabled, false);
-            btn(h, 'Turn on').click();
-            await flushPromises();
-            assert.equal(h.confirms.length, 1);
-            assert.ok(!/16 GB of memory/.test(h.host.textContent));
-        }
-    });
-
-    it('a refusal from the daemon (409) puts the message on the card instead of an error', async () => {
-        const refusal = { enabled: false, ram_ok: false, ram_message: MESSAGE, error: MESSAGE, refused: 'low_ram' };
-        const h = setup({ enabled: false }, [['POST', '/api/v3/features/media/enable',
-            () => ({ status: 409, json: { media: features(refusal).media, detail: MESSAGE } })]]);
+    it('a big computer says in plain words that it sets up by itself, and can be started now', async () => {
+        const h = setup({ enabled: false, mode: 'auto', ram_warning: '',
+            words: 'Waiting its turn: the picture model downloads by itself when your computer is idle.' });
         await h.mount();
-        btn(h, 'Turn on').click();
-        await flushPromises();
-        assert.ok(h.host.textContent.includes(MESSAGE));
-        assert.equal(btn(h, 'Turn on').disabled, true);
+        assert.match(h.host.textContent, /set up by themselves/);
+        assert.match(h.host.textContent, /downloads by itself/);
+        assert.ok(!/16 GB of memory/.test(h.host.textContent));
+        assert.equal(btn(h, 'Turn on now').disabled, false);
+    });
+
+    it('a person who turned it off reads "turned off by you" and the automatic set-up is not promised', async () => {
+        const h = setup({ enabled: false, mode: 'auto', opted_out: true, words: 'Turned off by you' });
+        await h.mount();
+        assert.match(h.host.textContent, /turned off by you/i);
+        assert.ok(!/by themselves/.test(h.host.textContent));
+    });
+
+    it('an older daemon that says nothing is the one-click card', async () => {
+        const h = setup({ enabled: false });
+        await h.mount();
+        assert.equal(btn(h, 'Turn on').disabled, false);
+        assert.ok(!/16 GB of memory/.test(h.host.textContent));
+    });
+
+    it('a downloading environment shows the plain sentence from the daemon', async () => {
+        const h = setup({ enabled: true, env_state: 'installing', progress: 0.4, step: 'x',
+            words: 'Downloading the picture model, 40%' });
+        await h.mount();
+        assert.match(h.host.textContent, /Downloading the picture model, 40%/);
     });
 });

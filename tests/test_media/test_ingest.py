@@ -98,6 +98,9 @@ class SpyCache:
 def root(tmp_path, monkeypatch):
     r = tmp_path / "slm"
     monkeypatch.setenv("SLM_DATA_DIR", str(r))
+    # "Remember where text was found" is on by default and asks the reader for boxes; these tests are about
+    # the plain read, with a reader that has no boxes, so it is set off explicitly.
+    monkeypatch.setenv("SLM_FEATURE_MEDIA_REGIONS", "off")
     return r
 
 

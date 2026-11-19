@@ -19,6 +19,7 @@ from superlocalmemory.truth import leases
 from superlocalmemory.truth.backlog_pass import BacklogPass
 from superlocalmemory.truth.dispute_pass import DisputePass
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_truth.test_backlog_pass import backlog as backlog_store  # noqa: F401 - fixture
 from tests.test_truth.test_dispute_pass import disputed  # noqa: F401 - fixture
 from tests.test_truth.test_leases import _leased_fact, leased  # noqa: F401 - fixture
@@ -42,14 +43,14 @@ class Spy:
 def test_the_dispute_pass_judges_with_nothing_held(disputed) -> None:  # noqa: F811
     db, _old, _new = disputed
     spy = Spy(db)
-    DisputePass(db, FeatureFlags(file_values={"judge.ladder": "shadow", "truth.slots": "shadow"},
+    DisputePass(db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow", "truth.slots": "shadow"}),
                                  environ={}), JudgeLadder([spy])).run()
     assert spy.asked == [{"lock": False, "write_open": False}]
 
 
 def test_the_backlog_pass_judges_with_nothing_held(backlog_store) -> None:  # noqa: F811
     spy = Spy(backlog_store)
-    BacklogPass(backlog_store, FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={}),
+    BacklogPass(backlog_store, FeatureFlags(file_values=off_except({"judge.ladder": "shadow"}), environ={}),
                 JudgeLadder([spy])).run()
     assert spy.asked == [{"lock": False, "write_open": False}]
 
@@ -69,7 +70,7 @@ def test_a_judge_that_takes_a_long_time_does_not_block_a_save(disputed) -> None:
             writer.join(timeout=5)
             return super().answer(question, items)
 
-    DisputePass(db, FeatureFlags(file_values={"judge.ladder": "shadow", "truth.slots": "shadow"},
+    DisputePass(db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow", "truth.slots": "shadow"}),
                                  environ={}), JudgeLadder([Slow(db)])).run()
     assert done.is_set()
 
@@ -101,12 +102,12 @@ def test_the_write_step_is_one_short_hold_after_the_judge(pass_name, request) ->
     if pass_name == "dispute":
         db, _o, _n = request.getfixturevalue("disputed")
         runner = lambda ladder: DisputePass(  # noqa: E731
-            db, FeatureFlags(file_values={"judge.ladder": "shadow", "truth.slots": "shadow"},
+            db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow", "truth.slots": "shadow"}),
                              environ={}), ladder).run()
     else:
         db = request.getfixturevalue("backlog_store")
         runner = lambda ladder: BacklogPass(  # noqa: E731
-            db, FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={}), ladder).run()
+            db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow"}), environ={}), ladder).run()
     real = db.raw_connection
 
     def tracked():

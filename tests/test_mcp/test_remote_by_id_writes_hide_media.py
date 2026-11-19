@@ -253,8 +253,12 @@ def test_core_memory_cannot_pin_or_unpin_a_hidden_memory(world, view, action) ->
             f.fact_id for f in engine._db.get_pinned(engine.profile_id)}
 
 
-def test_core_memory_pins_a_visible_memory_and_a_local_caller_pins_anything(world) -> None:
+def test_core_memory_pins_a_visible_memory_and_a_local_caller_pins_anything(world, monkeypatch) -> None:
     from superlocalmemory.mcp.tools_active import register_active_tools
+
+    # This test is about who may see a memory, not about the instruction firewall: with ``trust.taint`` on
+    # (the default now) a plain pin of a memory with no recorded origin waits for an explicit promotion.
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
     engine, ids = world
     server = _Server()

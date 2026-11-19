@@ -320,9 +320,33 @@ async def _remember_document(args: dict[str, Any]) -> dict[str, Any]:
         return _fail("error", "The document could not be saved.", retryable=True)
 
 
-async def _status(job_id: str, profile_id: str) -> dict[str, Any]:
+def _setup_via_daemon() -> dict[str, Any]:
+    """Where pictures, documents and the optional models stand, in plain words (read-only)."""
+    from superlocalmemory.cli import daemon
+    from superlocalmemory.mcp._daemon_proxy import daemon_unavailable_error
+
+    media = daemon.daemon_request("GET", "/api/v3/features", timeout_seconds=30.0)
+    packs = daemon.daemon_request("GET", "/api/v3/features/media/packs", timeout_seconds=30.0)
+    if not isinstance(media, dict) or not isinstance(packs, dict):
+        return {"success": False, "status": "unavailable", "retryable": True,
+                "code": "DAEMON_UNAVAILABLE", "error": daemon_unavailable_error()}
+    view = media.get("media") or {}
+    return {"success": True, "setup": {
+        "mode": view.get("mode", "one_click"), "words": view.get("words", ""),
+        "warning": view.get("ram_warning", ""), "enabled": bool(view.get("enabled")),
+        "parts": [{"pack": p.get("pack"), "words": p.get("words", ""), "state": p.get("state")}
+                  for p in packs.get("packs", []) if isinstance(p, dict)]}}
+
+
+async def _status(job_id: str, profile_id: str, setup: bool = False) -> dict[str, Any]:
     if _remote_refused():
         return _fail("not_for_remote", NOT_FOR_REMOTE_DOCS)
+    if setup:
+        try:
+            return await asyncio.to_thread(_setup_via_daemon)
+        except Exception as exc:  # noqa: BLE001 - a tool answer, never a traceback
+            logger.warning("media_status (setup) failed: %s", type(exc).__name__)
+            return _fail("error", "The set-up status could not be read.", retryable=True)
     if not _ID.fullmatch(job_id or ""):
         return _fail("invalid_request", "That is not a valid job id.")
     try:
@@ -405,9 +429,12 @@ def register_document_tools(server: Any) -> None:
 
     @server.tool(title="Get Document Job Status", annotations=READ_ONLY)
     @admits(OperationKind.RECALL)
-    async def media_status(job_id: str, profile_id: str = "") -> dict:
-        """How far a saved document's background work has got. Apps on other computers need the owner's permission."""
-        return await _status(job_id, profile_id)
+    async def media_status(job_id: str = "", profile_id: str = "", setup: bool = False) -> dict:
+        """How far a saved document's background work has got (``job_id``), or with ``setup=true`` where pictures,
+        documents and their models stand in plain words ("Downloading the picture model, 40%", "Ready", "Turned off by
+        you") with the one-click warning on a computer under 16 GB. Apps on other computers need the owner's
+        permission."""
+        return await _status(job_id, profile_id, setup)
 
 
 def register_media_resources(server: Any) -> None:

@@ -124,6 +124,10 @@ else:
     # 4.1.25 installs the answer check (~1 GB) by default; no test may start
     # that download by accident. Tests of the default clear this themselves.
     os.environ["SLM_SKIP_LAYA"] = "1"
+    # Pictures, documents and the model packs download by themselves in a real daemon on a 16 GB+
+    # computer (4.2.30). No test or CI run may ever start that: the daemon loop reads this and stays idle.
+    # Tests of the automatic path pass their own environment to ``media_auto.tick``.
+    os.environ["SLM_NO_AUTO_DOWNLOAD"] = "1"
     # No test may register a real login service. A test HOME keeps the plist
     # out of the user's LaunchAgents, but ``launchctl load`` still hands the job
     # to the user's launchd, which keeps its daemon running (and restarts it)

@@ -9,6 +9,7 @@ import pytest
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_ladder import JudgeLadder, TierAnswer
 from superlocalmemory.truth.dispute_pass import DisputePass
+from tests.helpers.flag_baseline import off_except
 from tests.test_truth import test_dispute_pass as _dispute_tests
 from tests.test_truth.test_dispute_pass import _calibrate, _open, _retired
 
@@ -34,7 +35,7 @@ class EditsDuringTheCall:
 
 def _run(db, tier):
     _calibrate(db, "replaces")
-    dp = DisputePass(db, FeatureFlags(file_values=ON, environ={}), JudgeLadder([tier]))
+    dp = DisputePass(db, FeatureFlags(file_values=off_except(ON), environ={}), JudgeLadder([tier]))
     return dp.run()
 
 

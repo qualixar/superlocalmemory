@@ -194,8 +194,31 @@ def _regions_status(root: Path, env: Any) -> dict[str, Any]:
             "step": "", "error": "", "media_ready": _media_ready(root, env)}
 
 
+def _with_words(view: dict[str, Any]) -> dict[str, Any]:
+    """Add ``mode`` (``auto`` / ``one_click``), the small-computer ``warning`` and one plain sentence,
+    ``words``, so every surface (dashboard, ``slm media pack status``, MCP) says the same thing."""
+    try:
+        from superlocalmemory.runtimes import media_auto
+        from superlocalmemory.runtimes.media_env import current_media_policy
+
+        policy = current_media_policy()
+        if view.get("pack") == REGIONS_ID:
+            words = ("Switched off with the kill switch." if view.get("killed") else (
+                "Ready" if view.get("enabled") else "Turned off by you"))
+        else:
+            words = media_auto.pack_words(view, policy.mode)
+        return {**view, "mode": policy.mode, "warning": policy.warning, "words": words}
+    except Exception:  # noqa: BLE001 - words are a courtesy; the state itself must still be served
+        logger.debug("could not word the pack status", exc_info=True)
+        return {**view, "mode": "one_click", "warning": "", "words": ""}
+
+
 def status(pack_id: str, data_root: str | Path | None = None, *, env: Any = None) -> dict[str, Any]:
     """Where one part stands, in words a person can read. Reads only; starts and creates nothing."""
+    return _with_words(_status(pack_id, data_root, env=env))
+
+
+def _status(pack_id: str, data_root: str | Path | None = None, *, env: Any = None) -> dict[str, Any]:
     if pack_id == REGIONS_ID:
         return _regions_status(_root(data_root), env)
     spec, root = get(pack_id), _root(data_root)
@@ -226,13 +249,9 @@ def _refusal(spec: PackSpec, root: Path, env: Any) -> str:
     if _flags(root).killed:
         return KILLED_WORDS
     from superlocalmemory.runtimes import features as feat
-    from superlocalmemory.runtimes.media_env import media_ram_message
 
     if not feat.media_enabled(root) or _managed(root, env).status().state != "ready":
         return NEEDS_MEDIA_WORDS
-    ram = media_ram_message()
-    if ram:
-        return ram
     if not installed(spec, root):
         root.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(root).free
@@ -306,7 +325,7 @@ def enable(pack_id: str, *, source: str = "api", data_root: str | Path | None = 
     not on, when the computer is too small, or when there is not enough disk space; nothing is written then.
     """
     if pack_id == REGIONS_ID:
-        return _switch_regions(True, _root(data_root), env)
+        return _with_words(_switch_regions(True, _root(data_root), env))
     spec, root = get(pack_id), _root(data_root)
     reason = _refusal(spec, root, env)
     if reason:
@@ -341,7 +360,7 @@ def disable(pack_id: str, *, remove_files: bool = False, data_root: str | Path |
             env: Any = None) -> dict[str, Any]:
     """Turn one part off: the flag, a running download and the loaded model. The files stay unless asked."""
     if pack_id == REGIONS_ID:
-        return _switch_regions(False, _root(data_root), env)
+        return _with_words(_switch_regions(False, _root(data_root), env))
     spec, root = get(pack_id), _root(data_root)
     try:
         _write_flag(spec, root, False)

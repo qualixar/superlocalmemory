@@ -133,13 +133,19 @@ still works via keyword search; only semantic recall needs the model.
 
 ---
 
-### Step 5b — Ask the user one question: pictures and documents
+### Step 5b — Pictures and documents
 
-This is the only choice to put to the user. Ask it in plain words, for example:
+On a computer with 16 GB of memory or more there is nothing to ask: once SLM is running
+and idle, it sets up pictures and documents by itself in the background (the picture
+model, then a picture describer and a scanned-page reader, one download at a time, about
+3.9 GB in all). `slm media status` shows how far it is. If the user turned it off,
+it stays off.
+
+On a smaller computer it is one click. Ask in plain words, for example:
 
 > "Do you also want to find your pictures, screenshots and PDFs by describing them?
-> It adds a second local model (about 1.5 GB to download) and needs a computer with
-> 16 GB of memory. Your text memory works the same either way."
+> This computer has less than 16 GB of memory, so they may be slow. Your text memory
+> works the same either way."
 
 - **Yes:** `slm media enable --yes`, then `slm media status` until it says `on`.
 - **No:** do nothing. The user can turn it on any time from the dashboard
@@ -241,7 +247,7 @@ Discipline:
 
 Both are opt-in. Ask the user before you turn anything on.
 
-- **Pictures and PDFs.** Asked in Step 5b. Needs 16 GB of memory and a 1.5 GB download.
+- **Pictures and PDFs.** Step 5b: set up by itself on 16 GB or more; one click on a smaller computer.
   `slm media status` shows whether it is on; `slm media enable` turns it on. Then
   `recall` also returns saved pictures and PDF pages, and the MCP tools
   `remember_media`, `remember_document`, `get_media` and `media_status` appear in the
@@ -289,7 +295,7 @@ slm status                 System status
 slm doctor                 Full pre-flight diagnostics
 slm hooks status           Check Claude Code hook wiring
 slm health                 Math layer health
-slm media status           Are pictures and documents on (off by default)
+slm media status           Are pictures and documents on, and how far set-up is
 slm media enable --yes     Turn them on (the user's choice, Step 5b)
 slm team status            Company-mode login requirement
 slm restart                Nuclear restart (kill orphans, start fresh)

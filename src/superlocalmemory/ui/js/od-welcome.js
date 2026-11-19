@@ -178,7 +178,7 @@
   // -- row 3: pictures and documents ---------------------------------------------------------
 
   var MEDIA_SENTENCE = 'Find your pictures, screenshots and PDFs by describing them. '
-    + 'Adds a second local model: about 1.5 GB, needs 16 GB of memory.';
+    + 'Adds a second local model: about 1.5 GB. It sets up by itself on a computer with 16 GB of memory or more.';
 
   function mediaProblem(res) {
     if (res.status === 404) return 'Pictures and documents are not available in this build.';
@@ -193,8 +193,8 @@
 
   function mediaOff(r, m) {
     r.appendChild(line(MEDIA_SENTENCE));
-    var blocked = m.ram_ok === false || m.env_state === 'unsupported';
-    if (m.ram_ok === false && m.ram_message) r.appendChild(el('p', null, m.ram_message));
+    var blocked = m.env_state === 'unsupported';
+    if (m.ram_warning) r.appendChild(el('p', null, m.ram_warning));  // a small computer is warned, never refused
     else if (m.env_state === 'unsupported' && m.step) r.appendChild(el('p', null, m.step));
     var go = button('Set up pictures and documents', 'btn sm primary', goToMedia);
     go.disabled = blocked;

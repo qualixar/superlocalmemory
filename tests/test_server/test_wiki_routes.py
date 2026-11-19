@@ -21,6 +21,9 @@ def wiki_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SLM_WIKI_DIR", str(tmp_path / "wiki"))
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("SLM_4230_OFF", raising=False)
+    # The wiki is on by default; these tests start from a person's own "off" and turn it on or to shadow
+    # one test at a time (``_flag``).
+    monkeypatch.setenv("SLM_FEATURE_COMPILER_WIKI", "off")
     return tmp_path / "wiki"
 
 

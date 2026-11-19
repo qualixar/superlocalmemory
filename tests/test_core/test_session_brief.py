@@ -15,6 +15,14 @@ import pytest
 from superlocalmemory.core import session_brief as sb
 from superlocalmemory.core.block_sources import current_filter, keep_sources, source_filter
 
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """What session start selects, not the origin firewall: these memories are saved through agent
+    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a
+    promotion. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
 # ---- the workspace (git faked) ---------------------------------------------
 
 

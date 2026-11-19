@@ -190,7 +190,7 @@ describe('Row 3: pictures and documents (optional)', () => {
         const h = setup({ feat: () => ({ json: features({ enabled: false }) }) });
         await h.mount();
         const row = h.row('media');
-        assert.match(row.textContent, /Find your pictures, screenshots and PDFs by describing them\. Adds a second local model: about 1\.5 GB, needs 16 GB of memory\./);
+        assert.match(row.textContent, /Find your pictures, screenshots and PDFs by describing them\. Adds a second local model: about 1\.5 GB\. It sets up by itself on a computer with 16 GB of memory or more\./);
         assert.doesNotMatch(row.textContent, /✓/);
         h.btn('Set up pictures and documents').click();
         assert.deepEqual(h.nav, ['media-pane']);
@@ -206,12 +206,12 @@ describe('Row 3: pictures and documents (optional)', () => {
         assert.equal(row.querySelectorAll('button').length, 0);
     });
 
-    it('a computer with too little memory says so and cannot start the setup', async () => {
-        const msg = 'Images and documents need a computer with at least 16 GB of memory; this one has 8.0 GB.';
-        const h = setup({ feat: () => ({ json: features({ enabled: false, ram_ok: false, ram_message: msg }) }) });
+    it('a computer with too little memory is warned in plain words and can still start the setup', async () => {
+        const msg = 'This computer has 8.0 GB of memory; pictures and documents may be slow and the models are released when memory runs low.';
+        const h = setup({ feat: () => ({ json: features({ enabled: false, ram_ok: true, ram_message: '', ram_warning: msg }) }) });
         await h.mount();
-        assert.match(h.row('media').textContent, /this one has 8\.0 GB/);
-        assert.equal(h.btn('Set up pictures and documents').disabled, true);
+        assert.match(h.row('media').textContent, /this computer has 8\.0 GB/i);
+        assert.equal(h.btn('Set up pictures and documents').disabled, false);
     });
 
     it('while it is being set up, it says so and points at the pane', async () => {
@@ -243,7 +243,7 @@ describe('Safety and tone', () => {
         const evil = '<img src=x onerror=alert(1)>';
         const h = setup({
             local: () => hosts([{ id: 'x', name: evil, live: 0 }]),
-            feat: () => ({ json: features({ enabled: false, ram_ok: false, ram_message: evil }) }),
+            feat: () => ({ json: features({ enabled: false, ram_ok: true, ram_message: '', ram_warning: evil }) }),
         });
         await h.mount();
         assert.equal(h.host.querySelectorAll('img').length, 0);

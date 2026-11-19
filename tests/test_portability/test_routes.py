@@ -31,8 +31,8 @@ def wait(world, run_id, seconds=60):
     assert JOBS.join(run_id, seconds)
 
 
-def test_off_by_default_every_call_names_the_switch(world, monkeypatch) -> None:
-    monkeypatch.delenv(env_name("portability.import"))
+def test_when_a_person_turned_it_off_every_call_names_the_switch(world, monkeypatch) -> None:
+    monkeypatch.setenv(env_name("portability.import"), "off")  # on by default; this is a person's own off
     listing = world.client.get("/api/import/runs").json()
     assert listing["success"] and listing["enabled"] is False and listing["flag"] == "portability.import"
     for path in ("/api/import/preview", "/api/import/run"):
@@ -207,13 +207,14 @@ def test_a_viewer_can_preview_but_not_import_or_undo(world, monkeypatch) -> None
 
 def test_the_switch_turns_the_pack_on_and_off_and_respects_the_kill_switch(world, monkeypatch) -> None:
     monkeypatch.delenv(env_name("portability.import"))
+    assert world.client.get("/api/import/runs").json()["enabled"] is True  # on by default
+    assert world.client.post("/api/import/switch", json={"state": "maybe"}).status_code == 422
+    off = world.client.post("/api/import/switch", json={"state": "off"})
+    assert off.status_code == 200 and off.json()["enabled"] is False
     assert world.client.get("/api/import/runs").json()["enabled"] is False
     on = world.client.post("/api/import/switch", json={"state": "on"})
     assert on.status_code == 200 and on.json()["enabled"] is True
     assert world.client.get("/api/import/runs").json()["state"] == "on"
-    assert world.client.post("/api/import/switch", json={"state": "maybe"}).status_code == 422
-    off = world.client.post("/api/import/switch", json={"state": "off"})
-    assert off.json()["enabled"] is False
     monkeypatch.setenv("SLM_4230_OFF", "1")
     killed = world.client.post("/api/import/switch", json={"state": "on"})
     assert killed.status_code == 409 and "kill switch" in killed.json()["detail"]

@@ -21,8 +21,12 @@ picture description below is on, no generative model looks at the files, so
 SLM cannot describe a picture to you: it finds it, and you look at the
 thumbnail it returns.
 
-This feature is **off by default**. Pictures live in their own database
-(`media.db`); turning it on does not change any existing memory or embedding.
+This feature is **on by default**: on a computer with 16 GB of memory or more SLM
+sets it up and downloads its models by itself (a few minutes after the SLM service
+starts, when the computer is idle); on a smaller one the person taps one button
+(`slm media enable`). Pictures live in their own database (`media.db`); setting it
+up does not change any existing memory or embedding. `slm media status` and
+`media_status` with `setup=true` say in plain words what is happening.
 
 ---
 
@@ -66,12 +70,15 @@ It says whether the feature is off, set up, still setting up, or failed
 slm media enable    # shows the download size and a disk check, then asks; --yes skips the question
 ```
 
-Turning it on downloads about 1.5 GB of models and tools, and needs a
-computer with 16 GB of memory (the check passes from 15 GiB). On a smaller
-computer `enable` refuses with the reason and exits with code 4; text memory
-keeps working. Never turn it on, or pass `--yes`, without the user saying
-yes in this conversation. Never set `SLM_MEDIA_ALLOW_LOW_RAM=1` yourself: it
-removes the memory check and the owner must decide that.
+Setting it up downloads about 1.5 GB of models and tools. From 15 GiB of memory
+(a computer sold as 16 GB) SLM does it by itself; below that `enable` is a
+one-click download that prints "This computer has 8.0 GB of memory; pictures and
+documents may be slow and the models are released when memory runs low." and is
+never refused for memory. A person who turned it off (`slm media disable`) keeps
+it off: the automatic set-up never undoes that. Never turn it on again, or pass
+`--yes`, without the user saying yes in this conversation. Never set
+`SLM_MEDIA_ALLOW_LOW_RAM=1` yourself (the developer switch that makes a small
+computer take the automatic path): the owner decides that.
 
 Supported: macOS on Apple Silicon, Windows x64, Linux x86_64 and Linux ARM64
 (aarch64), Python 3.12 to 3.14. Not supported: Intel Macs and Windows on ARM.
@@ -250,8 +257,10 @@ slm media pack disable captions          # off again (--remove-files also delete
   `from page 3, top left`. Give that place when you cite a picture or a scanned
   page.
 
-The parts need pictures and documents turned on first, a computer with 16 GB of
-memory, and free disk space; the kill switch turns all three off. Only one of
+The parts are on by default and need pictures and documents set up first and free
+disk space; on 16 GB or more the service downloads both models by itself, one at a
+time, and a part you disabled stays off (below 16 GB it is one click). The kill
+switch turns all three off. Only one of
 these models is in memory at a time, in its own worker, and it is released a
 minute after its last use. The dashboard has the same three switches under
 **Documents & Images**, in plain words. Nothing here adds an MCP tool.

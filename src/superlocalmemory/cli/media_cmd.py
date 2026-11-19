@@ -86,9 +86,9 @@ def _running(args: Namespace) -> None:
 def _enable(args: Namespace) -> None:
     _running(args)
     media = _call(args, "GET", FEATURES_PATH)["media"]
-    if media.get("ram_ok") is False:  # refused here: say so plainly, ask nothing
-        die(args, str(media.get("ram_message") or ""), EXIT_LOW_RAM)
     if not getattr(args, "json", False):
+        if media.get("ram_warning"):  # a small computer is warned, never refused
+            print(media["ram_warning"])
         print(f"Images & documents download {SIZE_TEXT} of models.")
         print(_disk_text(media.get("precheck", {})))
     if not _confirmed(args):
@@ -121,7 +121,10 @@ def _disable(args: Namespace) -> None:
 
 def _status(args: Namespace) -> None:
     data = _call(args, "GET", FEATURES_PATH)
-    _emit(args, data, "Images & documents: " + media_line(data["media"]))
+    text = "Images & documents: " + media_line(data["media"])
+    if data["media"].get("ram_warning"):
+        text += "\n" + data["media"]["ram_warning"]
+    _emit(args, data, text)
 
 
 def _plural(n: int, word: str) -> str:

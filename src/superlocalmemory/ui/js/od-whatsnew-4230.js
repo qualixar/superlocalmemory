@@ -3,10 +3,10 @@
 //
 // 4.2.30 (D-41, §8.10.3 l): the "What memory can do now" card on the Dashboard home, next to the
 // What's new tiles. One plain line for each new thing, each with a link to its card or its
-// guide, and shown only while that feature is not yet turned on: which ones are on comes from
-// GET /api/whatsnew/state (the feature flags, read-only). The card hides itself when there is
-// nothing left to offer, and a person can dismiss it (remembered in this browser).
-// Nothing from the server is parsed as HTML.
+// guide. Every feature is on by default (Varun, 19 Nov 2026), so each line says "On by default";
+// a feature a person (or the kill switch) turned off says so and shows the switch to turn it on.
+// Which ones are on comes from GET /api/whatsnew/state (the feature flags, read-only). A person
+// can dismiss the card (remembered in this browser). Nothing from the server is parsed as HTML.
 (function () {
   'use strict';
 
@@ -51,7 +51,7 @@
       line: 'Import what ChatGPT, Claude, Mem0, Letta or your Markdown notes remember. You see a preview first, and one Undo removes the whole import.',
       doc: 'importing.md' },
     { id: 'media_packs', title: 'Better pictures and documents',
-      line: 'Optional models describe your pictures and read scanned pages better. Each is off until you turn it on, and the download size is shown first.',
+      line: 'Models that describe your pictures and read scanned pages better. On a computer with 16 GB of memory or more they download by themselves, one at a time, when it is idle; on a smaller one you tap one button, and the size is shown first.',
       pane: 'media-pane', paneLabel: 'Open Documents & Images' },
     { id: 'decisions', title: 'Your agents decide, and you can undo',
       line: 'Agents can settle disputes and apply changes themselves. Each decision is listed on the Dashboard with an Undo.',
@@ -92,13 +92,14 @@
     return a;
   }
 
-  function item(entry, flag) {
+  function item(entry, flag, on) {
     var li = el('li', 'od-whatsnew-item');
     li.setAttribute('data-entry', entry.id);
     var text = el('span', 'od-whatsnew-item-text');
     text.appendChild(el('strong', null, entry.title + (/[.?!]$/.test(entry.title) ? ' ' : '. ')));
     text.appendChild(document.createTextNode(entry.line));
-    if (flag) text.appendChild(el('code', 'od-whatsnew-how', 'slm flags set ' + flag + ' on'));
+    if (flag && on) text.appendChild(el('em', 'od-whatsnew-state', ' On by default.'));
+    else if (flag) text.appendChild(el('code', 'od-whatsnew-how', 'Turned off. Turn on: slm flags set ' + flag + ' on'));
     li.appendChild(text);
     li.appendChild(link(entry));
     return li;
@@ -107,8 +108,8 @@
   function draw(host, state) {
     host.textContent = '';
     var features = (state && state.features) || {};
-    var shown = ENTRIES.filter(function (e) { return !(features[e.id] && features[e.id].on); });
-    if (!shown.length || dismissed()) return;
+    var shown = ENTRIES;
+    if (!Object.keys(features).length || dismissed()) return;
     var card = el('div', 'card card-pad od-whatsnew od-whatsnew-4230');
     var close = el('button', 'btn sm ghost od-whatsnew-close', '×');
     close.type = 'button';
@@ -121,13 +122,13 @@
         'Turn it off with slm flags kill off to use them.'));
     }
     var list = el('ul', 'od-whatsnew-list');
-    shown.forEach(function (e) { list.appendChild(item(e, features[e.id] && features[e.id].flag)); });
+    shown.forEach(function (e) { list.appendChild(item(e, features[e.id] && features[e.id].flag, !!(features[e.id] && features[e.id].on))); });
     card.appendChild(list);
     host.appendChild(card);
   }
 
   // Resolves when drawn. Nothing is asked of the server for a card the person dismissed, and a
-  // state that cannot be read draws nothing (never a list that might offer what is already on).
+  // state that cannot be read draws nothing (never a list that might state what is on without knowing).
   function mount(host) {
     if (!host) return Promise.resolve();
     host.textContent = '';

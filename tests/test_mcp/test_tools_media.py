@@ -273,3 +273,28 @@ def test_save_tools_pass_scope_and_the_sharing_list(srv, monkeypatch, tool, url)
     assert path == url and body["scope"] == "shared" and body["shared_with"] == ["p2", "p3"]
     call(srv, tool, {"base64": "QUJD"})
     assert "scope" not in spy.calls[1][2] and "shared_with" not in spy.calls[1][2]
+
+
+def test_media_status_setup_reports_the_plain_words_and_the_small_computer_warning(srv, monkeypatch):
+    warning = ("This computer has 8.0 GB of memory; pictures and documents may be slow and the models are "
+               "released when memory runs low.")
+
+    def fake(method, path, *a, **kw):
+        if path == "/api/v3/features":
+            return {"media": {"mode": "one_click", "words": "One click to download the picture model.",
+                              "ram_warning": warning, "enabled": False}}
+        return {"packs": [{"pack": "captions", "words": "Downloading the picture description model, 40%",
+                           "state": "downloading"}]}
+
+    monkeypatch.setattr(daemon, "daemon_request", fake)
+    res = call(srv, "media_status", {"setup": True})
+    assert res["success"] is True and res["setup"]["mode"] == "one_click" and res["setup"]["warning"] == warning
+    assert res["setup"]["parts"][0]["words"] == "Downloading the picture description model, 40%"
+
+
+def test_media_status_setup_is_not_for_remote_apps(srv, monkeypatch):
+    spy = Spy({})
+    monkeypatch.setattr(daemon, "daemon_request", spy)
+    with remote_caller("rk_00000001"):
+        res = call(srv, "media_status", {"setup": True})
+    assert spy.calls == [] and res["code"] == "not_for_remote"

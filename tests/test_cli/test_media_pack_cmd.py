@@ -16,7 +16,8 @@ from superlocalmemory.cli import media_cmd, media_pack_cmd
 PACKS = {"packs": [
     {"pack": "captions", "label": "Describe pictures", "what": "Writes a few words.", "state": "off",
      "download_words": "Describe pictures: a 0.5 GB download", "model": "florence-community/Florence-2-base",
-     "licence": "MIT", "progress": 0.0},
+     "licence": "MIT", "progress": 0.0,
+     "words": "One click to download the picture description model (0.5 GB)."},
     {"pack": "documents", "label": "Read scanned documents better", "what": "A larger model.", "state": "on",
      "download_words": "Read scanned documents better: a 1.9 GB download", "model": "PaddlePaddle/PaddleOCR-VL-1.6",
      "licence": "Apache-2.0", "progress": 1.0},
@@ -46,11 +47,19 @@ def _args(**kw):
     return Namespace(**base)
 
 
-def test_status_lists_each_part_with_its_download_size(daemon, capsys):
+def test_status_lists_each_part_in_plain_words(daemon, capsys):
     media_cmd.cmd_media(_args())
     out = capsys.readouterr().out
-    assert "captions: off (Describe pictures: a 0.5 GB download)" in out
-    assert "documents: on." in out and "regions: off (No download)" in out
+    assert "captions: One click to download the picture description model (0.5 GB)." in out
+    assert "documents: on." in out  # an older daemon that sends no words: the state is still shown
+
+
+def test_status_shows_the_small_computer_warning_once(daemon, capsys):
+    _, state = daemon
+    warning = "This computer has 8.0 GB of memory; pictures and documents may be slow."
+    state["reply"] = {"packs": [{**p, "warning": warning} for p in PACKS["packs"]]}
+    media_cmd.cmd_media(_args())
+    assert capsys.readouterr().out.count(warning) == 1
 
 
 def test_status_for_one_part_and_as_json(daemon, capsys):

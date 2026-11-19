@@ -77,7 +77,10 @@ def test_the_read_lists_the_parts_with_their_sizes_and_changes_nothing(ctx):
     body = client.get("/api/v3/features/media/packs").json()
     assert [p["pack"] for p in body["packs"]] == ["captions", "documents", "regions"]
     assert body["packs"][0]["download_words"] == "Describe pictures: a 0.5 GB download"
-    assert all(p["state"] == "off" for p in body["packs"]) and body["packs"][0]["media_ready"] is True
+    models = [p for p in body["packs"] if p["pack"] != "regions"]
+    assert all(p["state"] == "off" and p["installed"] is False for p in models)  # no model downloaded yet
+    assert body["packs"][2]["state"] == "on" and body["packs"][0]["media_ready"] is True  # regions: on by default
+    assert all(p["words"] for p in body["packs"]) and body["packs"][0]["mode"] in ("auto", "one_click")
     assert sorted(p.name for p in root.iterdir()) == before
 
 

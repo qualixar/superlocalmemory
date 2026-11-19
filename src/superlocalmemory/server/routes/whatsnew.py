@@ -2,14 +2,14 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 """``GET /api/whatsnew/state``: which 4.2.30 features are already on (§8.10.3 l).
 
-The dashboard's "New in 4.2.30" entries are shown only while the feature they describe is not
-yet turned on, so the page needs each flag's state and nothing else. Read-only and open to the
+The dashboard's "New in 4.2.30" entries say "On by default" for a feature that is on and show the
+switch for one a person turned off, so the page needs each flag's state and nothing else. Read-only and open to the
 dashboard like ``GET /api/outcomes/measurement``: it reveals only whether a switch is on, never
 any memory. A switch that the kill switch holds off reads as off, and says the kill switch is on.
 
 ``features`` maps an entry id to ``{"on": bool, "flag": <flag id or null>}``. An entry with no
 flag (``why``: the reason a memory was shown is always available) is never "on", so it shows
-until the person dismisses the card. Measuring is "on" once its notice was read.
+no state line. Measuring is "on" once its notice was read.
 """
 
 from __future__ import annotations

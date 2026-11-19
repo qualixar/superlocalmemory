@@ -87,7 +87,8 @@ def _page_text(runtime):
             if "page" in r.metadata.get("_slm_source", {})}
 
 
-def test_everything_off_the_standard_reader_reads_and_asks_for_no_boxes(store, tmp_path):
+def test_everything_off_the_standard_reader_reads_and_asks_for_no_boxes(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("SLM_FEATURE_MEDIA_REGIONS", "off")  # on by default; this is a person's own off
     client = RegionClient(ocr={1: "Scanned receipt text here"})
     receipt, runtime = _run(store, tmp_path, client)
     assert client.asked == [False, False]
@@ -164,6 +165,7 @@ def test_erasing_a_document_erases_its_page_regions(store, tmp_path, monkeypatch
     assert store._read().execute("SELECT COUNT(*) FROM media_regions").fetchone()[0] == 0
 
 
-def test_the_document_models_page_region_is_not_kept_while_regions_is_off(store, tmp_path, doc_model):
+def test_the_document_models_page_region_is_not_kept_while_regions_is_off(store, tmp_path, doc_model, monkeypatch):
+    monkeypatch.setenv("SLM_FEATURE_MEDIA_REGIONS", "off")  # on by default; this is a person's own off
     _run(store, tmp_path, RegionClient())
     assert store._read().execute("SELECT COUNT(*) FROM media_regions").fetchone()[0] == 0

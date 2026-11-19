@@ -18,6 +18,7 @@ from superlocalmemory.truth import disputes, slot_store
 from superlocalmemory.truth.dispute_pass import DisputePass
 from superlocalmemory.truth.slot_pass import SlotPass
 from superlocalmemory.truth.slot_resolver import reconcile_ledger
+from tests.helpers.flag_baseline import off_except
 from tests.test_core.test_coverage_backfill import _db
 from tests.test_truth.test_dispute_pass import Fixed, _calibrate
 from tests.test_truth.test_slot_pass import _retired
@@ -36,7 +37,7 @@ NONE = None  # no declaration: recorded as unknown, like a fact from before 4.2.
 
 
 def _flags(**states):
-    return FeatureFlags(file_values=states, environ={})
+    return FeatureFlags(file_values=off_except(states), environ={})
 
 
 def _fact(db, content, created, origin):
@@ -125,8 +126,8 @@ def test_shadow_reports_what_it_would_hold_and_changes_nothing(tmp_path) -> None
 def test_the_kill_switch_means_off(tmp_path) -> None:
     db = _db(tmp_path / "memory.db")
     values = {"truth.slots": "shadow", "trust.taint": "on"}
-    live = SlotPass(db, FeatureFlags(file_values=values, environ={}), state_dir=tmp_path)
-    killed = SlotPass(db, FeatureFlags(file_values=values, environ={}, killed=True),
+    live = SlotPass(db, FeatureFlags(file_values=off_except(values), environ={}), state_dir=tmp_path)
+    killed = SlotPass(db, FeatureFlags(file_values=off_except(values), environ={}, killed=True),
                       state_dir=tmp_path)
     assert live._taint_state() == "on" and killed._taint_state() == "off"
 

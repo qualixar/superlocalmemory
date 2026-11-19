@@ -3617,6 +3617,18 @@ async def lifespan(application: FastAPI):
             media_housekeeping.run(), name="media-housekeeping"
         )
 
+    # Pictures, documents and both model packs set themselves up on a computer with 16 GB or more
+    # (Varun, 19 Nov 2026): a few minutes after start-up has settled, one download at a time. Only here,
+    # in the real daemon: never a hook, a recall or a one-off command. Idle on a smaller computer.
+    _auto_task = getattr(application.state, "_media_auto_task", None)
+    if _auto_task is None or _auto_task.done():
+        from superlocalmemory.runtimes import media_auto
+
+        application.state._media_auto_task = asyncio.create_task(
+            media_auto.run(idle=lambda: time.monotonic() - _last_activity >= media_auto.IDLE_S),
+            name="media-auto-setup",
+        )
+
     # v3.6.7: Start MCP Streamable-HTTP session manager (GOTCHA #1).
     # streamable_http_app() carries its own Starlette lifespan that initialises
     # an anyio task group inside the session manager. Without entering that
@@ -3791,6 +3803,13 @@ async def lifespan(application: FastAPI):
         _upload_hk = getattr(application.state, "_upload_housekeeping_task", None)
         if _upload_hk is not None and not _upload_hk.done():
             _upload_hk.cancel()
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    try:
+        _media_auto = getattr(application.state, "_media_auto_task", None)
+        if _media_auto is not None and not _media_auto.done():
+            _media_auto.cancel()
     except Exception:  # pragma: no cover — defensive
         pass
 

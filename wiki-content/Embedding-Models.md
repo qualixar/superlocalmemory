@@ -14,7 +14,7 @@ For that reason "Upgrade memory engine", the card in Settings and `slm embedder 
 |---|---|
 | Used for | Pictures and PDF pages only, never text |
 | Download the first time | About 1.5 GB, with the OCR and PDF tools ([Pictures and Documents](Pictures-and-Documents)) |
-| Computer | Needs 16 GB of memory; machines sold as 16 GB pass the check |
+| Computer | Sets up by itself from 16 GB of memory (machines sold as 16 GB count); below that it is one click, with a warning |
 | When idle | Unloads after 30 minutes without use (`SLM_MEDIA_WORKER_IDLE_S` changes it), so a text-only day holds no picture model in memory |
 
 A recall never waits for the picture model to load. If it is cold, that recall goes on without pictures and says so, and the model warms in the background ([How Recall Works](How-Recall-Works)).

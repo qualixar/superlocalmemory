@@ -19,17 +19,15 @@ from superlocalmemory.core.feature_flags import (
     write_flag,
 )
 
-#: What 4.2.30 measures by default: injection receipts (D-22), randomised
-#: withholding (D-28, D-34), logged adjacent swaps (D-46) and usage detection (D-49: without
-#: it the withholding and the swaps could never observe a ``used`` outcome). Everything else
-#: ships dark.
-DEFAULT_ON = frozenset({"outcomes.receipts", "outcomes.holdout", "outcomes.swaps",
-                        "outcomes.usage"})
+#: Every flag is on by default (Varun, 19 Nov 2026: "every feature we are enabling should be on by
+#: default for my end users"). Measuring (injection receipts D-22, randomised withholding D-28/D-34,
+#: logged swaps D-46, usage detection D-49) was on from W0; the rest followed on 19 Nov.
+DEFAULT_ON = frozenset(FLAGS)
 
 
-def test_4230_measures_by_default_and_every_other_flag_ships_dark() -> None:
+def test_every_4230_flag_is_on_by_default() -> None:
     assert FLAGS
-    assert {f.flag_id for f in FLAGS.values() if f.default is not FlagState.OFF} == DEFAULT_ON
+    assert {f.flag_id for f in FLAGS.values() if f.default is FlagState.ON} == DEFAULT_ON
     assert all(FLAGS[fid].default is FlagState.ON for fid in DEFAULT_ON)
     assert all(f.workstream.startswith("WS-") for f in FLAGS.values())
 
@@ -88,7 +86,9 @@ def test_slm_flags_sets_a_flag_and_the_kill_switch(tmp_path, monkeypatch, capsys
 
 def test_environment_beats_file_beats_default() -> None:
     fid = "truth.slots"
-    assert resolve(fid, file_values={}, environ={}) is FlagState.OFF
+    assert resolve(fid, file_values={}, environ={}) is FlagState.ON
+    assert resolve(fid, file_values={fid: "off"}, environ={}) is FlagState.OFF  # a person's own off
+    assert resolve(fid, file_values={fid: "off"}, environ={env_name(fid): "on"}) is FlagState.ON
     assert resolve(fid, file_values={fid: "shadow"}, environ={}) is FlagState.SHADOW
     assert resolve(fid, file_values={fid: "shadow"},
                    environ={env_name(fid): "on"}) is FlagState.ON
@@ -97,8 +97,8 @@ def test_environment_beats_file_beats_default() -> None:
 
 @pytest.mark.parametrize("raw,state", [
     (True, FlagState.ON), (False, FlagState.OFF), ("1", FlagState.ON), ("yes", FlagState.ON),
-    ("OFF", FlagState.OFF), (" Shadow ", FlagState.SHADOW), ("bogus", FlagState.OFF),
-    (3, FlagState.OFF), (None, FlagState.OFF)])
+    ("OFF", FlagState.OFF), (" Shadow ", FlagState.SHADOW), ("bogus", FlagState.ON),
+    (3, FlagState.ON), (None, FlagState.ON)])  # an unreadable value falls back to the default: on
 def test_values_parse_or_fall_back(raw, state) -> None:
     assert resolve("truth.leases", file_values={"truth.leases": raw}, environ={}) is state
 

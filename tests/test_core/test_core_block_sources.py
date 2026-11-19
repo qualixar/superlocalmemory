@@ -24,6 +24,14 @@ from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
 
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """What session start selects, not the origin firewall: these memories are saved through agent
+    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a
+    promotion. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
 PID = "default"
 
 

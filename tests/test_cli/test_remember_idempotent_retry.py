@@ -32,7 +32,11 @@ def test_rerunning_the_same_remember_stores_it_once(engine_with_mock_deps, capsy
     with _client(engine_with_mock_deps) as client:
 
         def forward(_method, path, body, **_kwargs):
-            bodies.append(dict(body))
+            # Only the CLI's remember requests are under test. The same patched function also
+            # carries the embedder proxy's POST /api/v3/embed when an earlier test in the worker
+            # left the proxy embedder in place; that body has no idempotency key by design.
+            if path.startswith("/remember"):
+                bodies.append(dict(body))
             response = client.post(path, json=body)
             assert response.status_code in (200, 202), response.text
             return response.json()

@@ -11,6 +11,7 @@ from superlocalmemory.core.judge_ladder import JudgeLadder, TierAnswer
 from superlocalmemory.core.judge_questions import SLOT_RELATION
 from superlocalmemory.truth.dispute_pass import DisputePass
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_core.test_coverage_backfill import _db
 from tests.test_truth.test_slot_pass import _fact, _flags, _retired
 
@@ -83,7 +84,7 @@ def _run(db, verdict, *, confidence=0.95, calibrated=True, **flags):
     if calibrated:
         _calibrate(db, verdict)
     tier = Fixed(verdict, confidence)
-    counts = DisputePass(db, FeatureFlags(file_values=flags, environ={}),
+    counts = DisputePass(db, FeatureFlags(file_values=off_except(flags), environ={}),
                          JudgeLadder([tier])).run()
     return counts, tier
 
@@ -239,7 +240,7 @@ class FailingTier:
 
 def _pass(db, *tiers, limit=32, **flags):
     flags = flags or {"judge.ladder": "shadow"}
-    return DisputePass(db, FeatureFlags(file_values=flags, environ={}), JudgeLadder(list(tiers)),
+    return DisputePass(db, FeatureFlags(file_values=off_except(flags), environ={}), JudgeLadder(list(tiers)),
                        limit=limit).run()
 
 
@@ -437,8 +438,8 @@ def test_an_older_value_is_asked_in_time_order(older) -> None:
 def test_replaces_on_an_older_value_retires_it_and_keeps_the_head(older) -> None:
     db, old, new = older
     _calibrate(db, "replaces")
-    counts = DisputePass(db, FeatureFlags(file_values={
-        "judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"}, environ={}),
+    counts = DisputePass(db, FeatureFlags(file_values=off_except({
+        "judge.ladder": "on", "truth.slots": "on", "truth.slots.auto_apply": "on"}), environ={}),
         JudgeLadder([Fixed("replaces")])).run()
     assert counts["resolved_replaces"] == 1 and _open(db) == 0
     until, expired, by = _retired(db, old)

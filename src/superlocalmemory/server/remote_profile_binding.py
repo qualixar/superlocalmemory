@@ -181,6 +181,8 @@ NEUTRAL_ARGUMENTS: frozenset[str] = frozenset({
 #: later tool with a ``path`` argument is never let through by accident.
 MEDIA_ARGUMENTS: frozenset[str] = frozenset({
     "base64", "download_url", "file", "file_name", "job_id", "media_id", "path", "variant",
+    # ``media_status(setup=true)``: where pictures and models stand; local callers only (refused for remote keys).
+    "setup",
 })
 #: ``file`` is a chat app's attachment object (``openai/fileParams``).
 #: Only the two saving tools take it.

@@ -51,6 +51,8 @@ def world(tmp_path, monkeypatch):
     for name in list(os.environ):
         if name.startswith("SLM_FEATURE_") or name == KILL_ENV:
             monkeypatch.delenv(name)
+    for flag_id in FLAGS:  # on by default: the store is built with every flag off, as the passes expect
+        write_flag(home, flag_id, FlagState.OFF)
     db = _db(tmp_path / "memory.db")
     for apply_schema in (apply_v343_schema, apply_v346_schema, apply_v347_schema,
                          apply_v3410_schema, apply_v3411_schema):

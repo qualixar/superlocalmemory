@@ -22,7 +22,8 @@ def _cls(**kw) -> str:
 def test_the_order_is_the_one_in_the_blueprint() -> None:
     assert oc.ORDER == ("user_direct", "user_confirmed", "system", "agent_inferred", "tool_output",
                         "mesh_peer", "web", "imported_file", "model_generated")
-    assert oc.CLASSES == set(oc.ORDER) | {"unknown"}
+    assert oc.CLASSES == set(oc.ORDER) | {"unknown", "legacy"}
+    assert oc.rank_of("legacy") == oc.rank_of("system")  # kept as before (Varun, 19 Nov)
 
 
 @pytest.mark.parametrize("a,b", list(itertools.combinations_with_replacement(oc.ORDER, 2)))
@@ -63,7 +64,8 @@ def test_every_class_has_plain_words() -> None:
     assert oc.label("tool_output") == "a tool's output"
     assert oc.label("web") == "a web page"
     assert oc.label("model_generated") == "written by a model"
-    assert oc.label("unknown") == "unknown (saved before 4.2.30)"
+    assert oc.label("unknown") == "unknown (its source was not recorded)"
+    assert oc.label("legacy") == "saved before 4.2.30 (trusted as it was before)"
     assert oc.label("not-a-class") == oc.label("unknown")
 
 

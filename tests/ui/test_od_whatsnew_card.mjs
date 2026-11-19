@@ -102,14 +102,11 @@ describe("what's-new card follows the real state", () => {
         assert.equal(h.timers.length, 0);
     });
 
-    it('under 16 GB: the refusal message shows and the turn-on button is disabled', async () => {
-        const h = await setup({ media: { enabled: false, ram_ok: false, ram_message: MESSAGE } });
-        assert.ok(h.host.textContent.includes(MESSAGE));
-        assert.equal(h.btn('Turn on images & documents').disabled, true);
-        h.btn('Turn on images & documents').click();
-        await flushPromises();
-        assert.deepEqual(h.seen, []);
-        assert.equal(h.confirms.length, 0);
+    it('under 16 GB: the warning shows and the turn-on button works (one click, never refused)', async () => {
+        const warning = 'This computer has 4.0 GB of memory; pictures and documents may be slow and the models are released when memory runs low.';
+        const h = await setup({ media: { enabled: false, ram_ok: true, ram_message: '', mode: 'one_click', ram_warning: warning } });
+        assert.ok(h.host.textContent.includes(warning));
+        assert.equal(h.btn('Turn on images & documents').disabled, false);
     });
 
     it('setup that failed offers the turn-on button again', async () => {

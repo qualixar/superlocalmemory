@@ -133,13 +133,22 @@ def test_pack_models_have_memory_numbers_and_the_embedding_models_are_untouched(
     assert media_models.profile_for("florence-community/Florence-2-base") is None  # no evidence floor
 
 
-def test_the_watchdog_limit_moves_only_while_a_pack_is_on(tmp_path, monkeypatch):
+def test_the_watchdog_limit_moves_only_while_a_pack_is_on_and_its_model_is_here(tmp_path, monkeypatch):
+    from superlocalmemory.runtimes import media_packs
+
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("SLM_MEDIA_WORKER_RSS_LIMIT_MB", raising=False)
+    monkeypatch.delenv("SLM_FEATURE_MEDIA_DOCUMENT_PACK", raising=False)
     before = media_models.watchdog_limit_mb(1600)
-    assert before == 4500
+    assert before == 4500  # the flag is on by default, but no model is downloaded: nothing moves
+    spec = media_packs.DOCUMENTS
+    media_packs.model_dir(spec, tmp_path).mkdir(parents=True)
+    (media_packs.pack_dir(spec, tmp_path) / media_packs.READY_FILE).write_text(
+        json.dumps({"repo": spec.repo, "revision": spec.revision}), encoding="utf-8")
+    assert media_models.watchdog_limit_mb(1600) == 6500  # on and installed
+    monkeypatch.setenv("SLM_FEATURE_MEDIA_DOCUMENT_PACK", "off")  # a person's own off puts it back
+    assert media_models.watchdog_limit_mb(1600) == before
     monkeypatch.setenv("SLM_FEATURE_MEDIA_DOCUMENT_PACK", "on")
-    assert media_models.watchdog_limit_mb(1600) == 6500
     monkeypatch.setenv("SLM_4230_OFF", "1")  # the kill switch puts it back
     assert media_models.watchdog_limit_mb(1600) == before
 

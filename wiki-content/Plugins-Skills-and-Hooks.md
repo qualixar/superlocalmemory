@@ -75,7 +75,7 @@ A skill is a short document the agent loads when a request matches its descripti
 | `slm-loop` | Gate-verified bounded loops with SLM as the ledger ([Bounded Loops](Bounded-Loops)) | yes |
 | `slm-cache` | Exact cache for repeated reads and searches ([Optimize](Optimize)) | yes |
 | `slm-compress` | Reversible compression of large output ([Optimize](Optimize)) | yes |
-| `slm-media` | Save and find pictures and PDFs; off by default ([Pictures and Documents](Pictures-and-Documents)) | yes |
+| `slm-media` | Save and find pictures and PDFs; on by default, set up by itself from 16 GB ([Pictures and Documents](Pictures-and-Documents)) | yes |
 | `slm-web-access` | Set up and diagnose Web access for web apps ([Web Access and Connected Apps](Web-Access-and-Connected-Apps)) | yes |
 
 Every host in the table above that is not Cursor-format gets all 16. The exceptions are `slm codex install` (14, without the two bot-host skills) and Hermes over a remote connection (7: `slm-cache`, `slm-compress`, `slm-recall`, `slm-remember`, `slm-scope`, `slm-session`, `slm-status`).

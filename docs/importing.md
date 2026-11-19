@@ -2,8 +2,8 @@
 
 Part of 4.2.30 (WS-9). SuperLocalMemory can read the export files of ChatGPT, Claude, Mem0 and Letta,
 a folder of OKF notes, and plain Markdown (`AGENTS.md`, `CLAUDE.md`, `MEMORY.md` with its topic files),
-and bring what is in them into your memory. It is an optional pack: **off until you turn it on**
-(`slm flags set portability.import on`, or **Turn on importing** on the dashboard), and the kill switch
+and bring what is in them into your memory. It is on by default and runs only when you start an import
+(`slm flags set portability.import off` turns it off), and the kill switch
 (`slm flags kill on`) stops it.
 
 An import is one unit. You see what a file holds before anything is saved, it runs in the background

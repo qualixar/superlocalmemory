@@ -330,10 +330,12 @@ def test_the_report_carries_the_need_gate(store) -> None:
 
 # -- the flag (D-47) ------------------------------------------------------------------------------
 
-def test_the_gate_is_off_by_default_and_on_the_kill_switch(store, tmp_path, monkeypatch) -> None:
+def test_the_gate_is_on_by_default_off_by_a_persons_off_and_on_the_kill_switch(store, tmp_path, monkeypatch) -> None:
     from superlocalmemory.core.feature_flags import FlagState, write_flag
 
     gate = ng.Gate(tmp_path, store.db_path)
+    assert ng.flag_state(tmp_path) == "on" and gate.decide("what did we decide?", "default").recall
+    write_flag(tmp_path, "delivery.need_gate", FlagState.OFF)  # a person's own off
     assert ng.flag_state(tmp_path) is None and gate.decide("what did we decide?", "default") is None
     write_flag(tmp_path, "delivery.need_gate", FlagState.ON)
     assert gate.decide("what did we decide?", "default").recall

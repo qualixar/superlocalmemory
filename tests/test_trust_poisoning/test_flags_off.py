@@ -26,9 +26,12 @@ from tests.test_trust_poisoning.test_tool_output_firewall import (
 )
 
 
-def test_both_flags_ship_off() -> None:
-    assert FLAGS["trust.taint"].default is FlagState.OFF
-    assert FLAGS["trust.secret_screen"].default is FlagState.OFF
+def test_both_flags_ship_on_and_a_persons_off_reads_as_before(monkeypatch) -> None:
+    assert FLAGS["trust.taint"].default is FlagState.ON
+    assert FLAGS["trust.secret_screen"].default is FlagState.ON
+    monkeypatch.delenv(TAINT)  # the suite's baseline is an environment "off"
+    assert firewall.active() and firewall.observing()
+    monkeypatch.setenv(TAINT, "off")
     assert not firewall.active() and not firewall.observing()
 
 

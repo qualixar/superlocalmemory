@@ -121,13 +121,19 @@ PACK_FLAGS: Mapping[str, str] = MappingProxyType({
 
 
 def _enabled_pack_caps() -> list[int]:
-    """Memory caps of the pack models whose flag is on: with every pack off the watchdog is what it was."""
-    try:
-        from superlocalmemory.core.feature_flags import FeatureFlags
-        from superlocalmemory.infra.data_root import canonical_data_root
+    """Memory caps of the pack models that are on AND on this computer.
 
-        flags = FeatureFlags(canonical_data_root())
-        return [PACK_MEMORY_MB[repo][0] for repo, flag in PACK_FLAGS.items() if flags.enabled(flag)]
+    The flags default to on (19 Nov 2026), so a flag alone no longer means a model is in use: only a part
+    whose files are installed can load, and only then does the watchdog make room for it. With no model
+    downloaded the watchdog is what it was.
+    """
+    try:
+        from superlocalmemory.infra.data_root import canonical_data_root
+        from superlocalmemory.runtimes import media_packs
+
+        root = canonical_data_root()
+        return [PACK_MEMORY_MB[spec.repo][0] for spec in media_packs.PACKS.values()
+                if spec.repo in PACK_FLAGS and media_packs.is_active(spec.pack_id, root)]
     except Exception:  # noqa: BLE001 - a flag that cannot be read leaves the watchdog as it was
         return []
 

@@ -25,7 +25,14 @@ def home(tmp_path, monkeypatch):
     from tests.test_core.test_coverage_backfill import _db
 
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
+    # The 4.2.30 flags are on by default. These tests start from cues off (the "ships dark" test is a
+    # person's own off) and the firewall off, then switch what they need on through the data folder.
     monkeypatch.delenv("SLM_FEATURE_DELIVERY_CUES", raising=False)
+    monkeypatch.delenv("SLM_FEATURE_TRUST_TAINT", raising=False)
+    from superlocalmemory.core.feature_flags import FlagState as _FS
+    from superlocalmemory.core.feature_flags import write_flag as _wf
+    _wf(tmp_path, "delivery.cues", _FS.OFF)
+    _wf(tmp_path, "trust.taint", _FS.OFF)
     store = _db(tmp_path / "memory.db")
     return tmp_path, store
 
@@ -61,7 +68,7 @@ def _on(tmp_path, state=FlagState.ON):
     write_flag(tmp_path, "delivery.cues", state)
 
 
-def test_it_ships_dark(home, monkeypatch, capsys) -> None:
+def test_a_persons_own_off_delivers_nothing(home, monkeypatch, capsys) -> None:
     tmp_path, store = home
     _memory(store, content=PLAN, cues=["tool:Bash:git push"])
     _bind(store)

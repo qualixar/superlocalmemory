@@ -84,7 +84,6 @@
   var enableRequested = false;
 
   function startEnable(host, opts, msg, m) {
-    if (lowRam(m)) return;
     confirmThen({
       title: 'Turn on images and documents', target: 'Images and documents',
       consequence: 'Installs ' + mediaSize(m) + '. Everything stays on this computer.',
@@ -98,20 +97,21 @@
     });
   }
 
-  // The daemon decides (one function, 16 GB) and says so in ram_ok / ram_message; an
-  // older daemon says nothing, which counts as fine.
-  function lowRam(m) {
-    return !!m && m.ram_ok === false;
-  }
-
+  // The daemon decides (one function: automatic from 16 GB, one click below) and says so in `mode`,
+  // `words` and, on a smaller computer, `ram_warning`. Nothing is refused for memory. An older daemon
+  // says nothing, which counts as the one-click path.
   function offCard(host, m, opts) {
-    var card = cardShell('Turn on images and documents',
-      'Remember pictures and read PDFs: ' + mediaSize(m) + ', and it stays on this computer.');
+    var auto = m.mode === 'auto' && !m.opted_out;
+    var title = m.opted_out ? 'Images and documents are turned off by you'
+      : (auto ? 'Images and documents set up by themselves' : 'Turn on images and documents');
+    var detail = auto ? (m.words || 'SuperLocalMemory downloads the picture model by itself when your computer is idle.')
+      : 'Remember pictures and read PDFs: ' + mediaSize(m) + ', and it stays on this computer.';
+    var card = cardShell(title, detail);
     var msg = messageLine(card);
     if (m.env_state === 'unsupported' && m.step) msg.textContent = m.step;
-    if (lowRam(m) && m.ram_message) card.insertBefore(el('p', null, m.ram_message), msg);
-    var go = button('Turn on', 'btn sm primary', function () { startEnable(host, opts, msg, m); });
-    go.disabled = m.env_state === 'unsupported' || lowRam(m);
+    if (m.ram_warning) card.insertBefore(el('p', null, m.ram_warning), msg);
+    var go = button(auto ? 'Turn on now' : 'Turn on', 'btn sm primary', function () { startEnable(host, opts, msg, m); });
+    go.disabled = m.env_state === 'unsupported';
     card.appendChild(go);
     if (enableRequested && !go.disabled) {
       enableRequested = false;
@@ -134,7 +134,7 @@
   }
 
   function installingCard(m) {
-    var card = cardShell('Setting up images and documents', 'This can take several minutes.');
+    var card = cardShell('Setting up images and documents', m.words || 'This can take several minutes.');
     card.appendChild(progressBar(m));
     card.appendChild(el('p', 'muted', m.step || 'Working…'));
     return card;
@@ -174,7 +174,7 @@
   }
 
   function onCard(host, opts, m) {
-    var card = cardShell('Images and documents are on', mediaSize(m) + '. Everything stays on this computer.');
+    var card = cardShell('Images and documents are on', (m.words || 'Ready') + '. Everything stays on this computer.');
     var label = el('label', 'muted');
     var box = el('input');
     box.type = 'checkbox';
@@ -274,18 +274,19 @@
       t.appendChild(el('p', 'muted', 'Pictures and PDFs are remembered, and they stay on this computer.'));
       t.appendChild(button(OPEN_MEDIA, 'btn sm primary', function () { goTo('media-pane'); }));
     } else if (m.enabled && m.env_state === 'installing') {
-      t.appendChild(el('p', 'muted', 'Setting up: ' + (m.step || 'working') + ' (' + percentText(m) + ').'));
+      t.appendChild(el('p', 'muted', m.words || ('Setting up: ' + (m.step || 'working') + ' (' + percentText(m) + ').')));
       t.appendChild(button(OPEN_MEDIA, 'btn sm', function () { goTo('media-pane'); }));
     } else if (m.enabled && m.env_state === 'ready') {
       t.appendChild(el('p', 'muted', 'Almost done. Restart SuperLocalMemory to finish; the button is on the next page.'));
       t.appendChild(button(OPEN_MEDIA, 'btn sm primary', function () { goTo('media-pane'); }));
     } else {
-      t.appendChild(el('p', 'muted', 'Remember pictures and read PDFs. Installs ' + mediaSize(m) +
-        ' once, and nothing leaves this computer.'));
-      if (lowRam(m) && m.ram_message) t.appendChild(el('p', null, m.ram_message));
+      var auto = m.mode === 'auto' && !m.opted_out;
+      t.appendChild(el('p', 'muted', m.opted_out ? 'Turned off by you.' : (auto && m.words ? m.words
+        : 'Remember pictures and read PDFs. Installs ' + mediaSize(m) + ' once, and nothing leaves this computer.')));
+      if (m.ram_warning) t.appendChild(el('p', null, m.ram_warning));
       else if (m.env_state === 'unsupported' && m.step) t.appendChild(el('p', null, m.step));
-      var go = button('Turn on images & documents', 'btn sm primary', requestEnable);
-      go.disabled = m.env_state === 'unsupported' || lowRam(m);
+      var go = button(auto ? 'Turn on now' : 'Turn on images & documents', 'btn sm primary', requestEnable);
+      go.disabled = m.env_state === 'unsupported';
       t.appendChild(go);
     }
     return t;

@@ -271,7 +271,7 @@ def test_origin_of_reads_the_row_or_computes_without_writing(db) -> None:
 def test_for_results_is_one_batched_select_plus_a_bounded_live_fill(db, monkeypatch) -> None:
     monkeypatch.setenv(FLAG, "on")
     stored = _store(db, "I prefer tea.", _person())
-    monkeypatch.delenv(FLAG)
+    monkeypatch.setenv(FLAG, "off")
     live = [_store(db, f"Mail number {i} about tea.", _web()) for i in range(13)]
     with db.raw_connection() as conn:
         got = ft.for_results(conn, [stored.fact_id] + [f.fact_id for f in live] + ["", "nope"])
@@ -308,3 +308,92 @@ def test_a_confirmation_survives_a_later_computation(db) -> None:
     ft.store(lambda sql, params: db.execute(sql, params), fact.fact_id, "default",
              ft.compute(_query(db), fact.fact_id))
     assert _rows(db)[fact.fact_id][0] == "user_confirmed"
+
+
+# -- memories from before the upgrade (Varun, 19 Nov: kept exactly as in 4.2.19) ------------------
+
+def _cutoff(db) -> str:
+    rows = db.execute("SELECT applied_at FROM migration_log WHERE name = 'M074_fact_origin'", ())
+    assert rows, "the test store must record when fact_origin was applied"
+    return str(rows[0][0])
+
+
+def _from_before_the_upgrade(db, text: str):
+    fact = _store(db, text)
+    db.execute("DELETE FROM fact_origin WHERE fact_id = ?", (fact.fact_id,))
+    db.execute("UPDATE atomic_facts SET created_at = ? WHERE fact_id = ?",
+               ("2025-01-01T00:00:00+00:00", fact.fact_id))
+    return fact
+
+
+def test_a_fact_saved_before_the_store_kept_origins_is_legacy_and_trusted(db) -> None:
+    assert _cutoff(db) > "2025-01-01T00:00:00+00:00"
+    fact = _from_before_the_upgrade(db, "Saved by 4.2.19, long before the upgrade.")
+    got = ft.compute(_query(db), fact.fact_id)
+    assert got == ft.Trust("legacy", "legacy", "v3:before_4230")
+    from superlocalmemory.trust import firewall
+    from superlocalmemory.trust import origin_class as oc
+
+    assert firewall.is_trusted_taint(got.taint_class)
+    assert oc.at_least("legacy", firewall.FLOOR) and not oc.at_least("legacy", "user_confirmed")
+
+
+def test_a_fact_with_no_origin_row_after_the_upgrade_still_fails_closed(db) -> None:
+    fact = _store(db, "Saved after the upgrade, its origin row lost.")
+    db.execute("DELETE FROM fact_origin WHERE fact_id = ?", (fact.fact_id,))
+    assert ft.compute(_query(db), fact.fact_id).taint_class == "unknown"
+
+
+def test_with_no_migration_record_nothing_is_grandfathered(db) -> None:
+    fact = _from_before_the_upgrade(db, "Old, but the log cannot say when origins began.")
+    db.execute("DELETE FROM migration_log WHERE name = 'M074_fact_origin'", ())
+    assert ft.legacy_cutoff(_query(db)) is None
+    assert ft.compute(_query(db), fact.fact_id).taint_class == "unknown"
+
+
+def test_legacy_mixed_with_a_web_page_is_the_web_page(db) -> None:
+    from superlocalmemory.trust import origin_class as oc
+
+    assert oc.join("legacy", "web") == "web"
+    assert oc.join("legacy", "system") in {"legacy", "system"}
+    assert oc.join("legacy", "unknown") == "unknown"
+
+
+def test_the_batch_marks_facts_from_before_the_upgrade_legacy(db) -> None:
+    fact = _from_before_the_upgrade(db, "Old memory for the batch.")
+    ft.run_batch(db)
+    assert _rows(db)[fact.fact_id] == ("legacy", "legacy", "v3:before_4230")
+
+
+def test_the_firewall_keeps_unclassified_old_facts_and_holds_new_ones(db, monkeypatch) -> None:
+    """Session start reads through ``firewall.clause``: right after an upgrade, before the batch
+    has classified anything, a memory from before the upgrade is still shown and a new one with
+    no class is still held."""
+    from superlocalmemory.trust import firewall
+
+    monkeypatch.setattr(firewall, "active", lambda: True)
+    old = _from_before_the_upgrade(db, "Old memory, not classified yet.")
+    new = _store(db, "New memory, not classified yet.")
+    sql = "SELECT f.fact_id FROM atomic_facts f WHERE 1 = 1" + firewall.clause(db)
+    shown = {r[0] for r in db.execute(sql, ())}
+    assert old.fact_id in shown and new.fact_id not in shown
+    assert firewall.withheld(db, [old.fact_id, new.fact_id]) == {new.fact_id}
+
+
+def test_a_malformed_cutoff_never_reaches_sql(db, monkeypatch) -> None:
+    from superlocalmemory.trust import firewall
+
+    monkeypatch.setattr(firewall, "active", lambda: True)
+    monkeypatch.setattr(ft, "legacy_cutoff", lambda _q: "x' OR '1'='1")
+    assert "OR '1'='1" not in firewall.clause(db)
+
+
+def test_an_old_fact_the_batch_classified_legacy_is_still_shown(db, monkeypatch) -> None:
+    from superlocalmemory.trust import firewall
+
+    monkeypatch.setattr(firewall, "active", lambda: True)
+    old = _from_before_the_upgrade(db, "Old memory, classified by the batch.")
+    ft.run_batch(db)
+    assert _rows(db)[old.fact_id][1] == "legacy"
+    sql = "SELECT f.fact_id FROM atomic_facts f WHERE 1 = 1" + firewall.clause(db)
+    assert old.fact_id in {r[0] for r in db.execute(sql, ())}

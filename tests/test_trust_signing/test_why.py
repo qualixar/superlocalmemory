@@ -110,7 +110,7 @@ def test_the_firewall_section_names_the_approvals(db, monkeypatch) -> None:
     assert got["acting"] is True and got["below_system"] is True
     assert got["approvals"][0]["wanted"] == "rule" and got["approvals"][0]["state"] == "pending"
     assert "holds this memory back" in got["words"]
-    monkeypatch.delenv(TAINT)
+    monkeypatch.setenv(TAINT, "off")
     off = why.explain(_ro(db), fact.fact_id)["firewall"]
     assert off["acting"] is False and "not acting" in off["words"]
 

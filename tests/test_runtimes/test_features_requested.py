@@ -113,28 +113,13 @@ def small_machine(monkeypatch):
     monkeypatch.setattr(managed_env, "_ram_bytes", lambda: 8 * 1024 ** 3)
 
 
-def test_a_refused_request_is_cleared_recorded_and_not_retried(tmp_path, small_machine, caplog):
-    import logging
-
+@needs_vec
+def test_a_request_from_a_small_computer_is_honoured_not_refused(tmp_path, small_machine):
     _request(tmp_path)
     env = FakeEnv()
-    with caplog.at_level(logging.WARNING):
-        first = features.apply_requested(source="npm", env=env, data_root=tmp_path)
-    assert first is not None and first["enabled"] is False and first["refused"] == "low_ram"
+    first = features.apply_requested(source="npm", env=env, data_root=tmp_path)
+    assert first is not None and first["enabled"] is True and "refused" not in first
     saved = features.read_features(tmp_path)["media"]
-    assert saved["enabled"] is False and not saved.get("requested") and saved["refused"] == "low_ram"
-    assert features.media_requested(tmp_path) is False
-    assert not (tmp_path / "media.db").exists() and env.installs == 0
-    assert sum("16 GB" in r.getMessage() for r in caplog.records) == 1
-    caplog.clear()
-    assert features.apply_requested(source="npm", env=env, data_root=tmp_path) is None  # next start: nothing
-    assert not [r for r in caplog.records if "16 GB" in r.getMessage()]
-
-
-@needs_vec
-def test_a_refused_request_does_not_block_a_later_turn_on_when_memory_allows(tmp_path, small_machine, monkeypatch):
-    _request(tmp_path)
-    features.apply_requested(source="npm", env=FakeEnv(), data_root=tmp_path)
-    monkeypatch.setenv("SLM_MEDIA_ALLOW_LOW_RAM", "1")
-    out = features.enable_media(source="cli", start_install=False, env=FakeEnv(), data_root=tmp_path)
-    assert "refused" not in out and features.media_enabled(tmp_path) is True
+    assert saved["enabled"] is True and not saved.get("requested") and not saved.get("refused")
+    env.done.wait(5)
+    assert env.installs == 1

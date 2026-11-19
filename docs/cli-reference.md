@@ -437,7 +437,7 @@ Lists the cues of the active profile, newest first: the kind and pattern, whethe
 you gave it (`explicit`) or SLM found a file path in a plan (`extracted`), and the
 start of the memory it belongs to. It reads the store directly and does not need
 the daemon. Cues bring a memory back on the step they name, through the `cue` hook,
-while the `delivery.cues` setting is on (off by default; see `slm flags`).
+while the `delivery.cues` setting is on (it is on by default; see `slm flags`).
 
 ```bash
 slm cues list
@@ -566,9 +566,9 @@ slm media pack enable regions                        # no download: keeps the pa
 slm media pack disable captions [--remove-files]     # off again; memories are kept
 ```
 
-Optional models for pictures and documents, each off until turned on; the download size is shown before anything downloads and `--yes` is the person's yes (an agent never passes it unasked). They need `slm media enable` first and are read as off under the kill switch. `--json` is for agents. Full guide: [Better pictures and documents](media-pack.md).
+Optional models for pictures and documents, on by default: on a computer with 16 GB of memory or more the SLM service downloads them by itself, one at a time (`slm media pack status` says in plain words what is happening, for example "Downloading the picture description model, 40%", "Ready" or "Turned off by you"). On a smaller computer `enable` is a one-click download: it prints the warning and the size first, and `--yes` is the person's yes (an agent never passes it unasked). A part you disable stays off. They need images and documents on (`slm media enable`; the automatic set-up does it) and are read as off under the kill switch. `--json` is for agents. Full guide: [Better pictures and documents](media-pack.md).
 
-Images and documents need a computer with at least 16 GB of memory. On a smaller computer `enable` refuses with a plain reason and exits with code 4; your text memories keep working. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
+Images and documents set themselves up on a computer with 16 GB of memory or more. On a smaller one (or when the memory is unknown) nothing downloads by itself and `enable` works as a one-click download after printing "This computer has 8.0 GB of memory; pictures and documents may be slow and the models are released when memory runs low."; it never refuses for memory. `slm media disable` is remembered: the automatic set-up never turns them on again. Set-up runs in the background inside the SLM service, and a restart (`slm restart`, or the dashboard button) starts the picture worker. Turning it on never changes your existing memories or their embeddings.
 
 `slm media repair` re-reads each kept picture and stores its vector in the current picture index. Use it when a save told you the picture "can't be found by what it shows yet", or after the picture model or mode changed (saving then says the index was built with a different model). It rebuilds the index for the current model first, only once the first picture has embedded, so a failed run never leaves you without an index. One run works for up to four minutes; if it says pictures are left, run it again. Pictures whose file is no longer kept are counted and skipped.
 

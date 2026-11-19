@@ -12,6 +12,7 @@ from superlocalmemory.core import overtaken_cases as ot
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_ladder import JudgeLadder
 from superlocalmemory.truth.backlog_pass import POPULATION, BacklogPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_core.test_coverage_backfill import _db
 from tests.test_truth.test_dispute_pass import Fixed, _calibrate
 from tests.test_truth.test_slot_pass import _fact
@@ -56,7 +57,7 @@ def _calibrated(db, verdict):
 
 def _run(db, verdict, confidence=0.95, **flags):
     tier = Fixed(verdict, confidence)
-    counts = BacklogPass(db, FeatureFlags(file_values=flags, environ={}),
+    counts = BacklogPass(db, FeatureFlags(file_values=off_except(flags), environ={}),
                          JudgeLadder([tier])).run()
     return counts, tier
 

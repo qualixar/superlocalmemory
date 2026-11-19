@@ -131,7 +131,7 @@ first fact within one maintenance cycle. A plan saved with `kind="prospective"`
 whose text names a file path (a folder, then a file name with an extension, up to
 three) also gets an `extracted` path cue for each. The memory comes back through
 `slm hook cue` on PreToolUse and PostToolUse, once per session and only while the
-`delivery.cues` setting is on (off by default; see `slm flags`). After an agent
+`delivery.cues` setting is on (on by default; see `slm flags`). After an agent
 edits a file, memories saved from that file with `source_file` are shown too,
 with a note that they may be out of date. Cue deliveries are logged like other
 deliveries and are never withheld. List cues with `slm cues list`.

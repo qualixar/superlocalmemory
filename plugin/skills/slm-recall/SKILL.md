@@ -431,8 +431,8 @@ it, or with the user, just because it was remembered.
 
 ### 8c. Compiled pages: read one for an overview, recall for a question
 
-SLM can compile pages from the user's memories (4.2.30, off until they run a rebuild or turn
-on `compiler.dream`): a **current state** page per subject (the value each slot holds now and
+SLM can compile pages from the user's memories (4.2.30, `compiler.dream` is on by default and
+proposes them for review; a rebuild also makes them): a **current state** page per subject (the value each slot holds now and
 since when, and every open dispute shown as a dispute), a **story** page per family of
 decisions in time order, and a **topic** page per entity or tag. Read them with
 `get_memory_summary(kind="page")` (no `target`: the list of pages with their ids) and

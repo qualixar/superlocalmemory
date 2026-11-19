@@ -121,9 +121,11 @@ def test_a_pre_4230_pin_or_rule_stays_where_it_is(db, monkeypatch) -> None:
                          "WHERE fact_id = ?", (fid,))[0]
         assert (row["origin_class"], row["taint_class"]) == ("unknown", "user_confirmed")
         assert row["basis"] == "confirmed:grandfathered:pre-4.2.30"
-    assert firewall.withheld(db, [pinned, rule, plain]) == {plain}
+    # Varun, 19 Nov: a plain memory from before the upgrade is kept as it was in 4.2.19 too
+    # (``legacy``, decided by its date); only memories saved after it follow the floor.
+    assert firewall.withheld(db, [pinned, rule, plain]) == set()
     classify_all(db)  # the batch never lowers it
-    assert firewall.withheld(db, [pinned, rule]) == set()
+    assert firewall.withheld(db, [pinned, rule, plain]) == set()
     with connect(db) as conn:
         assert firewall.pending(conn, "default")["count"] == 0
 

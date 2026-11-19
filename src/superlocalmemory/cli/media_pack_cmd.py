@@ -5,9 +5,9 @@
 """``slm media pack status|enable|disable``: the optional picture and document models (WS-8, D-19).
 
 ``captions`` describes each saved picture in a few words (on every platform); ``documents`` reads scanned
-pages with a larger model. Each is off until turned on, and turning on downloads its model: the size is
-shown first and nothing is downloaded without ``--yes`` (or a typed yes at a terminal). The work runs in
-the daemon, like ``slm media enable``.
+pages with a larger model. Both are on by default: on a computer with 16 GB or more the daemon downloads each
+model by itself; on a smaller one this command is the one click (the size is shown first and nothing is
+downloaded by hand without ``--yes`` or a typed yes). The work runs in the daemon, like ``slm media enable``.
 """
 
 from __future__ import annotations
@@ -32,29 +32,36 @@ def _call(args: Namespace, method: str, body: dict | None = None, suffix: str = 
 
 
 def _line(pack: dict[str, Any]) -> str:
-    state = {"on": "on", "ready": "downloaded, off", "downloading": "downloading", "failed": "failed",
-             "off": "off"}.get(str(pack.get("state")), str(pack.get("state")))
-    extra = ""
-    if pack.get("state") == "downloading":
-        extra = f" ({round(float(pack.get('progress') or 0) * 100)}%)"
-    elif pack.get("state") == "failed" and pack.get("error"):
-        extra = f" ({pack['error']})"
-    elif pack.get("state") == "off":
-        extra = f" ({pack.get('download_words')})"
-    return f"{pack.get('pack')}: {state}{extra}. {pack.get('what')}"
+    """One part in plain words: ``captions: Downloading the picture description model, 40%. <what it does>``."""
+    words = str(pack.get("words") or "").strip()
+    if not words:  # an older daemon that does not word its own state
+        words = {"on": "on", "ready": "downloaded, off", "downloading": "downloading", "failed": "failed",
+                 "off": "off"}.get(str(pack.get("state")), str(pack.get("state")))
+    if not words.endswith((".", "!", "?")):
+        words += "."
+    return f"{pack.get('pack')}: {words} {pack.get('what')}"
+
+
+def _warning(packs: list[dict[str, Any]]) -> str:
+    return next((str(p["warning"]) for p in packs if p.get("warning")), "")
 
 
 def _status(args: Namespace) -> None:
     packs = _call(args, "GET")["packs"]
     name = getattr(args, "pack", None)
     shown = [p for p in packs if not name or p["pack"] == name]
-    _emit(args, {"packs": shown}, "\n".join(_line(p) for p in shown))
+    lines = [_line(p) for p in shown]
+    if _warning(shown):
+        lines.append(_warning(shown))
+    _emit(args, {"packs": shown}, "\n".join(lines))
 
 
 def _enable(args: Namespace) -> None:
     _running(args)
     pack = next(p for p in _call(args, "GET")["packs"] if p["pack"] == args.pack)
     if not getattr(args, "json", False):
+        if pack.get("warning"):  # a small computer is warned, never refused
+            print(pack["warning"])
         print(pack["download_words"] + f" ({pack['model']}, {pack['licence']} licence).")
         print("The model files stay on this computer. Nothing is downloaded until you say yes.")
     if pack["state"] in ("on", "ready"):

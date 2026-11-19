@@ -53,6 +53,7 @@ def test_results_carry_the_dispute_and_the_changed_file(store, monkeypatch) -> N
 def test_nothing_is_added_with_the_flag_off_or_the_kill_switch_on(store, monkeypatch) -> None:
     db, _old, new, leased = store
     monkeypatch.setenv(env_name("truth.slots"), "off")
+    monkeypatch.setenv(env_name("trust.taint"), "off")  # the origin note is on by default too (19 Nov)
     assert all(set(r) == {"fact_id", "content"} for r in _notes(db, new, leased))
     monkeypatch.setenv(env_name("truth.slots"), "on")
     monkeypatch.setenv(KILL_ENV, "1")

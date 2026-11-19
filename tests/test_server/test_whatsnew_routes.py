@@ -35,19 +35,23 @@ def test_every_entry_names_a_real_flag_or_none() -> None:
         assert flag is None or flag in FLAGS, entry
 
 
-def test_a_fresh_install_has_nothing_on(client) -> None:
+def test_a_fresh_install_has_every_flagged_entry_on(client) -> None:
     body = client.get(URL).json()
     assert body["success"] and body["kill_switch"] is False
-    assert {k: v["on"] for k, v in body["features"].items()} == {k: False for k in whatsnew.ENTRIES}
+    # Every feature is on by default (19 Nov 2026); the entries without a flag are never "on".
+    expected = {k: flag is not None for k, flag in whatsnew.ENTRIES.items()}
+    expected["measurement"] = False  # on once its notice was read
+    assert {k: v["on"] for k, v in body["features"].items()} == expected
     assert body["features"]["need_gate"]["flag"] == "delivery.need_gate"
     assert body["features"]["why"]["flag"] is None
 
 
-def test_turning_a_flag_on_turns_only_its_entries_on(client, home) -> None:
-    write_flag(home, "trust.taint", FlagState.ON)
-    write_flag(home, "delivery.cues", FlagState.ON)
-    on = {k for k, v in client.get(URL).json()["features"].items() if v["on"]}
-    assert on == {"origin", "firewall", "cues"}
+def test_turning_a_flag_off_turns_only_its_entries_off(client, home) -> None:
+    write_flag(home, "trust.taint", FlagState.OFF)
+    write_flag(home, "delivery.cues", FlagState.OFF)
+    off = {k for k, v in client.get(URL).json()["features"].items()
+           if not v["on"] and v["flag"] is not None}
+    assert off == {"origin", "firewall", "cues"}
 
 
 def test_shadow_is_not_on(client, home) -> None:
@@ -63,7 +67,7 @@ def test_measuring_is_on_once_its_notice_was_read(client, home) -> None:
 
 
 def test_the_kill_switch_reads_everything_off_and_says_so(client, home, monkeypatch) -> None:
-    write_flag(home, "trust.signing", FlagState.ON)
+    assert client.get(URL).json()["features"]["signing"]["on"] is True
     monkeypatch.setenv("SLM_4230_OFF", "1")
     body = client.get(URL).json()
     assert body["kill_switch"] is True and body["features"]["signing"]["on"] is False

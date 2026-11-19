@@ -57,12 +57,18 @@ WEB = "web"
 IMPORTED_FILE = "imported_file"
 MODEL_GENERATED = "model_generated"
 UNKNOWN = "unknown"
+#: Saved before this store took 4.2.30 (no origin row, created before ``fact_origin`` existed
+#: here). Varun, 19 Nov: memories from before the upgrade keep working exactly as in 4.2.19, so
+#: they rank with ``system`` (at the firewall's floor). Decided by date, not by the missing row:
+#: a fact saved after the upgrade with no origin row is still ``unknown`` and fails closed.
+LEGACY = "legacy"
 
 #: Best first. The position is the rank: a smaller rank is more trusted.
 ORDER: tuple[str, ...] = (USER_DIRECT, USER_CONFIRMED, SYSTEM, AGENT_INFERRED, TOOL_OUTPUT,
                           MESH_PEER, WEB, IMPORTED_FILE, MODEL_GENERATED)
-CLASSES: frozenset[str] = frozenset(ORDER) | {UNKNOWN}
-_RANK: Mapping[str, int] = {name: i for i, name in enumerate(ORDER)}
+CLASSES: frozenset[str] = frozenset(ORDER) | {UNKNOWN, LEGACY}
+_RANK: Mapping[str, int] = {**{name: i for i, name in enumerate(ORDER)},
+                            LEGACY: ORDER.index(SYSTEM)}
 
 #: What people read (dashboard "Where this came from", ``slm why``).
 LABELS: Mapping[str, str] = {
@@ -75,7 +81,8 @@ LABELS: Mapping[str, str] = {
     WEB: "a web page",
     IMPORTED_FILE: "an imported file",
     MODEL_GENERATED: "written by a model",
-    UNKNOWN: "unknown (saved before 4.2.30)",
+    UNKNOWN: "unknown (its source was not recorded)",
+    LEGACY: "saved before 4.2.30 (trusted as it was before)",
 }
 
 #: The mapping version, the prefix of every ``basis``. A change to :data:`ROWS`
@@ -99,6 +106,8 @@ def join(a: str, b: str) -> str:
     ra, rb = _RANK.get(a), _RANK.get(b)
     if ra is None or rb is None:
         return UNKNOWN
+    if ra == rb and a != b:  # ``legacy`` shares ``system``'s rank: the mix reads as ``system``
+        return SYSTEM
     return a if ra >= rb else b
 
 

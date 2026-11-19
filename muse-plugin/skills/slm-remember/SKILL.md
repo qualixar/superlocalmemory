@@ -355,8 +355,8 @@ slm import status [RUN_ID]         # progress
 slm import undo RUN_ID             # takes the whole run back exactly
 ```
 
-It is off until the user turns it on (`slm flags set portability.import on`); if a command
-says it is off, tell the user and ask before you switch it on. Preview first and read the user the
+It is on by default and runs only when someone starts an import; if a command
+says it is off (the user or the kill switch turned it off), tell the user and ask before you switch it on (`slm flags set portability.import on`). Preview first and read the user the
 sentence it prints. Imported text is marked `imported_file`, the lowest origin: it never replaces
 a memory the user already has, never becomes a rule or a pin by itself, and a value that disagrees
 with what they said waits as a dispute (`slm disputes`) for a decision. Every import is recorded

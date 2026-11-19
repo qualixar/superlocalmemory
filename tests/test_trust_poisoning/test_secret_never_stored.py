@@ -32,7 +32,7 @@ def _everywhere(root: Path, needle: str) -> list[str]:
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path))
     monkeypatch.delenv(KILL_ENV, raising=False)
-    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.setenv(FLAG, "off")
     return tmp_path
 
 

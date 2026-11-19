@@ -66,7 +66,7 @@ FLAG = "trust.taint"
 #: The lowest class that may be an instruction (M-15). Below it, a person must approve.
 FLOOR = oc.SYSTEM
 #: The taint classes at or above :data:`FLOOR`, best first.
-TRUSTED: tuple[str, ...] = tuple(c for c in oc.ORDER if oc.at_least(c, FLOOR))
+TRUSTED: tuple[str, ...] = tuple(c for c in (*oc.ORDER, oc.LEGACY) if oc.at_least(c, FLOOR))
 
 #: What a memory was asked to become (the ``wanted`` of an approval row).
 PIN, RULE, DECISION, CORE, SESSION_START = "pin", "rule", "decision", "core", "session_start"
@@ -142,6 +142,10 @@ def _has_table(rows: Rows, name: str) -> bool:
         return False
 
 
+#: The cutoff is read from the store's own migration log; it is put in SQL only in this shape.
+_CUTOFF_SHAPE = re.compile(r"\d{4}-\d{2}-\d{2}[T ][0-9:.+\-Z]{0,40}")
+
+
 def clause(store: Any, alias: str = "f") -> str:
     """`` AND EXISTS (...)``: only facts whose stored taint is trusted; ``""`` unless acting.
 
@@ -152,11 +156,20 @@ def clause(store: Any, alias: str = "f") -> str:
     """
     if not active():
         return ""
-    if not _has_table(rows_of(store), "fact_trust"):
+    rows = rows_of(store)
+    if not _has_table(rows, "fact_trust"):
         return " AND 1 = 0"
     marks = ", ".join(f"'{c}'" for c in TRUSTED)  # constants of origin_class, never input
-    return (f" AND EXISTS (SELECT 1 FROM fact_trust ft WHERE ft.fact_id = {alias}.fact_id "
-            f"AND ft.taint_class IN ({marks}))")
+    trusted = (f"EXISTS (SELECT 1 FROM fact_trust ft WHERE ft.fact_id = {alias}.fact_id "
+               f"AND ft.taint_class IN ({marks}))")
+    cutoff = fact_trust.legacy_cutoff(rows)
+    if not _CUTOFF_SHAPE.fullmatch(cutoff or ""):
+        return f" AND {trusted}"
+    # Saved before this store took 4.2.30 and not classified yet: legacy, kept as before.
+    legacy = (f"(NOT EXISTS (SELECT 1 FROM fact_trust ft WHERE ft.fact_id = {alias}.fact_id) "
+              f"AND NOT EXISTS (SELECT 1 FROM fact_origin fo WHERE fo.fact_id = {alias}.fact_id) "
+              f"AND replace({alias}.created_at, ' ', 'T') < '{cutoff.replace(' ', 'T')}')")
+    return f" AND ({trusted} OR {legacy})"
 
 
 def taints(rows: Rows, fact_ids: Iterable[str]) -> dict[str, str]:

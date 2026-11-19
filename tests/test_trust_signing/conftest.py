@@ -9,6 +9,7 @@ import pytest
 from superlocalmemory.core.feature_flags import KILL_ENV, env_name
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 from superlocalmemory.trust import signing_key as sk
+from tests.helpers.flag_baseline import env_baseline_off
 from tests.test_core.test_coverage_backfill import _db
 
 SIGNING = env_name("trust.signing")
@@ -33,7 +34,7 @@ class FakeKeychain:
 def _own_home(tmp_path, monkeypatch):
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "slm-home"))
     monkeypatch.delenv(KILL_ENV, raising=False)
-    monkeypatch.delenv(SIGNING, raising=False)
+    env_baseline_off(monkeypatch)  # on by default; each test turns on the flag it is about
     sk.install(None)
     yield
     sk.install(None)

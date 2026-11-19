@@ -1,7 +1,7 @@
 # The living wiki: compiled pages and Markdown both ways
 
 Part of 4.2.30 (WS-6). SuperLocalMemory can compile pages from your memories and write them to a
-folder of Markdown files, and read your edits to those files back. Everything is off until you
+folder of Markdown files, and read your edits to those files back. Everything is on by default; nothing is written until you
 turn it on, and nothing in it changes a memory without you.
 
 ## What a page is

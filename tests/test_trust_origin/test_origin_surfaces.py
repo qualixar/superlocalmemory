@@ -49,7 +49,7 @@ def test_results_carry_origin_in_words_only_while_the_flag_observes(store, monke
     assert got[mine]["origin"] == {"class": "user_direct", "taint": "user_direct",
                                    "label": "you said this", "taint_label": "you said this"}
     assert got[page]["origin"]["class"] == "web" and got[page]["origin"]["label"] == "a web page"
-    assert got[old]["origin"]["class"] == "unknown"
+    assert got[old]["origin"]["class"] == "legacy"  # saved before the store kept origins
     assert "basis" not in got[mine]["origin"]
 
 
@@ -106,9 +106,9 @@ def test_the_memory_detail_says_where_it_came_from_whatever_the_flag(store) -> N
     with db.raw_connection() as conn:
         assert for_fact(conn, "default", mine)["origin"]["label"] == "you said this"
         assert for_fact(conn, "default", page)["origin"]["class"] == "web"
-        unknown = for_fact(conn, "default", old)["origin"]
-        assert unknown["class"] == "unknown" and "4.2.30" in unknown["label"]
-        assert "basis" not in unknown
+        legacy = for_fact(conn, "default", old)["origin"]
+        assert legacy["class"] == "legacy" and "4.2.30" in legacy["label"]
+        assert "basis" not in legacy
     assert _count(db) == 0  # reading wrote nothing
 
 

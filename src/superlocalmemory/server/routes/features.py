@@ -43,11 +43,11 @@ def _ram_view() -> dict[str, Any]:
     return ram_view()
 
 
-def _ram_refusal(precheck: dict[str, Any]) -> str:
-    """Why this computer cannot turn images and documents on ("" when it can); decided in one place."""
-    from superlocalmemory.runtimes.media_env import media_ram_refusal
+def _ram_policy(precheck: dict[str, Any]):
+    """How this computer gets its models (automatic from 16 GB, one click below); decided in one place."""
+    from superlocalmemory.runtimes.media_env import media_policy
 
-    return media_ram_refusal(int(precheck.get("ram_bytes") or 0))
+    return media_policy(int(precheck.get("ram_bytes") or 0))
 
 
 def _media_view(status: dict[str, Any], root: Path, *, fresh: bool = True) -> dict[str, Any]:
@@ -68,8 +68,14 @@ def _media_view(status: dict[str, Any], root: Path, *, fresh: bool = True) -> di
     size_of = media_size.measure_now if fresh else media_size.cached_bytes
     view["installed_bytes"] = size_of(root / "runtimes" / "media")
     view["install_estimate_bytes"] = int(2.8 * 1024 ** 3)
-    refusal = _ram_refusal(status.get("precheck") or {})
-    view["ram_ok"], view["ram_message"] = not refusal, refusal
+    from superlocalmemory.runtimes import media_auto
+
+    policy = _ram_policy(status.get("precheck") or {})
+    # Never refused for memory any more: ``ram_ok`` stays for older dashboards, the warning is for people.
+    view["ram_ok"], view["ram_message"] = True, ""
+    view["mode"], view["ram_warning"] = policy.mode, policy.warning
+    view["opted_out"] = feat.media_opted_out(root)
+    view["words"] = media_auto.media_words(view, policy.mode, opted_out=view["opted_out"])
     if env.get("error_kind"):
         view["error"] = env["error_kind"]
     if status.get("error"):
@@ -135,12 +141,12 @@ async def enable_media_route(request: Request):
     if body.get("yes") is not True:
         raise HTTPException(400, detail="Send {\"yes\": true} to turn images and documents on.")
     source = body.get("source", "dashboard")
-    if source not in tuple(s for s in feat.SOURCES if s != "npm"):
+    if source not in tuple(s for s in feat.SOURCES if s not in ("npm", "auto")):
         raise HTTPException(400, detail="source must be one of: cli, dashboard, api.")
     root = _data_root()
     status = feat.enable_media(source=source, env=_media_env(), data_root=root)
     view = _media_view(status, root)
-    if status.get("refused"):  # this computer cannot run it: a state conflict, not a server fault
+    if status.get("refused"):  # kept for older callers: nothing is refused for memory any more
         return JSONResponse({"media": view, "detail": status.get("error", "")}, status_code=409)
     code = 500 if status.get("error") else 202
     return JSONResponse({"media": view}, status_code=code)
@@ -180,7 +186,7 @@ async def enable_media_pack_route(request: Request):
     if body.get("yes") is not True:
         raise HTTPException(400, detail="Send {\"yes\": true} to download the model and turn this on.")
     source = body.get("source", "dashboard")
-    if source not in tuple(s for s in feat.SOURCES if s != "npm"):
+    if source not in tuple(s for s in feat.SOURCES if s not in ("npm", "auto")):
         raise HTTPException(400, detail="source must be one of: cli, dashboard, api.")
     from superlocalmemory.runtimes import media_packs
 

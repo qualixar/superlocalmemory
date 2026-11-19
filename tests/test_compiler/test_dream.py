@@ -167,10 +167,18 @@ def test_the_cycle_has_nothing_to_do_on_an_empty_store(tmp_path) -> None:
     assert dream.run_profile(db, PROFILE)["skipped"] == "nothing to propose"
 
 
-def test_the_scheduler_step_runs_only_while_the_flag_is_on(busy, monkeypatch, tmp_path) -> None:
+def test_the_flag_is_on_by_default_and_the_step_runs(busy, monkeypatch, tmp_path) -> None:
     db, _ids, _dups = busy
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("SLM_FEATURE_COMPILER_DREAM", raising=False)
+    got = dream.maintenance_step(db, (PROFILE,))  # on by default since 19 Nov
+    assert len(got) == 1 and got[0]["set_id"]
+
+
+def test_the_scheduler_step_runs_only_while_the_flag_is_on(busy, monkeypatch, tmp_path) -> None:
+    db, _ids, _dups = busy
+    monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SLM_FEATURE_COMPILER_DREAM", "off")  # a person's own off wins
     assert dream.maintenance_step(db, (PROFILE,)) == []
     assert table_rows(db, "proposal_sets") == []
     monkeypatch.setenv("SLM_FEATURE_COMPILER_DREAM", "on")
@@ -192,7 +200,7 @@ def test_the_scheduler_runs_the_dream_pass_last_and_records_failures(busy, monke
     monkeypatch.setenv("SLM_DATA_DIR", str(tmp_path / "data"))
     sched = SimpleNamespace(_running=True, _db=db, steps=[], _profile_ids=lambda: (PROFILE,))
     sched._record_step = lambda name, ok, err="": sched.steps.append((name, ok, err))
-    monkeypatch.delenv("SLM_FEATURE_COMPILER_DREAM", raising=False)
+    monkeypatch.setenv("SLM_FEATURE_COMPILER_DREAM", "off")  # a person's own off
     MaintenanceScheduler._dream_pass(sched)
     assert sched.steps == [("dream cycle", True, "")] and table_rows(db, "proposal_sets") == []
     monkeypatch.setenv("SLM_FEATURE_COMPILER_DREAM", "on")

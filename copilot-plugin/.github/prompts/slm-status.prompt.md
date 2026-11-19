@@ -220,7 +220,7 @@ card at the top of the Health pane. Guide: `docs/memory-health.md`.
 
 ## Pictures and documents: status and repair
 
-Pictures and documents are an optional feature, off by default. Check them with
+Pictures and documents are on by default (automatic on 16 GB or more, one click below). Check them with
 the CLI (the MCP `get_status` does not report them):
 
 ```bash
@@ -238,7 +238,7 @@ failed. The five picture tools (`remember_media`, `get_media`,
 the feature is on and only in the `full`, `power` and `whole` tool sets; a
 restart (`slm restart`) starts the picture worker. A document's own progress
 is the `media_status` MCP tool, not this command. Details, limits and the
-16 GB requirement: `slm-media`. `slm status` also prints an "Embedding switch" line while a model switch or
+the 16 GB rule (automatic above, one click below): `slm-media`. `slm status` also prints an "Embedding switch" line while a model switch or
 the memory-engine upgrade is pending.
 
 ## Truth checks, judges and audit questions (4.2.30)
@@ -326,7 +326,7 @@ checked again whenever the page is read; no model writes any of it, and each pag
 says how many sentences it withheld. A page is never a memory. `slm wiki status
 --json` shows the pages and the Markdown folder; `slm wiki diff --json` shows what
 a build would change and which files hold the user's edits; `slm wiki build` writes
-the approved pages (needs `slm flags set compiler.wiki on`; `shadow` only reports).
+the approved pages (`compiler.wiki` is on by default; `shadow` only reports).
 `slm wiki rebuild` (compile and apply the pages, recorded and undone with `slm proposals
 rollback`) and `slm wiki sync` (read the user's edits to the Markdown back as proposals)
 work from any caller, and an edit is only ever a proposal, decided like any set with

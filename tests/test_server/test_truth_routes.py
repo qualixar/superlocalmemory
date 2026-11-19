@@ -10,6 +10,7 @@ import pytest
 
 from superlocalmemory.truth import leases
 from superlocalmemory.truth.slot_pass import SlotPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_server.test_per_request_profile import _daemon
 from tests.test_truth.test_slot_pass import _fact, _flags
 
@@ -166,7 +167,7 @@ def audited(disputed):
 
     client, app, old, new = disputed
     db = app.state.engine._db
-    DisputePass(db, FeatureFlags(file_values={"judge.ladder": "shadow"}, environ={}),
+    DisputePass(db, FeatureFlags(file_values=off_except({"judge.ladder": "shadow"}), environ={}),
                 JudgeLadder([Fixed("same", 0.9)])).run()
     db.execute("UPDATE judge_receipts SET audit_selected = 1")
     return client, app, old, new

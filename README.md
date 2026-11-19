@@ -72,7 +72,7 @@ source .venv/bin/activate         # Windows: .venv\Scripts\activate
 python -m pip install superlocalmemory   # or, without a venv: pipx install superlocalmemory
 slm setup
 slm connect claude-code
-slm media enable                  # optional: pictures and documents (about 1.5 GB; needs 16 GB of memory)
+slm media enable                  # pictures and documents: automatic on 16 GB+, one click below
 ```
 
 **uv**: `uv tool install --python 3.12 superlocalmemory` installs `slm` as an isolated tool, with nothing to activate; see [Linux install](https://github.com/qualixar/superlocalmemory/blob/main/docs/install-linux.md#isolated-slm-command-with-uv).
@@ -244,7 +244,7 @@ The verdict is one input to the support decision, with its own time budget, and 
 | **Document health check** | Finds pages with no readable text, documents linked to nothing, duplicate pages and documents whose facts were contradicted | [Pictures and documents](https://github.com/qualixar/superlocalmemory/blob/main/docs/pictures-and-documents.md) |
 | **Folders and Obsidian vaults** | `slm sources add ~/Notes --kind obsidian` mirrors Markdown, canvas files, PDFs and images into memory, read-only, after showing what it would read | [CLI](https://github.com/qualixar/superlocalmemory/blob/main/docs/cli-reference.md) |
 | **From ChatGPT and your phone** | Attach a file in ChatGPT, or ask any connected web app for a one-time upload link that streams the file straight to your computer | [Web access](https://github.com/qualixar/superlocalmemory/blob/main/docs/remote-access/hosts.md) |
-| **Your data stays yours** | Pictures live in their own store and never leave your computer; erasing a memory erases its picture. Off by default, one click to turn on; needs 16 GB of memory | [Compliance](https://github.com/qualixar/superlocalmemory/blob/main/docs/compliance.md) |
+| **Your data stays yours** | Pictures live in their own store and never leave your computer; erasing a memory erases its picture. Set up by itself on 16 GB of memory or more, one click on a smaller computer | [Compliance](https://github.com/qualixar/superlocalmemory/blob/main/docs/compliance.md) |
 
 ### Memory health
 
@@ -410,7 +410,7 @@ Upgrades never move or delete memory, and a store update takes a restore point f
 | 64-bit Linux (x86-64, ARM64) | Yes | No (Jev works) |
 | Intel Mac, 32-bit Windows | No prebuilt install | — |
 
-Python 3.12+, Node 18+ for npm. Pictures and documents need 16 GB of memory.
+Python 3.12+, Node 18+ for npm. Pictures and documents set themselves up on 16 GB of memory or more and are one click below that.
 
 ## Star history
 

@@ -30,6 +30,8 @@ def die(args: Namespace, message: str, code: int) -> NoReturn:
 def media_line(media: dict[str, Any]) -> str:
     if media.get("enabled"):
         state = media.get("env_state", "")
+        if state == "installing":
+            return f"Downloading the picture model, {int(float(media.get('progress') or 0) * 100)}%"
         if media.get("restart_required"):
             return "on, ready - restart to start using it (slm restart)"
         if state == "ready":
@@ -43,12 +45,18 @@ def media_line(media: dict[str, Any]) -> str:
         return f"on, setting up ({state}, {pct}%) {media.get('step', '')}".rstrip()
     if media.get("requested"):
         return "requested by the installer - it starts the next time SLM starts"
-    return "off - turn on with: slm media enable"
+    if media.get("opted_out"):
+        return "Turned off by you - turn on with: slm media enable"
+    if media.get("mode") == "auto":
+        return "starts by itself a few minutes after SLM starts (turn on now with: slm media enable)"
+    return "one click to turn on: slm media enable"
 
 
 def render(data: dict[str, Any]) -> str:
     media = data.get("media", {})
     lines = [f"Images & documents: {media_line(media)}"]
+    if media.get("ram_warning"):
+        lines.append(f"  note: {media['ram_warning']}")
     if media.get("error"):
         lines.append(f"  problem: {media['error']}")
     lines.append(f"Mesh: {data.get('mesh', {}).get('apps_with_mesh', 0)} app(s) connected")

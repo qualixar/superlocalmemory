@@ -32,7 +32,7 @@ def _states(home):
 def test_a_fresh_install_measures_by_default(tmp_path) -> None:
     assert _states(tmp_path) == {"outcomes.holdout": "on", "outcomes.swaps": "on",
                                  "outcomes.receipts": "on", "outcomes.usage": "on",
-                                 "delivery.need_gate": "off"}
+                                 "delivery.need_gate": "on"}
     assert switch.status(tmp_path)["measuring"] is True
 
 
@@ -40,7 +40,7 @@ def test_off_turns_the_interventions_and_usage_detection_off_and_nothing_else(tm
     switch.set_measurement(tmp_path, False, channel="cli")
     assert _states(tmp_path) == {"outcomes.holdout": "off", "outcomes.swaps": "off",
                                  "outcomes.receipts": "on", "outcomes.usage": "off",
-                                 "delivery.need_gate": "off"}
+                                 "delivery.need_gate": "on"}
     assert switch.status(tmp_path)["measuring"] is False
 
 

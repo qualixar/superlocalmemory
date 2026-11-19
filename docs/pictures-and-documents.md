@@ -1,6 +1,6 @@
 # Pictures and documents: requirements and limits
 
-Pictures and documents are off until you turn them on, in the dashboard (the Documents & Images pane) or with `slm media enable`. Turning them on downloads about 1.5 GB of models and tools into SLM's own folder. It does not change your existing memories or their embeddings: pictures and PDF pages are added next to them.
+Pictures and documents are on by default. On a computer with 16 GB of memory or more, SLM sets them up by itself a few minutes after it starts, when the computer is idle (the Documents & Images pane and `slm media status` show the progress); on a smaller computer, turn them on in the dashboard or with `slm media enable`. Setting up downloads about 1.5 GB of models and tools into SLM's own folder. It does not change your existing memories or their embeddings: pictures and PDF pages are added next to them.
 
 The **Upgrade memory engine (preview)** card is a separate, optional step, and not available for text yet (see below). It re-reads every memory with the model that also reads pictures, so text and pictures share one search space. See [Upgrading the memory engine](#upgrading-the-memory-engine-preview) below.
 
@@ -10,7 +10,7 @@ Three optional parts add to this: a short description of each picture (a 0.5 GB 
 
 | | |
 |---|---|
-| Memory (RAM) | 16 GB. Computers sold as 16 GB report a little less, so the check passes from 15 GiB. |
+| Memory (RAM) | 16 GB or more for the automatic set-up (computers sold as 16 GB report a little less, so it starts from 15 GiB); below that it is one click, with a warning. |
 | Disk | About 1.5 GB for the models, plus what you save (up to 2 GB per profile). |
 | Systems | macOS on Apple Silicon, Windows x64, Linux x86_64 and Linux ARM64 (aarch64) with a glibc such as Debian, Ubuntu or Fedora. Python 3.12, 3.13 or 3.14. |
 | Not supported | Windows on ARM and Intel Macs. Text memory works there as before. |

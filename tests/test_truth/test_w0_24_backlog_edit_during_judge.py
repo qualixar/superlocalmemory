@@ -10,6 +10,7 @@ import pytest
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.core.judge_ladder import JudgeLadder, TierAnswer
 from superlocalmemory.truth.backlog_pass import BacklogPass
+from tests.helpers.flag_baseline import off_except
 from tests.test_truth import test_backlog_pass as _backlog_tests
 from tests.test_truth.test_backlog_pass import _calibrated, _status
 
@@ -32,7 +33,7 @@ class Edits:
 
 def _run(db, tier):
     _calibrated(db, "both_true")
-    return BacklogPass(db, FeatureFlags(file_values={"judge.ladder": "on"}, environ={}),
+    return BacklogPass(db, FeatureFlags(file_values=off_except({"judge.ladder": "on"}), environ={}),
                        JudgeLadder([tier])).run()
 
 
