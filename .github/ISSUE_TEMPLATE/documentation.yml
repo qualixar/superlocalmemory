@@ -1,0 +1,40 @@
+name: 📖 Documentation
+description: Something in the docs, README or wiki is wrong, missing or unclear
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Where?
+      description: Link to the page or file, with the heading if you can.
+      placeholder: https://github.com/qualixar/superlocalmemory/blob/main/docs/getting-started.md#install
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What's the problem?
+      options:
+        - It's wrong (doesn't match how SLM behaves)
+        - It's missing something
+        - It's unclear or hard to follow
+        - A link or command is broken
+        - Typo or formatting
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What does it say, what should it say, and what did you try?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SuperLocalMemory version
+      description: If the doc describes behaviour, which version did you compare it with? (`slm --version`)

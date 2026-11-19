@@ -1,0 +1,174 @@
+name: 🐛 Bug report
+description: Something in SuperLocalMemory is broken or behaves unexpectedly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A precise report gets fixed fastest.
+
+        **Security issue?** Stop here and use [private vulnerability reporting](https://github.com/qualixar/superlocalmemory/security/advisories/new) instead.
+        **Check your output before pasting.** Logs can contain memory text, file paths or project names. Remove anything private.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/qualixar/superlocalmemory/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I am on the [latest release](https://pypi.org/project/superlocalmemory/) or I say below which version I am on and why I cannot upgrade.
+          required: true
+        - label: I ran `slm doctor --fix` and the problem is still there.
+          required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe what went wrong. Include the exact error text if there is one.
+      placeholder: After `slm remember "..."`, `slm recall` returns nothing for that fact, and the dashboard shows the save as pending.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: The fact should come back from recall within a few seconds of saving.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps someone else can follow on a fresh install. Include commands, tool calls or prompts.
+      placeholder: |
+        1. `pipx install superlocalmemory` then `slm setup` (Mode A)
+        2. `slm remember "The staging database is on port 5433"`
+        3. `slm recall "staging database port"`
+        4. No results are returned
+    validations:
+      required: true
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Did this work before?
+      options:
+        - "Yes, it worked in an earlier version"
+        - "No, it never worked for me"
+        - "I don't know"
+    validations:
+      required: true
+
+  - type: input
+    id: last_working
+    attributes:
+      label: Last version that worked
+      description: Only if this is a regression. It tells us where to look.
+      placeholder: "e.g. 4.2.29"
+
+  - type: input
+    id: version
+    attributes:
+      label: SuperLocalMemory version
+      description: Run `slm --version` and paste the output.
+      placeholder: superlocalmemory 4.2.31
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - pip / pipx
+        - uv tool
+        - npm
+        - Claude Code plugin
+        - Repository clone (install.sh / install.ps1)
+        - Other (say below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Where are you using it?
+      description: Pick every agent or app involved.
+      multiple: true
+      options:
+        - CLI only (`slm`)
+        - Claude Code (terminal)
+        - Claude Code (desktop app)
+        - Claude Desktop (chat)
+        - Codex
+        - Cursor
+        - VS Code / GitHub Copilot
+        - Antigravity
+        - Hermes
+        - OpenCode
+        - Windsurf
+        - Zed
+        - JetBrains
+        - Dashboard (browser)
+        - Python API / framework adapter
+        - Other (say below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: Run `slm status` to see it.
+      options:
+        - "A (local, no LLM)"
+        - "B (local LLM)"
+        - "C (cloud LLM)"
+        - "I don't know"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - Windows (64-bit)
+        - Linux (Ubuntu / Debian)
+        - Linux (other)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Run `python --version` (or the Python that runs `slm`).
+      placeholder: "3.12.8"
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`slm doctor` output"
+      description: Paste the output of `slm doctor`. Review it first and remove anything private.
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors and logs
+      description: |
+        Stack traces or log lines. Daemon logs live in `~/.superlocalmemory/logs/`.
+        `slm diagnostics export ./slm-diagnostics.json` writes a counters-only summary with no memory content, which is safe to attach.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, configuration you changed, or how often it happens.

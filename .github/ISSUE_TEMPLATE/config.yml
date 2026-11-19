@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/qualixar/superlocalmemory/security/advisories/new
+    about: Please report security issues privately here, never in a public issue. See SECURITY.md.
+  - name: 💬 Ask a question
+    url: https://github.com/qualixar/superlocalmemory/discussions/categories/q-a
+    about: How do I…? Questions and setup help go to Discussions, where other users can find the answer later.
+  - name: 💡 Share what you built
+    url: https://github.com/qualixar/superlocalmemory/discussions/categories/show-and-tell
+    about: Show how you use SuperLocalMemory with your agents.
+  - name: 🔧 Troubleshooting guide
+    url: https://github.com/qualixar/superlocalmemory/blob/main/docs/troubleshooting.md
+    about: Fixes for common problems. Run `slm doctor --fix` first.
+  - name: 📖 Documentation
+    url: https://www.superlocalmemory.com
+    about: Install guides, the MCP tool reference and per-host setup.
