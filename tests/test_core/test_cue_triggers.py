@@ -19,6 +19,14 @@ from superlocalmemory.storage.migrations import M078_memory_cues as M078
 from superlocalmemory.storage.models import AtomicFact, MemoryRecord
 from superlocalmemory.truth.invariants import open_read_only
 
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about when a cue fires, not the origin firewall: the memories are saved through agent doors
+    (``agent_inferred``), and a cue is a push channel the firewall (on by default since 19 Nov) holds back until a
+    promotion. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
 TODAY = date(2026, 11, 18)
 
 

@@ -54,7 +54,8 @@ class FakeClient:
         return {"mime": "image/png", "width": 3, "height": 2, "exif": {"Make": "Cam"},
                 "phash": ph, "stored_path": str(stored), "stored_ext": self.ext, "thumb_path": str(thumb)}
 
-    def ocr_image(self, path, *, wait_cold=True):
+    def ocr_image(self, path, *, wait_cold=True, regions=False):
+        # Same signature as the real client (``regions`` adds boxes; this fake has none to give).
         self.calls.append("ocr")
         assert Path(path).is_file(), "the scratch picture must still be there when it is read"
         engine, text = self.ocr

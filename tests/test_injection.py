@@ -9,6 +9,8 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from superlocalmemory.core.injection import (
     InjectableMemory,
     clamp_content,
@@ -21,6 +23,14 @@ from superlocalmemory.core.injection import (
     resolve_budget,
     select_core_block,
 )
+
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """Core-block selection and rendering, not the origin firewall: these memories carry no taint, and the
+    firewall (on by default since 19 Nov) keeps untainted memories out of the core block. tests/test_trust_firewall
+    covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
 # ── estimate_tokens ──────────────────────────────────────────────────────
 

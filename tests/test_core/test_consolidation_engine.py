@@ -20,6 +20,14 @@ from superlocalmemory.core.consolidation_engine import ConsolidationEngine
 from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about how Core Memory blocks are compiled, not the origin firewall: the facts are saved
+    directly, so they carry no trusted origin, and the firewall (on by default since 19 Nov) keeps them out of
+    the compiled blocks. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

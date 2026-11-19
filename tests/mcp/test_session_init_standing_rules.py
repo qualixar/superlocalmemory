@@ -19,6 +19,14 @@ from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
 from tests.mcp.test_session_init_prospective_surface import _patches, _ToolServer
 
 
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about what session start selects, not the origin firewall: they save through agent
+    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
+    tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
+
 @pytest.fixture()
 def db(tmp_path) -> DatabaseManager:
     mgr = DatabaseManager(tmp_path / "memory.db")

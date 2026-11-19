@@ -37,7 +37,11 @@ def cfg(pii=False):
     return SimpleNamespace(pii_redaction=pii)
 
 
-def test_segments_are_prepared_by_origin_and_joined():
+def test_segments_are_prepared_by_origin_and_joined(monkeypatch):
+    # This one is about preparing each part by origin (a person's own text kept as typed, derived text
+    # redacted). ``trust.secret_screen`` (on by default since 19 Nov) also redacts a person's own text and has
+    # its own tests, so pin it off here.
+    monkeypatch.setenv("SLM_FEATURE_TRUST_SECRET_SCREEN", "off")
     rt = Runtime()
     out = submit_memory(rt, req(segments=((f"note {KEY}", ContentOrigin.USER_TEXT),
                                           (f"\n\n[Text in image]\nfound {KEY}", ContentOrigin.DERIVED_TEXT))),

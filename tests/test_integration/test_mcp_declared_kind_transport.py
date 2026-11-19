@@ -136,6 +136,10 @@ def _start_daemon(
         }
         (data_root / "config.json").write_text(json.dumps(config), encoding="utf-8")
     env = _child_env(data_root, port, root / "home", root / "cache")
+    # This file is about declared kinds crossing the transport, not the origin firewall: what the MCP child
+    # saves is ``agent_inferred``, and with ``trust.taint`` on (default since 19 Nov) a rule or decision is
+    # held out of session start until promoted. tests/test_trust_firewall covers that rule.
+    env["SLM_FEATURE_TRUST_TAINT"] = "off"
     log = root / f"daemon-{time.monotonic_ns()}.log"
     with log.open("wb") as handle:
         proc = subprocess.Popen(

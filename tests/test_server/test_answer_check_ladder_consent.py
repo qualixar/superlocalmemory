@@ -76,10 +76,19 @@ def test_moving_the_answer_check_to_another_provider_withdraws_it(client, tmp_pa
     assert not _given()
 
 
-def test_the_status_says_whether_the_judges_only_watch(client, tmp_path) -> None:  # noqa: F811
+def test_the_status_says_whether_the_judges_only_watch(client, tmp_path, monkeypatch) -> None:  # noqa: F811
+    # ``judge.ladder`` is on by default since 19 Nov; this one is about the status of a ladder that only watches.
+    monkeypatch.setenv("SLM_FEATURE_JUDGE_LADDER", "shadow")
     _jev_on(tmp_path)
     ladder = _post(client).json()["jev"]["ladder"]
     assert ladder["flag"] in {"off", "shadow"} and ladder["since"]
+
+
+def test_the_status_says_when_the_judges_act(client, tmp_path, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setenv("SLM_FEATURE_JUDGE_LADDER", "on")
+    _jev_on(tmp_path)
+    ladder = _post(client).json()["jev"]["ladder"]
+    assert ladder["flag"] == "on" and ladder["since"]
 
 
 def test_each_change_leaves_an_audit_receipt(client, tmp_path) -> None:  # noqa: F811

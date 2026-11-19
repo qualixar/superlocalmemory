@@ -1,7 +1,17 @@
 """BRN-16: unrelated standing rules must not consume the bounded context."""
 
+import pytest
+
 from tests.mcp.test_session_init_standing_rules import _context, _fact
 from tests.mcp.test_session_init_standing_rules import db as _fixture_db
+
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about what session start selects, not the origin firewall: they save through agent
+    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
+    tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
 db = _fixture_db
 

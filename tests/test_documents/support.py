@@ -45,7 +45,8 @@ class FakeClient:
             Path(path).read_bytes()).hexdigest()[:16], "stored_path": str(stored), "stored_ext": "png",
             "thumb_path": str(thumb)}
 
-    def ocr_image(self, path, *, wait_cold=True):
+    def ocr_image(self, path, *, wait_cold=True, regions=False):
+        # Same signature as the real client (``regions`` adds boxes; this fake has none to give).
         page = self._page(path)
         self.calls.append(("ocr", page))
         return {"engine": self.engine, "text": self.ocr.get(page, "")}

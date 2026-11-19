@@ -41,7 +41,11 @@ def test_user_text_is_byte_identical_when_redaction_is_off() -> None:
     ).hexdigest()
 
 
-def test_user_text_keeps_credentials_when_redaction_is_off() -> None:
+def test_user_text_keeps_credentials_when_redaction_is_off(monkeypatch) -> None:
+    # "Off" here is ``pii_redaction``. ``trust.secret_screen`` (on by default since 19 Nov) is a separate switch
+    # that also redacts a credential in a person's own text; tests/test_trust_firewall/test_secret_screen.py
+    # covers it, so pin it off for this one.
+    monkeypatch.setenv("SLM_FEATURE_TRUST_SECRET_SCREEN", "off")
     text = f"my key is {_fake_key()}"
     out = prepare_for_save(text, origin=ContentOrigin.USER_TEXT, pii_redaction=False)
     assert out.text == text

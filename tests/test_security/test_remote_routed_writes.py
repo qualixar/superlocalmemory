@@ -23,6 +23,14 @@ import pytest
 from tests.test_security._routed_host import HOST, OTHER, WORK, open_host
 
 
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about which profile a routed key may touch, not the origin firewall: what they save through
+    the agent door is ``agent_inferred``, and with the firewall on (default since 19 Nov) a pin needs a promotion
+    first. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
+
 @pytest.fixture
 def host(tmp_path, monkeypatch, mock_embedder):
     with open_host(tmp_path, monkeypatch, mock_embedder) as opened:

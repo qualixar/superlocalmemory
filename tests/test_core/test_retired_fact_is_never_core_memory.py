@@ -26,6 +26,14 @@ from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
 
+
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about retired facts, not the origin firewall: the facts are saved directly, so they carry no
+    trusted origin, and the firewall (on by default since 19 Nov) would keep them out of session start and the
+    blocks whether or not they were replaced. tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
 PID = "default"
 OLD = "Open for 4.2.16: do not reinstall PyPI 4.2.15 on this Mac."
 NEW = "SLM 4.2.16 is released and installed on every Mac harness."

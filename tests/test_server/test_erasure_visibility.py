@@ -10,6 +10,14 @@ from fastapi.testclient import TestClient
 from superlocalmemory.core.delete_refusal import STALE_AFTER_S, _drop_stale_erasure
 
 
+@pytest.fixture(autouse=True)
+def _origin_firewall_off(monkeypatch):
+    """These tests are about what session start selects, not the origin firewall: they save through agent
+    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
+    tests/test_trust_firewall covers that rule."""
+    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+
+
 @pytest.fixture()
 def dashboard(engine_with_mock_deps):
     from superlocalmemory.server.profile_runtime import bind_profile_runtime
