@@ -194,6 +194,12 @@ def ingestion_pass(
                 result.operation_id,
                 result.last_error,
             )
+    if not completed and not failed:
+        # Only when nothing fresh was waiting: retry, bounded and once per version,
+        # failed saves an older version could never clear (#325).
+        from superlocalmemory.core import stuck_save_redrive
+
+        stuck_save_redrive.step(engine)
     hooks.reconcile_pending(engine)
     return completed, failed
 

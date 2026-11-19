@@ -66,6 +66,51 @@ def _nothing_left_live(db: Any, operation: IngestionOperation) -> bool:
     return True
 
 
+def _retired_in_profile(db: Any, profile_id: str, ids: set[str]) -> set[str]:
+    """Which of *ids* this profile retired: archived, erased, or being erased (#325).
+
+    A save's fact archived after the save is not a broken save, and nothing needs
+    projecting for it. A fact with a row in another profile is never retired here, and
+    a fact gone with no erasure record is not either: both stay real faults.
+    """
+    if not ids:
+        return set()
+    marks = ",".join("?" for _ in ids)
+    rows = [dict(r) for r in db.execute(
+        f"SELECT fact_id, profile_id, COALESCE(archive_status, 'live') AS status "
+        f"FROM atomic_facts WHERE fact_id IN ({marks})", tuple(ids))]
+    elsewhere = {str(r["fact_id"]) for r in rows if r["profile_id"] != profile_id}
+    retired = {str(r["fact_id"]) for r in rows
+               if r["profile_id"] == profile_id and r["status"] != "live"}
+    try:
+        retired |= {str(dict(r)["fact_id"]) for r in db.execute(
+            f"SELECT fact_id FROM projection_tombstones WHERE profile_id=? "
+            f"AND fact_id IN ({marks})", (profile_id, *ids))}
+    except Exception:  # noqa: BLE001 -- a schema without tombstones erases nothing
+        pass
+    return retired - elsewhere
+
+
+def _unaccounted(db: Any, profile_id: str, expected: Any, facts: Any) -> set[str]:
+    """Expected fact ids that are neither present nor retired in this profile."""
+    missing = {str(i) for i in expected} - {f.fact_id for f in facts}
+    return missing - _retired_in_profile(db, profile_id, missing)
+
+
+def _live_embeddings_complete(engine: "MemoryEngine", facts: Any) -> bool:
+    """The save's own embeddings rule, read now: every live fact has one (#325)."""
+    if engine._embedder is None:
+        return True
+    ids = [f.fact_id for f in facts]
+    if not ids:
+        return True
+    marks = ",".join("?" for _ in ids)
+    rows = engine._db.execute(
+        f"SELECT COUNT(*) AS count FROM atomic_facts "
+        f"WHERE fact_id IN ({marks}) AND embedding IS NOT NULL", tuple(ids))
+    return int(dict(rows[0])["count"]) == len(ids)
+
+
 def _require_known_profile(engine: "MemoryEngine", profile_id: str) -> None:
     """Fail closed on a write routed to a profile that does not exist.
 
@@ -673,13 +718,19 @@ def build_engine_ingestion_command(
         facts = engine._db.get_facts_by_ids(  # withheld facts are still this op's facts
             list(operation.final_fact_ids), operation.profile_id, include_quarantined=True,
         )
-        if len(facts) != len(operation.final_fact_ids):
+        # A fact archived or erased since the save is retired, not missing (#325).
+        if _unaccounted(engine._db, operation.profile_id, operation.final_fact_ids, facts):
             state["relational"] = False
             return MaterializationResult(
                 operation.final_fact_ids,
                 state,
                 "checkpointed relational facts are missing",
             )
+        if state.get("embeddings") is False:
+            # #325: an embedding that landed after the save was recorded missing, and
+            # nothing re-read it, so every retry failed forever. Same rule as the save:
+            # complete when every live fact has one, or when no embedder is configured.
+            state["embeddings"] = _live_embeddings_complete(engine, facts)
         if state.get("provenance") is False and engine._provenance is not None:
             provenance_complete = True
             for fact in facts:
@@ -759,7 +810,8 @@ def build_engine_ingestion_command(
             facts = engine._db.get_facts_by_ids(
                 list(operation.final_fact_ids), operation.profile_id, include_quarantined=True,
             )
-            if len(facts) != len(operation.final_fact_ids):
+            if _unaccounted(engine._db, operation.profile_id,
+                            operation.final_fact_ids, facts):
                 return MaterializationResult(
                     operation.final_fact_ids,
                     dict(operation.derivation_state),
@@ -1104,7 +1156,8 @@ def build_engine_ingestion_command(
             list(operation.final_fact_ids),
             operation.profile_id, include_quarantined=True,  # a withheld fact is still indexed
         )
-        if len(facts) != len(operation.final_fact_ids):
+        # Archived or erased facts need no projection (#325); only unaccounted ones fail.
+        if _unaccounted(engine._db, operation.profile_id, operation.final_fact_ids, facts):
             raise RuntimeError("external projection facts are missing")
 
         # Mode A remains fully materializable without a model. Empty vector

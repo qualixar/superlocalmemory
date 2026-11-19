@@ -315,7 +315,10 @@ def test_reader_pool_is_bounded_and_honours_the_deadline(tmp_path) -> None:
         with pytest.raises(AdmissionJournalUnavailable):
             with journal._read_connection(deadline=started + 0.05):
                 pass
-        assert time.monotonic() - started < 0.2
+        # Without the deadline the pool waits _UNBOUNDED_BUSY_SECONDS (5 s). One second
+        # still proves the 50 ms deadline is honoured and leaves room for a busy CI runner
+        # (it measured 0.201 s there on 19 Nov 2026 against the old 0.2 s bound).
+        assert time.monotonic() - started < 1.0
     finally:
         for context in holders:
             context.__exit__(None, None, None)

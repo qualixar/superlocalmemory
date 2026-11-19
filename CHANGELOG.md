@@ -52,6 +52,7 @@ The kill switch is `slm flags kill on`, or `SLM_4230_OFF=1` in the daemon's envi
 
 ### Fixed
 
+- Failed saves that no retry could clear (#325). A save whose embeddings were written a moment after it was recorded as "incomplete derivation stages: embeddings", and a retry never looked again, so it failed every time. A save one of whose facts was archived later failed with "external projection facts are missing" for the same reason: the archived fact was counted as lost. A retry now reads the embeddings again and treats archived or erased facts as retired. A fact that is really gone, or that sits in another profile, still fails. After the upgrade SLM retries these saves by itself in the background: up to 20 every five minutes, each one once per version, and never while the kill switch is on. On the author's store, one save that had failed ten times cleared on its first retry.
 - A laptop could hang with its swap full while SLM held a 3.3 GB picture worker and a 2 GB reranker that its own memory budget never weighed against the machine. SLM now reads the operating system's memory pressure (macOS) or the available memory, and releases one loaded model per health check, picture worker first and then the reranker, never the embedder. All three workers now exit at once on SIGTERM.
 
 ### Security
