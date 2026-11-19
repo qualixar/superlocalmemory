@@ -1,0 +1,79 @@
+name: ✨ Feature request
+description: Suggest a new capability or an improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Good feature requests start from a real problem. Tell us what you were trying to do and what got in the way; we will work out the design with you.
+        For open-ended ideas, [Discussions → Ideas](https://github.com/qualixar/superlocalmemory/discussions/categories/ideas) is a better first stop.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/qualixar/superlocalmemory/issues?q=is%3Aissue) and [discussions](https://github.com/qualixar/superlocalmemory/discussions) for this idea.
+          required: true
+        - label: This is a single feature request (file separate requests for separate ideas).
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what makes it hard today?
+      placeholder: My Codex and Claude Code sessions both work on the same repo, but I can't tell which agent saved a given memory.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: How should it work? CLI commands, MCP tools, dashboard screens or config keys are all welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you use today or other tools that solve this.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Remember / recall quality
+        - MCP tools
+        - Agent integrations (plugins, hooks, skills)
+        - Dashboard
+        - CLI
+        - Mesh (multi-agent)
+        - Optimize (cache / compress)
+        - Teams, profiles and access control
+        - Privacy, security and compliance
+        - Performance and resource use
+        - Install and upgrade
+        - Documentation
+        - Other
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How much does this matter to you?
+      options:
+        - Nice to have
+        - Important, I have a workaround
+        - Blocking, I can't use SLM for this without it
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd be willing to open a pull request for this.

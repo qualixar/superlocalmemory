@@ -21,30 +21,7 @@ Thank you for considering contributing to SuperLocalMemory V4! This document pro
 
 ## Code of Conduct
 
-### Our Pledge
-
-We are committed to providing a welcoming and inclusive experience for everyone, regardless of background or identity.
-
-### Standards
-
-**Expected behavior:**
-- Use welcoming and inclusive language
-- Respect differing viewpoints and experiences
-- Accept constructive criticism gracefully
-- Focus on what is best for the community
-- Show empathy towards other community members
-
-**Unacceptable behavior:**
-- Harassment, trolling, or insulting comments
-- Personal or political attacks
-- Publishing others' private information
-- Any conduct that would be inappropriate in a professional setting
-
-### Enforcement
-
-Project maintainers are responsible for clarifying standards and will take appropriate corrective action in response to unacceptable behavior.
-
-Report violations to: [admin@superlocalmemory.com]
+This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). By taking part you agree to uphold it. Report unacceptable behaviour to admin@superlocalmemory.com.
 
 ---
 
