@@ -220,7 +220,8 @@ def test_before_web_recall_uses_the_canonical_boundary(monkeypatch, capsys) -> N
         "_read_input",
         lambda: {"tool_input": {"query": "release readiness"}},
     )
-    monkeypatch.setattr(before_web_hook, "_run_recall", lambda _query: _ATTACK)
+    monkeypatch.setattr(before_web_hook, "_queue_context", lambda _q, _sid: None)
+    monkeypatch.setattr(before_web_hook, "_run_recall", lambda _query, **_kw: _ATTACK)
 
     assert before_web_hook.main() == 0
     output = capsys.readouterr().out

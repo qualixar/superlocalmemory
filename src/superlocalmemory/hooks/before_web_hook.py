@@ -25,8 +25,12 @@ is ~5-15s in exchange for grounded answers. NOT suitable for UserPromptSubmit
 CONTRACT
 ========
 - Reads Claude Code stdin: {"tool_input": {"query"|"url"|"prompt": "..."}}
-- On non-trivial query: calls `slm recall <query> --limit 5`, injects top
-  results as a system-reminder block.
+- On non-trivial query: asks the daemon's hook queue (only memories the answer
+  check supports, never one this conversation already got) and injects them as a
+  system-reminder block. A queue that found nothing relevant is the answer.
+- Only when the queue cannot answer (daemon down, no answer in time, an error)
+  does it run `slm recall <query> --limit 5` instead, within what is left of
+  _HOOK_BUDGET_SEC, so the whole hook ends before the host's 5 s timeout.
 - On empty/short query / recall failure / SLM down: silent exit 0.
 - Always exit 0 — never blocks the web call.
 """
@@ -36,12 +40,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from typing import Any
 
 _MIN_QUERY_LEN = 5
 _QUERY_TRUNCATE = 200
 _RECALL_LIMIT = 5
 _RECALL_TIMEOUT_SEC = 3
+#: The whole hook, both paths together, stays under the plugin's 5 s PreToolUse timeout
+#: (Claude Code kills a hook at its timeout; on 20 Nov 2026 this hook was 42 of 50
+#: timeouts in a day on the author's Mac, when the queue wait and a fresh `slm recall`
+#: added up to 6 s). A fallback recall needs at least _MIN_FALLBACK_SEC to be worth it.
+_HOOK_BUDGET_SEC = 4.0
+_MIN_FALLBACK_SEC = 1.0
 _RECALLED_MAX_CHARS = 3000
 _RECALLED_MIN_USEFUL = 50
 _PREVIEW_CHARS = 80
@@ -74,7 +85,7 @@ def _read_input() -> dict[str, Any]:
         return {}
 
 
-def _run_recall(query: str) -> str:
+def _run_recall(query: str, timeout: float = _RECALL_TIMEOUT_SEC) -> str:
     """Run `slm recall <query> --limit N`. Returns trimmed output or empty."""
     try:
         # Bounded query length (already truncated to 200 chars). Subprocess
@@ -83,7 +94,7 @@ def _run_recall(query: str) -> str:
             ["slm", "recall", query, "--limit", str(_RECALL_LIMIT)],
             capture_output=True,
             text=True,
-            timeout=_RECALL_TIMEOUT_SEC,
+            timeout=timeout,
         )
         if proc.returncode != 0:
             return ""
@@ -95,17 +106,22 @@ def _run_recall(query: str) -> str:
         return ""
 
 
-def _queue_context(query: str, session_id: str) -> str:
+def _queue_context(query: str, session_id: str) -> str | None:
     """W3 open item: the recall through the daemon's hook queue, so the answer
     gets a ``hook_recall`` receipt with this conversation's id (usage joins it)
     and a memory the conversation already got is not shown again. Only when the
-    daemon's hook socket is up (else the queue would wait for nobody); returns
-    the rendered, untrusted-framed evidence or ``""``."""
+    daemon's hook socket is up (else the queue would wait for nobody).
+
+    Returns the rendered, untrusted-framed evidence; ``""`` when the queue answered
+    and nothing was relevant enough to show (the answer check's verdict, as in the
+    per-prompt hook: the caller must not replace it with weaker matches); ``None``
+    when the queue could not answer (no socket, no answer in time, an error), the
+    one case where the command path may try instead."""
     try:
         from superlocalmemory.hooks.hook_daemon import owned_socket_path
 
         if owned_socket_path() is None:
-            return ""
+            return None
         from superlocalmemory.core.recall_queue import RecallQueue
         from superlocalmemory.hooks import auto_recall_hook as ar
 
@@ -119,12 +135,12 @@ def _queue_context(query: str, session_id: str) -> str:
         finally:
             queue.close()
         if not isinstance(result, dict) or result.get("ok") is False:
-            return ""
+            return None
         envelope = ar._format_envelope(result.get("results") or [], response=result)
         context = (envelope.get("hookSpecificOutput") or {}).get("additionalContext", "")
         return context if isinstance(context, str) else ""
     except Exception:  # noqa: BLE001 - fail open to the command path
-        return ""
+        return None
 
 
 def main() -> int:
@@ -137,10 +153,14 @@ def main() -> int:
 
         preview = query[:_PREVIEW_CHARS].replace('"', "'")
         session_id = payload.get("session_id")
+        started = time.monotonic()
         memory_evidence = _queue_context(query, session_id if isinstance(session_id, str)
                                          else "")
-        if not memory_evidence:
-            recalled = _run_recall(query)
+        if memory_evidence is None:
+            left = _HOOK_BUDGET_SEC - (time.monotonic() - started)
+            if left < _MIN_FALLBACK_SEC:
+                return 0
+            recalled = _run_recall(query, timeout=min(left, _RECALL_TIMEOUT_SEC))
             if not recalled:
                 return 0
             from superlocalmemory.core.injection import render_untrusted_text
