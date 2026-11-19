@@ -12,6 +12,19 @@ on:
   push:
     branches: ["rc/**"]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: >-
+          Runner image. macos-15 is the release default; pick ubuntu-24.04 when
+          GitHub's macOS arm64 queue is out of capacity ("job was not acquired
+          by Runner"), so a release is never blocked on one cloud's queue.
+        type: choice
+        default: macos-15
+        options: [macos-15, ubuntu-24.04]
+      shards:
+        description: JSON list of shards to run, e.g. [4] to finish one cancelled shard.
+        type: string
+        default: "[0, 1, 2, 3, 4, 5]"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,14 +33,14 @@ concurrency:
 jobs:
   shard:
     name: Shard ${{ matrix.shard }}
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 60
     env:
       UV_PYTHON_PREFERENCE: only-managed
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: ${{ fromJSON(inputs.shards || '[0, 1, 2, 3, 4, 5]') }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
@@ -35,6 +48,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install libomp (required by lightgbm)
+        if: runner.os == 'macOS'
         run: brew install libomp
       - name: Install the locked environment
         run: |
@@ -43,7 +57,7 @@ jobs:
       - name: Pick this shard's test files
         env:
           SHARD: ${{ matrix.shard }}
-          SHARDS: "6"  # must equal the matrix length
+          SHARDS: "6"  # total shard count; a dispatch may run only some of them
         run: |
           uv run python - <<'EOF' > shard-files.txt
           import os, pathlib, zlib
