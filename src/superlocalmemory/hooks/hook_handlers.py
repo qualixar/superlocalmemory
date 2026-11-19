@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -300,15 +301,28 @@ def _launch_post_session_evolution(
 # 0. SESSION INIT HINT — first SessionStart hook; fires before start
 # ---------------------------------------------------------------------------
 
+#: SLM's MCP tools have one of two names: ``mcp__superlocalmemory__<tool>`` when the
+#: server was registered by hand, ``mcp__plugin_superlocalmemory_superlocalmemory__<tool>``
+#: when it comes from the Claude Code plugin. Hook texts and the gate accept both.
+_SLM_TOOL_RE = re.compile(r"^mcp__(?:plugin_superlocalmemory_)?superlocalmemory__\w+$")
+
+
+def is_slm_tool(tool_name: str) -> bool:
+    """Whether ``tool_name`` is one of SuperLocalMemory's MCP tools, under either name."""
+    return bool(_SLM_TOOL_RE.match(tool_name or ""))
+
+
 _SESSION_INIT_HINT = """<SLM_SESSION_INIT_HINT>
 SuperLocalMemory is available for this session.
 
 For memory-aware work, initialize SLM once near the start of the turn:
 
 1. Load the tool schema if your host requires it:
-   ToolSearch query: "select:mcp__superlocalmemory__session_init"
+   ToolSearch query: "superlocalmemory session_init"
+   (it is mcp__plugin_superlocalmemory_superlocalmemory__session_init from the
+   Claude Code plugin, or mcp__superlocalmemory__session_init when registered by hand)
 
-2. Call mcp__superlocalmemory__session_init with:
+2. Call that session_init tool with:
    project_path = your current working directory
    query = a short description of the session topic
 
@@ -391,8 +405,9 @@ def _hook_start() -> None:
     print()
     print("## SLM Session Init")
     print("For memory-aware sessions, call:")
-    print(f"  mcp__superlocalmemory__session_init with project_path='{project_dir}'"
-          " and a topic from the user's first message")
+    print(f"  SuperLocalMemory's session_init tool with project_path='{project_dir}'"
+          " and a topic from the user's first message"
+          ' (ToolSearch "superlocalmemory session_init" loads it under either name)')
     print("session_init returns both context AND memories — no separate recall needed.")
 
 
@@ -425,7 +440,7 @@ def _hook_gate() -> None:
             sys.exit(0)
 
     # Allow SLM tools through (needed to call session_init itself)
-    if tool_name.startswith("mcp__superlocalmemory__"):
+    if is_slm_tool(tool_name):
         sys.exit(0)
 
     # Allow ToolSearch through (needed to fetch SLM tool schemas)
@@ -433,8 +448,8 @@ def _hook_gate() -> None:
         sys.exit(0)
 
     # Block everything else
-    print("[SLM-GATE] BLOCKED: Call mcp__superlocalmemory__session_init"
-          " before using other tools.")
+    print("[SLM-GATE] BLOCKED: call SuperLocalMemory's session_init tool"
+          ' (ToolSearch "superlocalmemory session_init") before using other tools.')
     sys.exit(2)
 
 
@@ -507,7 +522,7 @@ def _hook_checkpoint() -> None:
 
             # Suggest richer observe to Claude (with semantic context)
             print(f"[SLM-AUTO] File changed: {basename}"
-                  " — Call mcp__superlocalmemory__observe with a 1-line"
+                  " — Call SuperLocalMemory's observe tool with a 1-line"
                   " summary of what was changed and why.")
 
     # v3.4.43: Periodic 15/30-min recall/learn nags REMOVED.

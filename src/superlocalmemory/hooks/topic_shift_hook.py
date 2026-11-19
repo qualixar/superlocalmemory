@@ -105,9 +105,10 @@ _ACK_RE = re.compile(
 )
 
 _SHIFT_REMINDER = (
-    "[SLM] Topic shift detected. Consider calling "
-    "mcp__superlocalmemory__recall with the new topic to surface relevant "
-    "memories before responding."
+    "[SLM] Topic shift detected. Consider calling SuperLocalMemory's recall tool "
+    "(mcp__plugin_superlocalmemory_superlocalmemory__recall from the Claude Code "
+    "plugin, mcp__superlocalmemory__recall otherwise) with the new topic to "
+    "surface relevant memories before responding."
 )
 
 # Optional test/embedder overrides. Runtime defaults are resolved dynamically
