@@ -52,13 +52,14 @@ MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType({
 
 
 #: Memory numbers of the optional pack models (WS-8), by repo: ``(worker memory cap MB, free MB wanted
-#: before loading)``. PROVISIONAL, routing-only: estimated from the parameter counts at 32-bit (Florence-2
-#: base 0.23 B, PaddleOCR-VL 0.9 B) plus working memory; they are measured on the first real run.
+#: before loading)``. MEASURED 19 Nov 2026 on an M5 Mac, CPU, with the watchdog's own gauge (physical
+#: footprint): the caption worker peaked at 3,199 MB (three pictures, one 3000x2000) and the document
+#: worker at 5,948 MB (an A4 page at 150 dpi). The first estimate (2,500 MB) stopped every caption.
 #: Not entries of ``MODEL_PROFILES``: these models make no embeddings, so no evidence floor applies.
 PACK_MEMORY_MB: Mapping[str, tuple[int, int]] = MappingProxyType({
-    "florence-community/Florence-2-base": (2500, 2500),
-    "PaddlePaddle/PaddleOCR-VL-1.6": (6500, 6000),
-    "PaddlePaddle/PaddleOCR-VL": (6500, 6000),
+    "florence-community/Florence-2-base": (4000, 3500),
+    "PaddlePaddle/PaddleOCR-VL-1.6": (7500, 6000),
+    "PaddlePaddle/PaddleOCR-VL": (7500, 6000),
 })
 
 

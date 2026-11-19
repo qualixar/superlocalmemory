@@ -83,15 +83,14 @@ describe('turn-on card', () => {
         assert.equal(h.calls.filter(c => c.url === '/api/v3/features').length, gets);
     });
 
-    it('ready + restart required: the button calls the existing restart function', async () => {
+    it('ready before a restart: it is on, with a note that memory use drops after the next restart', async () => {
+        // 19 Nov 2026, real store: pictures were saved, read, indexed and described with no restart; a
+        // restart only lets text and pictures share one model process. Nothing blocks on it.
         const h = setup(MEDIA('ready', { restart_required: true }));
-        let got = null;
-        h.window.odRestartDaemon = (b, s) => { got = [b, s]; };
         await h.mount();
-        const b = btn(h, 'Restart SuperLocalMemory');
-        assert.ok(b);
-        b.click();
-        assert.ok(got && got[0] === b);
+        assert.match(h.host.textContent, /Images and documents are on/);
+        assert.match(h.host.textContent, /less memory after SuperLocalMemory next restarts/);
+        assert.equal(btn(h, 'Restart SuperLocalMemory'), undefined);
     });
 
     it('failed: the server message is shown as text only', async () => {

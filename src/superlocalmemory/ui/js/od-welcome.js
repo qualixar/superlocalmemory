@@ -188,7 +188,7 @@
 
   function mediaIsOn(m) {
     if (window.odFeatures && typeof window.odFeatures.isOn === 'function') return window.odFeatures.isOn(m);
-    return !!(m.enabled && m.env_state === 'ready' && !m.restart_required);
+    return !!(m.enabled && m.env_state === 'ready');  // works before a restart (19 Nov, real store)
   }
 
   function mediaOff(r, m) {

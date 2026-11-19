@@ -55,7 +55,10 @@
 
   // ---------------------------------------------------------------- media card
   function isOn(m) {
-    return !!(m.enabled && m.env_state === 'ready' && !m.restart_required);
+    // Pictures and documents work as soon as the environment is ready (checked on a real store,
+    // 19 Nov 2026): saved, read, indexed and described with no restart. A restart only lets text and
+    // pictures share one model process, so it is a note on the card, never a step that blocks.
+    return !!(m.enabled && m.env_state === 'ready');
   }
 
   function cardShell(title, sub) {
@@ -148,16 +151,6 @@
     return card;
   }
 
-  function restartCard() {
-    var card = cardShell('One more step', 'Restart so images and documents can start.');
-    var status = messageLine(card);
-    card.appendChild(button('Restart SuperLocalMemory', 'btn sm primary', function (b) {
-      if (typeof window.odRestartDaemon === 'function') window.odRestartDaemon(b, status);
-      else status.textContent = 'Restart from the Governance page.';
-    }));
-    return card;
-  }
-
   function startDisable(host, opts, box, msg) {
     var remove = !!box.checked;
     confirmThen({
@@ -174,7 +167,9 @@
   }
 
   function onCard(host, opts, m) {
-    var card = cardShell('Images and documents are on', (m.words || 'Ready') + '. Everything stays on this computer.');
+    var sub = (m.words || 'Ready') + '. Everything stays on this computer.';
+    if (m.restart_required) sub += ' It uses less memory after SuperLocalMemory next restarts.';
+    var card = cardShell('Images and documents are on', sub);
     var label = el('label', 'muted');
     var box = el('input');
     box.type = 'checkbox';
@@ -189,7 +184,6 @@
 
   function pickCard(host, m, opts) {
     if (isOn(m)) return onCard(host, opts, m);
-    if (m.enabled && m.env_state === 'ready') return restartCard();
     if (m.enabled && m.env_state === 'installing') return installingCard(m);
     if (m.enabled && m.env_state === 'failed') return failedCard(host, m, opts);
     return offCard(host, m, opts);

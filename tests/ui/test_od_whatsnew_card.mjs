@@ -114,11 +114,11 @@ describe("what's-new card follows the real state", () => {
         assert.ok(h.btn('Turn on images & documents'));
     });
 
-    it('turned on but needing a restart: points to the pane, which has the restart button', async () => {
+    it('ready before a restart: the tile says On (it works before a restart, 19 Nov real-store check)', async () => {
         const h = await setup({ media: { enabled: true, env_state: 'ready', restart_required: true } });
-        assert.match(h.tiles()[0].textContent, /restart/i);
+        assert.doesNotMatch(h.tiles()[0].textContent, /restart/i);
         assert.ok(h.btn('Open Documents & Images'));
-        assert.equal(h.host.querySelector('.badge.ok'), null);
+        assert.ok(h.host.querySelector('.badge.ok'));
     });
 
     it('no app with bot messages: offers to set them up in Connected apps', async () => {

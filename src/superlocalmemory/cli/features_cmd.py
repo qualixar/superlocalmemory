@@ -33,7 +33,7 @@ def media_line(media: dict[str, Any]) -> str:
         if state == "installing":
             return f"Downloading the picture model, {int(float(media.get('progress') or 0) * 100)}%"
         if media.get("restart_required"):
-            return "on, ready - restart to start using it (slm restart)"
+            return "on (uses less memory after the next restart: slm restart)"
         if state == "ready":
             return "on"
         step = str(media.get("step") or "").strip()

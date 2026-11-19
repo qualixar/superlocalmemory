@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 #: Seconds a pack worker stays loaded after its last request, then its memory goes back (routing-only).
 PACK_IDLE_S = 60.0
+#: Seconds one request to a pack worker may take. Measured 19 Nov 2026 (M5, CPU, machine busy): a
+#: caption 3-5 s warm, ~15 s cold; one A4 page through PaddleOCR-VL about 160 s, warm or cold. Page
+#: reading runs in the background document jobs, never inside a person's request, so it gets room.
+PACK_REQUEST_TIMEOUT_S = {"captions": 120.0, "documents": 600.0}
 #: Free disk wanted, as a multiple of the download, while it is being unpacked (routing-only).
 DISK_HEADROOM = 2.0
 READY_FILE = "ready.json"
@@ -403,7 +407,8 @@ def pack_client(pack_id: str, data_root: str | Path | None = None, *, env: Any =
             return None
         from superlocalmemory.runtimes.worker_client import shared_pack_client
 
-        return shared_pack_client(managed, spec.repo, spec.revision, spec.role, model_dir(spec, root), PACK_IDLE_S)
+        return shared_pack_client(managed, spec.repo, spec.revision, spec.role, model_dir(spec, root), PACK_IDLE_S,
+                                  PACK_REQUEST_TIMEOUT_S.get(pack_id, 120.0))
     except Exception:  # noqa: BLE001 - an optional part that cannot start is simply absent
         logger.warning("pack %s is not available", pack_id, exc_info=True)
         return None

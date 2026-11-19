@@ -500,7 +500,7 @@ def live_pack_clients() -> list[MediaWorkerClient]:
 
 
 def shared_pack_client(managed: Any, model_id: str, revision: str, role: str, model_dir: Path | str,
-                       idle_s: float) -> MediaWorkerClient:
+                       idle_s: float, request_timeout_s: float = 120.0) -> MediaWorkerClient:
     """The one client per pack model: its own worker process, its own folder, a short idle time.
 
     A pack model never shares a worker with the embedding model, so only one model is in memory in each
@@ -511,7 +511,8 @@ def shared_pack_client(managed: Any, model_id: str, revision: str, role: str, mo
         client = _PACK_CLIENTS.get(key)
         if client is None:
             client = _PACK_CLIENTS[key] = MediaWorkerClient(managed, model_id=model_id, revision=revision,
-                                                            role=role, model_dir=model_dir, idle_s=idle_s)
+                                                            role=role, model_dir=model_dir, idle_s=idle_s,
+                                                            request_timeout_s=request_timeout_s)
         return client
 
 

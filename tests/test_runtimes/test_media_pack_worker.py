@@ -126,7 +126,7 @@ def test_a_pack_worker_goes_idle_and_gives_its_memory_back(stub_env, picture):
 # -- memory numbers ---------------------------------------------------------------
 
 def test_pack_models_have_memory_numbers_and_the_embedding_models_are_untouched():
-    assert media_models.rss_limit_mb_for("florence-community/Florence-2-base") == 2500
+    assert media_models.rss_limit_mb_for("florence-community/Florence-2-base") == 4000  # measured 3,199 MB
     assert media_models.load_mb_for("PaddlePaddle/PaddleOCR-VL-1.6") == 6000
     assert media_models.rss_limit_mb_for(media_models.EG2_REPO) == 4500  # unchanged
     assert media_models.rss_limit_mb_for("fake:8") == media_models.DEFAULT_RSS_LIMIT_MB
@@ -145,7 +145,7 @@ def test_the_watchdog_limit_moves_only_while_a_pack_is_on_and_its_model_is_here(
     media_packs.model_dir(spec, tmp_path).mkdir(parents=True)
     (media_packs.pack_dir(spec, tmp_path) / media_packs.READY_FILE).write_text(
         json.dumps({"repo": spec.repo, "revision": spec.revision}), encoding="utf-8")
-    assert media_models.watchdog_limit_mb(1600) == 6500  # on and installed
+    assert media_models.watchdog_limit_mb(1600) == 7500  # on and installed (measured 5,948 MB)
     monkeypatch.setenv("SLM_FEATURE_MEDIA_DOCUMENT_PACK", "off")  # a person's own off puts it back
     assert media_models.watchdog_limit_mb(1600) == before
     monkeypatch.setenv("SLM_FEATURE_MEDIA_DOCUMENT_PACK", "on")
@@ -300,3 +300,20 @@ def test_paddleocr_vl_is_loaded_by_its_native_class_and_a_page_is_one_region(mon
     assert out["engine"] == "paddleocr_vl" and out["regions"] == [
         {"text": out["text"][:400], "bbox": [0.0, 0.0, 1.0, 1.0], "label": "page"}]
     assert pack_models.parse_document.__doc__ and "page itself" in pack_models.parse_document.__doc__
+
+
+def test_page_reading_gets_room_and_a_caption_keeps_the_short_deadline(tmp_path):
+    """Measured 19 Nov: one A4 page through PaddleOCR-VL took ~160 s on a busy CPU, past the 120 s
+    every worker had; page reading runs in background jobs, so its pack gets more room."""
+    from types import SimpleNamespace
+
+    from superlocalmemory.runtimes import media_packs, worker_client
+
+    assert media_packs.PACK_REQUEST_TIMEOUT_S["documents"] >= 300
+    assert media_packs.PACK_REQUEST_TIMEOUT_S["captions"] == 120.0
+    managed = SimpleNamespace(root=tmp_path / "m")
+    client = worker_client.shared_pack_client(managed, "x/doc", "r1", "document", tmp_path, 60.0, 600.0)
+    try:
+        assert client.request_timeout_s == 600.0
+    finally:
+        worker_client._PACK_CLIENTS.clear()
