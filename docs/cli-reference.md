@@ -1588,8 +1588,8 @@ slm import undo RUN_ID [--wait [S]]                             # take the whole
 Brings memories and conversations in from ChatGPT (`conversations.json`, the numbered files, the zip), Claude
 (`conversations.json`, `memories.json`, or text copied from its memory settings), Mem0 (`get_all` output in any of
 its shapes), Letta (`.af`), OKF and Markdown (`AGENTS.md`, `CLAUDE.md`, `MEMORY.md` and topic files). `FILE` is a
-file or a folder on this computer. Off until `slm flags set portability.import on`; every command says so when it
-is off. Imported text has origin `imported_file`: it never replaces a memory you already have, never moves a slot
+file or a folder on this computer. On by default (`portability.import`); after `slm flags set portability.import off`
+every command says it is off. Imported text has origin `imported_file`: it never replaces a memory you already have, never moves a slot
 head (a contradiction waits as a question, at most 50 per run, and no judge is asked), and the whole run can be
 undone exactly. Any caller may start or undo an import (D-49); each is recorded with who and the channel and listed
 under **Recent decisions by your agents**. MCP has no import tool; an agent runs this command. `--json` is for

@@ -24,7 +24,10 @@ Identity files (`.install_token`, `.signer_key`, `api_key`, `credentials.json`) 
 | `answer_check.json`, `memory_kinds.json` | Settings kept outside the per-mode copies so a consent cannot come back after a mode switch. |
 | `optimize.json` | [Optimize](Optimize) settings, hot-reloaded every 2 seconds. |
 | `code_graph_config.json` | Code-graph switches. |
-| `features.json` | Whether images, documents and folder sources are turned on. |
+| `features.json` | Whether images, documents and folder sources are turned on, and the 4.2.30 settings: one state per flag (`on`, `shadow` or `off`) and the kill switch. See [The 4.2.30 settings](#the-4230-settings). |
+| `disclosures.json` | The measurement notice, the version you acknowledged, and each on or off change of it. |
+| `consents.json` | Your agreement to send pairs of memories to the online judge. Not a feature flag, and no environment variable sets it. |
+| `wiki.json`, `wiki/` | Where the living wiki writes its Markdown files, and the files themselves. |
 | `adapters.json` | Ingestion adapter configuration. See [Ingestion Adapters](Ingestion-Adapters). |
 | `backup_config.json`, `cloud-backup-encryption.json`, `backups/` | Backup schedule, encryption state and the local copies. See [Cloud Backup](Cloud-Backup). |
 | `remote_keys.json` | Web Access keys (stored as digests). |
@@ -42,12 +45,14 @@ If `config.json` is unreadable or corrupt, SLM falls back to the Mode A default 
 
 ## The Settings pane
 
-The Settings pane has a search box over every setting and 16 groups. "Save all changes" at the bottom clicks the Save button of the groups that have one, and each group says whether a daemon restart is needed.
+The Settings pane has a search box over every setting and 18 groups. "Save all changes" at the bottom clicks the Save button of the groups that have one, and each group says whether a daemon restart is needed.
 
 | Group | What it changes |
 |---|---|
 | Operating Mode & LLM Provider | Mode A, B or C; provider (None, Ollama, OpenRouter, OpenAI, Anthropic), model, API key, base URL; a Test button. |
-| Answer check | On this Mac (Laya), Online with Jev, or Off; setup, repair, test, remove. See [Answer Check](Answer-Check). |
+| Answer check | On this Mac (Laya), Online with Jev, or Off; setup, repair, test, remove. Under Online with Jev, "Background judges" shows the notice and the I agree and Stop buttons for the judges that ask Jev whether a newer memory replaces an older one. See [Answer Check](Answer-Check). |
+| Help SLM measure what works | One On or Off switch for the withholding and swapping described below. |
+| Turn off everything new in 4.2.30 | The kill switch, and a button that brings back the memories 4.2.30 retired after counting them and asking. |
 | Embeddings & Retrieval | Default local model or a custom OpenAI-compatible endpoint (model, dimension, endpoint, key, Test); the background re-index panel; and, only for a store whose text an older release moved to the picture model, the memory-engine card with Roll back. See [Embedding Models](Embedding-Models). |
 | Storage Backends | Graph backend `auto`, `sqlite` or `cozo`; vector backend `auto`, `sqlite-vec` or `lancedb`; base directory (read-only). Saving reports whether a restart is needed. |
 | Memory Scope (auto-saves) | Default write scope (personal, shared, global) and whether recall includes shared and global memories. Both recall switches are off by default. |
@@ -63,7 +68,62 @@ The Settings pane has a search box over every setting and 16 groups. "Save all c
 | Rate Limits | Write limit, read limit and window in seconds. Applied immediately; the local dashboard gets a multiple of the limits. |
 | Daemon (port changes require restart) | API port, legacy port, whether the legacy port is open, idle timeout (0 = run forever). |
 
-Not in Settings: the remote reranker (`config.json` only), retention policy and company mode (Governance pane), memory-kind settings (`slm kinds settings`), Optimize (its own pane), Web Access (`slm remote`), the code graph, and turning on images and documents (the Documents & Images pane). The limits you set under Rate Limits are saved to `config.json` and re-applied at daemon start.
+Not in Settings: the remote reranker (`config.json` only), retention policy and company mode (Governance pane), memory-kind settings (`slm kinds settings`), Optimize (its own pane), Web Access (`slm remote`), the code graph, turning on images and documents and the optional picture and document models (the Documents & Images pane), importing (the Bring your memories from another app card on the home pane), and the trust, truth, judge and wiki flags (`slm flags`). The limits you set under Rate Limits are saved to `config.json` and re-applied at daemon start.
+
+## The 4.2.30 settings
+
+Release 4.2.30 adds a set of switches that are not in `config.json`. They live in `features.json` in the data folder and are changed with `slm flags set <flag> on|shadow|off`, with `slm measurement`, or from the dashboard. `slm flags` lists every flag and its state and needs no daemon. An environment variable `SLM_FEATURE_<FLAG>` (each dot becomes `_`, upper case; for example `SLM_FEATURE_OUTCOMES_HOLDOUT=off`) overrides the file. `shadow` means the subsystem computes and records in its own tables, changes no memory and sends nothing off the computer, with one exception: in `delivery.need_gate` shadow, memories are still injected on the prompts its fixed rules let through. Subsystems read their flag at their next run, and `trust.signing` needs a daemon restart.
+
+Four settings are on by default and the rest are off.
+
+### What SLM measures
+
+SLM measures whether memory helps your agents, on this computer and as ids and numbers only. `slm measurement status` shows the notice and each measure in plain words, and the same notice is printed on the first terminal run after an upgrade and at npm install.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `outcomes.receipts` | on | Writes a receipt each time SLM hands memories to an agent: memory ids, rank, score and the logged probability of each choice. Never text. |
+| `outcomes.holdout` | on | In about 1 in 10 session starts, leaves out one eligible memory or switches off one retrieval channel for that fetch (MCP session start only), chosen by a logged random draw. Never pinned rules, standing rules, core blocks, explicit recall, cues or lease warnings. |
+| `outcomes.swaps` | on | In about 1 in 20 of an agent's explicit recalls, two neighbouring results trade places. Nothing is left out or added. |
+| `outcomes.usage` | on | Compares an agent's last reply with the memories it was given to see which were used. Ids and scores only. |
+
+`slm measurement off` turns off `outcomes.holdout`, `outcomes.swaps` and `outcomes.usage` together, and `slm measurement off --receipts` turns the receipts off as well. The dashboard's Settings card "Help SLM measure what works" has one switch for the same thing. It is not a plugin setting: the withholding and swapping happen in the daemon and the session-start command, which a plugin's own options cannot reach. Inside an agent, the skill tells the agent to run `slm measurement off` when you ask, never on its own. `slm health --memory` (the Memory Health report) shows what these measurements found.
+
+### Memory on every prompt, and reminders on cues
+
+Both are on by default. `delivery.need_gate` registers per-prompt recall: the UserPromptSubmit hook (`slm hook auto_recall`) asks memory before the agent answers, but only when the prompt needs it. Fixed rules skip acknowledgements, greetings, arithmetic, translation requests and slash commands, and the rest are ranked by a simple score. The skip threshold is set from your own logged prompts so that at most 10% of the prompts that needed memory are skipped, and until enough prompts have a known outcome the score skips nothing. A memory the conversation already got is not shown again, and the hook adds nothing if it cannot answer within its time limit. `slm health --memory` shows how many prompts were skipped.
+
+`delivery.cues` brings a memory back when the agent touches something it was saved for. A memory saved with cues (`remember(cues=["path:src/**/schema.py", "tool:Bash:git push", "error:database is locked", "repo:myproject", "date:2026-12-01"])` or `slm remember --cue path:...`) comes back right before or after the matching step, at most once per conversation. `slm cues list` shows them.
+
+`delivery.harm_gate` only reports in this release: `slm health --memory` lists memories that measurably make the agent worse when included. It never removes a memory from what an agent sees.
+
+### The kill switch
+
+`slm flags kill on`, `SLM_4230_OFF=1` in the daemon's environment, `POST /api/flags/kill`, or the Settings card "Turn off everything new in 4.2.30" returns the store to the way it read before 4.2.30, without a downgrade. It stops every 4.2.30 background pass and makes reads ignore slots, source leases, disputes and taint, so recall results carry no dispute, source, origin or `why` notes. It does not undo retirements: `slm flags rollback-retirements [--dry-run]` says how many memories would come back and then brings them back as one recorded decision that can be undone.
+
+### Trust: origin, the firewall, the secret screen and signing
+
+All on by default since 4.2.30; set any one to `off` with `slm flags set <flag> off`.
+
+| Flag | What it does |
+|---|---|
+| `trust.taint` | Records how each memory arrived and classes it, best first: `user_direct`, `user_confirmed`, `system`, `agent_inferred`, `tool_output`, `mesh_peer`, `web`, `imported_file`, `model_generated`. A memory saved before your store took 4.2.30 is `legacy` and is trusted as it was before, decided by its date; one saved later with no origin record is `unknown` and is not trusted. A memory's taint is the lowest class among it and everything it was built from. `shadow` records and shows the class. `on` also keeps text below `system` from becoming a pin, a rule, a core block or a session-start instruction by itself, and stops a lower-class memory from replacing a higher one. It becomes an instruction through one explicit, recorded promotion by any caller (`slm trust promote`, or the dashboard card Held back from instructions), which `slm trust withdraw` can take back. Everything from before the upgrade keeps working as it did, and a background pass records the origin of each old memory. |
+| `trust.secret_screen` | On, every door that saves text replaces anything shaped like a credential with a typed placeholder such as `[REDACTED:GITHUB:ab12]`. The original is kept nowhere, and a save is refused if the screen cannot run. It recognises key formats, not sentences such as "the password is hunter2". |
+| `trust.signing` | The daemon signs each memory with a key read once from your operating system's keychain and makes each new audit-chain link an HMAC under the same key. It detects a memory changed by something that has your files but not your login session; it does not stop a process running as you. No keychain means signing is unavailable, never a key file. On macOS the keychain may ask once to allow access, for example after Python is upgraded. `slm signing status` and `slm doctor --truth` report problems by id. |
+
+`slm why FACT_ID` explains one memory: where it came from, whether the firewall holds it, its signature, its disputes and when agents were shown it.
+
+### Disputes, leases and the judges
+
+All on by default. `truth.slots` lets memories state the current value of one thing (`remember(slot="subject/relation", slot_value="...")`). A different value later opens a dispute, and recall results carry both sides with a next action. `truth.leases` records the fingerprint of the file a memory was saved from (`remember(source_file=...)`) and marks results whose file changed or went missing. `judge.ladder` sends typed questions to rules, the on-device judge and, only with your consent (`slm consent give judge_ladder_hosted`), the online Jev judge. A judge acts on a memory only after blind audit labels support it at a stated error rate; until then it only watches. `slm disputes` and `slm audit` settle and label from a terminal, and the dashboard has the same as plain-word cards.
+
+### Proposals, the living wiki and the dream cycle
+
+All on by default. `compiler.dream` lets the background cycle queue pages and exact-duplicate merges for review at most every six hours; it asks no model and applies nothing. `compiler.wiki` (`on`, or `shadow` to see what would be written) lets `slm wiki build` write approved pages as Markdown and `slm wiki sync` read your edits back as proposals. The folder is `SLM_WIKI_DIR`, or `dir` in `wiki.json`, or `wiki/` in the data folder. `compiler.auto_apply` applies only a set whose basis is a recorded certificate, so in practice a person or an agent decides each set. Every sentence of a page is a word-for-word piece of a memory or a fixed template. The kill switch reads both flags as off.
+
+### Importing and the picture models
+
+`portability.import` is on: `slm import` and the dashboard card can preview, run and undo the import of a ChatGPT, Claude, Mem0, Letta, OKF or Markdown file; an upload is capped at 64 MB. `media.captions` (a 0.5 GB download), `media.document_pack` (1.9 GB) and `media.regions` (no download) are on. On a computer with 16 GB of memory or more, SLM sets up images and documents and then both models by itself while it is idle, one download at a time and never under memory pressure; anything you turned off stays off. Below 16 GB it is one click (`slm media enable`, `slm media pack enable captions|documents|regions`, or the dashboard), with a note that it may be slow. `SLM_NO_AUTO_DOWNLOAD=1` stops the automatic download on a computer. See [Pictures and Documents](Pictures-and-Documents) and the [import guide](https://github.com/qualixar/superlocalmemory/blob/main/docs/importing.md).
 
 ## Environment variables
 
@@ -80,6 +140,9 @@ Every variable below was found by searching the source. The default is stated on
 | `SLM_REQUIRE_CREDENTIALS` | `1` makes even loopback writes present a daemon capability, install token or API key. | off | `server/write_identity.py` |
 | `SLM_REQUIRE_API_KEY_LOOPBACK` | When set and an `api_key` file exists, loopback writes must also send a matching `X-SLM-API-Key`. | off | `infra/auth_middleware.py` |
 | `SLM_DISABLE` | Any value other than `0`, `false`, `no` or `off` makes SLM do nothing, like the `.disabled` file. | unset | `core/slm_disabled.py` |
+| `SLM_4230_OFF` | The 4.2.30 kill switch: turns every 4.2.30 setting off. See [The kill switch](#the-kill-switch). | unset | `core/feature_flags.py` |
+| `SLM_FEATURE_<FLAG>` | Overrides one 4.2.30 flag (`on`, `shadow`, `off`); each dot becomes `_`, for example `SLM_FEATURE_OUTCOMES_HOLDOUT`. | the value in `features.json` | `core/feature_flags.py` |
+| `SLM_WIKI_DIR` | Folder the living wiki writes to. | `dir` in `wiki.json`, else `wiki/` in the data folder | `compiler/wiki.py` |
 | `SLM_NON_INTERACTIVE` | Makes the setup wizard treat the session as non-interactive. | unset | `cli/setup_wizard.py` |
 | `SLM_PYTHON` | Python interpreter the npm installer uses; it must be 3.12 to 3.14. | searched automatically | `scripts/postinstall.js` |
 
@@ -107,6 +170,7 @@ Every variable below was found by searching the source. The default is stated on
 | `SLM_EMBED_WORKER_RSS_LIMIT_MB` | Resident-size cap for the embedding worker. | 2500 | `core/embedding_worker.py` |
 | `SLM_RATE_LIMIT_WRITE`, `SLM_RATE_LIMIT_READ`, `SLM_RATE_LIMIT_WINDOW` | Per-client request limits and window in seconds. Loopback gets `max(300, 10 x write)` writes and `max(2000, 20 x read)` reads. | 30, 120, 60 | `core/remote_mode.py` |
 | `SLM_DB_BUSY_TIMEOUT_MS` | How long a database call waits for a writer. | 10000 | `storage/database.py` |
+| `SLM_HOOK_RECALL_WORKERS` | How many agent sessions' per-prompt recalls the daemon serves at the same time, 1 to 4. One serves sessions strictly in turn. | 2 | `core/queue_consumer.py` |
 | `SLM_LOOP_KILL` | Any non-empty value stops bounded loops. | unset | `loops/engine.py` |
 
 ### Web Access and remote use
@@ -147,7 +211,8 @@ Every variable below was found by searching the source. The default is stated on
 
 | Variable | Effect | Default | Source |
 |---|---|---|---|
-| `SLM_MEDIA_ALLOW_LOW_RAM` | `1` lets images and documents turn on below the 15 GiB check. | off | `runtimes/media_env.py` |
+| `SLM_MEDIA_ALLOW_LOW_RAM` | `1` treats a computer below the 15 GiB check as large enough for the automatic set-up. | off | `runtimes/media_env.py` |
+| `SLM_NO_AUTO_DOWNLOAD` | `1` stops the automatic download of the picture and document models on this computer. | off | `runtimes/media_auto.py` |
 | `SLM_MEDIA_WORKER_RSS_LIMIT_MB` | Overrides the picture worker's size cap. | per model (4500 MB for EmbeddingGemma 2) | `runtimes/media_models.py` |
 | `SLM_MEDIA_SPACE_MODE` | `paired` or `separate` picture search space. | `separate` | `runtimes/space_plan.py` |
 | `SLM_DOC_MAX_MB` | Largest PDF accepted, in MB. | 100 | `documents/submit.py` |
@@ -169,7 +234,7 @@ Provider keys are read from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI
 
 **Rate limits.** The daemon starts its limiters at 30 writes and 120 reads per 60 seconds (`SLM_RATE_LIMIT_WRITE`, `SLM_RATE_LIMIT_READ`, `SLM_RATE_LIMIT_WINDOW`). The Settings Rate Limits group can show 100 and 300 until you save a value, because the page reads its own defaults; save a value once and both agree.
 
-**Recall depth.** A recall returns up to 20 results by default (`CANONICAL_RECALL_LIMIT`). Callers can ask for a different number per call.
+**Recall depth.** A recall returns up to 20 results by default (`CANONICAL_RECALL_LIMIT`). Callers can ask for a different number per call, and since 4.2.30 the number asked for is always respected: a question worded like an aggregation no longer returns more than the `limit` given.
 
 ## The deployment preset
 
@@ -193,4 +258,4 @@ There is no language setting. Replace the embedder and the reranker instead, as 
 
 The endpoint must be HTTPS off the machine (plain HTTP is allowed for loopback and, while `retrieval.trust_plain_http_lan` is true, numeric private-LAN addresses), may not contain user info, a query string or a fragment, and redirects are not followed. If it is unreachable, recall returns fusion-ranked results without reranking; it never silently falls back to the English model. Remote reranking sends the query and each candidate's text to that endpoint after a best-effort secret and PII filter, so only use a service you trust.
 
-Code: `core/config.py` (`SLMConfig`, `ScopeConfig`, `RetrievalConfig`, `load_deployment_config`), `infra/data_root.py`, `cli/commands.py` (`cmd_config`), `ui/js/od-settings.js`, `core/remote_mode.py`, `infra/rate_limiter.py`, `retrieval/remote_reranker_config.py`, `core/answer_check_state.py`, `core/memory_kind_config.py`, `mcp/server.py`.
+Code: `core/feature_flags.py`, `core/kill_switch.py`, `outcomes/switch.py`, `core/config.py` (`SLMConfig`, `ScopeConfig`, `RetrievalConfig`, `load_deployment_config`), `infra/data_root.py`, `cli/commands.py` (`cmd_config`), `ui/js/od-settings.js`, `core/remote_mode.py`, `infra/rate_limiter.py`, `retrieval/remote_reranker_config.py`, `core/answer_check_state.py`, `core/memory_kind_config.py`, `mcp/server.py`.
