@@ -7,7 +7,8 @@ from tests.mcp.test_session_init_standing_rules import _context, _fact
 from tests.mcp.test_session_init_standing_rules import db as _fixture_db
 
 # Runs with the origin firewall ON: the rules are saved as an agent saves them
-# (``tests/helpers/agent_rule.py``), which is what promotes a confirmed rule.
+# (``tests/helpers/agent_rule.py``): an agent's own words are at the firewall's floor, so a rule it
+# saved stands with no promotion step (owner decision, 19 Nov).
 pytestmark = pytest.mark.usefixtures("firewall_on")
 
 

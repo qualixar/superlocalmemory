@@ -1,34 +1,28 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""Saving or confirming a memory as a rule or decision is its explicit promotion (4.2.30, 19 Nov).
+"""Saving or confirming a memory as a rule or decision, under the minimal firewall (19 Nov).
 
-The owner's decision: when an agent saves a memory with the declared kind ``rule`` or
-``decision``, or confirms an existing fact's kind as one of them, that counts as the explicit
-promotion the instruction firewall asks for. The memory reaches session start, and the
-promotion is recorded in Recent decisions with Undo (``firewall.approve``; undone through
-``firewall.withdraw``).
+Since the owner's 19 Nov decision the instruction firewall's floor is ``agent_inferred``: an
+agent's own words are trusted for instruction slots directly, so a rule or decision an agent
+saves (or whose kind it confirms) needs no promotion. This module keeps its doors and records
+nothing for those facts. What it still does:
 
-What is promoted, and what is not:
-
-* a fact whose taint is exactly ``agent_inferred`` (an agent's own words) is promoted, as the
-  caller's own actor and channel, which the route took from the connection
-  (``server/decision_door.py``), never from a parameter;
-* a fact that is already trusted needs nothing;
-* a fact below ``agent_inferred`` (a tool's output, another agent's message, a web page, an
-  imported file, model text, unknown) is **not** promoted. It stays held and the ask is put on
-  the waiting list (``firewall.request``), as the pin door does;
+* a fact that is already trusted (``agent_inferred`` or above, or ``legacy``) is skipped: no
+  promotion, no decision-log entry;
+* a fact below the floor (a web page, a tool's output, another agent's message, an imported file,
+  model text, unknown) is **not** promoted. It stays held and the ask is put on the waiting list
+  (``firewall.request``), as the pin door does;
 * **a correction keeps a rule working** (:func:`inherit`): when a correction is applied to a fact
-  that was already trusted (promoted, grandfathered or above the floor) and the successor carries
-  the rule or decision kind, the successor is promoted the same way, as the actor and channel of
-  whoever applied it. A predecessor that was not trusted passes nothing on, and a successor below
-  ``agent_inferred`` is held. Rolling the correction back takes that promotion back
-  (:func:`take_back`);
+  that was already trusted and the successor carries the rule or decision kind, the successor is
+  checked the same way: trusted passes, below the floor is held and asked for. A predecessor that
+  was not trusted passes nothing on. Rolling the correction back takes a promotion this module
+  recorded back (:func:`take_back`);
 * nothing happens while the firewall is not acting (``trust.taint`` off or shadow, or the kill
   switch on): nothing is held then.
 
 A guess is not a decision: the background classifier (``storage/memory_kind_writes.apply_batch``)
 never calls this module. It runs inside the canonical writer's own transaction, beside the kind
-write or the save it follows, so the kind and its promotion are one commit.
+write or the save it follows, so the kind and its ask are one commit.
 
 Ids, class names and counts only in logs.
 """
@@ -43,7 +37,6 @@ from typing import Any
 from superlocalmemory.core import decisions
 from superlocalmemory.storage.memory_kinds import is_confirmed
 from superlocalmemory.trust import fact_trust, firewall
-from superlocalmemory.trust import origin_class as oc
 
 logger = logging.getLogger(__name__)
 
@@ -62,42 +55,27 @@ def wanted(kind: object) -> bool:
     return str(kind or "").strip().lower() in KINDS and firewall.active()
 
 
-def _lead(kind: str, how: str, by: str) -> str:
-    who = "you" if by == "dashboard" else "an agent"
-    return f"Promoted a {kind} {who} {how},"  # joined to "so agents may follow it (...)"
-
-
 def _promote_one(conn: sqlite3.Connection, fact_id: str, kind: str, *, by: str, channel: str,
                  how: str, via: str = VIA) -> str:
-    """``promoted``, ``held`` or ``skipped`` for one fact. A failed promotion leaves no trace."""
+    """``skipped`` (already trusted, or no such fact) or ``held`` (below the floor: asked for).
+
+    ``how`` and ``via`` are kept for the callers' sake; since the floor is ``agent_inferred`` a
+    rule an agent saves needs no promotion, so nothing is promoted here and nothing is recorded
+    for a trusted fact.
+    """
     origin = fact_trust.origin_of(conn, fact_id)
-    if origin is None:
+    if origin is None or firewall.is_trusted_taint(origin["taint"]):
         return "skipped"
-    taint = origin["taint"]
-    if firewall.is_trusted_taint(taint):
-        return "skipped"
-    if taint != oc.AGENT_INFERRED:
-        firewall.request(conn, fact_id, kind, by=by, channel=channel)
-        return "held"
-    conn.execute(f"SAVEPOINT {_SAVEPOINT}")
-    try:
-        firewall.approve(conn, fact_id, by=by, channel=channel, via=via,
-                         lead=_lead(kind, how, by))
-    except (sqlite3.Error, LookupError, ValueError) as exc:
-        conn.execute(f"ROLLBACK TO {_SAVEPOINT}")
-        logger.warning("promotion on declared %s not recorded for %s (%s)", kind, fact_id,
-                       type(exc).__name__)
-        conn.execute(f"RELEASE {_SAVEPOINT}")
-        return "held"
-    conn.execute(f"RELEASE {_SAVEPOINT}")
-    return "promoted"
+    firewall.request(conn, fact_id, kind, by=by, channel=channel)
+    return "held"
 
 
 def promote(conn: sqlite3.Connection, profile_id: str, facts: Iterable[tuple[str, str]], *,
             by: str, channel: str, how: str, via: str = VIA) -> dict[str, Any]:
-    """Promote each ``(fact_id, kind)`` whose kind is a rule or decision, as ``by`` through
-    ``channel``. Only facts of ``profile_id`` are touched. Returns ``{"promoted": [...],
-    "held": [...]}`` (fact ids); empty while the firewall is not acting."""
+    """Check each ``(fact_id, kind)`` whose kind is a rule or decision, as ``by`` through
+    ``channel``: a fact below the floor is held and asked for. Only facts of ``profile_id`` are
+    touched. Returns ``{"promoted": [], "held": [...]}`` (fact ids; ``promoted`` stays empty
+    under the minimal firewall); empty while the firewall is not acting."""
     out: dict[str, list[str]] = {"promoted": [], "held": []}
     if not firewall.active() or channel not in firewall.CHANNELS:
         return out
@@ -117,12 +95,13 @@ def promote(conn: sqlite3.Connection, profile_id: str, facts: Iterable[tuple[str
 
 def inherit(conn: sqlite3.Connection, profile_id: str, predecessor_id: str, successor_id: str,
             *, by: str, channel: str) -> dict[str, Any]:
-    """On an applied correction: promote the successor when what it retires was trusted.
+    """On an applied correction: ask for the successor when what it retires was trusted.
 
     Runs inside the apply transaction, after the kind was carried over. The predecessor must be
-    trusted (a promotion, a grandfathered memory or a class at or above the floor); the successor
-    must carry a confirmed rule or decision kind and be exactly ``agent_inferred`` to be
-    promoted, and a lower class is held and asked for. Empty while the firewall is not acting.
+    trusted (a promotion, a grandfathered memory or a class at or above the floor) and the
+    successor must carry a confirmed rule or decision kind; a successor at or above the floor
+    needs nothing, and a lower class is held and asked for. Empty while the firewall is not
+    acting.
     """
     none: dict[str, list[str]] = {"promoted": [], "held": []}
     if not firewall.active():

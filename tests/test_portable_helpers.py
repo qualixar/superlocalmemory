@@ -66,7 +66,7 @@ def test_a_windows_child_environment_keeps_what_windows_needs(monkeypatch, tmp_p
     assert env["USERPROFILE"] == env["HOME"] == str(tmp_path)  # Path.home() there
 
 
-def test_a_posix_child_environment_is_only_home(monkeypatch, tmp_path):
+def test_a_posix_child_environment_is_only_home_and_the_guards(monkeypatch, tmp_path):
     monkeypatch.setattr(_portable.os, "name", "posix")
     monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
-    assert _portable.child_env_base(tmp_path) == {"HOME": str(tmp_path)}
+    assert _portable.child_env_base(tmp_path) == {"HOME": str(tmp_path), **_portable.GUARD_ENV}

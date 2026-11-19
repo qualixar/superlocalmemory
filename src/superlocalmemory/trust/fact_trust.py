@@ -3,7 +3,8 @@
 """Each fact's origin class and taint, computed from its origin signals (M-15, WS-5).
 
 * **Class** of a fact: ``origin_class.classify`` over the ``fact_origin`` row
-  (M074). A fact with no such row (saved before 4.2.30) is ``unknown``.
+  (M074). A fact with no such row is ``legacy`` when it was created before this store took
+  4.2.30 (trusted as before) and ``unknown`` when it was created after.
 * **Taint** of a fact: the lattice join (the lowest class) over the fact and
   everything it was derived from. A fact is derived from ``parent_fact_id``
   (a correction's predecessor) and, when it is a derived fact or its parent

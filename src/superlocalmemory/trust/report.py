@@ -72,14 +72,6 @@ def origins(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
     return {name: int(n) for name, n in sorted(rows, key=position)}
 
 
-def _cues_would_hold(slm_home: Path | None) -> int:
-    """Cue deliveries the firewall would have held while it was in shadow (a count)."""
-    from superlocalmemory.hooks import cue_hook
-    from superlocalmemory.infra.data_root import canonical_data_root
-
-    return cue_hook.shadow_held(slm_home or canonical_data_root())
-
-
 def build(conn: sqlite3.Connection, profile_id: str, *, slm_home: Path | None = None) -> dict:
     """The Trust section (JSON-ready); ``{}`` only if nothing at all could be read."""
     out: dict = {}
@@ -96,7 +88,6 @@ def build(conn: sqlite3.Connection, profile_id: str, *, slm_home: Path | None = 
              "preview": i["preview"][:120]} for i in queue["items"]]
         out["origins"] = origins(conn, profile_id)
         out["secrets_held_back"] = placeholders(conn, profile_id)
-        out["cues_would_hold"] = _cues_would_hold(slm_home)
         out["decisions"] = decisions.counts(conn, profile_id)
     except Exception:  # noqa: BLE001 - this section never breaks the report
         logger.debug("trust section unreadable", exc_info=True)
@@ -119,8 +110,6 @@ def describe(section: dict) -> list[str]:
     if section.get("waiting"):
         lines.append("  See them with: slm trust pending. Promote one on purpose with: "
                      "slm trust promote FACT_ID (recorded, and it can be withdrawn)")
-    if section.get("taint") == "shadow" and section.get("cues_would_hold"):
-        lines.append(f"  Cue deliveries the firewall would have held: {section['cues_would_hold']}")
     if section.get("unclassified"):
         lines.append(f"  Not yet classified by origin: {section['unclassified']}")
     made = section.get("decisions") or {}

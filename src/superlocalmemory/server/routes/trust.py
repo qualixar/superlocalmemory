@@ -3,10 +3,11 @@
 """Memories waiting for a promotion (WS-5, the instruction firewall, D-49).
 
 ``GET /api/trust/pending`` feeds the dashboard's "Held back from instructions" card and
-``slm trust pending``: memories that asked to be a pin, a standing rule, a core block
-or part of the session start, and whose origin (a tool's output, a web page, an
-agent's own words, anything saved before 4.2.30 and not already a pin or rule) is not
-trusted enough to be one by itself (``trust/firewall.py``). ``GET /api/trust/status``
+``slm trust pending``: memories that asked to be a pin, a standing rule, a standing decision
+or a core block, and whose origin (a web page, a tool's output, another agent's message, an
+imported file, a model's text, or a source that was not recorded) is not trusted enough to be
+one by itself (``trust/firewall.py``). They are still recalled and shown at session start.
+``GET /api/trust/status``
 says whether the firewall is acting and the secret screen is on.
 
 ``POST /api/trust/promote/{fact_id}`` (also ``/approve/{fact_id}``), ``/approve-all`` and

@@ -2,6 +2,7 @@
 import json
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,16 @@ def payload():
         return {}
 
 
+def command(action):
+    # The plugin's launcher finds the slm the MCP server uses (an installed one, then the
+    # data-folder venv) and never fails the host; a bare slm is only the last resort.
+    launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slm-run")
+    bash = shutil.which("bash")
+    if bash and os.path.isfile(launcher):
+        return [bash, launcher, "hook", action]
+    return ["slm", "hook", action]
+
+
 def slm(action, data):
     workspace_paths = data.get("workspacePaths")
     env = dict(os.environ)
@@ -22,7 +33,7 @@ def slm(action, data):
         env["CLAUDE_PROJECT_DIR"] = workspace_paths[0]
     try:
         result = subprocess.run(
-            ["slm", "hook", action], input=json.dumps(data), text=True,
+            command(action), input=json.dumps(data), text=True,
             capture_output=True, timeout=8, env=env,
         )
         return result.stdout.strip()

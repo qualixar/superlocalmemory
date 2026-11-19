@@ -2,10 +2,10 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 """M081: the instruction firewall's approval record (4.2.30, WS-5, D-37, I-10, I-11).
 
-A memory whose taint is below ``system`` (a tool's output, a web page, another agent's
-message, an import, a model's text, an agent's own words, or anything saved before 4.2.30)
-cannot become a pin, a standing rule or a core block, and is not shown in the session-start
-sections, until a person approves it (``trust/firewall.py``).
+A memory whose taint is below ``agent_inferred`` (a tool's output, a web page, another agent's
+message, an import, a model's text, or an unknown origin) cannot become a pin, a standing rule or
+a core block by itself, until one recorded promotion (``trust/firewall.py``; the minimal firewall,
+D-53, never hides a memory from recall or the session start). The table's shape is unchanged.
 
 This table records the two things nothing else can: what was *asked for* and refused or
 withheld (``wanted``: ``pin``, ``rule``, ``decision``, ``core`` or ``session_start``, with who

@@ -17,16 +17,8 @@ import pytest
 
 from superlocalmemory.core.config import ConsolidationConfig, SLMConfig
 from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
-
-
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """These tests are about how Core Memory blocks are compiled, not the origin firewall: the facts are saved
-    directly, so they carry no trusted origin, and the firewall (on by default since 19 Nov) keeps them out of
-    the compiled blocks. tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+from tests.helpers.agent_rule import agent_stores
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -35,10 +27,9 @@ def _origin_firewall_off(monkeypatch):
 @pytest.fixture()
 def tmp_db(tmp_path: Path) -> DatabaseManager:
     """Create an in-memory-ish test database with full schema."""
-    db_path = tmp_path / "test.db"
-    db = DatabaseManager(db_path)
-    db.initialize(schema)
-    return db
+    from tests.test_core.test_coverage_backfill import _db
+
+    return _db(tmp_path / "test.db")  # migrated like a live store: origins and trust are recorded
 
 
 @pytest.fixture()
@@ -100,7 +91,7 @@ def _seed_facts(
             importance=0.5,
             signal_type=SignalType.FACTUAL,
         )
-        db.store_fact(fact)
+        agent_stores(db, fact)
         ids.append(fact.fact_id)
     return ids
 
@@ -282,7 +273,7 @@ class TestConsolidationModeA:
             signal_type=SignalType.FACTUAL,
             confidence=0.9, importance=0.8,
         )
-        tmp_db.store_fact(fact)
+        agent_stores(tmp_db, fact)
         # Set signal_type to 'decision' directly
         tmp_db.execute(
             "UPDATE atomic_facts SET signal_type = 'decision' WHERE fact_id = ?",

@@ -334,7 +334,15 @@ def _ensure_mark_table(conn: sqlite3.Connection) -> None:
 def maintenance_step(db: Any, *, max_batches: int = 5) -> int:
     """One maintenance cycle's share, only while the daemon holds the key and the flag observes."""
     signer = sk.current()
-    if signer is None or not _observing():
+    if signer is None:
+        # The one place a keychain answer that came after the daemon's start bound is collected
+        # (F-07): never a hook, a recall or a CLI read. Does nothing unless the start timed out.
+        if sk.status() != sk.UNAVAILABLE_TIMEOUT or not _observing():
+            return 0
+        signer = sk.retry_late_key()
+        if signer is None:
+            return 0
+    elif not _observing():
         return 0
     total = 0
     for _ in range(max_batches):

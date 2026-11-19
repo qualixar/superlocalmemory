@@ -83,6 +83,7 @@ def test_no_supported_keychain_means_signing_is_unavailable_and_no_file_is_writt
         raise credentials.CredentialError("secure_keyring_unavailable")
 
     monkeypatch.setattr(credentials, "_native_backend", none)
+    monkeypatch.setattr(sk, "keychain_blocked", lambda: None)  # the guard has its own tests
     monkeypatch.chdir(tmp_path)
     before = sorted(p.name for p in tmp_path.rglob("*"))
     result = sk.load(create=True)

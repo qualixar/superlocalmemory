@@ -16,6 +16,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests._portable import GUARD_ENV
+
 REPO = Path(__file__).resolve().parents[2]
 SRC_SCRIPTS = REPO / "plugin-src" / "scripts"
 BUILT_PLUGIN = REPO / "plugin"
@@ -88,6 +90,7 @@ def sandbox_env(tmp_path: Path, stub_dir: Path, **extra: str | None) -> dict[str
         "CLAUDE_PLUGIN_ROOT": str(BUILT_PLUGIN),
         "CLAUDE_PLUGIN_DATA": str(tmp_path / "plugin-data"),
         "LANG": os.environ.get("LANG", "C"),
+        **GUARD_ENV,
     }
     for key, value in extra.items():
         if value is None:

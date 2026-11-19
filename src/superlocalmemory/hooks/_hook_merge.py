@@ -18,8 +18,14 @@ def replace_owned(
     existing: list[Any],
     new_entries: list[dict[str, Any]],
     is_owned_command: Callable[[Any], bool],
+    *,
+    is_owned_hook: Callable[[Any], bool] | None = None,
 ) -> list[Any]:
-    """Return ``existing`` with SLM-owned hooks swapped for ``new_entries``."""
+    """Return ``existing`` with SLM-owned hooks swapped for ``new_entries``.
+
+    ``is_owned_hook`` (the whole hook object) decides ownership when given; otherwise the
+    command alone does.
+    """
     result: list[Any] = []
     insert_at: int | None = None
     for entry in existing:
@@ -27,8 +33,7 @@ def replace_owned(
         if not isinstance(hooks, list):
             result.append(entry)
             continue
-        kept = [h for h in hooks
-                if not (isinstance(h, dict) and is_owned_command(h.get("command", "")))]
+        kept = [h for h in hooks if not _owned(h, is_owned_command, is_owned_hook)]
         if len(kept) == len(hooks):
             result.append(entry)
             continue
@@ -42,6 +47,13 @@ def replace_owned(
     if insert_at is None:
         return [*result, *fresh]
     return [*result[:insert_at], *fresh, *result[insert_at:]]
+
+
+def _owned(hook: Any, by_command: Callable[[Any], bool],
+           by_hook: Callable[[Any], bool] | None) -> bool:
+    if by_hook is not None:
+        return bool(by_hook(hook))
+    return isinstance(hook, dict) and by_command(hook.get("command", ""))
 
 
 def has_owned(entries: Any, is_owned_command: Callable[[Any], bool]) -> bool:

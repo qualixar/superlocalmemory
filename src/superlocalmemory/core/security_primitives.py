@@ -26,7 +26,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from superlocalmemory.core import credential_shapes
+from superlocalmemory.core import credential_shapes, public_material
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -235,7 +235,8 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"xoxb-[A-Za-z0-9\-]{10,}"), "SLACK"),
     (re.compile(r"ey[A-Za-z0-9_\-]{10,}\.ey[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}"),
      "JWT"),
-    (re.compile(r"-----BEGIN [A-Z ]+-----"), "PRIVATE_KEY"),
+    # A private key only (F-08): a public key or certificate block is public text, kept as written.
+    (re.compile(r"-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY[A-Z ]{0,10}-----"), "PRIVATE_KEY"),
 )
 
 #: Shapes ``detect_secrets`` adds to the replaced ones above; ``redact_secrets`` does not use them.
@@ -361,7 +362,9 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
     if not text:
         return text
 
-    out = text
+    # F-08: an SSH public key, a public certificate/key block and an integrity hash are public and
+    # look random; they are set aside, and put back after every pass below.
+    out, public = public_material.shield(text)
 
     if aggression == "high":
         for pat, label in _HIGH_AGGRESSION_PATTERNS:
@@ -459,7 +462,7 @@ def redact_secrets(text: str, *, entropy_threshold: float = 4.5,
         return _entropy_token(token)
 
     out = token_re.sub(_entropy_sub, out)
-    return out
+    return public_material.unshield(out, public)
 
 
 # ---------------------------------------------------------------------------

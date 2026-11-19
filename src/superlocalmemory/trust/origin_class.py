@@ -59,7 +59,7 @@ MODEL_GENERATED = "model_generated"
 UNKNOWN = "unknown"
 #: Saved before this store took 4.2.30 (no origin row, created before ``fact_origin`` existed
 #: here). Varun, 19 Nov: memories from before the upgrade keep working exactly as in 4.2.19, so
-#: they rank with ``system`` (at the firewall's floor). Decided by date, not by the missing row:
+#: they rank with ``system`` (above the firewall's floor, ``agent_inferred``). Decided by date, not by the missing row:
 #: a fact saved after the upgrade with no origin row is still ``unknown`` and fails closed.
 LEGACY = "legacy"
 

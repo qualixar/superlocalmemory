@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from tests import conftest
-from tests._portable import child_env_base
+from tests._portable import GUARD_ENV, child_env_base
 from tests.isolation_guard import LiveRootGuard, live_data_roots
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -114,7 +114,7 @@ def _run_without_root_conftest(tmp_path: Path, *, pinned: bool) -> Path:
         if pinned else "")), encoding="utf-8")
     env = {k: v for k, v in os.environ.items()
            if k not in ("SLM_DATA_DIR", "SL_MEMORY_PATH", "SLM_HOME")}
-    env.update(HOME=str(home),
+    env.update(GUARD_ENV, HOME=str(home),
                PYTHONPATH=os.pathsep.join([str(REPO_ROOT / "src"), str(REPO_ROOT)]))
     if os.name == "nt":
         env["USERPROFILE"] = str(home)  # where Path.home() looks on Windows

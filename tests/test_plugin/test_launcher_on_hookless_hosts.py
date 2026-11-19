@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._portable import GUARD_ENV
 from tests.test_plugin._plugin_sandbox import BUILT_PLUGIN, SYSTEM_PATH, system_path_has_slm, write_exe
 
 pytestmark = [
@@ -59,7 +60,7 @@ def _logging_stub(path: Path, tag: str, log: Path) -> Path:
 def _run(tmp_path: Path, stub_dir: Path, extra: dict[str, str], *, launcher: Path = LAUNCHER):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {"PATH": f"{stub_dir}:{SYSTEM_PATH}", "HOME": str(home)}
+    env = {"PATH": f"{stub_dir}:{SYSTEM_PATH}", "HOME": str(home), **GUARD_ENV}
     env.update(extra)
     return subprocess.run(
         [str(launcher), *CMD_ARGS], env=env, capture_output=True, text=True,

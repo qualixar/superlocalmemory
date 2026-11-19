@@ -10,8 +10,9 @@
     POST /api/import/runs/{run_id}/undo     take the whole run back, exactly         (memory-update)
     POST /api/import/switch                 turn the pack on or off (this computer)  (global manage)
 
-The pack is off by default behind ``portability.import``; every call but the two reads and the
-switch says which switch is off. A file arrives as ``{"filename", "data_base64"}`` (at most
+The pack is on by default behind ``portability.import`` (a person's own off or the kill switch
+stops it); every call but the two reads and the switch says which switch is off. A file
+arrives as ``{"filename", "data_base64"}`` (at most
 ``constants.MAX_UPLOAD_BYTES`` after decoding: the size cap is a routing constant, and a request
 that says it is bigger is refused before its body is read), or as ``{"path"}`` from a caller on
 this computer. The bytes are staged privately between preview and run (``portability/staging``).

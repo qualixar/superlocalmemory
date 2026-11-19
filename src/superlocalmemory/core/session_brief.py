@@ -17,7 +17,7 @@ where the agent is, from the store and two bounded git calls, with no engine
   that says more than its date (``[name] session ended <date> | ...``);
 * **what needs attention here**: open disputes with a side saved under this
   project, and memories whose source file inside this project changed or went
-  missing (``truth.leases``).
+  missing (leases, which follow ``truth.slots``).
 
 Where a part has nothing, the start falls back to what it showed before (the
 profile's recent important facts), so a new project still gets context.

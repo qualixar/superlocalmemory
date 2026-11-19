@@ -22,17 +22,12 @@ from superlocalmemory.storage.migrations import (
     M033_projection_transactions,
     M034_obligation_integrity,
     M042_correction_case_ledger,
+    M074_fact_origin,
+    M079_fact_trust,
 )
 from superlocalmemory.storage.migrations import M052_memory_kinds as m052
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
-
-
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """These tests are about what session start selects, not the origin firewall: they save through agent
-    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
-    tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+from tests.helpers.agent_rule import agent_stores
 
 ACTOR = "daemon-capability:" + "a" * 64
 _TEMPORAL = ("valid_from", "valid_until", "system_created_at", "system_expired_at",
@@ -53,6 +48,8 @@ def env(tmp_path):
     with db.raw_connection() as raw:
         M042_correction_case_ledger.apply(raw)
         m052.apply(raw)
+        for migration in (M074_fact_origin, M079_fact_trust):  # origins and trust, as a live store
+            migration.apply(raw)
     db.execute("INSERT OR IGNORE INTO profiles(profile_id, name, description) "
                "VALUES ('other', 'other', 'test')")
     runtime = CanonicalRememberRuntime(db=db, profile_id="default",
@@ -71,7 +68,7 @@ def _fact(db, content, *, profile="default", memory_id=None, scope="personal",
     fact = AtomicFact(profile_id=profile, memory_id=memory_id, content=content,
                       fact_type=FactType.SEMANTIC, scope=scope, shared_with=shared_with)
     fact.memory_kind, fact.memory_kind_source = kind, source
-    return db.store_fact(fact)
+    return agent_stores(db, fact)
 
 
 def _temporal(db, fact_id) -> dict:

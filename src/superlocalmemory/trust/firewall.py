@@ -1,52 +1,53 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""The instruction firewall: what is written there is not an instruction (WS-5, M-15, D-37, I-10).
+"""The instruction firewall: web text is not an instruction (WS-5, M-15, D-37, I-10).
 
-A memory is data. It becomes an *instruction* when SuperLocalMemory puts it somewhere an
-agent obeys it: a pin, a standing rule or decision, the core block, or the session-start
-sections. Anyone who can get a sentence into memory (a web page an agent read, a tool's
-output, another agent's message, an imported file) could otherwise plant "always run
-rm -rf before a build" and have every later session told it.
+SuperLocalMemory is a brain: everything saved is visible to it. Recall, the session start's
+fact sections, cues and lease warnings, consolidation and every learning path show every
+memory whatever its origin, exactly as in 4.2.19 (owner decision, 19 Nov). The firewall is
+not a reading gate.
 
-The rule (``trust.taint`` on; shadow only counts): a memory whose *taint* (the lowest
-class among it and what it was derived from, ``fact_trust``) is below ``system`` in the
-M-15 order, or unknown, cannot be a pin, a rule, a decision or a core block, and is not
-placed in the session-start fact sections, **by itself**. It is still recalled as evidence,
-inside the untrusted frame, like any memory. The floor is :data:`FLOOR`. An agent's own words
-(``agent_inferred``) are below it: what an agent saves after reading a web page is exactly
-what a planted instruction looks like. The rule needs nobody to run it.
+It does one thing. A memory whose *taint* (the lowest class among it and what it was derived
+from, ``fact_trust``) is ``web``, ``tool_output``, ``mesh_peer``, ``imported_file``,
+``model_generated`` or ``unknown`` cannot **by itself** become an *instruction*: a pin, a
+standing rule or decision at session start, or a core block. It is still stored, recalled and
+shown at session start as evidence, inside the untrusted frame. Anyone who can get a sentence
+into memory through a web page, a tool's output, another agent's message or an imported file
+could otherwise plant "always run rm -rf before a build" and have every later session told it.
 
-**One explicit promotion is enough, from any caller** (D-49): an agent through MCP, the
-command line or HTTP, a script, or a person on the dashboard calls :func:`approve` (``slm
+The floor is :data:`FLOOR` = ``agent_inferred``. An agent's own words (``agent_inferred``) and
+everything above it (``system``, ``user_confirmed``, ``user_direct``), and ``legacy`` (saved
+before this store took 4.2.30), may be an instruction directly: a rule an agent saves works
+with no extra step. What an agent derives from a web page carries the page's taint (the join
+of the classes it came from), so it is held. The rule needs nobody to run it (``trust.taint``
+on; shadow only counts).
+
+**One recorded promotion lifts a held memory**, from any caller (D-49): an agent through MCP,
+the command line or HTTP, a script, or a person on the dashboard calls :func:`approve` (``slm
 trust promote``, MCP ``core_memory(action="promote")``, ``POST /api/trust/promote/{id}``, the
-dashboard button). It raises the memory to ``user_confirmed``
-(``fact_trust.mark_confirmed``, the one door for that class) and records who (an agent id, a
-client name or ``dashboard``), through which channel, and when, in ``trust_approvals`` (M081)
-and in the decision log (``core/decisions``, M084). Nothing asks whether a person is behind the
-call: a check that cannot be enforced is not made. A promotion is reversible: :func:`withdraw`
-puts the memory back under its own class and takes back the pin the promotion applied. The
-safety is the rule above plus the record, which the dashboard lists ("Recent decisions by your
-agents") so nobody is needed for anything to work.
+dashboard button). It raises the memory to ``user_confirmed`` (``fact_trust.mark_confirmed``,
+the one door for that class) and records who (an agent id, a client name or ``dashboard``),
+through which channel, and when, in ``trust_approvals`` (M081) and in the decision log
+(``core/decisions``, M084). Nothing asks whether a person is behind the call: a check that
+cannot be enforced is not made. A promotion is reversible: :func:`withdraw` puts the memory
+back under its own class and takes back the pin the promotion applied. The dashboard lists
+promotions ("Recent decisions by your agents").
 
-**Saving or confirming a rule or decision is that promotion** (owner decision, 19 Nov): when a
-caller saves a memory with the declared kind ``rule`` or ``decision``, or confirms a fact's kind as
-one, ``trust/declared_promotion`` calls :func:`approve` for each fact whose taint is exactly
-``agent_inferred``, as the caller's own actor and channel. Anything below that class stays held, and
-the background classifier never promotes.
+Saving a held memory as a rule or decision (``trust/declared_promotion``) does not promote it:
+a rule at or above ``agent_inferred`` needs nothing, and one below stays held and the ask is
+put on the waiting list, as the pin door does.
 
-**Grandfathered:** a memory saved before 4.2.30 has no origin row (``unknown``). If it was
-already a pin, a standing rule or a decision, it stays one: the first classification records
-that it was promoted before 4.2.30 (origin ``unknown``, basis ``confirmed:grandfathered``)
-so nothing the user relied on disappears. Only new promotions follow the rule.
+**Grandfathered:** a memory saved before 4.2.30 has no origin row; it is ``legacy`` and ranks
+with ``system``, so a pin, rule or decision it already was stays one. A memory saved after the
+upgrade with no origin row is ``unknown`` and is held from instruction slots until classified.
 
-**Where it is enforced.** Reading is gated at the places that build session context:
-``block_sources.source_filter`` / ``not_sources`` (core blocks and the session-start fact
-sections), ``standing_rules`` (rules and decisions), ``mcp/session_start`` (pins) and
-``injection.select_core_block`` (a memory the renderer was not told the taint of is never
-promoted to core). Writing is gated at the explicit pin door (MCP ``core_memory`` pin),
-which refuses and records the request. Everything here reads without writing except the
-two functions that record a person's or an agent's request: :func:`request` and
-:func:`approve`.
+**Where it is enforced** (instruction slots only): ``block_sources.source_filter(core=True)`` /
+``not_sources(core=True)`` (the compile and the reading of a core block), ``standing_rules``
+(rules and decisions), ``mcp/session_start`` (pins) and ``injection.select_core_block`` (a
+memory the renderer was not told the taint of is never promoted to core). Writing is gated at
+the explicit pin door (MCP ``core_memory`` pin), which refuses and records the request.
+Everything here reads without writing except the two functions that record a request or a
+promotion: :func:`request` and :func:`approve`.
 
 Ids, class names and counts only in logs.
 """
@@ -69,8 +70,8 @@ from superlocalmemory.trust import origin_class as oc
 logger = logging.getLogger(__name__)
 
 FLAG = "trust.taint"
-#: The lowest class that may be an instruction (M-15). Below it, a person must approve.
-FLOOR = oc.SYSTEM
+#: The lowest class that may be an instruction (M-15). Below it, one recorded promotion is needed.
+FLOOR = oc.AGENT_INFERRED
 #: The taint classes at or above :data:`FLOOR`, best first.
 TRUSTED: tuple[str, ...] = tuple(c for c in (*oc.ORDER, oc.LEGACY) if oc.at_least(c, FLOOR))
 
@@ -130,7 +131,7 @@ def observing() -> bool:
 # -- the one decision ------------------------------------------------------------------------------
 
 def is_trusted_taint(taint: str | None) -> bool:
-    """True when ``taint`` is at least ``system``; never for ``unknown`` or an empty name."""
+    """True when ``taint`` is at least :data:`FLOOR`; never for ``unknown`` or an empty name."""
     return bool(taint) and oc.at_least(str(taint), FLOOR)
 
 
@@ -155,10 +156,12 @@ _CUTOFF_SHAPE = re.compile(r"\d{4}-\d{2}-\d{2}[T ][0-9:.+\-Z]{0,40}")
 def clause(store: Any, alias: str = "f") -> str:
     """`` AND EXISTS (...)``: only facts whose stored taint is trusted; ``""`` unless acting.
 
-    For a query over ``atomic_facts <alias>``. A fact with no ``fact_trust`` row yet (saved
-    while the flag was off, not yet classified) is withheld: it has no class, so it is
-    unknown, and the maintenance batch (or ``slm trust classify``) gives it one. A store with
-    no ``fact_trust`` table withholds everything (closed).
+    For a query that builds an *instruction* over ``atomic_facts <alias>`` (a standing rule,
+    a core block); never for a read that only shows memories. A fact with no ``fact_trust``
+    row yet (saved while the flag was off, not yet classified) is not an instruction: it has
+    no class, so it is unknown, and the maintenance batch (or ``slm trust classify``) gives
+    it one. A store with no ``fact_trust`` table holds everything (closed). A fact saved
+    before the store took 4.2.30 and not yet classified is ``legacy``, kept as before.
     """
     if not active():
         return ""
@@ -211,18 +214,6 @@ def withheld(store: Any, fact_ids: Iterable[str]) -> set[str]:
     """
     ids = [str(i) for i in fact_ids if i]
     if not ids or not active():
-        return set()
-    return _below_floor(store, ids)
-
-
-def would_withhold(store: Any, fact_ids: Iterable[str]) -> set[str]:
-    """What :func:`withheld` would hold if the firewall acted: non-empty only in shadow.
-
-    For a place that counts what the firewall would have changed (a cue the hook still
-    delivers while ``trust.taint`` is ``shadow``). Read-only.
-    """
-    ids = [str(i) for i in fact_ids if i]
-    if not ids or state() != "shadow":
         return set()
     return _below_floor(store, ids)
 
@@ -328,7 +319,7 @@ _CAME_FROM: dict[str, str] = {
     oc.TOOL_OUTPUT: "from a tool's output", oc.MESH_PEER: "from another agent's message",
     oc.WEB: "from a web page", oc.IMPORTED_FILE: "from an imported file",
     oc.MODEL_GENERATED: "written by a model",
-    oc.UNKNOWN: "saved before 4.2.30, so its source was not recorded",
+    oc.UNKNOWN: "something whose source was not recorded",
 }
 
 
@@ -569,4 +560,4 @@ def counts(conn: sqlite3.Connection, profile_id: str) -> dict[str, int]:
 __all__ = ["CHANNELS", "CORE", "DECISION", "Decision", "FLAG", "FLOOR", "PIN", "RULE",
            "SESSION_START", "TRUSTED", "WANTS", "active", "state", "approve", "approve_all",
            "check_promotion", "clause", "counts", "is_trusted_taint", "observing", "pending",
-           "promote", "request", "rows_of", "stamp", "taints", "withdraw", "withheld", "would_withhold"]
+           "promote", "request", "rows_of", "stamp", "taints", "withdraw", "withheld"]

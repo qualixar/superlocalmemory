@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._portable import GUARD_ENV
+
 REPO = Path(__file__).parent.parent.parent
 RESOLVE_SH = REPO / "plugin-src" / "scripts" / "torch-cpu-resolve.sh"
 
@@ -41,6 +43,7 @@ def _run(tmp_path: Path, body: str, env_overrides: dict[str, str] | None = None,
     """Source torch-cpu-resolve.sh then run `body`, with a clean, controlled env."""
     env = {
         "HOME": str(tmp_path),
+        **GUARD_ENV,
         "PATH": (f"{path_prefix}:" if path_prefix else "") + "/usr/bin:/bin",
     }
     if env_overrides:

@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests._portable import GUARD_ENV
 
 ROOT = Path(__file__).resolve().parents[2]
 GET_SH = ROOT / "scripts" / "get-slm.sh"
@@ -94,6 +95,7 @@ class Rig:
             "UV_BIN_OUT": str(self.tool_bin),
             "SLM_GET_DRY_RUN": "1",
             "LC_ALL": "C",
+            **GUARD_ENV,
         }
         env.update(self.extra_env)
         return env
@@ -427,6 +429,7 @@ def _real_env(tmp_path: Path, path: str) -> dict[str, str]:
         "UV_TOOL_BIN_DIR": str(tmp_path / "bin"),
         "UV_PYTHON_INSTALL_DIR": str(tmp_path / "py"),
         "SLM_GET_SKIP_START": "1",
+        **GUARD_ENV,
     }
 
 

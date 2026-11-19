@@ -1,9 +1,9 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Licensed under AGPL-3.0-or-later - see LICENSE file
-"""Owner decision 19 Nov: when an agent saves or confirms a memory as a rule or a decision, that is
-its explicit promotion. It reaches session start, is recorded in Recent decisions with Undo, and
-anything that did not come from an agent's own words (web page, tool output, import, model text)
-stays held. Everything here runs with ``trust.taint`` ON."""
+"""Owner decision 19 Nov (minimal firewall): the floor is ``agent_inferred``, so a rule or decision an
+agent saves or confirms stands at session start with no promotion step and no decision-log entry.
+Anything below the floor (web page, tool output, peer message, import, model text) stays held and the
+ask goes on the waiting list. Everything here runs with ``trust.taint`` ON."""
 
 from __future__ import annotations
 
@@ -74,47 +74,52 @@ def test_an_agent_saving_a_rule_reaches_session_start_with_the_firewall_on(world
     assert resp.status_code == 200, resp.text
     [fact_id] = resp.json()["fact_ids"]
     assert fact_id in _standing(db)
-    assert _taint(db, fact_id) == "user_confirmed"
+    assert _taint(db, fact_id) == "agent_inferred"  # trusted as it is: nothing was promoted
 
 
-def test_the_promotion_is_recorded_with_the_agent_actor_and_channel(world) -> None:
+def test_an_agents_rule_needs_no_promotion_and_records_none(world) -> None:
     client, _app, db = world
-    [fact_id] = _remember(client, RULE_TEXT, "decl-rule-2", kind="rule").json()["fact_ids"]
-    [row] = _promotions(client)
-    assert (row["actor"], row["channel"], row["action"]) == ("agent:claude-code", "mcp", "promote")
-    assert row["subject_id"] == fact_id and row["can_undo"]
-    assert row["summary"] == ("Promoted a rule an agent saved, so agents may follow it "
-                              "(an agent's own words)")
-    assert row["detail"]["was_taint"] == "agent_inferred"
+    _remember(client, RULE_TEXT, "decl-rule-2", kind="rule")
+    assert _promotions(client) == []
+    with connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM trust_approvals").fetchone()[0] == 0
 
 
-def test_a_saved_decision_is_promoted_too(world) -> None:
+def test_a_saved_decision_stands_too(world) -> None:
     client, _app, db = world
     [fact_id] = _remember(client, DECISION_TEXT, "decl-dec-1", kind="decision").json()["fact_ids"]
     assert fact_id in _standing(db, MemoryKind.DECISION)
-    [row] = _promotions(client)
-    assert row["summary"].startswith("Promoted a decision an agent saved")
+    assert _promotions(client) == []
 
 
-def test_the_actor_comes_from_the_connection_never_from_the_body(world) -> None:
-    client, _app, _db = world
-    _remember(client, RULE_TEXT, "decl-rule-3", kind="rule",
-              headers={CONNECTION_HEADER: "claude-code", CHANNEL_HEADER: "cli"},
-              metadata={"agent_id": "someone-else"})
-    [row] = _promotions(client)
-    assert (row["actor"], row["channel"]) == ("agent:claude-code", "cli")
-
-
-def test_undo_takes_the_saved_rule_out_of_session_start_again(world) -> None:
+def test_the_ask_for_a_held_memory_names_the_actor_from_the_connection_never_the_body(
+        world) -> None:
     client, _app, db = world
-    [fact_id] = _remember(client, RULE_TEXT, "decl-rule-4", kind="rule").json()["fact_ids"]
-    [row] = _promotions(client)
-    done = client.post(f"/api/decisions/{row['decision_id']}/undo", json={})
-    assert done.status_code == 200, done.text
-    assert fact_id not in _standing(db)
-    assert _taint(db, fact_id) == "agent_inferred"
+    fact_id = save(db, RULE_TEXT, WEB)
+    resp = client.patch(f"/api/memory-kinds/fact/{fact_id}", json={"kind": "rule"},
+                        headers={CONNECTION_HEADER: "claude-code", CHANNEL_HEADER: "cli"})
+    assert resp.status_code == 200, resp.text
     with connect(db) as conn:
-        assert [i["fact_id"] for i in firewall.pending(conn, "default")["items"]] == [fact_id]
+        [row] = conn.execute("SELECT requested_by, requested_channel, wanted FROM trust_approvals "
+                             "WHERE fact_id = ?", (fact_id,)).fetchall()
+    assert tuple(row) == ("agent:claude-code", "cli", "rule")
+
+
+def test_a_held_rule_stands_after_one_recorded_promotion_and_undo_takes_it_back(world) -> None:
+    client, _app, db = world
+    fact_id = save(db, RULE_TEXT, WEB)
+    client.patch(f"/api/memory-kinds/fact/{fact_id}", json={"kind": "rule"}, headers=CALLER)
+    assert fact_id not in _standing(db)
+    done = client.post(f"/api/trust/promote/{fact_id}", json={}, headers=CALLER)
+    assert done.status_code == 200, done.text
+    assert fact_id in _standing(db)
+    [row] = _promotions(client)
+    assert (row["actor"], row["channel"], row["subject_id"]) == (
+        "agent:claude-code", "mcp", fact_id)
+    undone = client.post(f"/api/decisions/{row['decision_id']}/undo", json={})
+    assert undone.status_code == 200, undone.text
+    assert fact_id not in _standing(db)
+    assert _taint(db, fact_id) == "web"
 
 
 def test_a_save_without_a_rule_or_decision_kind_is_not_promoted(world) -> None:
@@ -126,17 +131,16 @@ def test_a_save_without_a_rule_or_decision_kind_is_not_promoted(world) -> None:
     assert {_taint(db, plain), _taint(db, pref)} == {"agent_inferred"}
 
 
-def test_saving_the_same_rule_again_records_nothing_new(world) -> None:
-    client, _app, _db = world
-    _remember(client, RULE_TEXT, "decl-rule-5", kind="rule")
-    _remember(client, RULE_TEXT, "decl-rule-5", kind="rule")  # an exact retry
-    assert len(_promotions(client)) == 1
+def test_saving_the_same_rule_again_changes_nothing(world) -> None:
+    client, _app, db = world
+    first = _remember(client, RULE_TEXT, "decl-rule-5", kind="rule").json()["fact_ids"]
+    again = _remember(client, RULE_TEXT, "decl-rule-5", kind="rule").json()["fact_ids"]  # a retry
+    assert first == again and _standing(db) == first and _promotions(client) == []
 
 
-def test_a_rule_saved_while_the_writer_was_busy_is_promoted_when_it_lands(
+def test_a_rule_saved_while_the_writer_was_busy_stands_when_it_lands(
         engine_with_mock_deps, monkeypatch) -> None:
-    """Accepted (202), committed in the background: promoted by the same post-commit step that
-    applies ``replaces``, as the same actor and channel."""
+    """Accepted (202), committed in the background: it stands once it lands, with nothing promoted."""
     monkeypatch.setenv(TAINT, "on")
     engine = engine_with_mock_deps
     with _daemon(engine, profiles=("work",)) as (client, app):
@@ -150,20 +154,18 @@ def test_a_rule_saved_while_the_writer_was_busy_is_promoted_when_it_lands(
             holder.close()
         assert accepted.status_code == 202, accepted.text
         assert runtime.wait_for_deferred(timeout=15.0)
-        # Before anyone resends: the background commit itself did the promotion.
+        # Before anyone resends: the background commit itself is enough.
         [fact_id] = [r["fact_id"] for r in engine._db.execute(
             "SELECT fact_id FROM atomic_facts WHERE content = ?", (RULE_TEXT,))]
         assert fact_id in _standing(engine._db)
-        [row] = _promotions(client)
-        assert (row["actor"], row["channel"]) == ("agent:claude-code", "mcp")
-        # The resend gets the final receipt and does not record a second promotion.
+        assert _promotions(client) == []
+        # The resend gets the final receipt.
         assert _remember(client, RULE_TEXT, "decl-busy", kind="rule").json()["fact_ids"] == [fact_id]
-        assert len(_promotions(client)) == 1
 
 
 # -- confirming a kind on an existing memory ---------------------------------------------------
 
-def test_confirming_an_agent_fact_as_a_decision_promotes_it(world) -> None:
+def test_confirming_an_agent_fact_as_a_decision_makes_it_stand_without_a_promotion(world) -> None:
     client, _app, db = world
     fact_id = _agent_fact(db, DECISION_TEXT)
     assert fact_id not in _standing(db, MemoryKind.DECISION)
@@ -171,20 +173,17 @@ def test_confirming_an_agent_fact_as_a_decision_promotes_it(world) -> None:
                         headers=CALLER)
     assert resp.status_code == 200, resp.text
     assert fact_id in _standing(db, MemoryKind.DECISION)
-    [row] = _promotions(client)
-    assert (row["actor"], row["channel"], row["subject_id"]) == (
-        "agent:claude-code", "mcp", fact_id)
-    assert row["summary"].startswith("Promoted a decision an agent confirmed")
+    assert _promotions(client) == []
 
 
-def test_the_batch_confirm_promotes_each_agent_fact_and_skips_other_kinds(world) -> None:
+def test_the_batch_confirm_makes_each_agent_rule_stand_and_skips_other_kinds(world) -> None:
     client, _app, db = world
     rule, pref = _agent_fact(db, RULE_TEXT), _agent_fact(db, "Varun likes dark themes.")
     resp = client.post("/api/memory-kinds/confirm", headers=CALLER, json={"items": [
         {"fact_id": rule, "kind": "rule"}, {"fact_id": pref, "kind": "preference"}]})
     assert resp.status_code == 200, resp.text
     assert _standing(db) == [rule]
-    assert [r["subject_id"] for r in _promotions(client)] == [rule]
+    assert _promotions(client) == []
     assert _taint(db, pref) == "agent_inferred"
 
 
@@ -313,7 +312,7 @@ def _review(client, case, action, headers, version=None):
                        json={"expected_version": case["version"] if version is None else version})
 
 
-def test_applying_a_correction_of_a_rule_promotes_its_successor_as_the_reviewer(world) -> None:
+def test_applying_a_correction_of_a_rule_keeps_the_rule_standing_with_no_promotion(world) -> None:
     client, _app, db = world
     [rule] = _remember(client, RULE_TEXT, "corr-rule-1", kind="rule").json()["fact_ids"]
     successor, case = _propose(client, rule, "corr-edit-1")
@@ -321,12 +320,11 @@ def test_applying_a_correction_of_a_rule_promotes_its_successor_as_the_reviewer(
     done = _review(client, case, "apply", {CONNECTION_HEADER: "reviewer", CHANNEL_HEADER: "cli"})
     assert done.status_code == 200, done.text
     assert successor in _standing(db)
-    top = [r for r in _promotions(client) if r["subject_id"] == successor]
-    assert [(r["actor"], r["channel"]) for r in top] == [("agent:reviewer", "cli")]
-    assert top[0]["summary"].startswith("Promoted a rule an agent corrected")
+    assert _taint(db, successor) == "agent_inferred"
+    assert _promotions(client) == []
 
 
-def test_rolling_the_correction_back_takes_the_promotion_back(world) -> None:
+def test_rolling_the_correction_back_restores_the_old_rule(world) -> None:
     client, _app, db = world
     [rule] = _remember(client, RULE_TEXT, "corr-rule-2", kind="rule").json()["fact_ids"]
     successor, case = _propose(client, rule, "corr-edit-2")
@@ -334,23 +332,38 @@ def test_rolling_the_correction_back_takes_the_promotion_back(world) -> None:
     undone = _review(client, case, "rollback", CALLER, version=applied["version"])
     assert undone.status_code == 200, undone.text
     assert successor not in _standing(db) and rule in _standing(db)
-    assert _taint(db, successor) == "agent_inferred"
-    [row] = [r for r in _promotions(client) if r["subject_id"] == successor
-             and r["action"] == "promote"]
-    assert row["undone"]
 
 
-def test_a_correction_of_a_rule_nobody_promoted_promotes_nothing(world) -> None:
+def test_a_correction_of_a_held_rule_does_not_make_its_successor_stand(world) -> None:
     client, _app, db = world
-    held = _agent_fact(db)  # an agent's own words that no save or confirmation promoted
+    held = save(db, RULE_TEXT, WEB)  # a web page's sentence, confirmed as a rule but held
     db.execute("UPDATE atomic_facts SET memory_kind = 'rule', memory_kind_source = 'caller' "
                "WHERE fact_id = ?", (held,))
+    assert held not in _standing(db)
     successor, case = _propose(client, held, "corr-edit-3")
     _review(client, case, "apply", CALLER)
-    assert _taint(db, successor) == "agent_inferred" and _promotions(client) == []
+    assert successor not in _standing(db)
+    assert _taint(db, successor) == "web"  # the page's class travels to what replaced it
+    assert _promotions(client) == []
 
 
-def test_with_the_firewall_off_a_correction_promotes_nothing(
+def test_a_promotion_recorded_for_a_correction_is_taken_back_on_rollback(world) -> None:
+    """Kept for a store whose earlier build recorded one: the rollback marks it undone."""
+    from superlocalmemory.trust import declared_promotion
+
+    _client, _app, db = world
+    fact_id = save(db, RULE_TEXT, WEB)
+    with db.raw_connection() as conn:
+        firewall.approve(conn, fact_id, by="agent:a", channel="mcp",
+                         via=declared_promotion.CORRECTION_VIA)
+        assert declared_promotion.take_back(conn, "default", fact_id, by="agent:a",
+                                            channel="mcp") is True
+        assert declared_promotion.take_back(conn, "default", fact_id, by="agent:a",
+                                            channel="mcp") is False  # nothing left to take back
+    assert _taint(db, fact_id) == "web"
+
+
+def test_with_the_firewall_off_a_correction_records_nothing(
         engine_with_mock_deps, monkeypatch) -> None:
     monkeypatch.setenv(TAINT, "on")
     with _daemon(engine_with_mock_deps, profiles=("work",)) as (client, app):
@@ -358,5 +371,5 @@ def test_with_the_firewall_off_a_correction_promotes_nothing(
         successor, case = _propose(client, rule, "corr-edit-4")
         monkeypatch.setenv(TAINT, "off")
         _review(client, case, "apply", CALLER)
-        assert [r["subject_id"] for r in _promotions(client)] == [rule]
+        assert _promotions(client) == []
         assert _taint(app.state.engine._db, successor) == "agent_inferred"

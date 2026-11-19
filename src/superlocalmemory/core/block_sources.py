@@ -53,19 +53,21 @@ _NOT_A_SOURCE = (
 )
 
 
-def source_filter(store: Any) -> tuple[str, tuple[str, ...]]:
+def source_filter(store: Any, *, core: bool = False) -> tuple[str, tuple[str, ...]]:
     """``(" AND NOT ...", params)`` to append to a query over ``atomic_facts f``.
 
     ``store`` is the DatabaseManager or sqlite3 connection the query runs on;
     it decides whether the retirement check can be applied.
+
+    The instruction firewall (``trust/firewall.py``) is added only with ``core=True``, for
+    the one reader whose output is an instruction: the compile of a core block. Every other
+    reader (the session-start fact sections) shows every memory whatever its origin, as in
+    4.2.19: the firewall is not a reading gate (owner decision, 19 Nov).
     """
-    # WS-5: with trust.taint on, only memories whose taint is at least ``system`` (the
-    # instruction firewall, trust/firewall.py): a core block and the session start are
-    # instructions to an agent, so a tool's output or a web page is not a source.
     from superlocalmemory.trust import firewall
 
-    return (" AND NOT " + _NOT_A_SOURCE + _not_retired(store) + firewall.clause(store),
-            (REQUEST_SOURCE,))
+    wall = firewall.clause(store) if core else ""
+    return (" AND NOT " + _NOT_A_SOURCE + _not_retired(store) + wall, (REQUEST_SOURCE,))
 
 
 def current_filter(store: Any) -> str:
@@ -101,8 +103,12 @@ def keep_sources(rows: Iterable[Any], limit: int) -> list[Any]:
     return kept[:limit]
 
 
-def not_sources(conn: Any, fact_ids: Iterable[str]) -> set[str]:
-    """The ids among ``fact_ids`` that may not be a block's source."""
+def not_sources(conn: Any, fact_ids: Iterable[str], *, core: bool = False) -> set[str]:
+    """The ids among ``fact_ids`` that may not be a block's source.
+
+    ``core=True`` adds the instruction firewall's verdict (a core block is an instruction);
+    without it only prompts, bookkeeping and retired facts are excluded.
+    """
     ids = [str(i) for i in fact_ids if i]
     if not ids:
         return set()
@@ -113,6 +119,8 @@ def not_sources(conn: Any, fact_ids: Iterable[str]) -> set[str]:
         f"({current}) AS is_current "
         f"FROM atomic_facts f WHERE f.fact_id IN ({marks})", (REQUEST_SOURCE, *ids))
     bad = {str(r[0]) for r in rows if r[2] or not r[3] or is_stub(str(r[1] or ""))}
+    if not core:
+        return bad
     from superlocalmemory.trust import firewall
 
     return bad | firewall.withheld(conn, ids)

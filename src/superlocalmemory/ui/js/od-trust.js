@@ -1,15 +1,16 @@
 // od-trust.js: the Dashboard home "Held back from instructions" card (4.2.30, WS-5, D-49).
 //
-// A memory is data. It becomes an instruction when SuperLocalMemory puts it where an
-// agent obeys it: a pin, a standing rule, your core memory, the start of every session.
-// A memory that came from a tool's output, a web page, another agent, an import, a
-// model's text, an agent's own words, or from before 4.2.30, does not become one by itself.
-// This card lists those memories in plain words (only once the firewall is switched on or in
+// Nothing is hidden from your agents: they recall, and are shown at session start, every memory
+// whatever its origin. The firewall does one thing: a memory that came from a web page, a tool's
+// output, another agent, an import or a model's text (or whose source was not recorded) cannot by
+// itself become an instruction: a pin, a standing rule or decision, or core memory. An agent's own
+// words and everything above them are trusted for those roles directly.
+// This card lists the held memories in plain words (only once the firewall is switched on or in
 // shadow; off, nothing is held back and the card stays hidden). Nothing here needs you: an
 // agent can promote a memory with one explicit call, and you can too:
 //   - Promote : it may now be an instruction (recorded: who, when, through the dashboard;
 //     "Recent decisions by your agents" lists it with an Undo).
-//   - Promote all : everything listed, one call (the old memories of a store).
+//   - Promote all : everything listed, one call.
 // Nothing is ever deleted here; a memory that is not promoted is still found by recall, as
 // evidence. Every call goes to the routes `slm trust promote` uses
 // (POST /api/trust/promote/{fact}, /api/trust/promote-all); the page's own door is recorded
@@ -72,7 +73,7 @@
   // "From " + the class label reads badly for these two ("From written by a model."), so say them as a phrase.
   var FROM_WORDS = {
     model_generated: 'text a model wrote',
-    unknown: 'a memory saved before 4.2.30, with no record of where it came from'
+    unknown: 'a memory whose source was not recorded'
   };
 
   function itemRow(item) {
@@ -99,13 +100,13 @@
     var c = $('dash-trust-card'), b = $('dash-trust-body');
     if (!c || !b) return;
     b.textContent = '';
-    // Off (the default in 4.2.30): nothing is held back, so nothing waits and the card stays away.
+    // Off: nothing is held back, so nothing waits and the card stays away.
     c.hidden = !items.length || state === 'off';
     var badge = $('dash-trust-count');
     if (badge) badge.textContent = count ? String(count) : '';
     if (!items.length) return;
     b.appendChild(el('p', 'dash-card-meta', acting
-      ? 'These memories asked to be instructions, but did not come from you, so they are held back. Promote the ones you trust, on purpose.'
+      ? 'These memories came from a web page, a tool, another agent, an import or a model, and are held back from being a pin, a rule or core memory. Your agents still find them and see them as evidence. Promote the ones you trust, on purpose.'
       : 'The instruction firewall is not switched on yet, so nothing is held back. This is what it would hold.'));
     if (items.length > 1) {
       var all = el('div', 'truth-actions');

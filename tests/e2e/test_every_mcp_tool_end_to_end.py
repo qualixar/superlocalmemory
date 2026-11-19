@@ -32,6 +32,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from tests._portable import GUARD_ENV
+
 try:
     import pytest
 except ImportError:  # the runner script uses this module without pytest installed
@@ -76,6 +78,7 @@ def isolated_env(root: Path, port: int, profile: str | None = None) -> dict:
     if real_mod.exists() and not (hf / "modules").exists():
         shutil.copytree(real_mod, hf / "modules")
     env.update({
+        **GUARD_ENV,
         "HOME": str(home), "PYTHONPATH": str(SRC),
         "SLM_DATA_DIR": str(root / "data"), "SLM_DAEMON_PORT": str(port),
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",

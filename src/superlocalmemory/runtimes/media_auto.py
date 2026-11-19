@@ -40,8 +40,10 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import logging
 import os
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -89,13 +91,23 @@ class _Retry:
 
 @dataclass
 class AutoState:
-    """What the loop remembers between looks: failures and when to try again, per part."""
+    """What the loop remembers between looks: failures and when to try again, per part.
+
+    The failures and the wait are also kept in the data folder (``STATE_FILE``), so a daemon that
+    restarts does not forget them; ``loaded_from`` is the folder this state was last read from.
+    """
 
     parts: dict[str, _Retry] = field(default_factory=dict)
+    loaded_from: Path | None = None
+    saved: dict[str, Any] = field(default_factory=dict)
 
     def part(self, key: str) -> _Retry:
         return self.parts.setdefault(key, _Retry())
 
+
+#: Where the failure count and back-off are kept (F-16), in the data folder.
+STATE_FILE = "media-auto-state.json"
+_wall: Callable[[], float] = time.time  # the clock that outlives a restart; monotonic time does not
 
 _STATE = AutoState()
 _STATE_LOCK = threading.RLock()  # re-entered: describing a part while a look holds it
@@ -104,6 +116,79 @@ _STATE_LOCK = threading.RLock()  # re-entered: describing a part while a look ho
 def backoff_s(failures: int) -> float:
     """10 minutes after the first failure, doubling, never more than 6 hours."""
     return min(RETRY_MAX_S, RETRY_BASE_S * (2 ** max(0, failures - 1)))
+
+
+def _version() -> str:
+    from superlocalmemory import __version__
+
+    return str(__version__)
+
+
+def _load_state(root: Path, state: AutoState, now: float) -> None:
+    """Take the failures a former run recorded for this version; an unreadable record is ignored.
+
+    The wait is stored as a wall-clock time (the monotonic clock restarts with the process) and
+    comes back as what is left of it. A record of another version is not read: a new release gets
+    a fresh chance, and ``gave_up`` holds only for the version that gave up.
+    """
+    state.loaded_from = root
+    try:
+        raw = json.loads((root / STATE_FILE).read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or raw.get("version") != _version() or not isinstance(
+                raw.get("parts"), dict):
+            return
+        wall = _wall()
+        for key, rec in raw["parts"].items():
+            failures = rec.get("failures") if isinstance(rec, dict) else None
+            if key not in ("media", *PACK_ORDER) or type(failures) is not int or failures < 1:
+                continue
+            part = state.part(key)
+            if part.failures >= failures:
+                continue  # this run already knows more
+            left = rec.get("next_try_at")
+            left = max(0.0, float(left) - wall) if isinstance(left, int | float) else 0.0
+            part.failures, part.reason = failures, str(rec.get("reason", ""))[:300]
+            part.next_try, part.open_attempt = now + left, False
+        state.saved = _snapshot(state, now)
+    except (OSError, ValueError, TypeError):
+        logger.debug("automatic set-up record not read", exc_info=True)
+
+
+def _snapshot(state: AutoState, now: float) -> dict[str, Any]:
+    wall = _wall()
+    return {"version": _version(),
+            "parts": {key: {"failures": p.failures, "reason": p.reason,
+                            "next_try_at": round(wall + max(0.0, p.next_try - now), 1)}
+                      for key, p in sorted(state.parts.items()) if p.failures > 0}}
+
+
+def _save_state(root: Path, state: AutoState, now: float) -> None:
+    """Write the record when the failures changed since the last write; never raises."""
+    try:
+        snap = _snapshot(state, now)
+        # the wait is compared by failures and reason: its wall time moves with every look
+        key = {k: (v["failures"], v["reason"]) for k, v in snap["parts"].items()}
+        if key == {k: (v["failures"], v["reason"]) for k, v in state.saved.get("parts", {}).items()} \
+                and snap["version"] == state.saved.get("version"):
+            return
+        if not snap["parts"] and not (root / STATE_FILE).exists():
+            state.saved = snap
+            return
+        root.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=f"{STATE_FILE}.", suffix=".tmp", dir=str(root))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(snap, fh)
+            os.replace(tmp, root / STATE_FILE)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        state.saved = snap
+    except Exception:  # noqa: BLE001 - a record that cannot be kept never stops the look
+        logger.debug("automatic set-up record not written", exc_info=True)
 
 
 def auto_disabled(env: Mapping[str, str] | None = None) -> bool:
@@ -157,7 +242,7 @@ def _media_step(root: Path, env: Any, state: AutoState, now: float,
     from superlocalmemory.runtimes import features as feat
     from superlocalmemory.runtimes.managed_env import FAILED, INSTALLING, READY, UNSUPPORTED
 
-    if feat.media_opted_out(root):
+    if feat.media_opted_out(root, env=env):
         return Outcome("turned_off", WAIT_S)
     managed = feat._env(env, root)
     status = managed.status()
@@ -244,13 +329,18 @@ def tick(data_root: str | Path | None = None, *, ram_bytes: int | None = None, e
         state = _STATE if state is None else state
         moment = time.monotonic() if now is None else now
         with _STATE_LOCK:
-            step = _media_step(root, env, state, moment, enable_media or feat.enable_media)
-            if step is not None:
-                return step
-            for pack_id in PACK_ORDER:
-                step = _pack_step(root, env, state, moment, pack_id, enable_pack or media_packs.enable)
+            if state.loaded_from != root:
+                _load_state(root, state, moment)
+            try:
+                step = _media_step(root, env, state, moment, enable_media or feat.enable_media)
                 if step is not None:
                     return step
+                for pack_id in PACK_ORDER:
+                    step = _pack_step(root, env, state, moment, pack_id, enable_pack or media_packs.enable)
+                    if step is not None:
+                        return step
+            finally:
+                _save_state(root, state, moment)
         return Outcome("done", None)
     except Exception:  # noqa: BLE001 - a background default never takes the daemon down
         logger.warning("automatic set-up of pictures and documents hit an error", exc_info=True)
@@ -353,7 +443,7 @@ def describe(data_root: str | Path | None = None, *, env: Any = None,
              for p in (media_packs.status(pid, root, env=env) for pid in PACK_ORDER)]
     return {"mode": policy.mode, "warning": policy.warning, "auto_disabled": auto_disabled(),
             "media": {"state": st.state, "words": media_words(view, policy.mode,
-                                                              opted_out=feat.media_opted_out(root))},
+                                                              opted_out=feat.media_opted_out(root, env=env))},
             "parts": parts}
 
 

@@ -68,7 +68,17 @@ def _backup_once(target: Path, version: str) -> Path | None:
     return backup
 
 
+class FileChanged(OSError):
+    """The file is no longer what was read: someone wrote it while the upgrade worked."""
+
+
 def _write_atomic(target: Path, data: dict[str, Any], original_text: str) -> None:
+    """Replace ``target`` with ``data`` only if it still holds ``original_text`` (F-13).
+
+    The file is read once, merged and replaced; Claude Code or the person may write it in between.
+    The text is read again just before the replace, and a difference raises :class:`FileChanged`
+    with nothing written, so the other writer's change is never lost.
+    """
     text = json.dumps(data, indent=_indent_of(original_text), ensure_ascii=False)
     text += "\n"
     tmp = target.with_name(target.name + ".slm_tmp")
@@ -78,6 +88,8 @@ def _write_atomic(target: Path, data: dict[str, Any], original_text: str) -> Non
             os.chmod(tmp, stat.S_IMODE(target.stat().st_mode))
         except OSError:
             pass
+        if target.read_text(encoding="utf-8") != original_text:
+            raise FileChanged(f"{target.name} changed while it was being upgraded")
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
@@ -124,6 +136,9 @@ def _upgrade_file(
     try:
         backup = _backup_once(target, version)
         _write_atomic(target, merged, text)
+    except FileChanged:
+        return _result("changed-meanwhile", f"{path.name} changed while it was being upgraded; "
+                       "nothing was written, the next start tries again", path)
     except OSError as exc:
         return _result("error", f"could not write {path.name}: {exc}", path)
     return _result("updated", "replaced and added SLM hook entries; other entries untouched",
@@ -208,6 +223,23 @@ def _data_root(data_root: Path | str | None) -> Path:
     return canonical_data_root()
 
 
+#: A host with one of these answers is tried again at the next start (the version is not marked done).
+_RETRY_STATUSES = ("error", "changed-meanwhile")
+
+
+def _killed(root: Path, env: Mapping[str, str] | None) -> bool:
+    """The 4.2.30 kill switch is on (environment or ``features.json``). Unreadable counts as on:
+    a background default writing into a person's files does not guess."""
+    try:
+        from superlocalmemory.core.feature_flags import FeatureFlags
+
+        flags = FeatureFlags(root) if env is None else FeatureFlags(root, environ=env)
+        return bool(flags.killed)
+    except Exception:  # noqa: BLE001
+        logger.warning("hook upgrade: kill switch unreadable; skipped this start", exc_info=True)
+        return True
+
+
 def marker_version(data_root: Path | str | None = None) -> str | None:
     """The version whose upgrade already ran, or ``None``."""
     try:
@@ -241,9 +273,11 @@ def run_once(*, version: str | None = None, data_root: Path | str | None = None,
     root = _data_root(data_root)
     if marker_version(root) == version:
         return None
+    if _killed(root, env):
+        return None  # "turn off everything new in 4.2.30" (F-13): not marked done, it runs once lifted
     hosts = upgrade_all(version=version, claude_settings=claude_settings,
                         codex_hooks_path=codex_hooks_path)
-    if not any(res["status"] == "error" for res in hosts.values()):
+    if not any(res["status"] in _RETRY_STATUSES for res in hosts.values()):
         try:
             _write_marker(root, version, hosts)
         except OSError:

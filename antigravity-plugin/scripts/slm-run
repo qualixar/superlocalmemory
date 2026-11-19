@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# slm-run (Codex edition) - run slm for a plugin hook, with the slm the MCP launcher uses.
+#
+#   "${CLAUDE_PLUGIN_ROOT}/scripts/slm-run" hook <name>
+#
+# The Codex hooks used to call a bare `slm hook ... 2>/dev/null || true`. Where
+# SuperLocalMemory lives only in the plugin's own environment (the case
+# scripts/slm-launch was written for) every hook was "command not found" and the
+# error was thrown away, so per-prompt recall and cues did nothing and nothing said
+# why. This wrapper picks slm the way slm-launch does: an installed `slm` on PATH
+# first, then the venv under SLM_DATA_DIR (default ~/.superlocalmemory). It passes
+# stdin, stdout and the arguments straight through.
+#
+# A hook must never break the session that runs it, so this ALWAYS exits 0. When
+# slm cannot be found, or fails, the reason goes to
+#     ${SLM_DATA_DIR:-~/.superlocalmemory}/logs/plugin-hooks.log
+# and one line naming that file goes to stderr. A hook that succeeds is silent:
+# whatever slm wrote to stderr is discarded.
+#
+# Sibling of plugin/scripts/slm-run (Claude Code), which resolves through
+# slm-resolve.sh and CLAUDE_PLUGIN_DATA. Codex has neither, so this one stands alone.
+
+_slm_args="$*"
+_SLM_DATA_DIR="${SLM_DATA_DIR:-${HOME}/.superlocalmemory}"
+_log_dir="${_SLM_DATA_DIR}/logs"
+_log="${_log_dir}/plugin-hooks.log"
+_LOG_MAX_BYTES=1048576
+
+# Append one entry. Best effort: an unwritable log must not fail the hook.
+_log_entry() {
+    {
+        mkdir -p "${_log_dir}" || return 1
+        if [ -f "${_log}" ] && [ "$(wc -c < "${_log}")" -gt "${_LOG_MAX_BYTES}" ]; then
+            mv -f "${_log}" "${_log}.1"
+        fi
+        printf '%s slm %s: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${_slm_args}" "$1" >> "${_log}"
+    } 2>/dev/null
+}
+
+# Record a failure, tell stderr where to look, and leave the session alone.
+_give_up() {
+    if _log_entry "$1"; then
+        echo "SLM plugin: hook 'slm ${_slm_args}' did not run cleanly; see ${_log}" >&2
+    else
+        echo "SLM plugin: hook 'slm ${_slm_args}' did not run cleanly: $1" >&2
+    fi
+    exit 0
+}
+
+# An installed slm wins over a plugin-owned venv, the same order as slm-launch.
+_VENV_BIN="${_SLM_DATA_DIR}/venv/bin/slm"
+if command -v slm >/dev/null 2>&1; then
+    SLM_BIN="$(command -v slm)"
+elif [ -x "${_VENV_BIN}" ]; then
+    SLM_BIN="${_VENV_BIN}"
+else
+    _give_up "no SuperLocalMemory found: looked for 'slm' on PATH and ${_VENV_BIN}. Install it with: pipx install superlocalmemory"
+fi
+
+# slm's stderr is kept only long enough to report a failure. The trap removes it
+# however this script ends, including a host timeout killing the hook.
+_err="$(mktemp "${TMPDIR:-/tmp}/slm-hook.XXXXXX" 2>/dev/null)" || _err=/dev/null
+trap '[ "${_err}" = /dev/null ] || rm -f "${_err}"' EXIT
+trap 'exit 0' HUP INT TERM
+
+"${SLM_BIN}" "$@" 2>"${_err}"
+_rc=$?
+if [ "${_rc}" -ne 0 ]; then
+    _detail=""
+    [ "${_err}" = /dev/null ] || _detail="$(tail -n 5 "${_err}" 2>/dev/null | tr '\n' ' ')"
+    _give_up "exit ${_rc} from ${SLM_BIN}${_detail:+: ${_detail}}"
+fi
+exit 0

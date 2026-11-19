@@ -133,7 +133,7 @@ def test_claude_stale_slm_entry_is_replaced_in_place_not_moved(tmp_path) -> None
     path = tmp_path / "settings.json"
     stale = {"matcher": "WebSearch|WebFetch",
              "hooks": [{"type": "command", "command": "slm hook before_web 2>/dev/null || true",
-                        "timeout": 99}]}
+                        "timeout": 5000}]}  # a release before 4.1.22 wrote milliseconds
     _write(path, {"hooks": {"PreToolUse": [_user_entry("first"), stale, _user_entry("last")]}})
 
     upgrade.upgrade_claude_settings(path, version=VERSION)

@@ -38,6 +38,7 @@ from superlocalmemory.infra.daemon_identity import (
     write_descriptor,
 )
 from superlocalmemory.infra.process_identity import process_start_token_for
+from tests._portable import GUARD_ENV
 
 _STUB = r"""
 import json, pathlib, socket, sys, time
@@ -394,6 +395,7 @@ def _mcp_env(tmp_path: Path, port: int) -> dict[str, str]:
         HF_HOME=str(cache / "huggingface"), XDG_CACHE_HOME=str(cache),
         OMP_NUM_THREADS="1", TOKENIZERS_PARALLELISM="false",
         PYTHONPATH=os.pathsep.join(filter(None, [str(src), env.get("PYTHONPATH", "")])),
+        **GUARD_ENV,  # the SLM_ filter above dropped the plugin's copies of these
     )
     return env
 

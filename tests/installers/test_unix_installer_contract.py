@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests._portable import GUARD_ENV
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -60,6 +61,7 @@ def isolated_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "CALL_LOG": str(call_log),
         "LC_ALL": "C",
+        **GUARD_ENV,
     }
     return env, bin_dir, call_log
 

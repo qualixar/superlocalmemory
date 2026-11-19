@@ -37,8 +37,9 @@
   var FIREWALL = {
     off: 'The instruction firewall is off, so nothing is held back from being an instruction.',
     shadow: 'The instruction firewall is watching: it shows what it would hold back, and holds nothing yet.',
-    on: 'The instruction firewall is on: a memory from a tool, a web page or another agent cannot become ' +
-        'a rule or part of your core memory by itself; one explicit, recorded call promotes it.'
+    on: 'The instruction firewall is on: a memory from a tool, a web page, another agent, an import or a model ' +
+        'cannot become a pin, a rule or part of your core memory by itself; one explicit, recorded call ' +
+        'promotes it. Your agents still see every memory.'
   };
 
   function goToWaiting() {

@@ -23,6 +23,7 @@ from superlocalmemory.loops import receipt_jobs
 from superlocalmemory.loops.execution_guard import admission
 from superlocalmemory.loops.execution_receipts import run_check
 from superlocalmemory.loops.receipt_jobs import register_job, run_registered_check
+from tests._portable import GUARD_ENV
 from tests.mcp.test_loop_independent_receipts import _threaded_receipt_connection
 from tests.mcp.test_loop_receipt_replay import harness
 
@@ -66,7 +67,7 @@ async def watch(db, job_id, name="build", profile="default"):
 
 def rerun(command, cwd):
     return subprocess.run(
-        command, cwd=cwd, env={"PATH": os.defpath, "HOME": str(cwd)}, capture_output=True
+        command, cwd=cwd, env={"PATH": os.defpath, "HOME": str(cwd), **GUARD_ENV}, capture_output=True
     ).returncode
 
 

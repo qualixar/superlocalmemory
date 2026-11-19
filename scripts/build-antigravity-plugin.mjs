@@ -71,8 +71,17 @@ for (const [sub, out] of [['skills', 'skills'], ['agents', 'agents'], ['commands
 {
   const codexHooks = join(ROOT, 'codex-plugin', 'hooks', 'hooks.json');
   if (existsSync(codexHooks)) {
-    files.set('hooks/hooks.json', nl(readFileSync(codexHooks, 'utf8')));
+    // The Codex file names the plugin root with a Claude-style variable. Antigravity's own
+    // hooks.json below runs `./scripts/...` from the plugin folder, so this copy does the same,
+    // through `bash` (the build writes no file modes), and reaches slm by the plugin's launcher
+    // instead of a bare `slm` that may not be on that host's PATH (F-12).
+    const antigravityHooks = readFileSync(codexHooks, 'utf8')
+      .replaceAll('\\"${CLAUDE_PLUGIN_ROOT}/scripts/slm-run\\" hook', 'bash ./scripts/slm-run hook');
+    files.set('hooks/hooks.json', nl(antigravityHooks));
   }
+  // The launcher the hooks call: the Codex edition (an installed slm first, then the data-folder venv).
+  const slmRun = join(ROOT, 'codex-plugin', 'scripts', 'slm-run');
+  if (existsSync(slmRun)) files.set('scripts/slm-run', readFileSync(slmRun, 'utf8'));
 }
 
 files.set('hooks.json', JSON.stringify({
@@ -101,6 +110,7 @@ files.set('scripts/antigravity_hook_adapter.py', `#!/usr/bin/env python3
 import json
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,6 +124,16 @@ def payload():
         return {}
 
 
+def command(action):
+    # The plugin's launcher finds the slm the MCP server uses (an installed one, then the
+    # data-folder venv) and never fails the host; a bare slm is only the last resort.
+    launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slm-run")
+    bash = shutil.which("bash")
+    if bash and os.path.isfile(launcher):
+        return [bash, launcher, "hook", action]
+    return ["slm", "hook", action]
+
+
 def slm(action, data):
     workspace_paths = data.get("workspacePaths")
     env = dict(os.environ)
@@ -121,7 +141,7 @@ def slm(action, data):
         env["CLAUDE_PROJECT_DIR"] = workspace_paths[0]
     try:
         result = subprocess.run(
-            ["slm", "hook", action], input=json.dumps(data), text=True,
+            command(action), input=json.dumps(data), text=True,
             capture_output=True, timeout=8, env=env,
         )
         return result.stdout.strip()

@@ -116,12 +116,12 @@ def test_the_marker_holds_no_prompt_text_and_old_ones_are_removed(monkeypatch, r
 
 def test_the_overlap_is_real_both_registrations_run_the_same_action() -> None:
     """The reason for the marker: the plugin and the installed hook both end in
-    ``slm hook auto_recall`` for one Codex prompt event."""
+    ``slm hook auto_recall`` for one Codex prompt event (the plugin's through its launcher, 4.2.30)."""
     from superlocalmemory.hooks import codex_handlers
 
     plugin = json.loads((Path(__file__).parents[2] / "codex-plugin" / "hooks" / "hooks.json").read_text())
     commands = [h["command"] for g in plugin["hooks"]["UserPromptSubmit"] for h in g["hooks"]]
-    assert any("slm hook auto_recall" in c for c in commands)
+    assert any("slm-run" in c and "hook auto_recall" in c for c in commands)
     source = Path(codex_handlers.__file__).read_text()
     assert '"auto_recall"' in source and "def hook_codex_prompt" in source
 

@@ -100,7 +100,7 @@ def test_environment_beats_file_beats_default() -> None:
     ("OFF", FlagState.OFF), (" Shadow ", FlagState.SHADOW), ("bogus", FlagState.ON),
     (3, FlagState.ON), (None, FlagState.ON)])  # an unreadable value falls back to the default: on
 def test_values_parse_or_fall_back(raw, state) -> None:
-    assert resolve("truth.leases", file_values={"truth.leases": raw}, environ={}) is state
+    assert resolve("truth.slots", file_values={"truth.slots": raw}, environ={}) is state
 
 
 def test_shadow_on_an_unshadowable_flag_reads_off() -> None:
@@ -116,19 +116,19 @@ def test_unknown_flag_is_off_not_an_error() -> None:
 
 
 def test_enabled_and_observing() -> None:
-    flags = FeatureFlags(file_values={"truth.slots": "shadow", "truth.leases": "on"}, environ={})
+    flags = FeatureFlags(file_values={"truth.slots": "shadow", "judge.ladder": "on"}, environ={})
     assert flags.observing("truth.slots") and not flags.enabled("truth.slots")
-    assert flags.observing("truth.leases") and flags.enabled("truth.leases")
+    assert flags.observing("judge.ladder") and flags.enabled("judge.ladder")
     assert flags.as_dict()["truth.slots"] == "shadow"
 
 
 def test_file_round_trip_and_corrupt_file(tmp_path) -> None:
     assert read_features_file(tmp_path) == {}
     write_flag(tmp_path, "truth.slots", FlagState.SHADOW)
-    write_flag(tmp_path, "truth.leases", FlagState.ON)
+    write_flag(tmp_path, "judge.ladder", FlagState.ON)
     data = json.loads((tmp_path / "features.json").read_text())
-    assert data == {"features": {"truth.leases": "on", "truth.slots": "shadow"}}
-    assert FeatureFlags(tmp_path, environ={}).enabled("truth.leases")
+    assert data == {"features": {"judge.ladder": "on", "truth.slots": "shadow"}}
+    assert FeatureFlags(tmp_path, environ={}).enabled("judge.ladder")
     (tmp_path / "features.json").write_text("{not json")
     assert read_features_file(tmp_path) == {}
     (tmp_path / "features.json").write_text('["a list"]')

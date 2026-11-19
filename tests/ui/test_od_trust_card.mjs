@@ -76,7 +76,7 @@ describe('Held back from instructions card', () => {
   it('reads as a sentence for the origins whose label does not follow "From" (browser check, 18 Nov)', async () => {
     const items = [
       ITEM('m1', { origin: 'written by a model', origin_class: 'model_generated' }),
-      ITEM('m2', { origin: 'unknown (saved before 4.2.30)', origin_class: 'unknown' }),
+      ITEM('m2', { origin: 'unknown (its source was not recorded)', origin_class: 'unknown' }),
     ];
     const d = page({ items }, []);
     await d.window.SLMTrust.reload(); await flush();
@@ -84,7 +84,7 @@ describe('Held back from instructions card', () => {
     assert.doesNotMatch(text, /From written by a model/);
     assert.doesNotMatch(text, /From unknown \(/);
     assert.match(text, /From text a model wrote\./);
-    assert.match(text, /From a memory saved before 4\.2\.30, with no record of where it came from\./);
+    assert.match(text, /From a memory whose source was not recorded\./);
   });
 
   it('in shadow it says nothing is held back yet', async () => {

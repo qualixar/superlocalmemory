@@ -12,19 +12,9 @@ the checkpoint's background enrichment has not run yet."""
 
 from __future__ import annotations
 
-import pytest
-
 from superlocalmemory.core.engine_ingestion import build_engine_ingestion_command
 from superlocalmemory.core.standing_rules import standing_facts
 from tests.test_server.test_canonical_remember_route import _client
-
-
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """These tests are about what session start selects, not the origin firewall: they save through agent
-    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a promotion.
-    tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
 OLD = ("Checkpoint: Alice is migrating the billing service to Postgres. "
        "The cutover is planned for Friday. Bob reviews the schema.")

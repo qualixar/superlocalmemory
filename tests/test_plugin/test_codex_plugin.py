@@ -257,7 +257,7 @@ class TestHooksJson:
             for h in group.get("hooks", [])
             if h.get("type") == "command"
         ]
-        assert any("slm hook start" in cmd for cmd in all_commands), (
+        assert any("slm-run" in cmd and "hook start" in cmd for cmd in all_commands), (
             f"SessionStart must call 'slm hook start'; found: {all_commands}"
         )
 
@@ -278,7 +278,7 @@ class TestHooksJson:
             for h in group.get("hooks", [])
             if h.get("type") == "command"
         ]
-        assert any("slm hook stop" in cmd for cmd in all_commands), (
+        assert any("slm-run" in cmd and "hook stop" in cmd for cmd in all_commands), (
             f"Stop must call 'slm hook stop'; found: {all_commands}"
         )
 

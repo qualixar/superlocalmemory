@@ -20,26 +20,18 @@ import pytest
 
 from superlocalmemory.core.config import ConsolidationConfig
 from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
-
-
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """What session start selects, not the origin firewall: these memories are saved through agent
-    doors (``agent_inferred``), which the firewall (on by default since 19 Nov) holds back until a
-    promotion. tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+from tests.helpers.agent_rule import agent_stores
 
 PID = "default"
 
 
 @pytest.fixture()
 def db(tmp_path) -> DatabaseManager:
-    mgr = DatabaseManager(tmp_path / "memory.db")
-    mgr.initialize(schema)
-    return mgr
+    from tests.test_core.test_coverage_backfill import _db
+
+    return _db(tmp_path / "memory.db")  # migrated like a live store: origins and trust are recorded
 
 
 def _save(db, content: str, fact_type: FactType, *, meta: dict | None = None,
@@ -49,7 +41,7 @@ def _save(db, content: str, fact_type: FactType, *, meta: dict | None = None,
                                              metadata=meta or {}))
     fact = AtomicFact(profile_id=PID, memory_id=memory_id, content=content,
                       fact_type=fact_type, created_at=created, confidence=confidence)
-    fact_id = db.store_fact(fact)
+    fact_id = agent_stores(db, fact)
     for i in range(accesses):
         db.execute("INSERT INTO fact_access_log (log_id, fact_id, profile_id, accessed_at) "
                    "VALUES (?, ?, ?, ?)", (f"{fact_id}-{i}", fact_id, PID,

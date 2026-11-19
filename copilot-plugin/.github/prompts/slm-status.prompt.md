@@ -383,21 +383,21 @@ slm trust pending [--json]    # the memories held back until promoted, with wher
 slm health --memory --json    # `trust`: origins, waiting_items, credentials held as placeholders (counts by type)
 ```
 
-A memory is data until SLM puts it where an agent obeys it: a pin, a standing rule or decision,
-core memory, the session-start sections. With `trust.taint` on, a memory whose taint is below
-`system` (a tool's output, a web page, a peer's message, an import, a model's text, an agent's
-own words, or anything saved before 4.2.30 and not already a pin or rule) is held back until
-it is promoted on purpose. See what is held and why (`slm trust pending --json` →
+SLM never hides a memory from you: recall and the session start show every memory. A memory is data
+until SLM puts it where an agent obeys it: a pin, a standing rule or decision, core memory. With
+`trust.taint` on, a memory whose taint is below `agent_inferred` (a web page, a tool's output, a
+peer's message, an import, a model's text, or one whose source was not recorded) is held back from
+those roles until it is promoted on purpose. Your own saved rules (`agent_inferred`) and memories
+saved before 4.2.30 (`legacy`) are trusted as they are. See what is held and why (`slm trust pending --json` →
 `data.items[].origin`, `wanted_words`). One explicit call promotes a memory: `slm trust promote
 FACT_ID`, `core_memory(action="promote")`, or the dashboard's **Promote** button. Any caller may
 promote; the promotion is recorded (who, channel, time), listed under **Recent decisions by your
 agents**, and `slm trust withdraw FACT_ID` takes it back. Promote only what you have checked the
 user wants as an instruction. `data.unclassified` is the number of memories not yet given an
-origin class; they stay held until the background batch runs. Memories already pinned or marked as rules before
-4.2.30 stay so (recorded as promoted before 4.2.30). Saving or confirming a memory as a rule or
-decision is itself a recorded promotion (an agent's own words only, undone from **Recent
-decisions**), while text from a web page, a tool, a peer or an import stays held and the
-background classifier never promotes.
+origin class; they cannot be an instruction until the background batch runs. Memories saved before
+4.2.30 are `legacy` and keep working. Saving or confirming your own memory as a rule or decision
+needs no promotion, while the same act on text from a web page, a tool, a peer or an import only
+puts it on the waiting list, and the background classifier never promotes.
 `trust.secret_screen` is separate: it stores a detected credential as `[REDACTED:TYPE:LAST4]`,
 and `data.trust.secrets_held_back.by_type` counts them (never a value).
 

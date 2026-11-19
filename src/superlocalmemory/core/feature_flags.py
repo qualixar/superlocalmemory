@@ -65,12 +65,11 @@ class Flag:
 #: The registry. Adding a subsystem means adding its flag here first.
 FLAGS: Mapping[str, Flag] = {f.flag_id: f for f in (
     Flag("truth.slots", "WS-1", FlagState.ON,
-         "Bind facts to slots and decide supersede / compatible / dispute"),
+         "Bind facts to slots and decide supersede / compatible / dispute; also records source-file "
+         "fingerprints (leases) and flags facts whose source changed"),
     Flag("truth.slots.auto_apply", "WS-1", FlagState.ON,
          "Apply deterministic slot supersessions through the correction ledger",
          shadowable=False),
-    Flag("truth.leases", "WS-1", FlagState.ON,
-         "Record source fingerprints and flag facts whose source changed"),
     Flag("judge.ladder", "WS-2", FlagState.ON,
          "Route typed memory questions through the judge ladder"),
     # D-22: measurement starts at W0, on by default (ids only, local). Since 19 Nov (Varun: "every

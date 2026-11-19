@@ -9,7 +9,7 @@ saves go out at once, and how many contradictions one import may put in front of
 
 from __future__ import annotations
 
-#: The flag that switches the pack on (``core/feature_flags``); off by default (D-19).
+#: The flag that switches the pack on (``core/feature_flags``); on by default since 19 Nov (D-19, D-50).
 FLAG = "portability.import"
 
 #: An upload through HTTP (dashboard or remote app): at most this many bytes after decoding.

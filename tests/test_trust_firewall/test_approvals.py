@@ -11,8 +11,8 @@ from superlocalmemory.storage.migration_runner import DEFERRED_MIGRATIONS
 from superlocalmemory.storage.migrations import M081_trust_approvals as M081
 from superlocalmemory.trust import fact_trust, firewall
 from tests.test_trust_firewall.conftest import (
-    AGENT,
     EVIL,
+    MESH,
     PERSON,
     TAINT,
     TOOL,
@@ -78,7 +78,7 @@ def test_pending_lists_asked_for_and_already_promoted_untrusted_memories(db, mon
     mine = save(db, "Run the tests before every commit.", PERSON, kind="rule")
     evil = save(db, EVIL, TOOL, kind="rule")
     pinned = save(db, "Pinned from a web page.", WEB, pinned=True)
-    asked = save(db, "Pin me please.", AGENT)
+    asked = save(db, "Pin me please.", MESH)
     with db.raw_connection() as conn:
         firewall.request(conn, asked, "pin", by="claude", channel="mcp")
     with connect(db) as conn:

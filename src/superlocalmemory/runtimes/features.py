@@ -82,12 +82,29 @@ def media_requested(data_root: str | Path | None = None) -> bool:
     return bool(media.get("requested")) and not media.get("enabled")
 
 
-def media_opted_out(data_root: str | Path | None = None) -> bool:
-    """True when someone turned images and documents off on purpose (``disable_media``).
+def media_opted_out(data_root: str | Path | None = None, *, env: ManagedEnv | None = None) -> bool:
+    """True when someone turned images and documents off on purpose.
 
     The automatic set-up (``runtimes/media_auto``) never undoes this; ``enable_media`` clears it.
+    4.2.30's ``disable_media`` writes ``opted_out``. An earlier release did not, so an off that
+    someone chose before the upgrade is read from what it did leave (F-05): ``enabled`` false with
+    the ``enabled_at`` of the time it was on, or the environment installed on the disk while the
+    switch is off and no installer request is waiting. A fresh install, or one with only an
+    installer request recorded, is not an off.
     """
-    return bool(read_features(data_root)["media"].get("opted_out"))
+    media = read_features(data_root)["media"]
+    if media.get("opted_out"):
+        return True
+    if media.get("enabled"):
+        return False
+    if media.get("enabled_at"):
+        return True
+    if media.get("requested"):
+        return False
+    try:
+        return _env(env, data_root).status().state == "ready"
+    except Exception:  # noqa: BLE001 - an unreadable record is not a choice
+        return False
 
 
 def engine_upgrade_requested(data_root: str | Path | None = None) -> bool:
@@ -220,8 +237,10 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
         raise ValueError(f"source must be one of {SOURCES}")
     from superlocalmemory.media import MediaVectorsUnavailable, open_media_store
 
+    previous: dict[str, Any] = {}
     try:
         data = read_features(data_root)
+        previous = dict(data["media"])
         data["media"] = {"enabled": True, "enabled_at": datetime.now(timezone.utc).isoformat(),
                          "choice_source": source}
         _write_features(data_root, data)
@@ -230,12 +249,12 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
             store.close()
     except MediaVectorsUnavailable as exc:
         logger.warning("could not turn on images and documents: %s", exc)
-        _roll_back_enable(data_root)
+        _roll_back_enable(data_root, previous)
         return {**media_feature_status(data_root, env=env), "enabled": False,
                 "error": _NO_EXTENSIONS}
     except (OSError, sqlite3.Error, ImportError) as exc:
         logger.warning("could not turn on images and documents: %s", exc)
-        _roll_back_enable(data_root)
+        _roll_back_enable(data_root, previous)
         return {**media_feature_status(data_root, env=env), "enabled": False,
                 "error": "Couldn't save the setting. Check that the data folder is writable."}
     managed = _env(env, data_root)
@@ -244,10 +263,15 @@ def enable_media(*, source: str, start_install: bool = True, env: ManagedEnv | N
     return media_feature_status(data_root, env=managed)
 
 
-def _roll_back_enable(data_root: str | Path | None) -> None:
+def _roll_back_enable(data_root: str | Path | None, previous: dict[str, Any] | None = None) -> None:
+    """Put the choice back as it was before a failed turn-on (and never leave a half choice).
+
+    The failed attempt wrote ``enabled_at``; left there, a later look would read it as "turned off
+    by someone". The earlier record, including an earlier opt-out, is what comes back.
+    """
     try:
         data = read_features(data_root)
-        data["media"]["enabled"] = False
+        data["media"] = {**(previous or {}), "enabled": False}
         _write_features(data_root, data)
     except OSError:
         pass

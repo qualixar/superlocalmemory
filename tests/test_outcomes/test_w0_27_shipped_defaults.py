@@ -31,10 +31,6 @@ def shipped(monkeypatch):
     """The shipped defaults: no environment override of the holdout or the swaps."""
     monkeypatch.delenv("SLM_FEATURE_OUTCOMES_HOLDOUT", raising=False)
     monkeypatch.delenv("SLM_FEATURE_OUTCOMES_SWAPS", raising=False)
-    # These facts are inserted without an origin row (``unknown``), which the instruction firewall
-    # keeps out of the session-start sections now that ``trust.taint`` is on by default. This file is
-    # about withholding, so the firewall is set off explicitly.
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
 
 
 @pytest.fixture

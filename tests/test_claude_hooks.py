@@ -87,15 +87,18 @@ class TestIsSLMHookEntry:
         assert hooks_mod._is_slm_hook_entry(entry) is True
 
     def test_detects_session_marker(self):
-        entry = {"hooks": [{"type": "command", "command": "test -f /tmp/slm-session-initialized"}]}
+        entry = {"hooks": [{"type": "command", "command": (
+            "touch /var/folders/ab/T/slm-session-initialized-0123456789abcdef")}]}
         assert hooks_mod._is_slm_hook_entry(entry) is True
 
     def test_detects_legacy_script_path(self):
-        entry = {"hooks": [{"type": "command", "command": "bash ~/.superlocalmemory/hooks/start.sh"}]}
+        entry = {"hooks": [{"type": "command", "command": (
+            "/Users/someone/.superlocalmemory/hooks/slm-session-start.sh")}]}
         assert hooks_mod._is_slm_hook_entry(entry) is True
 
     def test_detects_slm_session_start_time(self):
-        entry = {"hooks": [{"type": "command", "command": "test ! -f /tmp/slm-session-start-time"}]}
+        entry = {"hooks": [{"type": "command", "command": (
+            "slm hook start 2>/dev/null || true; touch /tmp/slm-session-start-time")}]}
         assert hooks_mod._is_slm_hook_entry(entry) is True
 
     def test_rejects_non_slm_entry(self):

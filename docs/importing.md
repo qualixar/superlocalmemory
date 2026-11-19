@@ -58,8 +58,9 @@ Imported memories have the origin `imported_file`, the bottom of the origin latt
   a recorded decision settles it (`slm disputes`, `settle_dispute`, the dashboard). One run lists at most
   **50** such disputes (`DISPUTES_PER_RUN`); past that the text is still kept and the run says how many it left
   out. These are routing constants: they protect the review queue and decide nothing about what is true.
-- They never become a rule, a pin or a session-start instruction by themselves; that needs one explicit,
-  recorded promotion, as for any text below `system` (see the instruction firewall).
+- They never become a rule, a pin or a core block by themselves; that needs one explicit, recorded
+  promotion, as for any text below `agent_inferred` (see the instruction firewall). They are still
+  recalled and shown at session start, as evidence.
 - The import is a decision under D-49: any caller may start it, it is recorded as kind `import` with who and the
   channel, listed under **Recent decisions by your agents**, and its Undo there rolls the run back.
 

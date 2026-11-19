@@ -28,6 +28,7 @@ from pathlib import Path
 
 import corpus
 from _verdicts import parse_recall
+from tests._portable import GUARD_ENV
 
 #: Old versions ignore SLM_DATA_DIR and read ``$HOME/.superlocalmemory``; the data
 #: directory is always placed there so every version agrees on where it is.
@@ -132,7 +133,7 @@ class Instance:
         env.update(
             SLM_DATA_DIR=str(self.data_dir), HOME=str(self.home),
             SLM_DAEMON_PORT=str(self.port), HF_HUB_OFFLINE="1",
-            TRANSFORMERS_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1",
+            TRANSFORMERS_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1", **GUARD_ENV,
         )
         return env
 

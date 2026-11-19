@@ -74,7 +74,7 @@ def _media_view(status: dict[str, Any], root: Path, *, fresh: bool = True) -> di
     # Never refused for memory any more: ``ram_ok`` stays for older dashboards, the warning is for people.
     view["ram_ok"], view["ram_message"] = True, ""
     view["mode"], view["ram_warning"] = policy.mode, policy.warning
-    view["opted_out"] = feat.media_opted_out(root)
+    view["opted_out"] = feat.media_opted_out(root, env=_media_env())
     view["words"] = media_auto.media_words(view, policy.mode, opted_out=view["opted_out"])
     if env.get("error_kind"):
         view["error"] = env["error_kind"]

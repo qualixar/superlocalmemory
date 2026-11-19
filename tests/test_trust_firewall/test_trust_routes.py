@@ -52,7 +52,7 @@ def test_the_list_is_readable_by_anyone_with_the_review_role(world) -> None:
 def test_status_says_what_is_on_and_how_many_wait(world) -> None:
     client, *_ = world
     body = client.get("/api/trust/status").json()
-    assert body["taint"] == "on" and body["secret_screen"] == "off" and body["floor"] == "system"
+    assert body["taint"] == "on" and body["secret_screen"] == "off" and body["floor"] == "agent_inferred"
     assert body["waiting"] == 2 and body["approved"] == 0
 
 

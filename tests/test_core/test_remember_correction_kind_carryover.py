@@ -33,7 +33,8 @@ from superlocalmemory.trust import firewall
 from tests.helpers.agent_rule import agent_stores, firewall_on  # noqa: F401
 
 # Every test here runs with the origin firewall ON: the rule is saved as an agent saves it
-# (``tests/helpers/agent_rule.py``), which is what promotes a confirmed rule.
+# (``tests/helpers/agent_rule.py``). An agent's own words are at the firewall's floor, so a rule it
+# saved, and its correction, stand with no promotion (owner decision, 19 Nov).
 pytestmark = pytest.mark.usefixtures("firewall_on")
 
 
@@ -183,8 +184,8 @@ def _promotions(db) -> list[dict]:
 
 
 def _held_rule(db, content, origin=None) -> str:
-    """A confirmed rule that nobody promoted: stored under ``origin`` (an agent's own words by
-    default) with the kind set directly, the way a save with no promotion leaves it."""
+    """A confirmed rule stored under ``origin`` (an agent's own words by default) with the kind
+    set directly, the way a save leaves it."""
     from superlocalmemory.storage import fact_origin as fo
     from tests.helpers.agent_rule import AGENT_ORIGIN
 
@@ -196,30 +197,28 @@ def _held_rule(db, content, origin=None) -> str:
         return db.store_fact(fact)
 
 
-def test_the_corrected_rule_is_promoted_as_whoever_applied_it(env) -> None:
+def test_the_corrected_rule_stands_with_no_promotion(env) -> None:
     db, runtime = env
     rule = _fact(db, "Never push directly to main.", kind="rule", source="caller")
     res = _propose(runtime, rule, "succ00000000010", "Only push to main via PR.")
     assert _taint(db, res["successor_fact_id"]) == "agent_inferred"
     assert [f.content for f in standing_facts(db, "default")] == ["Never push directly to main."]
     _transition(runtime, res["case_id"], res["version"], "apply")
-    assert _taint(db, res["successor_fact_id"]) == "user_confirmed"
-    top = _promotions(db)[0]
-    assert (top["subject_id"], top["actor"], top["channel"]) == (
-        res["successor_fact_id"], "agent:claude-code", "mcp")
-    assert top["summary"] == ("Promoted a rule an agent corrected, so agents may follow it "
-                              "(an agent's own words)")
-    assert top["detail"]["via"] == "correction" and top["can_undo"]
+    # an agent's own words are at the firewall's floor: nothing to promote, nothing recorded
+    assert _taint(db, res["successor_fact_id"]) == "agent_inferred"
+    assert [f.content for f in standing_facts(db, "default")] == ["Only push to main via PR."]
+    assert _promotions(db) == []
 
 
-def test_a_rule_nobody_promoted_passes_nothing_on_to_its_correction(env) -> None:
+def test_a_rule_an_agent_saved_passes_its_standing_to_its_correction(env) -> None:
     db, runtime = env
     held = _held_rule(db, "Never push directly to main.")
     assert _taint(db, held) == "agent_inferred"
+    assert [f.fact_id for f in standing_facts(db, "default")] == [held]
     res = _propose(runtime, held, "succ00000000011", "Only push to main via PR.")
     _transition(runtime, res["case_id"], res["version"], "apply")
     assert _taint(db, res["successor_fact_id"]) == "agent_inferred"
-    assert standing_facts(db, "default") == []
+    assert [f.fact_id for f in standing_facts(db, "default")] == [res["successor_fact_id"]]
     assert _promotions(db) == []
 
 
@@ -238,7 +237,7 @@ def test_a_successor_below_an_agents_own_words_is_held_not_promoted(env) -> None
     assert standing_facts(db, "default") == []
 
 
-def test_rolling_the_correction_back_takes_the_successors_promotion_back(env) -> None:
+def test_rolling_the_correction_back_restores_the_old_rule(env) -> None:
     db, runtime = env
     rule = _fact(db, "Never push directly to main.", kind="rule", source="caller")
     res = _propose(runtime, rule, "succ00000000013", "Only push to main via PR.")
@@ -246,11 +245,8 @@ def test_rolling_the_correction_back_takes_the_successors_promotion_back(env) ->
     _transition(runtime, res["case_id"], applied["version"], "rollback", key="trans-2",
                 promote_as=("agent:reviewer", "cli"))
     assert _taint(db, res["successor_fact_id"]) == "agent_inferred"
-    [promote] = [p for p in _promotions(db) if p["action"] == "promote"
-                 and p["subject_id"] == res["successor_fact_id"]]
-    assert promote["undone"] and (promote["undone_by"], promote["undone_channel"]) == (
-        "agent:reviewer", "cli")
     assert [f.content for f in standing_facts(db, "default")] == ["Never push directly to main."]
+    assert _promotions(db) == []
 
 
 def test_a_rejected_correction_promotes_nothing(env) -> None:
@@ -259,7 +255,7 @@ def test_a_rejected_correction_promotes_nothing(env) -> None:
     res = _propose(runtime, rule, "succ00000000014", "Only push to main via PR.")
     _transition(runtime, res["case_id"], res["version"], "reject")
     assert _taint(db, res["successor_fact_id"]) == "agent_inferred"
-    assert [p["subject_id"] for p in _promotions(db)] == [rule]
+    assert _promotions(db) == []
 
 
 def test_an_apply_without_a_caller_door_promotes_nothing(env) -> None:

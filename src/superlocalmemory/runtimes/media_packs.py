@@ -4,7 +4,7 @@
 
 """The optional multimodal pack: which model each part needs, and turning a part on or off (WS-8, D-19).
 
-Two parts, each off by default and each with its own explicit download:
+Two parts, each on by default (D-50) and each with its own download:
 
 * ``captions``: ``florence-community/Florence-2-base`` (MIT) writes a short description of a picture on
   every platform (flag ``media.captions``).
@@ -16,9 +16,10 @@ Both load through the native classes of the ``transformers`` version the media e
 are the true pinned sizes from the Hugging Face API on 18 Nov 2026 (routing only: they are shown to a
 person before anything is downloaded).
 
-A model is downloaded only when a person (or an agent acting for one) turns the part on, through the same
-managed-environment source the picture model uses. A flag alone never downloads, and nothing here is called
-from a hook or a recall. The kill switch turns both parts off at once.
+A model is downloaded through the same managed-environment source the picture model uses: by the daemon's
+automatic set-up on a computer with 16 GB or more (``runtimes/media_auto``, D-51), or when a person or an
+agent turns the part on (one click below 16 GB). Nothing here is called from a hook or a recall, a part
+someone turned off is never downloaded, and the kill switch turns both parts off at once.
 """
 
 from __future__ import annotations
@@ -300,7 +301,8 @@ def _download(spec: PackSpec, root: Path, env: Any, source: Any, cancel: threadi
         (pack_dir(spec, root) / READY_FILE).write_text(json.dumps({
             "repo": spec.repo, "revision": spec.revision, "bytes": spec.download_bytes,
             "installed_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
-        _write_flag(spec, root, True)
+        if not cancel.is_set():  # F-16: a "turn off" that arrived meanwhile is the last word
+            _write_flag(spec, root, True)
     except OSError as exc:
         logger.warning("pack %s could not be put in place (%s)", pid, type(exc).__name__)
         _set_job(pid, state="failed", error="The files could not be saved. Check the data folder is writable.")

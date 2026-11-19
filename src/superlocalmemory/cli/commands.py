@@ -6032,6 +6032,6 @@ def _core_block_rows(db_path: object, profile_id: str) -> list:
                 ids = _json.loads(row["source_fact_ids"] or "[]")
             except (TypeError, ValueError):
                 ids = []
-            if not not_sources(conn, ids if isinstance(ids, list) else []):
+            if not not_sources(conn, ids if isinstance(ids, list) else [], core=True):
                 kept.append(row)
         return kept

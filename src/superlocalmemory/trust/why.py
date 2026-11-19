@@ -132,8 +132,8 @@ def _firewall(conn: sqlite3.Connection, fact_id: str, taint: str | None) -> dict
     below = not firewall.is_trusted_taint(taint)
     if below and acting:
         words = ("The instruction firewall holds this memory back from being a pin, a standing "
-                 "rule, core memory or part of the session start until you approve it. It can "
-                 "still be recalled as evidence.")
+                 "rule, a standing decision or core memory until one recorded promotion lifts it. "
+                 "It is still recalled, and shown at session start, as evidence.")
     elif below:
         words = ("It would be held back from being a pin, a rule or core memory, but the "
                  "instruction firewall is not acting (trust.taint is not on).")

@@ -22,17 +22,9 @@ import pytest
 
 from superlocalmemory.core.config import ConsolidationConfig
 from superlocalmemory.core.consolidation_engine import ConsolidationEngine
-from superlocalmemory.storage import schema
 from superlocalmemory.storage.database import DatabaseManager
 from superlocalmemory.storage.models import AtomicFact, FactType, MemoryRecord
-
-
-@pytest.fixture(autouse=True)
-def _origin_firewall_off(monkeypatch):
-    """These tests are about retired facts, not the origin firewall: the facts are saved directly, so they carry no
-    trusted origin, and the firewall (on by default since 19 Nov) would keep them out of session start and the
-    blocks whether or not they were replaced. tests/test_trust_firewall covers that rule."""
-    monkeypatch.setenv("SLM_FEATURE_TRUST_TAINT", "off")
+from tests.helpers.agent_rule import agent_stores
 
 PID = "default"
 OLD = "Open for 4.2.16: do not reinstall PyPI 4.2.15 on this Mac."
@@ -41,9 +33,9 @@ NEW = "SLM 4.2.16 is released and installed on every Mac harness."
 
 @pytest.fixture()
 def db(tmp_path) -> DatabaseManager:
-    mgr = DatabaseManager(tmp_path / "memory.db")
-    mgr.initialize(schema)
-    return mgr
+    from tests.test_core.test_coverage_backfill import _db
+
+    return _db(tmp_path / "memory.db")  # migrated like a live store: origins and trust are recorded
 
 
 def _save(db, content: str, fact_type: FactType = FactType.OPINION, *,
@@ -53,7 +45,7 @@ def _save(db, content: str, fact_type: FactType = FactType.OPINION, *,
     fact = AtomicFact(profile_id=PID, memory_id=memory_id, content=content,
                       fact_type=fact_type, confidence=0.95, importance=importance,
                       created_at="2026-11-09T10:00:00+00:00")
-    fact_id = db.store_fact(fact)
+    fact_id = agent_stores(db, fact)
     for i in range(accesses):
         db.execute("INSERT INTO fact_access_log (log_id, fact_id, profile_id, accessed_at) "
                    "VALUES (?, ?, ?, ?)", (f"{fact_id}-{i}", fact_id, PID,

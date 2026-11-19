@@ -117,17 +117,37 @@
   }
 
   // ─── API (uses the globally patched fetch: X-Install-Token on POST) ──────────
+  // A check that never answers (a tab left open while SLM restarted, every upgrade does that) must
+  // not keep the owner on "Checking access..." for good: each check has a deadline, and a check that
+  // misses it fails open like any other error. The daemon enforces access on every request anyway.
+  function checkTimeoutMs() {
+    var t = Number(window.SLM_AUTH_CHECK_TIMEOUT_MS);
+    return t > 0 ? t : 8000;
+  }
+
   function api(url, method, body) {
     var init = { method: method || 'GET', credentials: 'same-origin' };
     if (body) {
       init.headers = { 'Content-Type': 'application/json' };
       init.body = JSON.stringify(body);
     }
-    return fetch(url, init).then(function (r) {
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    if (ctl) init.signal = ctl.signal;
+    var timer = null;
+    var deadline = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+        reject(new Error('access check timed out'));
+      }, checkTimeoutMs());
+    });
+    var request = fetch(url, init).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
         return { ok: r.ok, status: r.status, data: d };
       });
     });
+    return Promise.race([request, deadline]).then(
+      function (v) { clearTimeout(timer); return v; },
+      function (e) { clearTimeout(timer); throw e; });
   }
 
   // ─── Screens ────────────────────────────────────────────────────────────────

@@ -23,8 +23,8 @@ is kept, as it always was: redacting at storage cannot be undone
 (``core/credential_shapes``). The four characters a placeholder keeps are the
 last four of a long key (the house format), never of a short value.
 
-States: ``off`` (the default) changes nothing; ``shadow`` counts what would be
-screened and logs the counts, changing nothing; ``on`` screens. The kill switch
+States: ``on`` is the default (D-50) and screens; ``off`` changes nothing; ``shadow`` counts what would be
+screened and logs the counts, changing nothing. The kill switch
 reads as off. A screen that cannot run while it is ``on`` refuses the save
 (the error propagates) rather than storing the text in clear.
 

@@ -247,7 +247,7 @@ def test_imports_media_and_captions_are_refused_with_the_switch_on(world) -> Non
     flags = FeatureFlags(world.home)
     for flag_id in ("portability.import", "media.captions", "media.document_pack", "media.regions",
                     "trust.signing", "compiler.dream", "delivery.cues", "delivery.need_gate",
-                    "delivery.harm_gate", "judge.ladder", "truth.slots", "truth.leases"):
+                    "delivery.harm_gate", "judge.ladder", "truth.slots"):
         assert not flags.observing(flag_id), flag_id
 
 

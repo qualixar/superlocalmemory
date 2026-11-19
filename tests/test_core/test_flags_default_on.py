@@ -40,7 +40,7 @@ def home(tmp_path, monkeypatch):
 # -- the registry -------------------------------------------------------------------------------
 
 def test_there_are_exactly_the_flags_the_brief_lists_and_each_defaults_on():
-    assert len(FLAGS) == 21
+    assert len(FLAGS) == 20  # truth.leases had no reader and was removed (F-09)
     assert all(f.default is FlagState.ON for f in FLAGS.values())
 
 

@@ -2,8 +2,8 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 """The one import flow every door calls: preview, run, status, cancel, undo (WS-9, D-19, D-49).
 
-CLI, HTTP and the dashboard all end up here, so they behave the same. The pack is off by default
-(flag ``portability.import``; the kill switch stops it): every call says which switch is off and
+CLI, HTTP and the dashboard all end up here, so they behave the same. The pack is on by default
+(flag ``portability.import``; a person's own off or the kill switch stops it): every call says which switch is off and
 how to turn it on. An import is a decision (D-49): any caller may start one, and it is recorded
 in the decision log with who and through which channel, as kind ``import``, and its undo is the
 rollback of the whole run. One import runs at a time per profile.

@@ -367,13 +367,19 @@ def _hook_definitions(include_gate: bool = False) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 
 def _is_slm_command(cmd: object) -> bool:
-    """True for a command SLM wrote: its ``slm hook`` launcher or its session markers."""
-    text = str(cmd)
-    return ("slm hook" in text
-            or "slm session close" in text
-            or "slm-session" in text
-            or ".superlocalmemory/hooks/" in text
-            or "slm-session-initialized" in text)
+    """True only for a command some SLM release wrote (exact, after whitespace and temp-path
+    normalisation; 4.2.30). A line that merely mentions ``slm hook`` is the person's."""
+    from superlocalmemory.hooks._hook_identity import is_known_command
+
+    return is_known_command(cmd)
+
+
+def _is_slm_hook(hook: object) -> bool:
+    """True only for a hook object exactly as SLM wrote it: a known command, no extra keys,
+    one of the timeouts SLM wrote. An edited line, or a raised timeout, is the person's."""
+    from superlocalmemory.hooks._hook_identity import is_slm_hook
+
+    return is_slm_hook(hook)
 
 
 def _is_slm_hook_entry(entry: dict) -> bool:
@@ -381,8 +387,7 @@ def _is_slm_hook_entry(entry: dict) -> bool:
     hooks = entry.get("hooks", []) if isinstance(entry, dict) else []
     if not isinstance(hooks, list):
         return False
-    return any(isinstance(hook, dict) and _is_slm_command(hook.get("command", ""))
-               for hook in hooks)
+    return any(_is_slm_hook(hook) for hook in hooks)
 
 
 # ---------------------------------------------------------------------------
@@ -402,9 +407,33 @@ def _merge_hooks(settings: dict, hook_defs: dict) -> dict:
     merged_hooks = dict(hooks) if isinstance(hooks, dict) else {}
     for hook_type, slm_entries in hook_defs.items():
         existing = merged_hooks.get(hook_type, [])
+        existing = existing if isinstance(existing, list) else []
         merged_hooks[hook_type] = replace_owned(
-            existing if isinstance(existing, list) else [], slm_entries, _is_slm_command)
+            existing, _without_edited_copies(existing, slm_entries), _is_slm_command,
+            is_owned_hook=_is_slm_hook)
     return {**settings, "hooks": merged_hooks}
+
+
+def _without_edited_copies(existing: list, slm_entries: list) -> list:
+    """SLM's entries minus the commands a person already runs in their own, edited form.
+
+    A line the person changed (an extra variable, a script after it) is theirs and stays; SLM
+    must not add a second copy of the same ``slm hook <name>`` beside it, which would fire the
+    hook twice. A command counts as theirs only when it is not exactly SLM's.
+    """
+    from superlocalmemory.hooks._hook_identity import covered_by_edit
+
+    theirs = [str(h.get("command", "")) for e in existing
+              if isinstance(e, dict) and isinstance(e.get("hooks"), list)
+              for h in e["hooks"] if isinstance(h, dict) and not _is_slm_hook(h)]
+    if not theirs:
+        return slm_entries
+    kept = []
+    for entry in slm_entries:
+        hooks = [h for h in entry.get("hooks", []) if not covered_by_edit(h.get("command", ""), theirs)]
+        if hooks:
+            kept.append({**entry, "hooks": hooks})
+    return kept
 
 
 def settings_have_slm_hooks(settings: dict) -> bool:

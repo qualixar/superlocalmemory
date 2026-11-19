@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from tests._portable import GUARD_ENV
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _SNAPSHOT_FILES = (
@@ -98,6 +100,7 @@ def safe_child_env(home: Path) -> dict[str, str]:
         "SLM_DATA_DIR": str(home / "slm-data"),
         "SL_MEMORY_PATH": str(home / "slm-data"),
         "SLM_HOME": str(home / "slm-data"),
+        **GUARD_ENV,
     }
     for name in ("TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"):
         value = os.environ.get(name)

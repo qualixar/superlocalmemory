@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._portable import GUARD_ENV
 from tests.test_plugin._mcp_expand import WINDOWS_ENV, declared_server, expanded_argv
 
 REPO = Path(__file__).resolve().parents[2]
@@ -109,7 +110,7 @@ def _stub_slm(directory: Path, marker: str) -> None:
 
 def _run_declared(mcp_json: Path, root: Path, path_dir: Path, tmp_path: Path):
     env = _posix_env()
-    env.update(PATH=f"{path_dir}:/usr/bin:/bin", SLM_LAUNCHER="auto",
+    env.update(GUARD_ENV, PATH=f"{path_dir}:/usr/bin:/bin", SLM_LAUNCHER="auto",
                SLM_DATA_DIR=str(tmp_path / "data"), HOME=str(tmp_path / "home"))
     env.pop("CLAUDE_PLUGIN_DATA", None)
     argv = expanded_argv(mcp_json, root.as_posix(), env)

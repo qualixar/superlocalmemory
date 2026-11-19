@@ -153,13 +153,27 @@ _WINDOWS_ESSENTIALS = ("SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEX
                        "TEMP", "TMP", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE")
 
 
+#: The four guards the pytest plugin puts in ``os.environ`` (F-02, 19 Nov 2026). A child that
+#: *inherits* the environment gets them; a child whose environment a test builds by hand does not,
+#: unless the builder spreads this. Without the keyring one, a daemon asks the macOS keychain with a
+#: ``HOME`` that has no login keychain and the person at the computer sees a dialog; the other three
+#: stop a test daemon from downloading models, rewriting host hook files or installing the answer check.
+GUARD_ENV: dict[str, str] = {
+    "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
+    "SLM_NO_AUTO_DOWNLOAD": "1",
+    "SLM_NO_HOOK_UPGRADE": "1",
+    "SLM_SKIP_LAYA": "1",
+}
+
+
 def child_env_base(home: Path) -> dict[str, str]:
     """What a constructed (never inherited) child environment must start with.
 
     ``home`` is the child's home folder: HOME on POSIX, and on Windows also
-    USERPROFILE, which is where ``Path.home()`` looks there.
+    USERPROFILE, which is where ``Path.home()`` looks there. The four guards of
+    :data:`GUARD_ENV` come with it.
     """
-    env = {"HOME": str(home)}
+    env = {"HOME": str(home), **GUARD_ENV}
     if os.name == "nt":
         env.update({name: os.environ[name] for name in _WINDOWS_ESSENTIALS
                     if name in os.environ})

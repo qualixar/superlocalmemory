@@ -14,6 +14,7 @@ import pytest
 from superlocalmemory.cli import measurement_cmd
 from superlocalmemory.core.feature_flags import FeatureFlags
 from superlocalmemory.outcomes import disclosure
+from tests._portable import GUARD_ENV
 
 
 @pytest.fixture(autouse=True)
@@ -102,7 +103,8 @@ def test_the_parser_accepts_the_three_actions_and_defaults_to_status() -> None:
 
 
 def test_the_real_cli_is_wired_and_listed_in_help(tmp_path) -> None:
-    env = {"SLM_DATA_DIR": str(tmp_path), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    env = {"SLM_DATA_DIR": str(tmp_path), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+           **GUARD_ENV}
     done = subprocess.run([sys.executable, "-m", "superlocalmemory.cli.main", "measurement",
                            "status", "--json"], capture_output=True, text=True, env=env, timeout=120)
     assert done.returncode == 0, done.stderr
