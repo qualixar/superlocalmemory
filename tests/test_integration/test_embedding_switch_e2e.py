@@ -252,6 +252,18 @@ def _stop_and_reap(lane: Lane) -> None:
     assert not alive, f"model workers outlived the daemon stop: {[p.pid for p in alive]}"
 
 
+def _erase(lane, fact_id: str) -> int:
+    """DELETE as a real client does: a 503 means "busy, nothing changed, retry"
+    (``routes/memories.py``, Retry-After 3), which a busy CI runner can hit while a
+    deliberately slowed re-embedding job is writing. Anything else is the answer."""
+    deadline = time.monotonic() + 30
+    while True:
+        code, _ = lane.daemon.request("DELETE", f"/api/memories/{fact_id}")
+        if code != 503 or time.monotonic() > deadline:
+            return code
+        time.sleep(3)
+
+
 def _before_any_switch_the_probe_finds_alpha_in_the_old_space(lane):
     assert lane.vec_dimension() == 768
     assert _which(lane.probe_top()) == "ALPHA"
@@ -339,8 +351,7 @@ def _a_killed_daemon_keeps_the_old_space_and_resumes_the_job(lane):
     # Erase a memory mid-job: it must not survive in the staged space.
     victim = lane.rows("SELECT fact_id FROM atomic_facts WHERE content LIKE ?",
                        ("%inventory code Q007%",))[0][0]
-    code, _ = lane.daemon.request("DELETE", f"/api/memories/{victim}")
-    assert code == 200
+    assert _erase(lane, victim) == 200
     assert not lane.rows("SELECT 1 FROM reembed_next_map WHERE fact_id = ?", (victim,))
     lane.kill()
     state = lane.rows("SELECT state, cursor, done FROM embedding_reindex_jobs WHERE job_id = ?",
@@ -389,8 +400,7 @@ def _an_erased_memory_leaves_nothing_in_the_previous_space(lane):
                        ("%inventory code Q011%",))[0][0]
     vec_rowid = lane.rows("SELECT vec_rowid FROM reembed_prev_map WHERE fact_id = ?",
                           (victim,))[0][0]
-    code, _ = lane.daemon.request("DELETE", f"/api/memories/{victim}")
-    assert code == 200
+    assert _erase(lane, victim) == 200
     assert not lane.rows("SELECT 1 FROM reembed_prev_map WHERE fact_id = ?", (victim,))
     assert not lane.rows("SELECT 1 FROM reembed_prev_vec_rowids WHERE rowid = ?", (vec_rowid,)), (
         "the erased memory's vector survived in the previous space")

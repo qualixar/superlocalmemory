@@ -138,7 +138,10 @@ def test_adversarial_text_takes_milliseconds_not_minutes() -> None:
         for pattern in (_A, _B):
             start = time.perf_counter()
             pattern.spans(text)
-            assert time.perf_counter() - start < 0.5, (repr(text[:30]), len(text))
+            # Locally the worst input takes about 24 ms and time grows linearly; a
+            # catastrophic pattern takes minutes on these. A starved CI runner measured
+            # 0.69 s on 19 Nov 2026, so the bound is 2 s, still ~80x the local worst.
+            assert time.perf_counter() - start < 2.0, (repr(text[:30]), len(text))
 
 
 def test_a_save_and_a_dated_fact_with_such_text_finish() -> None:
