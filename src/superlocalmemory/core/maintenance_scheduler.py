@@ -318,7 +318,7 @@ class MaintenanceScheduler:
 
     def _dream_pass(self) -> None:
         """4.2.30 WS-6: the dream cycle: lint the store and queue extractive pages and exact
-        duplicate merges for review (compiler/dream.py). Behind ``compiler.dream`` (off);
+        duplicate merges for review (compiler/dream.py). Behind ``compiler.dream`` (on by default);
         it asks no model, applies nothing, and writes only proposal tables in one short
         transaction, so it never holds the writer lock across anything slow."""
         if not self._running:
@@ -336,7 +336,7 @@ class MaintenanceScheduler:
 
     def _slot_pass(self) -> None:
         """4.2.30 truth layer: bind facts to slots, oldest first, behind the
-        ``truth.slots`` flag (off by default; truth/slot_pass.py)."""
+        ``truth.slots`` flag (on by default; truth/slot_pass.py)."""
         if not self._running:
             return
         try:

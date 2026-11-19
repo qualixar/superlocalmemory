@@ -145,7 +145,7 @@ def _retract_one(args: Namespace, command: str, use_json: bool, profile: str) ->
 
 def cmd_audit(args: Namespace) -> int:
     from superlocalmemory.cli.commands import _daemon_unavailable
-    from superlocalmemory.cli.daemon import DaemonNotFound, DaemonUnprocessable, daemon_request
+    from superlocalmemory.cli.daemon import daemon_request
 
     use_json = bool(getattr(args, "json", False))
     profile = (getattr(args, "profile", "") or "").strip()
@@ -166,27 +166,41 @@ def cmd_audit(args: Namespace) -> int:
         _daemon_unavailable(command, use_json)
         return 1
     if getattr(args, "count", False):
-        if use_json:
-            _out(command, True, data={"count": result["count"]})
-        else:
-            print(f"{result['count']} question(s) waiting. Answer them with: slm audit")
-        return 0
+        return _print_count(result, command, use_json)
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not getattr(
         args, "list_queue", False)
     if not interactive:  # an agent or a script reads the queue; it labels with --answer
-        if use_json:
-            _out(command, True, data=result)
-        else:
-            print(f"{result['count']} question(s) waiting.")
-            for item in result.get("items") or []:
-                _show(item)
-            print("Label one with: slm audit --answer ITEM_ID LABEL --model YOUR_MODEL_ID")
-        return 0
-    items = list(result.get("items") or [])
+        return _print_queue(result, command, use_json)
+    return _ask_each(list(result.get("items") or []), result["count"], model, profile)
+
+
+def _print_count(result: dict, command: str, use_json: bool) -> int:
+    if use_json:
+        _out(command, True, data={"count": result["count"]})
+    else:
+        print(f"{result['count']} question(s) waiting. Answer them with: slm audit")
+    return 0
+
+
+def _print_queue(result: dict, command: str, use_json: bool) -> int:
+    if use_json:
+        _out(command, True, data=result)
+    else:
+        print(f"{result['count']} question(s) waiting.")
+        for item in result.get("items") or []:
+            _show(item)
+        print("Label one with: slm audit --answer ITEM_ID LABEL --model YOUR_MODEL_ID")
+    return 0
+
+
+def _ask_each(items: list, count: int, model: str, profile: str) -> int:
+    """At a terminal: show each waiting question, save each answer, stop on quit."""
+    from superlocalmemory.cli.daemon import DaemonNotFound, DaemonUnprocessable, daemon_request
+
     if not items:
         print("Nothing to answer right now. Thank you.")
         return 0
-    print(f"{result['count']} question(s) waiting. Your answers stay on this computer.")
+    print(f"{count} question(s) waiting. Your answers stay on this computer.")
     answered = 0
     for item in items:
         _show(item)

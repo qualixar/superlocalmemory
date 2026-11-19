@@ -58,7 +58,7 @@ RETIRED_FOR_ANOTHER = "retired_for_another"
 #: certificate and no approval. Since D-36 nothing retires here: an explicit
 #: key's new value opens a dispute, and the dispute pass retires only what the
 #: ``ActingGate`` allows on a certificate (rules ``explicit-v1`` included), so
-#: the flag now has a lawful basis (I-10). It stays off by default.
+#: the flag now has a lawful basis (I-10). On by default since 19 Nov 2026 (D-50).
 AUTO_APPLY_BASIS_READY = True
 
 

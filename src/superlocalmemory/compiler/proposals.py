@@ -124,8 +124,8 @@ def check_basis(conn: Any, profile_id: str, basis: Basis | None, kinds: Sequence
     if basis.kind not in (CERTIFICATE, RULE_CERTIFICATE) or not basis.ref:
         raise BasisRefused("Unknown basis. Nothing was changed.")
     if not _flags(flags).enabled("compiler.auto_apply"):
-        raise BasisRefused("Applying on a certificate needs compiler.auto_apply to be on "
-                           "(it is off by default). Nothing was changed.")
+        raise BasisRefused("Applying on a certificate needs compiler.auto_apply, which is turned "
+                           "off here (`slm flags set compiler.auto_apply on`). Nothing was changed.")
     rows = _select(conn, "SELECT tier, question_id, verdict FROM judge_certificates "
                    "WHERE cert_id = ? AND profile_id = ? AND voided_at IS NULL",
                    (basis.ref, profile_id))

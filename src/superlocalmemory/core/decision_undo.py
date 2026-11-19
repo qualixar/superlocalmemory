@@ -35,46 +35,74 @@ def undo(conn: sqlite3.Connection, *, profile_id: str, decision_id: str,
     if not found["can_undo"]:
         raise UndoRefused("That kind of decision is not undone; it is itself an undo or a "
                           "rejection.")
-    kind, subject = found["kind"], found["subject_id"]
+    kind = found["kind"]
+    reverse = _REVERSALS.get(kind)
+    if reverse is None:  # pragma: no cover - the kinds are closed in core/decisions
+        raise UndoRefused(f"unknown decision kind {kind}")
     try:
-        if kind == decisions.PROMOTION:
-            from superlocalmemory.trust import firewall
-
-            done = firewall.withdraw(conn, subject, by=decider.actor, channel=decider.channel)
-        elif kind == decisions.PROPOSAL:
-            from superlocalmemory.compiler import proposals
-
-            done = proposals.rollback_set(
-                conn, profile_id=profile_id, set_id=subject,
-                basis=proposals.Basis.decision(decider.actor, decider.channel))
-        elif kind == decisions.DISPUTE:
-            from superlocalmemory.truth import disputes
-
-            done = disputes.reopen(conn, profile_id=profile_id, dispute_id=subject,
-                                   channel=decider.channel, actor=decider.actor)
-        elif kind == decisions.IMPORT:
-            done = _undo_import(engine, runtime, profile_id, subject, decider)
-        elif kind == decisions.ROLLBACK_RETIREMENTS:
-            from superlocalmemory.truth import retirement_rollback
-
-            done = retirement_rollback.undo(conn, profile_id=profile_id, found=found,
-                                            decider=decider)
-        elif kind == decisions.KILL_SWITCH:
-            from superlocalmemory.core import kill_switch
-
-            done = kill_switch.undo(conn, found=found, decider=decider)
-        elif kind == decisions.LABEL:
-            from superlocalmemory.core import audit_review
-
-            done = audit_review.retract(conn, profile_id=profile_id, item_id=subject,
-                                        channel=decider.channel, actor=decider.actor)
-        else:  # pragma: no cover - the kinds are closed in core/decisions
-            raise UndoRefused(f"unknown decision kind {kind}")
+        done = reverse(conn, profile_id, found, decider, engine, runtime)
     except LookupError as exc:
         raise UndoRefused(f"There is nothing left to undo: {exc}") from None
     except ValueError as exc:  # StateRefused / ReopenRefused / ProposalError subclass it
         raise UndoRefused(str(exc)) from None
     return {"decision_id": decision_id, "kind": kind, "undone": True, **_plain(done)}
+
+
+# -- one reversal per kind: (conn, profile_id, found, decider, engine, runtime) -> answer --------
+
+def _undo_promotion(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.trust import firewall
+
+    return firewall.withdraw(conn, found["subject_id"], by=decider.actor, channel=decider.channel)
+
+
+def _undo_proposal(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.compiler import proposals
+
+    return proposals.rollback_set(
+        conn, profile_id=profile_id, set_id=found["subject_id"],
+        basis=proposals.Basis.decision(decider.actor, decider.channel))
+
+
+def _undo_dispute(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.truth import disputes
+
+    return disputes.reopen(conn, profile_id=profile_id, dispute_id=found["subject_id"],
+                           channel=decider.channel, actor=decider.actor)
+
+
+def _undo_import_kind(conn, profile_id, found, decider, engine, runtime):
+    return _undo_import(engine, runtime, profile_id, found["subject_id"], decider)
+
+
+def _undo_rollback_retirements(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.truth import retirement_rollback
+
+    return retirement_rollback.undo(conn, profile_id=profile_id, found=found, decider=decider)
+
+
+def _undo_kill_switch(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.core import kill_switch
+
+    return kill_switch.undo(conn, found=found, decider=decider)
+
+
+def _undo_label(conn, profile_id, found, decider, engine, runtime):
+    from superlocalmemory.core import audit_review
+
+    return audit_review.retract(conn, profile_id=profile_id, item_id=found["subject_id"],
+                                channel=decider.channel, actor=decider.actor)
+
+
+_REVERSALS = {
+    decisions.PROMOTION: _undo_promotion,
+    decisions.PROPOSAL: _undo_proposal,
+    decisions.DISPUTE: _undo_dispute,
+    decisions.IMPORT: _undo_import_kind,
+    decisions.ROLLBACK_RETIREMENTS: _undo_rollback_retirements,
+    decisions.KILL_SWITCH: _undo_kill_switch,
+    decisions.LABEL: _undo_label,
+}
 
 
 def _undo_import(engine: object | None, runtime: object | None, profile_id: str, run_id: str,
