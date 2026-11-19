@@ -252,6 +252,12 @@ class MediaWorkerClient(MediaEmbedderPort):
         if self.pid is not None and self._loaded:
             return
         self._kill()
+        if self._model_dir is not None and not self.model_id.startswith("fake:") \
+                and not self._model_dir.is_dir():
+            # A pack whose model is not here: say that, before asking for gigabytes of free memory
+            # to load something that cannot load (the same words the worker would use; no path).
+            raise MediaWorkerError("The model could not be loaded: the model files are not on this "
+                                   "computer; turn the pack on again.")
         need = 0 if self.model_id.startswith("fake:") else media_models.load_mb_for(self.model_id)
         try:
             with ram_lock.ram_reservation("media-model-load", required_mb=need, timeout_s=self.load_timeout_s):

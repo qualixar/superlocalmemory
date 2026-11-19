@@ -317,3 +317,28 @@ def test_page_reading_gets_room_and_a_caption_keeps_the_short_deadline(tmp_path)
         assert client.request_timeout_s == 600.0
     finally:
         worker_client._PACK_CLIENTS.clear()
+
+
+def test_a_missing_model_is_named_before_memory_is_asked_for(stub_env, tmp_path, monkeypatch, picture):
+    """GitHub's 7 GB runner (19 Nov): the measured reservation (3.5 GB free) was refused first, so a
+    pack with no model on the computer was reported as a memory problem. The folder is checked first."""
+    from contextlib import contextmanager
+
+    from superlocalmemory.core import ram_lock
+
+    @contextmanager
+    def refuse(*_a, **_k):
+        raise RuntimeError("ram_reservation(media-model-load): free 2976MB < required 3675MB")
+        yield
+
+    monkeypatch.delenv("SLM_MEDIA_WORKER_FAKE", raising=False)
+    monkeypatch.setattr(ram_lock, "ram_reservation", refuse)
+    c = MediaWorkerClient(stub_env, model_id="florence-community/Florence-2-base", revision="r", role="caption",
+                          model_dir=tmp_path / "nothing-here")
+    try:
+        with pytest.raises(MediaWorkerError) as seen:
+            c.caption_image(picture)
+        assert "turn the pack on again" in str(seen.value) and "free memory" not in str(seen.value)
+        assert str(tmp_path) not in str(seen.value)
+    finally:
+        c.stop()
