@@ -324,11 +324,22 @@ def _plan(version: str):
     ]
 
 
+def _utc_today():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date()
+
+
 def _date_ok(value: str) -> bool:
-    """date-released is acceptable when it parses and is not in the future."""
-    from datetime import date
+    """date-released is acceptable when it parses and is not in the future.
+
+    "Future" is judged against UTC with one day of slack, the same rule as
+    tests/release/test_v37_rc_candidate_contract.py: a release cut after
+    midnight IST is dated the next day while a UTC runner still reads the
+    previous one.
+    """
+    from datetime import date, timedelta
     try:
-        return date.fromisoformat(value) <= date.today()
+        return date.fromisoformat(value) <= _utc_today() + timedelta(days=1)
     except ValueError:
         return False
 

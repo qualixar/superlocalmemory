@@ -84,3 +84,20 @@ def test_a_successful_bump_writes_every_source(tmp_path, monkeypatch) -> None:
     assert bump_version.main(["2.0.0"]) == 0
     assert '"2.0.0"' in (tmp_path / "a.json").read_text(encoding="utf-8")
     assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "pkg==2.0.0\n"
+
+
+def test_date_released_may_be_one_day_ahead_of_utc(monkeypatch) -> None:
+    """A release cut after midnight IST is still the previous day in UTC.
+
+    4.2.31 was bumped at 01:00 IST on 20 Nov; the GitHub runner, on UTC, still
+    read 19 Nov, called the date "in the future" and failed --check. The rule
+    must match tests/release/test_v37_rc_candidate_contract.py: up to one day
+    ahead of UTC today is a real release date, two days ahead is a typo.
+    """
+    from datetime import date
+
+    monkeypatch.setattr(bump_version, "_utc_today", lambda: date(2026, 11, 19))
+    assert bump_version._date_ok("2026-11-19")
+    assert bump_version._date_ok("2026-11-20")
+    assert not bump_version._date_ok("2026-11-21")
+    assert not bump_version._date_ok("not-a-date")

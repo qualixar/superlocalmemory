@@ -241,7 +241,7 @@ is the `media_status` MCP tool, not this command. Details, limits and the
 the 16 GB rule (automatic above, one click below): `slm-media`. `slm status` also prints an "Embedding switch" line while a model switch or
 the memory-engine upgrade is pending.
 
-## Truth checks, judges and audit questions (4.2.30)
+## Truth checks, judges and audit questions (added in 4.2.30)
 
 ```bash
 slm doctor --truth [--json] [--db <path>]   # read-only; exits 1 when an invariant is violated
@@ -319,7 +319,7 @@ the dashboard's **Proposed changes** card has **Apply**, **Reject** and **Undo**
 **Recent decisions by your agents** lists every decision with an Undo. Read what a set
 changes before you apply it, and report anything that looks wrong.
 
-**The living wiki** (4.2.30, WS-6) is pages compiled from memory: current state per
+**The living wiki** (added in 4.2.30) is pages compiled from memory: current state per
 subject, the story of a family of decisions, a topic. Every sentence is a
 word-for-word piece of a memory it cites or a fixed template over slot values,
 checked again whenever the page is read; no model writes any of it, and each page
@@ -363,19 +363,19 @@ Never switch it off on your own
 initiative, even to make a test or a measurement tidier. Run it only when the
 user asks, and when `pending` is true, pass the notice on to the user.
 
-**The 4.2.30 kill switch.** `get_status` and `health` carry `kill_switch`
+**The kill switch (added in 4.2.30).** `get_status` and `health` carry `kill_switch`
 (`on`, `source`: file or environment, and a sentence in words). `slm flags`
-shows it too. When it is on, everything new in 4.2.30 is off and recall reads the
-way it did before 4.2.30: no dispute, source, standing or origin notes, no `why`
+shows it too. When it is on, everything added in 4.2.30 is off and recall reads the
+way it did before those features: no dispute, source, standing or origin notes, no `why`
 block, no background pass writing anything. Say so when results look plainer than
 usual. Turning it on or off is the user's choice (`slm flags kill on|off`, the
-dashboard card "Turn off everything new in 4.2.30", or `POST /api/flags/kill`);
+kill-switch card in the dashboard settings, or `POST /api/flags/kill`);
 never flip it on your own. It does not undo retirements: when the user wants
-the memories 4.2.30 retired back, run `slm flags rollback-retirements --dry-run`,
+back the memories retired by the features added in 4.2.30, run `slm flags rollback-retirements --dry-run`,
 tell them the count, and run it without `--dry-run` only on their yes. It is
 recorded as a decision and **Recent decisions** can undo it.
 
-## Trust: the instruction firewall and the secret screen (4.2.30)
+## Trust: the instruction firewall and the secret screen (added in 4.2.30)
 
 ```bash
 slm trust status [--json]     # is the firewall acting; how many memories wait; how many unclassified
@@ -388,14 +388,14 @@ until SLM puts it where an agent obeys it: a pin, a standing rule or decision, c
 `trust.taint` on, a memory whose taint is below `agent_inferred` (a web page, a tool's output, a
 peer's message, an import, a model's text, or one whose source was not recorded) is held back from
 those roles until it is promoted on purpose. Your own saved rules (`agent_inferred`) and memories
-saved before 4.2.30 (`legacy`) are trusted as they are. See what is held and why (`slm trust pending --json` →
+saved before trust classes were added in 4.2.30 (`legacy`) are trusted as they are. See what is held and why (`slm trust pending --json` →
 `data.items[].origin`, `wanted_words`). One explicit call promotes a memory: `slm trust promote
 FACT_ID`, `core_memory(action="promote")`, or the dashboard's **Promote** button. Any caller may
 promote; the promotion is recorded (who, channel, time), listed under **Recent decisions by your
 agents**, and `slm trust withdraw FACT_ID` takes it back. Promote only what you have checked the
 user wants as an instruction. `data.unclassified` is the number of memories not yet given an
-origin class; they cannot be an instruction until the background batch runs. Memories saved before
-4.2.30 are `legacy` and keep working. Saving or confirming your own memory as a rule or decision
+origin class; they cannot be an instruction until the background batch runs. Memories saved before trust classes were
+added in 4.2.30 are `legacy` and keep working. Saving or confirming your own memory as a rule or decision
 needs no promotion, while the same act on text from a web page, a tool, a peer or an import only
 puts it on the waiting list, and the background classifier never promotes.
 `trust.secret_screen` is separate: it stores a detected credential as `[REDACTED:TYPE:LAST4]`,

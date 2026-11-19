@@ -325,7 +325,7 @@ set `tags` to one or two relevant terms and `project` to the repo/product name.
 
 ---
 
-## Credentials are never stored (the secret screen, 4.2.30)
+## Credentials are never stored (the secret screen, added in 4.2.30)
 
 Never put an API key, token, password or private key in a memory. With `trust.secret_screen`
 on, SLM replaces anything shaped like a credential by a typed placeholder before it is
