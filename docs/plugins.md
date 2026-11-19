@@ -103,6 +103,15 @@ codex plugin marketplace add qualixar/superlocalmemory --ref main
 codex plugin add superlocalmemory-codex@qualixar
 ```
 
+To update the plugin after an SLM upgrade, refresh Codex's copy of the marketplace first. `codex plugin marketplace add` leaves an existing copy as it was ("already added"), so on its own it installs the old plugin again:
+
+```bash
+codex plugin marketplace upgrade qualixar
+codex plugin add superlocalmemory-codex@qualixar
+```
+
+`slm doctor` and `slm upgrade-hosts` print these commands when the plugin is older than SLM. Restart Codex afterwards.
+
 Review and trust the new hooks in Codex with `/hooks`. The agent rules in
 `codex-plugin/AGENTS.md` are not written for you: append them to your
 `AGENTS.md` ([details](../codex-plugin/README.md)).

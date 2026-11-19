@@ -67,8 +67,9 @@ def test_all_cli_commands_have_router_and_generated_slash_aliases() -> None:
     inventory = json.loads((PLUGIN / "command-inventory.json").read_text(encoding="utf-8"))
     commands = inventory["primary_commands"]
     # Includes `slm consent`, `slm measurement`, `slm flags`, outcome reporting,
-    # Memory health (enrich), `slm tools`, `slm repair-speaker`, `slm hide` and `slm cues`.
-    assert len(commands) == 89  # +`slm trust`, `slm why`, `slm signing`, `slm proposals`, `slm wiki`, `slm import` (4.2.30, WS-5/6/9)
+    # Memory health (enrich), `slm tools`, `slm repair-speaker`, `slm hide` and `slm cues`;
+    # 4.2.30 (WS-5/6/9): `slm trust`, `slm why`, `slm signing`, `slm proposals`, `slm wiki`, `slm import`.
+    assert len(commands) == 89
     assert len(set(commands)) == len(commands)
     runtime = _runtime()
     assert 'ctx.register_command("slm", plugin.slash_router' in runtime
