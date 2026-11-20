@@ -129,6 +129,10 @@ class Lane:
                   "embedding": {"provider": "openai", "api_endpoint": f"{models_url}/v1",
                                 "model_name": "stub-old", "dimension": 768, "api_key": ""}}
         (self.data_root / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        # No scheduled backup: a snapshot taken mid-test still holds the memory the
+        # test erases, and that erase is a separate case (#342), not a model switch.
+        (self.data_root / "backup_config.json").write_text(
+            json.dumps({"enabled": False}), encoding="utf-8")
         self.daemon = self.start()
 
     def start(self) -> RealDaemon:
