@@ -12,6 +12,7 @@ every host. Imports the tools only; it starts no daemon and opens no store.
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import tempfile
@@ -21,16 +22,21 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Write plugin-src/skills/slm-cli/SKILL.md from the MCP tool registry.")
+    parser.add_argument("--check", action="store_true",
+                        help="exit 1 when the file has drifted; write nothing")
+    check = parser.parse_args(argv).check  # --help and a typo exit here, before any write
     # Registering tools reads settings; keep this run away from the user's own data.
-    scratch = tempfile.mkdtemp(prefix="slm-cli-skill-")
-    os.environ["SLM_DATA_DIR"] = scratch
-    os.environ.setdefault("SLM_DISABLE_WARMUP_SIDE_EFFECTS", "1")
-    sys.path.insert(0, str(ROOT / "src"))
-    from superlocalmemory.cli.cli_skill import REGENERATE, SKILL_PATH, render_from_registry
+    with tempfile.TemporaryDirectory(prefix="slm-cli-skill-", ignore_cleanup_errors=True) as scratch:
+        os.environ["SLM_DATA_DIR"] = scratch
+        os.environ.setdefault("SLM_DISABLE_WARMUP_SIDE_EFFECTS", "1")
+        sys.path.insert(0, str(ROOT / "src"))
+        from superlocalmemory.cli.cli_skill import REGENERATE, SKILL_PATH, render_from_registry
 
+        text = render_from_registry()
     target = ROOT / SKILL_PATH
-    text = render_from_registry()
-    if "--check" in argv:
+    if check:
         current = target.read_text(encoding="utf-8") if target.exists() else ""
         if current != text:
             print(f"{SKILL_PATH} has drifted from the tool registry. Run: {REGENERATE}")
