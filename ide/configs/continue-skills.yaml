@@ -20,7 +20,7 @@ slashCommands:
     run: "slm status"
 
   - name: "slm-media"
-    description: "Are pictures and documents on? (off by default; needs 16 GB of memory)"
+    description: "Are pictures and documents on? (on by default; sets up by itself from 16 GB of memory)"
     run: "slm media status"
 
 # Usage in Continue.dev:

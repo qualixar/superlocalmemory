@@ -2,7 +2,7 @@
 # SuperLocalMemory one-line installer for macOS (Apple Silicon) and 64-bit Linux.
 #
 #   curl -fsSLo get-slm.sh https://raw.githubusercontent.com/qualixar/superlocalmemory/main/scripts/get-slm.sh && sh get-slm.sh
-#   sh get-slm.sh --media          also turn on pictures and documents (needs 16 GB RAM)
+#   sh get-slm.sh --media          start the pictures and documents download now (on by default)
 #
 # No Python and no Node are needed.  The script installs `uv` (Astral's tool
 # installer) when it is missing, lets uv fetch its own Python 3.12 for
@@ -75,7 +75,7 @@ usage() {
     say "SuperLocalMemory one-line installer"
     say ""
     say "  curl -fsSLo get-slm.sh https://raw.githubusercontent.com/qualixar/superlocalmemory/main/scripts/get-slm.sh && sh get-slm.sh"
-    say "  sh get-slm.sh --media    also turn on pictures and documents (needs 16 GB RAM)"
+    say "  sh get-slm.sh --media    start the pictures and documents download now (they are on by default)"
     say ""
     say "Environment: SLM_VERSION=<x.y.z> pins a release, SLM_MEDIA=1 is the same as --media."
 }

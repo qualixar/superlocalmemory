@@ -74,3 +74,33 @@ def test_other_texts_do_not_say_a_small_computer_is_refused(rel):
     text = (REPO / rel).read_text(encoding="utf-8")
     stale = [p for p in STALE if re.search(p, text)]
     assert stale == [], f"{rel} still says: {stale}"
+
+
+# Hand-written texts outside the generated skill trees that also describe the feature.
+HAND_WRITTEN = [
+    "codex-plugin/AGENTS.md",
+    "plugin-src/rules/AGENTS.md",
+    "ide/configs/continue-skills.yaml",
+    "scripts/get-slm.sh",
+    "scripts/get-slm.ps1",
+    "wiki-content/Privacy-and-Data-Flow.md",
+]
+_FEATURE = re.compile(r"picture|document|media|image", re.I)
+# A line about the feature must not call it off by default or say 16 GB is required.
+_STALE_LINE = re.compile(r"off by default|needs 16 GB|needs 16 GiB|requires 16 GB|optional and off", re.I)
+
+
+@pytest.mark.parametrize("rel", HAND_WRITTEN)
+def test_hand_written_texts_do_not_call_pictures_off_by_default_or_16_gb_only(rel):
+    lines = (REPO / rel).read_text(encoding="utf-8").splitlines()
+    stale = [f"{n}: {ln.strip()[:110]}" for n, ln in enumerate(lines, 1)
+             if _FEATURE.search(ln) and _STALE_LINE.search(ln)]
+    assert stale == [], f"{rel} still says the feature is off or needs 16 GB:\n" + "\n".join(stale)
+
+
+@pytest.mark.parametrize("rel", ["codex-plugin/AGENTS.md", "plugin-src/rules/AGENTS.md"])
+def test_agent_rules_say_on_by_default_and_the_16_gb_rule(rel):
+    text = (REPO / rel).read_text(encoding="utf-8")
+    section = text.split("## Pictures and documents", 1)[1].split("\n---\n", 1)[0]
+    assert section.lstrip().startswith("On by default."), rel
+    assert "automatic on a computer with 16 GB" in section and "one click below that" in section, rel

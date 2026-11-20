@@ -74,7 +74,7 @@ When a task has a checkable acceptance condition (tests, schema, lint, reconcili
 
 ## Pictures and documents
 
-Optional and off by default. A normal `recall` also searches saved pictures and PDF pages once the user has turned the feature on (`slm media enable`: a computer with 16 GB of memory, about 1.5 GB downloaded, the user's decision; never pass `--yes` for them; check with `slm media status`).
+On by default. A normal `recall` also searches saved pictures and PDF pages once the feature is set up (automatic on a computer with 16 GB of memory, about 1.5 GB downloaded; one click below that, the user's decision; never pass `--yes` for them; a person who turned it off keeps it off; check with `slm media status`).
 
 - `remember` stores text only. Save a picture with `remember_media` and a PDF with `remember_document`: give exactly one of `path`, `download_url` (https), `base64` or `file` (a ChatGPT attachment), plus `content` words saying why it matters. A PDF returns a `job_id`; follow it with `media_status`. `get_media` shows a thumbnail.
 - Limits: a picture is 25 MB (PNG, JPEG, GIF, WebP), a PDF 100 MB and at most 500 pages; pasted data is capped at 8 MB (picture) or 25 MB (PDF) from a local app and 512 KB from a web app.
