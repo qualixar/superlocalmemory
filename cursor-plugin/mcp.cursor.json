@@ -3,7 +3,7 @@
     "superlocalmemory": {
       "args": [
         "--from",
-        "superlocalmemory==4.2.32",
+        "superlocalmemory==4.2.33",
         "slm",
         "mcp"
       ],

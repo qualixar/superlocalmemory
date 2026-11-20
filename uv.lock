@@ -3023,7 +3023,7 @@ wheels = [
 
 [[package]]
 name = "superlocalmemory"
-version = "4.2.32"
+version = "4.2.33"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
