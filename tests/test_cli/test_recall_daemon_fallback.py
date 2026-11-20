@@ -154,7 +154,9 @@ def test_keyword_fallback_response_includes_retrieval_time_ms() -> None:
                 return []
             return _any
 
-    result = _recall_keyword_fallback(_Engine(), "query", 5)
+    # A generous source-check budget: this test is about the envelope, not
+    # timing (the 0.5 s default ran out on a busy CI runner in 4.2.31).
+    result = _recall_keyword_fallback(_Engine(), "query", 5, fidelity_budget_s=10.0)
 
     assert "retrieval_time_ms" in result, (
         "keyword fallback must return retrieval_time_ms — every other recall "
