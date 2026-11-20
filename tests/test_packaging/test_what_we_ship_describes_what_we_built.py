@@ -38,6 +38,20 @@ SHIPPED_MARKDOWN = sorted(
 ) if (REPO / "plugin-src").exists() else []
 
 
+_FULL_NAME_PREFIXES = (
+    "mcp__plugin_superlocalmemory_superlocalmemory__",
+    "mcp__superlocalmemory__",
+)
+
+
+def _unqualified(tool: str) -> str:
+    """``mcp__superlocalmemory__recall`` -> ``recall``; anything else unchanged."""
+    for prefix in _FULL_NAME_PREFIXES:
+        if tool.startswith(prefix):
+            return tool[len(prefix):]
+    return tool
+
+
 def _real_tool_names() -> set[str]:
     """Every name registered with @server.tool(), read from the source.
 
@@ -97,6 +111,10 @@ class TestEveryToolWeTellAnAgentToUseExists:
                         t.strip() for t in stripped[len(key):].split(",") if t.strip()
                     ]
                     for tool in declared:
+                        # Claude Code resolves an agent's MCP tools by full name:
+                        # mcp__superlocalmemory__<tool> (added as an MCP server) or
+                        # mcp__plugin_superlocalmemory_superlocalmemory__<tool> (plugin).
+                        tool = _unqualified(tool)
                         # "Bash(slm:*)" narrows the host's Bash tool to slm commands.
                         if tool.split("(", 1)[0] in host_tools or tool in real:
                             continue

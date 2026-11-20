@@ -24,6 +24,7 @@ import {
   readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync,
 } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
+import { bareAgentTools } from './agent-tool-names.mjs';
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), '..');
 const SRC = join(ROOT, 'plugin');
@@ -40,7 +41,11 @@ function walk(dir) {
     if (e.isDirectory()) walk(abs);
     else if (e.isFile()) {
       const rel = relative(SRC, abs).split('\\').join('/');
-      if (KEEP.some((re) => re.test(rel))) files.set(join(OUT, rel), readFileSync(abs, 'utf8'));
+      if (KEEP.some((re) => re.test(rel))) {
+        const text = readFileSync(abs, 'utf8');
+        // plugin/ spells tools the way Claude Code needs; VS Code keeps the bare source names.
+        files.set(join(OUT, rel), /^agents\//.test(rel) ? bareAgentTools(text) : text);
+      }
     }
   }
 }

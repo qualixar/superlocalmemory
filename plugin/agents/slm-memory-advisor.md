@@ -5,7 +5,7 @@ description: >
   session_init, remember, recall, and search; how to phrase queries; and how
   to keep memory clean. Delegate here for any "should I save/recall this?"
   decision or when memory results look wrong.
-tools: session_init, recall, search, remember, update_memory, forget, list_recent, Read
+tools: mcp__superlocalmemory__session_init, mcp__plugin_superlocalmemory_superlocalmemory__session_init, mcp__superlocalmemory__recall, mcp__plugin_superlocalmemory_superlocalmemory__recall, mcp__superlocalmemory__search, mcp__plugin_superlocalmemory_superlocalmemory__search, mcp__superlocalmemory__remember, mcp__plugin_superlocalmemory_superlocalmemory__remember, mcp__superlocalmemory__update_memory, mcp__plugin_superlocalmemory_superlocalmemory__update_memory, mcp__superlocalmemory__forget, mcp__plugin_superlocalmemory_superlocalmemory__forget, mcp__superlocalmemory__list_recent, mcp__plugin_superlocalmemory_superlocalmemory__list_recent, Read
 model: inherit
 ---
 
