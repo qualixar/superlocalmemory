@@ -107,30 +107,38 @@ _WRITER = textwrap.dedent("""
     import sys
     from pathlib import Path
     from superlocalmemory.hooks import event_spool
-    root, me = Path(sys.argv[1]), int(sys.argv[2])
+    root, me, wait_s = Path(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
     for i in range(200):
         ev = {"kind": "tool_event", "event_id": f"{me:08x}{i:024x}", "profile_id": "default",
               "session_id": "s", "tool_name": "Read", "output_summary": "y" * 900}
-        r = event_spool.append_events([ev], profile="default", root=root)
+        r = event_spool.append_events([ev], profile="default", root=root, wait_s=wait_s)
         assert r.written == 1, r
 """)
 
 
 def test_concurrent_hook_processes_never_tear_a_line(tmp_path: Path) -> None:
-    procs = [subprocess.Popen([sys.executable, "-c", _WRITER, str(tmp_path), str(n)])
-             for n in range(6)]
-    # Claims racing the writers is the daemon's normal life, at the daemon's
-    # fastest pace (hook_event_writer floors its interval at 50 ms). A claim
-    # loop with no pause starved the writers past their 1 s lock wait on a
-    # loaded test host, which no daemon does.
+    from superlocalmemory.hooks.event_delivery import SPOOL_LOCK_WAIT_S
+
+    # Half wait like a hook (then write beside the lock), half like the daemon's intake.
+    waits = [SPOOL_LOCK_WAIT_S, event_spool.LOCK_WAIT_S] * 3
+    procs = [subprocess.Popen([sys.executable, "-c", _WRITER, str(tmp_path), str(n), str(w)])
+             for n, w in enumerate(waits)]
+    # Claims race the writers at the daemon's fastest pace (hook_event_writer
+    # floors its interval at 50 ms). A claim that finds the lock busy is
+    # retried on the next pass, as the daemon's writer loop does: the events
+    # stay spooled, so a late claim delays them and loses none.
     claimed: dict[Path, None] = {}
     while any(p.poll() is None for p in procs):
-        claimed.update(dict.fromkeys(event_spool.claim_ready(tmp_path)))
+        try:
+            claimed.update(dict.fromkeys(event_spool.claim_ready(tmp_path)))
+        except event_spool.SpoolLockBusy:
+            pass
         time.sleep(0.05)
     assert all(p.wait(timeout=120) == 0 for p in procs)
     claimed.update(dict.fromkeys(event_spool.claim_ready(tmp_path)))
     ids = [e["event_id"] for p in claimed for e in _lines(p)]
     assert len(ids) == 1200 and len(set(ids)) == 1200
+    assert not list(tmp_path.glob(".*.part"))
 
 
 def test_a_dotted_profile_never_shares_files_with_another(tmp_path: Path) -> None:
