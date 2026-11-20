@@ -213,9 +213,10 @@ def _cmd_call(name: str, rest: list[str]) -> None:
         tool_args.validate(arguments, tool.parameters)
     except tool_args.ArgumentProblem as exc:
         _fail("invalid_arguments", str(exc), tool=name, details=exc.details)
+    # The daemon first: a daemon this call starts must never see the session bound below.
+    _ensure_daemon()
     if name.startswith("mesh_"):
         tool_host.bind_mesh_session(opts.session)
-    _ensure_daemon()
     result = _run(host, name, arguments)
     payload, is_error = tool_host.result_payload(
         result, Path(opts.image_dir) if opts.image_dir else None)

@@ -197,6 +197,23 @@ def test_mesh_session_is_named_stable_or_given(monkeypatch, tmp_path):
     assert tool_host.bind_mesh_session("mine") == "mine"
 
 
+def test_the_daemon_is_started_before_the_mesh_session_is_bound(monkeypatch, tmp_path):
+    """A daemon this call starts inherits os.environ: it must not see the caller's session."""
+    import os
+
+    for var in ("SLM_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID",
+                "SLM_CLIENT_CHANNEL"):  # all restored after the test
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
+    seen: list[str | None] = []
+    monkeypatch.setattr(tool_cmd, "_ensure_daemon", lambda: seen.append(os.environ.get("SLM_SESSION_ID")))
+    monkeypatch.setattr(tool_cmd, "_run", lambda *_a: CallToolResult(
+        content=[TextContent(type="text", text='{"ok": true}')]))
+    tool_cmd._cmd_call("mesh_inbox", ["--session", "caller-private"])
+    assert seen == [None]
+    assert os.environ["SLM_SESSION_ID"] == "caller-private"  # then bound for this process
+
+
 # -- the CLI form -----------------------------------------------------------------------------
 
 def test_the_cli_form_names_the_required_arguments(tools):

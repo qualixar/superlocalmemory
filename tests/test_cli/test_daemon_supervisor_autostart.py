@@ -126,6 +126,21 @@ def test_daemon_environment_is_pure_and_service_values_win():
     assert base == {"SLM_AGENT_ID": "a", "SLM_RANKING": "client", "PATH": "/x"}
 
 
+def test_daemon_environment_drops_every_caller_session_and_keeps_the_daemons_settings():
+    caller = {"SLM_SESSION_ID": "s", "CLAUDE_SESSION_ID": "c", "CLAUDE_CODE_SESSION_ID": "cc",
+              "SLM_AGENT_ID": "a", "SLM_CLIENT_CHANNEL": "mcp", "SLM_USER_SESSION": "u"}
+    settings = {"SLM_DATA_DIR": "/data", "SLM_DAEMON_PORT": "9999", "SLM_RANKING": "r",
+                "OPENROUTER_API_KEY": "k1", "OPENAI_API_KEY": "k2", "ANTHROPIC_API_KEY": "k3",
+                "PATH": "/x", "HOME": "/h"}
+    assert supervisor.daemon_environment({**caller, **settings}) == settings
+    # The service definition's own settings still win, and still never carry a session.
+    job = _job(9999, SLM_DATA_DIR="/service-data", OPENAI_API_KEY="service",
+               SLM_REQUIRE_CREDENTIALS="1", CLAUDE_SESSION_ID="x")
+    env = supervisor.daemon_environment({**caller, **settings}, job)
+    assert env == {**settings, "SLM_DATA_DIR": "/service-data", "OPENAI_API_KEY": "service",
+                   "SLM_REQUIRE_CREDENTIALS": "1"}
+
+
 # --- the service-manager commands ------------------------------------------------
 
 class _Runner:
