@@ -212,6 +212,27 @@ def _withholding_off_unless_a_test_turns_it_on(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _logger_levels_restored_after_each_test():
+    """A test that changes a logger's level must not change it for the next one.
+
+    ``slm tool`` quiets the root and ``superlocalmemory`` loggers to WARNING for
+    its own process (``cli.tool_cmd._quiet_logs``). Run in-process by a test,
+    that level outlived the test, and a later test in the same worker that
+    reads an INFO line through ``caplog`` saw nothing: ``caplog.at_level``
+    lowers only the root logger, and the ``superlocalmemory`` logger above the
+    module still dropped the record. Which test failed depended on the order
+    the worker ran them in.
+    """
+    import logging
+
+    names = ("", "superlocalmemory")
+    before = {name: logging.getLogger(name).level for name in names}
+    yield
+    for name, level in before.items():
+        logging.getLogger(name).setLevel(level)
+
+
+@pytest.fixture(autouse=True)
 def _stop_leaked_config_watchdogs():
     """Stop any config-store hot-reload watchdog left running by a test.
 
