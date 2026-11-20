@@ -30,6 +30,7 @@ import time
 from typing import TYPE_CHECKING
 
 from superlocalmemory.cli import daemon_startup as _startup
+from superlocalmemory.cli import daemon_supervisor as _supervisor
 from superlocalmemory.cli.daemon_errors import (  # noqa: F401 - re-exported
     DaemonServerError,
     server_error_from,
@@ -853,6 +854,11 @@ def start_lock_is_held() -> bool:
             pass
 
 
+def _no_daemon_near(port: int) -> bool:
+    """No daemon record names a live process, the lock is free, the port is unbound."""
+    return not _data_folder_is_owned() and not _has_tcp_listener(port)
+
+
 def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     """Spawn the unified daemon subprocess and wait for readiness.
 
@@ -885,6 +891,17 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
         logger.warning("daemon port %d is already owned; refusing a second start", _target_port)
         return False
     assert_no_durable_root_conflict()
+    # The installed service owns the daemon: a detached child of this client
+    # would carry the client's environment and collide with the service later.
+    # A service that accepts the start but runs nothing (a Windows task whose
+    # wrapper points at a removed Python) falls back to a direct start, but
+    # only while no daemon owns the folder or the port.
+    ready, service_job = _supervisor.start_through_service(
+        _target_port, lambda proc: _wait_for_daemon(timeout=60, proc=proc),
+        nothing_started=lambda: _no_daemon_near(_target_port),
+    )
+    if ready is not None:
+        return ready
 
     import subprocess
 
@@ -911,9 +928,14 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     # initialized by an earlier import, causing the SIGSEGV at
     # __kmp_suspend_initialize_thread when lightgbm forks its worker pool.
     # Forcing serial OpenMP eliminates the parallel barrier race entirely.
-    daemon_env = os.environ.copy()
-    daemon_env["OMP_NUM_THREADS"] = "1"
-    daemon_env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    # Never the client's identity (agent, channel, tool profile); the service's
+    # settings when a service exists but would not start it. The serial
+    # OpenMP defaults replace the client's own values, and a value the
+    # service definition sets replaces them in turn (the service wins).
+    daemon_env = _supervisor.daemon_environment(
+        {**os.environ, "OMP_NUM_THREADS": "1", "KMP_DUPLICATE_LIB_OK": "TRUE"},
+        service_job,
+    )
     bootstrap_descriptor = build_descriptor(
         port=_target_port,
         version=_slm_version,
@@ -1237,8 +1259,18 @@ def _describe_daemon_unavailability() -> dict[str, str]:
     return daemon_diagnosis.describe(sys.modules[__name__])
 
 
-def stop_daemon() -> bool:
+def _is_same_daemon(descriptor, expected) -> bool:
+    return (descriptor is not None and descriptor.pid == expected.pid
+            and descriptor.instance_id == expected.instance_id)
+
+
+def stop_daemon(expected=None) -> bool:
     """Stop only the daemon proven to belong to this data namespace.
+
+    ``expected``: a daemon record the caller already checked. The stop is
+    then bound to that exact instance; if the folder's record now names any
+    other daemon, nothing is stopped and False is returned. The request
+    carries the instance id, so the daemon refuses it too if it changed.
 
     Machine-wide process-name scans are forbidden: they can kill another SLM
     installation or a user's live workers during tests. V3.7 uses the owned
@@ -1266,6 +1298,8 @@ def stop_daemon() -> bool:
     stall-prone preflight round trip.
     """
     descriptor = read_descriptor()
+    if expected is not None and not _is_same_daemon(descriptor, expected):
+        return False
     legacy = _verified_legacy_health() if descriptor is None else None
     if descriptor is None and legacy is None:
         return False
@@ -1280,6 +1314,8 @@ def stop_daemon() -> bool:
             # "starting" must not make this command hang indefinitely.
             ready = _startup.wait_for_starting_daemon(seconds=_startup.stop_wait_budget())
             descriptor = ready[0] if ready is not None else descriptor
+            if expected is not None and not _is_same_daemon(descriptor, expected):
+                return False
         response = daemon_request(
             "POST",
             "/stop",
