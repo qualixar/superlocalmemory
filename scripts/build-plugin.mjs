@@ -25,6 +25,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import process from 'node:process';
 import { cursorPlan } from './build-cursor-plugin.mjs';
+import { claudeCodeAgentTools } from './agent-tool-names.mjs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -492,7 +493,7 @@ export function buildPlan(root, manifest) {
   cursorPlan(root, manifest, pluginRoot, plan).forEach((content, p) => plan.set(p, content));
 
   // ---------------------------------------------------------------------------
-  // Agents (verbatim)
+  // Agents (verbatim, except the `tools:` line: see claudeCodeAgentTools)
   // ---------------------------------------------------------------------------
   const agentsSrcPath = path.join(root, 'plugin-src', 'agents');
   if (fs.existsSync(agentsSrcPath)) {
@@ -506,6 +507,9 @@ export function buildPlan(root, manifest) {
         /SuperLocalMemory v\d+\.\d+\.\d+/g,
         `SuperLocalMemory v${manifest.version}`,
       );
+      // Claude Code resolves a sub-agent's tools by full MCP name only, so the
+      // bare names in plugin-src become the plugin and direct-MCP spellings.
+      if (fname.endsWith('.md')) content = claudeCodeAgentTools(content, manifest.pluginName);
       plan.set(path.join(pluginRoot, 'agents', fname), content);
     }
   }

@@ -8,7 +8,7 @@ description: >
   completion with an auditable ledger persisted in SLM. Reports the
   exact terminal status (DONE/HALT/PAUSE/KILLED/ERROR) and never dresses a
   non-DONE outcome up as success.
-tools: Bash, recall, remember, Read, slm_loop_run, slm_loop_history, slm_loop_show
+tools: Bash, mcp__superlocalmemory__recall, mcp__plugin_superlocalmemory_superlocalmemory__recall, mcp__superlocalmemory__remember, mcp__plugin_superlocalmemory_superlocalmemory__remember, Read, mcp__superlocalmemory__slm_loop_run, mcp__plugin_superlocalmemory_superlocalmemory__slm_loop_run, mcp__superlocalmemory__slm_loop_history, mcp__plugin_superlocalmemory_superlocalmemory__slm_loop_history, mcp__superlocalmemory__slm_loop_show, mcp__plugin_superlocalmemory_superlocalmemory__slm_loop_show
 model: inherit
 ---
 

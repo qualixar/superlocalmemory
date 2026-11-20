@@ -24,7 +24,8 @@
 //     "[" as JSON, fails to parse it and drops the context. `slm hook
 //     codex-start` emits the same context as hookSpecificOutput JSON, which
 //     Muse (like Codex and Claude Code) accepts.
-//   - agents: bare SLM tool names in `tools:` become mcp__superlocalmemory__<tool>.
+//   - agents: `tools:` keeps only the mcp__superlocalmemory__<tool> spelling (plugin/ also
+//     lists Claude Code's plugin-bundled one).
 //   Built from plugin/ (run build-plugin.mjs first) so the hooks, scripts,
 //   agents and skill text cannot drift from the Claude Code plugin.
 
@@ -32,6 +33,7 @@ import {
   readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync, chmodSync,
 } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
+import { directAgentTools } from './agent-tool-names.mjs';
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), '..');
 const SRC = join(ROOT, 'plugin');
@@ -69,17 +71,12 @@ export function dropAllowedTools(md) {
 
 /**
  * Muse names MCP tools mcp__<server>__<tool> (dev.meta.ai/docs/muse-code); an
- * agent's bare `recall` would match nothing. Capitalised names are host
- * built-ins (Read, Bash) and stay as they are.
+ * agent's bare `recall` would match nothing. plugin/ lists both the plugin and
+ * the direct spelling for Claude Code, so keep only the direct one here.
+ * Capitalised names are host built-ins (Read, Bash) and stay as they are.
  */
 export function qualifyAgentTools(md) {
-  const fm = md.match(/^---\n[\s\S]*?\n---\n/);
-  if (!fm) return md;
-  const head = fm[0].replace(/^tools:(.*)$/m, (_, list) => 'tools: ' + list.split(',')
-    .map((t) => t.trim()).filter(Boolean)
-    .map((t) => (/^[a-z][a-z0-9_]*$/.test(t) ? `mcp__superlocalmemory__${t}` : t))
-    .join(', '));
-  return head + md.slice(fm[0].length);
+  return directAgentTools(md);
 }
 
 /** Use the SessionStart action that answers in hookSpecificOutput JSON. */

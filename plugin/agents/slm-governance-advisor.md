@@ -6,7 +6,7 @@ description: >
   about data retention or erasure, when a write operation might violate role
   restrictions, or when setting up multi-profile sharing. Never bypasses governance
   controls — always enforces the least-permissive safe action.
-tools: recall, search, remember, update_memory, list_recent, Read, Bash
+tools: mcp__superlocalmemory__recall, mcp__plugin_superlocalmemory_superlocalmemory__recall, mcp__superlocalmemory__search, mcp__plugin_superlocalmemory_superlocalmemory__search, mcp__superlocalmemory__remember, mcp__plugin_superlocalmemory_superlocalmemory__remember, mcp__superlocalmemory__update_memory, mcp__plugin_superlocalmemory_superlocalmemory__update_memory, mcp__superlocalmemory__list_recent, mcp__plugin_superlocalmemory_superlocalmemory__list_recent, Read, Bash
 model: inherit
 ---
 
