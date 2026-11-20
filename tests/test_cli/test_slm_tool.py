@@ -259,7 +259,84 @@ def test_the_skill_ships_to_every_host():
 
 
 def test_a_lone_dash_means_stdin_but_a_dash_value_is_a_value():
-    assert tool_cmd._split_stdin(["-"]) == ([], True)
-    assert tool_cmd._split_stdin(["--content", "-"]) == (["--content", "-"], False)
-    assert tool_cmd._split_stdin(["--pretty", "-"]) == (["--pretty"], True)
-    assert tool_cmd._split_stdin(["--limit=3", "-"]) == (["--limit=3"], True)
+    def split(tokens):
+        call = tool_cmd._split_call(tokens)
+        return call.tool_tokens, call.use_stdin
+
+    assert split(["-"]) == ([], True)
+    assert split(["--content", "-"]) == (["--content", "-"], False)
+    assert split(["--pretty", "-"]) == ([], True)
+    assert split(["--limit=3", "-"]) == (["--limit=3"], True)
+
+
+@pytest.mark.parametrize("value", ["-h", "--help", "--json", "--pretty", "--tool-set", "-", "--"])
+def test_a_tool_value_that_looks_like_an_option_is_the_value(value):
+    call = tool_cmd._split_call(["--key", "k", "--value", value])
+    assert call.tool_tokens == ["--key", "k", "--value", value]
+    assert not call.wants_help and not call.use_stdin
+    assert call.options == {}
+
+
+@pytest.mark.parametrize("tokens, tool_set", [(["--help"], None), (["-h"], None),
+                                               (["--tool-set", "core", "-h"], "core")])
+def test_help_alone_is_still_the_tools_description(tokens, tool_set):
+    call = tool_cmd._split_call(tokens)
+    assert call.wants_help and call.options.get("tool_set") == tool_set
+
+
+def test_slm_tools_own_options_are_still_read():
+    call = tool_cmd._split_call(["--json", '{"key": "k"}', "--pretty", "--session=s", "--value", "v"])
+    assert call.options == {"json": '{"key": "k"}', "pretty": True, "session": "s"}
+    assert call.tool_tokens == ["--value", "v"]
+
+
+def _capture_call(monkeypatch):
+    sent = {}
+
+    def run(_host, name, arguments):
+        sent.update(name=name, arguments=arguments)
+        return CallToolResult(content=[TextContent(type="text", text='{"success": true}')])
+
+    monkeypatch.setattr(tool_cmd, "_run", run)
+    monkeypatch.setattr(tool_cmd, "_ensure_daemon", lambda: None)
+    monkeypatch.delenv("SLM_CLIENT_CHANNEL", raising=False)  # build_host claims it; restored
+    return sent
+
+
+@pytest.mark.parametrize("value", ["-h", "--json", "--pretty"])
+def test_an_option_looking_value_reaches_the_tool(monkeypatch, capsys, value):
+    sent = _capture_call(monkeypatch)
+    tool_cmd._cmd_call("slm_cache_set", ["--key", "k", "--value", value])
+    assert sent == {"name": "slm_cache_set", "arguments": {"key": "k", "value": value}}
+    assert capsys.readouterr().out.strip() == '{"success": true}'
+
+
+@pytest.mark.parametrize("tokens, code", [
+    (["--key", "k", "--json"], "invalid_arguments"),
+    (["--key", "k", "--pretty=yes"], "invalid_arguments"),
+    (["--key"], "invalid_arguments"),
+    (["--key", "k", "--tool-set", "nonsense"], "unknown_tool_set"),
+])
+def test_every_failure_of_a_call_is_json_on_stdout(monkeypatch, capsys, tokens, code):
+    import json
+
+    _capture_call(monkeypatch)
+    with pytest.raises(SystemExit) as exited:
+        tool_cmd._cmd_call("slm_cache_set", tokens)
+    assert exited.value.code == tool_cmd.EXIT_USAGE
+    body = json.loads(capsys.readouterr().out)
+    assert body["success"] is False and body["code"] == code, body
+
+
+@pytest.mark.parametrize("command, rest", [("describe", []), ("list", ["--nonsense"]),
+                                           ("describe", ["recall", "--tool-set"])])
+def test_list_and_describe_failures_are_json_on_stdout(monkeypatch, capsys, command, rest):
+    import json
+    from argparse import Namespace
+
+    monkeypatch.delenv("SLM_CLIENT_CHANNEL", raising=False)
+    with pytest.raises(SystemExit) as exited:
+        tool_cmd.cmd_tool(Namespace(target=command, rest=rest))
+    assert exited.value.code == tool_cmd.EXIT_USAGE
+    out = capsys.readouterr().out
+    assert json.loads(out)["code"] == "usage", out

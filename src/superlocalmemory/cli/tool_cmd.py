@@ -21,15 +21,20 @@ import asyncio
 import difflib
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
 from superlocalmemory.cli import tool_args, tool_host
 
 EXIT_OK, EXIT_TOOL_ERROR, EXIT_USAGE = 0, 1, 2
+#: ``slm tool NAME``'s own options, and whether each takes a value. A tool argument never
+#: has one of these names (``RESERVED_OPTIONS``; a test checks every tool).
+_CALL_OPTIONS = {"json": True, "args_file": True, "tool_set": True, "session": True,
+                 "image_dir": True, "pretty": False}
 #: Options of ``slm tool NAME`` itself; a tool argument with one of these names
 #: is passed with ``--json`` (none of today's tools has one; a test says so).
-RESERVED_OPTIONS = frozenset({"json", "args_file", "tool_set", "session", "image_dir", "pretty"})
+RESERVED_OPTIONS = frozenset(_CALL_OPTIONS)
 
 _EPILOG = """\
 examples:
@@ -76,8 +81,15 @@ def _fail(code: str, message: str, *, tool: str = "", details: list[str] | None 
     sys.exit(exit_code)
 
 
+class _JsonErrorParser(argparse.ArgumentParser):
+    """A usage error is a JSON failure on stdout, like every other failure of ``slm tool``."""
+
+    def error(self, message: str) -> NoReturn:
+        _fail("usage", f"{self.prog}: {message}")
+
+
 def _sub_parser(prog: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, allow_abbrev=False, add_help=True)
+    parser = _JsonErrorParser(prog=prog, allow_abbrev=False, add_help=True)
     parser.add_argument("--tool-set", default=None,
                         help="core, code, full, power, mesh, whole (default) or mcp "
                              "(what an MCP connection on this computer sees now)")
@@ -164,63 +176,88 @@ def _type_label(spec: dict[str, Any]) -> str:
     return "/".join(kinds) or "any"
 
 
-def _call_parser(name: str) -> argparse.ArgumentParser:
-    parser = _sub_parser(f"slm tool {name}")
-    parser.add_argument("--json", dest="json_text", default=None, metavar="OBJECT",
-                        help="The tool's arguments as one JSON object")
-    parser.add_argument("--args-file", default=None, metavar="PATH",
-                        help="Read the arguments (a JSON object) from a file")
-    parser.add_argument("--session", default=None,
-                        help="Mesh tools: the session whose inbox and peer id to use "
-                             "(default: SLM_SESSION_ID, else one per agent and folder)")
-    parser.add_argument("--image-dir", default=None, metavar="DIR",
-                        help="Write images a tool returns to DIR instead of inline base64")
-    parser.add_argument("--pretty", action="store_true", help="Indent the JSON output")
-    return parser
+_HELP = ("-h", "--help")
 
 
-def _split_stdin(rest: list[str]) -> tuple[list[str], bool]:
-    """``rest`` without a lone ``-`` (arguments on stdin), and whether one was there.
+@dataclass(frozen=True)
+class _Call:
+    """``slm tool NAME`` tokens, split into slm tool's own options and the tool's arguments."""
 
-    A ``-`` right after an option that takes a value (``--content -``) is that value.
+    options: dict[str, Any]
+    tool_tokens: list[str]
+    use_stdin: bool
+    wants_help: bool
+
+
+def _split_call(rest: list[str]) -> _Call:
+    """Read the tokens after the tool name, left to right.
+
+    The token after a tool argument (``--value``) is always that argument's value, whatever
+    it looks like: ``--value -h``, ``--value --json`` and ``--value -`` send those strings to
+    the tool. Only a token in an option's position is one of slm tool's own options, a lone
+    ``-`` (arguments on stdin), or ``-h``/``--help`` (the tool's description).
     """
-    tokens: list[str] = []
-    use_stdin = False
-    for i, token in enumerate(rest):
-        after_option = i > 0 and rest[i - 1].startswith("--") and "=" not in rest[i - 1] \
-            and rest[i - 1] != "--pretty"
-        if token == "-" and not after_option:
+    options: dict[str, Any] = {}
+    tool_tokens: list[str] = []
+    use_stdin = wants_help = False
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        key, sep, value = token[2:].partition("=") if token.startswith("--") else ("", "", "")
+        name = key.replace("-", "_")
+        if token in _HELP:
+            wants_help = True
+        elif token == "-":
             use_stdin = True
+        elif name in _CALL_OPTIONS:
+            if not _CALL_OPTIONS[name]:
+                if sep:
+                    raise tool_args.ArgumentProblem(f"--{key} takes no value")
+                options[name] = True
+            elif sep:
+                options[name] = value
+            elif i + 1 < len(rest):
+                i += 1
+                options[name] = rest[i]
+            else:
+                raise tool_args.ArgumentProblem(f"--{key} needs a value")
+        elif key and not sep and i + 1 < len(rest):
+            tool_tokens += [token, rest[i + 1]]  # a tool argument and its value
+            i += 1
         else:
-            tokens.append(token)
-    return tokens, use_stdin
+            tool_tokens.append(token)  # --key=value, or a stray token flag_pairs reports
+        i += 1
+    return _Call(options, tool_tokens, use_stdin, wants_help)
 
 
 def _cmd_call(name: str, rest: list[str]) -> None:
-    if "-h" in rest or "--help" in rest:  # a tool's help is its description
-        opts, _ = _sub_parser("slm tool").parse_known_args(
-            [t for t in rest if t not in ("-h", "--help")])
-        _cmd_describe([name, *(["--tool-set", opts.tool_set] if opts.tool_set else [])])
+    try:
+        call = _split_call(rest)
+    except tool_args.ArgumentProblem as exc:
+        _fail("invalid_arguments", str(exc), tool=name)
+    opts = call.options
+    if call.wants_help:  # a tool's help is its description
+        tool_set = opts.get("tool_set")
+        _cmd_describe([name, *(["--tool-set", tool_set] if tool_set else [])])
         return
-    tokens, use_stdin = _split_stdin(rest)
-    opts, extra = _call_parser(name).parse_known_args(tokens)
-    host = _host(opts.tool_set)
+    host = _host(opts.get("tool_set"))
     tool = _find(host, name)
     try:
         arguments = tool_args.gather(
-            json_text=opts.json_text, args_file=opts.args_file, use_stdin=use_stdin,
-            pairs=tool_args.flag_pairs(extra), schema=tool.parameters)
+            json_text=opts.get("json"), args_file=opts.get("args_file"),
+            use_stdin=call.use_stdin, pairs=tool_args.flag_pairs(call.tool_tokens),
+            schema=tool.parameters)
         tool_args.validate(arguments, tool.parameters)
     except tool_args.ArgumentProblem as exc:
         _fail("invalid_arguments", str(exc), tool=name, details=exc.details)
     # The daemon first: a daemon this call starts must never see the session bound below.
     _ensure_daemon()
     if name.startswith("mesh_"):
-        tool_host.bind_mesh_session(opts.session)
+        tool_host.bind_mesh_session(opts.get("session"))
     result = _run(host, name, arguments)
-    payload, is_error = tool_host.result_payload(
-        result, Path(opts.image_dir) if opts.image_dir else None)
-    _emit(payload, opts.pretty)
+    image_dir = opts.get("image_dir")
+    payload, is_error = tool_host.result_payload(result, Path(image_dir) if image_dir else None)
+    _emit(payload, bool(opts.get("pretty")))
     if is_error:
         sys.exit(EXIT_TOOL_ERROR)
 
