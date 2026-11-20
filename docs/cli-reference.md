@@ -735,7 +735,7 @@ Start the MCP server on stdio, for IDE configurations that run it as a
 subprocess. For HTTP transport the daemon exposes `/mcp/` itself. See [MCP
 Tools Reference](mcp-tools.md).
 
-### `slm tool list|describe|<name>`
+### `slm tool`
 
 Every MCP tool, from a shell. For an agent that can run commands but does not
 have the SuperLocalMemory MCP server, and for scripts and CI jobs.

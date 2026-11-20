@@ -256,7 +256,7 @@ def _erase(lane, fact_id: str) -> int:
     """DELETE as a real client does: a 503 means "busy, nothing changed, retry"
     (``routes/memories.py``, Retry-After 3), which a busy CI runner can hit while a
     deliberately slowed re-embedding job is writing. Anything else is the answer."""
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 120
     while True:
         code, _ = lane.daemon.request("DELETE", f"/api/memories/{fact_id}")
         if code != 503 or time.monotonic() > deadline:

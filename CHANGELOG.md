@@ -5,6 +5,36 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.32] — Every tool from the shell, no lost hook events, and one daemon the service owns
+
+Nothing changes in the store, and there is nothing to run.
+
+### Added
+
+- `slm tool` reaches every MCP tool from the shell: `slm tool list`, `slm tool describe <name>` and `slm tool <name> --json '{...}'`. Where a client cannot load SLM's MCP server, the pictures-and-documents, mesh, code-graph and learning tools are still available. A new `slm-cli` skill teaches agents the same route (#336).
+
+### Fixed
+
+- A hook no longer loses its events when the spool lock is busy. It writes the batch beside the lock and the next run picks it up. Under heavy load a stress run that kept 19 of 30 events now keeps all 30 (#340).
+- SLM's four Claude Code sub-agents (memory advisor, loop runner, optimize advisor and governance advisor) now receive SLM's memory tools. They named their tools in a form Claude Code does not resolve, so they ran with file tools only. Each now names every tool in both forms Claude Code uses, for the plugin and for a directly configured server (#330).
+- `slm upgrade-hosts` and the once-per-version step now keep Claude Code's SLM skills, advisors and `/slm-loop` current when SLM is set up without the plugin. Before, only the hooks were refreshed, and the report said "already current" while the skills were older. Files SLM wrote and you never changed are refreshed; a file you edited is kept and named; a skill you removed is not put back; anything linked from outside `~/.claude` is left alone. Advisors are installed with the tool names a directly configured server needs (#333).
+- `slm upgrade-hosts` no longer stops with an error when Claude Code uses SLM's plugin (#335).
+- Auto-start now asks the installed service (launchd, systemd or Task Scheduler) to start SLM, so one daemon runs with the service's own settings. A daemon started directly no longer inherits the settings of the app that started it. A daemon started outside the service hands over to the service's daemon when the service starts, and `slm doctor` reports a daemon the service does not own. On macOS the service's state is now read correctly, which also lets `slm serve uninstall` unload a running service again. When the service starts nothing, auto-start falls back to a direct start and says which service needs `slm serve install` (#332).
+- The pictures-and-documents skill, the Codex rules and the guides now say what the code does: the feature is on by default, sets itself up on a computer with 16 GB of memory or more, and is one click below that, never refused (#331).
+- Test fixtures and docstrings use fictional names (#341).
+
+### Changed
+
+- The README links SLM's listing in Awesome AI Agents (#334).
+- Test budgets that a slow CI runner could exhaust were raised (#329).
+
+### Known issues
+
+- Auto-start can reload a service while `slm serve uninstall` is removing it (#337).
+- Hand-over ignores a second service installed for the same data folder on another port (#338).
+- On Linux distributions that ship a user-wide service drop-in, the installed service is not recognised (#339).
+- Deleting a memory that a backup already holds removes it, but the API answers "busy, retry" until that backup is gone (#342). This predates 4.2.32.
+
 ## [4.2.31] — Hooks that fit their time limits and find SLM's tools
 
 A small release of three fixes found on a real Mac the day after 4.2.30. Nothing changes in the store, and there is nothing to run.

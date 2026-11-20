@@ -1,7 +1,7 @@
 ---
 name: slm-cli
 description: Use SuperLocalMemory from the shell when its MCP tools are not available to you. Every MCP tool runs as `slm tool <name>` with the same arguments, checks and JSON result, and the session protocol (start, recall before answering or searching, cue check before editing, remember decisions, pictures and PDFs, close) has a command for each step. Includes the full tool-to-command table.
-version: "4.2.31"
+version: "4.2.32"
 agent: agent
 tools:
   - Bash(slm:*)
