@@ -376,3 +376,63 @@ def test_retry_resumes_partial_erasure_and_reclaims_memory(engine_with_mock_deps
     assert result["ok"] is True
     assert result["erasure_verified"] is True
     assert db.execute("SELECT 1 FROM memories WHERE memory_id = 'mR'") == []
+
+
+def _delete(engine, fid):
+    from superlocalmemory.core.engine_ingestion import local_trusted_actor_id
+    from superlocalmemory.core.mutations import delete_fact_authorized
+
+    return delete_fact_authorized(
+        engine, fid,
+        trusted_actor_id=local_trusted_actor_id("python-api"),
+        source_agent_id="python-api",
+    )
+
+
+def test_delete_held_only_by_a_backup_succeeds_and_names_the_backup(stored_fact, monkeypatch):
+    """#342: a delete that is done and journalled outside every backup is a success.
+
+    The backup still holding the memory is an obligation the receipt records; a
+    restore replays the journal and removes the memory again. Answering
+    "retry" instead could never turn into success while the backup existed.
+    """
+    from superlocalmemory.core.transactions import fetch_receipt, is_tombstoned
+    from superlocalmemory.infra import erased_subjects
+
+    monkeypatch.setattr(erased_subjects, "register_targeted_erasure",
+                        lambda db, profile_id, fact_ids, erasure_id: (True, ["backup-1.db"]))
+    engine, fid = stored_fact
+
+    result = _delete(engine, fid)
+
+    assert result["ok"] is True, result
+    assert not result.get("retryable")
+    assert result["backup_obligations_pending"] == 1
+    # Honest: the erasure is not complete while the backup holds the memory.
+    assert result["erasure_verified"] is False
+    with engine._db.raw_connection() as conn:
+        assert is_tombstoned(conn, engine._profile_id, fid) is True
+        receipt = fetch_receipt(conn, result["erasure_id"])
+        assert any(p.owner == "backup_copies" and not p.erased for p in receipt.proofs)
+
+
+def test_delete_whose_journal_could_not_be_written_stays_retryable(stored_fact, monkeypatch):
+    """Without the journal, restoring the backup would bring the memory back unnoticed."""
+    from superlocalmemory.infra import erased_subjects
+
+    monkeypatch.setattr(erased_subjects, "register_targeted_erasure",
+                        lambda db, profile_id, fact_ids, erasure_id: (False, ["backup-1.db"]))
+    engine, fid = stored_fact
+
+    result = _delete(engine, fid)
+
+    assert result["ok"] is False
+    assert result["retryable"] is True
+
+
+def test_delete_with_no_backup_reports_no_obligation(stored_fact):
+    engine, fid = stored_fact
+    result = _delete(engine, fid)
+    assert result["ok"] is True
+    assert result["erasure_verified"] is True
+    assert result["backup_obligations_pending"] == 0
