@@ -120,6 +120,15 @@ def _detected_hosts(home: Path | None = None) -> list[str]:
             detected.append("claude-code")
     except Exception:
         pass
+    # A skills-only install (SLM's skills and agents in ~/.claude, no hooks) is the one this refresh
+    # exists for; it is found by the same test the refresh itself uses.
+    try:
+        from superlocalmemory.hooks.claude_code_assets import is_integrated
+
+        if is_integrated():
+            detected.append("claude-code")
+    except Exception:
+        pass
 
     # Hermes has a native YAML mapping rather than the portable-kit schema.
     # Detect it for reporting, but never overwrite it with an invented format.
@@ -380,6 +389,9 @@ def _asset_notes(result: dict[str, Any]) -> str:
                   f"refreshed ({result['outside'][0]})")
     if result["removed"]:
         notes += f"; {len(result['removed'])} file(s) you removed were not put back"
+    if result["blocked"]:
+        notes += (f"; {len(result['blocked'])} path(s) are a folder or a broken link where SLM "
+                  f"expects a file and were left alone ({result['blocked'][0]})")
     return notes
 
 

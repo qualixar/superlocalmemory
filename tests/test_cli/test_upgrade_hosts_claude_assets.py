@@ -168,3 +168,22 @@ def test_doctor_names_stale_assets_without_writing(claude_dir) -> None:
 def test_doctor_stays_quiet_for_a_plugin_install_or_no_slm(claude_dir) -> None:
     (claude_dir / "settings.json").write_text('{"theme": "dark"}\n')
     assert host_upgrades.claude_assets_finding() is None
+
+
+def test_a_skills_only_claude_code_is_detected_for_all_detected(claude_dir, tmp_path, monkeypatch) -> None:
+    (claude_dir / "settings.json").write_text('{"theme": "dark"}\n', encoding="utf-8")
+    for rel in PLAN:
+        if "slm-recall" in rel:
+            (claude_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+            (claude_dir / rel).write_text("the 4.1.24 text\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    assert "claude-code" in host_upgrades._detected_hosts(tmp_path / "home")
+
+
+def test_a_claude_code_with_nothing_of_slm_is_still_not_detected(claude_dir, tmp_path, monkeypatch) -> None:
+    (claude_dir / "settings.json").write_text('{"theme": "dark"}\n', encoding="utf-8")
+    (claude_dir / "skills" / "my-own-skill").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    assert "claude-code" not in host_upgrades._detected_hosts(tmp_path / "home")

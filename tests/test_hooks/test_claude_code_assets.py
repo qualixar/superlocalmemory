@@ -10,6 +10,7 @@ the skills added since were missing. Every test runs in a tmp ``~/.claude``; non
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 
@@ -335,3 +336,256 @@ def test_a_failed_asset_write_is_retried_at_the_next_start(daemon_files, claude_
 
     assert outcome["hosts"]["claude-code-assets"]["status"] == "error"
     assert not (daemon_files["data_root"] / "hooks-upgraded.json").exists()
+
+
+# -- review findings on the first version of this change ---------------------------------------
+
+def _recorded_install(claude_dir: Path) -> None:
+    assert _upgrade(claude_dir)["status"] == "updated"  # adds everything and records the digests
+
+
+def test_an_edit_saved_between_the_check_and_the_write_is_kept(claude_dir, tmp_path, monkeypatch) -> None:
+    _recorded_install(claude_dir)
+    nxt = _source_with(tmp_path / "next", {ADVISOR: b"new advisor text\n"})
+    real = assets._decide
+
+    def decide_then_person_types(folder, rel, *args, **kwargs):
+        entry = real(folder, rel, *args, **kwargs)
+        if rel == ADVISOR:
+            (folder / rel).write_text("typed while the upgrade ran\n", encoding="utf-8")
+        return entry
+
+    monkeypatch.setattr(assets, "_decide", decide_then_person_types)
+
+    result = _upgrade(claude_dir, source=nxt)
+
+    assert (claude_dir / ADVISOR).read_text(encoding="utf-8") == "typed while the upgrade ran\n"
+    assert ADVISOR in result["preserved"] and ADVISOR not in result["refreshed"]
+    assert not list(claude_dir.rglob("*.slm_tmp")), "no half-written temp file is left behind"
+    monkeypatch.setattr(assets, "_decide", real)
+    again = _upgrade(claude_dir, source=nxt)  # the manifest must not have learned the new digest
+    assert (claude_dir / ADVISOR).read_text(encoding="utf-8") == "typed while the upgrade ran\n"
+    assert ADVISOR in again["preserved"]
+
+
+def test_a_file_created_between_the_check_and_the_write_is_kept(claude_dir, monkeypatch) -> None:
+    real = assets._decide
+
+    def decide_then_person_creates(folder, rel, *args, **kwargs):
+        entry = real(folder, rel, *args, **kwargs)
+        if rel == COMMAND and entry.action == "add":
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_text("my own /slm-loop\n", encoding="utf-8")
+        return entry
+
+    monkeypatch.setattr(assets, "_decide", decide_then_person_creates)
+
+    result = _upgrade(claude_dir)
+
+    assert (claude_dir / COMMAND).read_text(encoding="utf-8") == "my own /slm-loop\n"
+    assert COMMAND in result["preserved"]
+
+
+def test_an_edit_made_while_the_backup_was_copied_is_not_lost(claude_dir, monkeypatch) -> None:
+    old = _seed_old_install(claude_dir)
+    real = assets._backup
+
+    def backup_then_person_types(target, version):
+        made = real(target, version)
+        if target.name == "SKILL.md" and target.parent.name == "slm-recall":
+            target.write_text("typed after the backup\n", encoding="utf-8")
+        return made
+
+    monkeypatch.setattr(assets, "_backup", backup_then_person_types)
+
+    result = _upgrade(claude_dir)
+
+    assert (claude_dir / SKILL_RECALL).read_text(encoding="utf-8") == "typed after the backup\n"
+    assert SKILL_RECALL in result["preserved"]
+    assert old[SKILL_RECALL] != b"typed after the backup\n"
+
+
+def _failing_replace(monkeypatch, marker: str) -> None:
+    real = os.replace
+
+    def replace(src, dst, *args, **kwargs):
+        if marker in str(dst) and not str(dst).endswith(assets.MANIFEST_NAME):
+            raise OSError(28, "No space left on device")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(assets.os, "replace", replace)
+
+
+def test_a_failed_write_leaves_no_orphan_backup_and_repeats_do_not_stack(claude_dir, monkeypatch) -> None:
+    _seed_old_install(claude_dir)
+    _failing_replace(monkeypatch, "slm-recall")
+
+    for _ in range(3):
+        result = _upgrade(claude_dir)
+        assert result["status"] == "error"
+
+    assert not list((claude_dir / "skills/slm-recall").glob("*.bak-slm-*"))
+    assert result["backups"] == [] or all("slm-recall" not in b for b in result["backups"])
+
+
+def test_an_identical_backup_is_reused_not_copied_again(tmp_path) -> None:
+    target = tmp_path / "SKILL.md"
+    target.write_text("mine\n")
+
+    first = assets._backup(target, "4.2.32")
+    second = assets._backup(target, "4.2.32")
+
+    assert first == second and len(list(tmp_path.glob("*.bak-slm-*"))) == 1
+    target.write_text("mine, edited again\n")
+    third = assets._backup(target, "4.2.32")
+    assert third != first and third.read_text() == "mine, edited again\n"
+    assert first.read_text() == "mine\n", "an earlier backup is never overwritten"
+
+
+def test_a_backup_that_was_already_there_survives_a_failed_write(claude_dir, monkeypatch) -> None:
+    old = _seed_old_install(claude_dir)
+    first = _upgrade(claude_dir)
+    assert first["status"] == "updated"
+    # put the old text back and fail the next write: the earlier (identical) backup must stay
+    (claude_dir / SKILL_RECALL).write_bytes(old[SKILL_RECALL])
+    (claude_dir / assets.MANIFEST_NAME).unlink()
+    _failing_replace(monkeypatch, "slm-recall")
+
+    result = _upgrade(claude_dir)
+
+    assert result["status"] == "error"
+    kept = list((claude_dir / "skills/slm-recall").glob("*.bak-slm-*"))
+    assert len(kept) == 1 and kept[0].read_bytes() == old[SKILL_RECALL]
+
+
+def test_a_file_that_cannot_be_read_is_an_honest_retryable_error(claude_dir, monkeypatch) -> None:
+    _recorded_install(claude_dir)
+    real = Path.read_bytes
+
+    def read_bytes(self):
+        if self == claude_dir / ADVISOR:
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    result = _upgrade(claude_dir, source=_source_with(claude_dir.parent / "next", {ADVISOR: b"new\n"}))
+
+    assert result["status"] == "error"
+    assert ADVISOR in result["detail"] and "read" in result["detail"]
+    assert ADVISOR not in result["preserved"], "the person did not change it; do not say they did"
+    assert result["status"] in hook_upgrade._RETRY_STATUSES
+
+
+def test_an_unreadable_file_keeps_the_version_from_being_marked_done(daemon_files, claude_dir, monkeypatch) -> None:
+    monkeypatch.setattr(claude, "DISABLED_FILE", daemon_files["data_root"] / "no-such-marker")
+    _recorded_install(claude_dir)
+    real = Path.read_bytes
+
+    def read_bytes(self):
+        if self == claude_dir / ADVISOR:
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    outcome = hook_upgrade.run_once(version="4.2.40", env={}, **daemon_files)
+
+    assert outcome["hosts"]["claude-code-assets"]["status"] == "error"
+    assert not (daemon_files["data_root"] / "hooks-upgraded.json").exists()
+
+
+def test_backups_are_reported_as_paths_under_claude_that_exist(claude_dir) -> None:
+    _seed_old_install(claude_dir)
+
+    result = _upgrade(claude_dir)
+
+    backups = result["backups"]
+    assert len(backups) == len(set(backups)) and len(backups) > 1
+    for rel in backups:
+        assert rel.startswith(("skills/", "agents/", "commands/")), rel
+        assert (claude_dir / rel).is_file()
+
+
+def test_a_folder_where_a_file_belongs_is_blocked_the_same_way_in_preview_and_apply(claude_dir) -> None:
+    (claude_dir / SKILL_RECALL).mkdir(parents=True)
+
+    preview = _upgrade(claude_dir, apply=False)
+    applied = _upgrade(claude_dir)
+
+    for result in (preview, applied):
+        assert result["blocked"] == [SKILL_RECALL]
+        assert SKILL_RECALL not in result["added"]
+    assert applied["status"] != "error"
+    assert (claude_dir / SKILL_RECALL).is_dir()
+    assert (claude_dir / ADVISOR).is_file(), "the other files are still added"
+    assert _upgrade(claude_dir)["status"] == "needs-review"
+
+
+# -- CRIT: the re-check must not stop the refresh it exists to protect ------------------------
+
+def test_an_untouched_file_slm_wrote_is_still_refreshed_with_its_mode_and_no_leftovers(claude_dir, tmp_path) -> None:
+    _recorded_install(claude_dir)
+    (claude_dir / ADVISOR).chmod(0o640)
+    nxt = _source_with(tmp_path / "next", {ADVISOR: b"new advisor text\r\nwith CRLF\r\n"})
+
+    result = _upgrade(claude_dir, source=nxt)
+
+    assert result["status"] == "updated" and result["refreshed"] == [ADVISOR]
+    assert (claude_dir / ADVISOR).read_bytes() == b"new advisor text\r\nwith CRLF\r\n"
+    assert (claude_dir / ADVISOR).stat().st_mode & 0o777 == 0o640
+    assert json.loads((claude_dir / assets.MANIFEST_NAME).read_text())["files"][ADVISOR] == \
+        assets._digest(b"new advisor text\r\nwith CRLF\r\n")
+    assert not list(claude_dir.rglob("*.slm_tmp")) and not list(claude_dir.rglob("*.bak-slm-*"))
+
+
+def test_a_refresh_through_a_link_that_stays_inside_claude_still_works(claude_dir, tmp_path) -> None:
+    _recorded_install(claude_dir)
+    real = claude_dir / "kept" / "advisor.md"
+    real.parent.mkdir()
+    real.write_bytes((claude_dir / ADVISOR).read_bytes())
+    (claude_dir / ADVISOR).unlink()
+    (claude_dir / ADVISOR).symlink_to(real)
+    nxt = _source_with(tmp_path / "next", {ADVISOR: b"new advisor text\n"})
+
+    result = _upgrade(claude_dir, source=nxt)
+
+    assert result["refreshed"] == [ADVISOR] and (claude_dir / ADVISOR).is_symlink()
+    assert real.read_bytes() == b"new advisor text\n"
+
+
+def test_a_file_that_appeared_already_identical_to_this_release_is_not_called_an_edit(claude_dir, monkeypatch) -> None:
+    real = assets._decide
+
+    def decide_then_same_text_appears(folder, rel, *args, **kwargs):
+        entry = real(folder, rel, *args, **kwargs)
+        if rel == COMMAND and entry.action == "add":
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_bytes(PLAN[COMMAND])
+        return entry
+
+    monkeypatch.setattr(assets, "_decide", decide_then_same_text_appears)
+
+    result = _upgrade(claude_dir)
+
+    assert COMMAND not in result["preserved"] and result["status"] == "updated"
+
+
+def test_a_different_backup_already_on_disk_is_neither_reused_nor_removed(claude_dir, monkeypatch) -> None:
+    old = _seed_old_install(claude_dir)
+    earlier = claude_dir / "skills/slm-recall" / f"SKILL.md.bak-slm-{VERSION}"
+    earlier.write_bytes(b"an unrelated earlier backup\n")
+
+    result = _upgrade(claude_dir)
+
+    assert earlier.read_bytes() == b"an unrelated earlier backup\n"
+    new = claude_dir / "skills/slm-recall" / f"SKILL.md.bak-slm-{VERSION}.1"
+    assert new.read_bytes() == old[SKILL_RECALL]
+    assert f"skills/slm-recall/SKILL.md.bak-slm-{VERSION}.1" in result["backups"]
+    # and a failed write later removes only the copy it made, not that earlier one
+    (claude_dir / SKILL_RECALL).write_bytes(b"third text\n")
+    (claude_dir / assets.MANIFEST_NAME).unlink()
+    _failing_replace(monkeypatch, "slm-recall")
+    assert _upgrade(claude_dir)["status"] == "error"
+    assert earlier.exists() and new.exists()
+    assert len(list((claude_dir / "skills/slm-recall").glob("*.bak-slm-*"))) == 2
