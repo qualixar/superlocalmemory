@@ -258,9 +258,8 @@ def job_state(job: SupervisorJob) -> JobState:
         return _STATES[job.platform](job)
     except JobMismatch as exc:
         return JobState("stale", detail=str(exc))
-    except (OSError, ValueError, TypeError, KeyError, StopIteration,
-            subprocess.SubprocessError) as exc:
-        return JobState("unknown", detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - an unreadable manager is never trusted
+        return JobState("unknown", detail=f"{type(exc).__name__}: {exc}")
 
 
 def job_loaded(job: SupervisorJob) -> bool:
@@ -347,8 +346,8 @@ def request_start(job: SupervisorJob) -> StartOutcome:
     """Ask the service manager to start ``job``; never raises."""
     try:
         return _STARTERS[job.platform](job)
-    except (OSError, KeyError, ValueError, subprocess.SubprocessError) as exc:
-        return StartOutcome(False, "failed", str(exc))
+    except Exception as exc:  # noqa: BLE001 - a failed ask means a direct start
+        return StartOutcome(False, "failed", f"{type(exc).__name__}: {exc}")
 
 
 class ServiceProcess:

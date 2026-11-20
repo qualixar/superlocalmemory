@@ -23,6 +23,9 @@ _TOKEN = re.compile(
 )
 _ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
 _INTEGER = re.compile(r"-?[0-9]+")
+#: launchd nests a job record two or three levels deep. Anything far deeper is
+#: not a job record, and parsing it recursively would raise RecursionError.
+_MAX_DEPTH = 32
 
 
 def _tokens(text: str) -> list[tuple[str, str]]:
@@ -51,7 +54,7 @@ def _scalar(kind: str, raw: str):
 
 class _Parser:
     def __init__(self, text: str):
-        self.items, self.at = _tokens(text), 0
+        self.items, self.at, self.depth = _tokens(text), 0, 0
 
     def _next(self) -> tuple[str, str]:
         if self.at >= len(self.items):
@@ -64,10 +67,14 @@ class _Parser:
 
     def value(self):
         kind, raw = self._next()
-        if raw == "{" and kind == "punct":
-            return self._dict()
-        if raw == "(" and kind == "punct":
-            return self._array()
+        if kind == "punct" and raw in {"{", "("}:
+            if self.depth >= _MAX_DEPTH:
+                raise ValueError("launchctl output is nested too deeply")
+            self.depth += 1
+            try:
+                return self._dict() if raw == "{" else self._array()
+            finally:
+                self.depth -= 1
         if kind == "punct":
             raise ValueError(f"unexpected {raw!r} in launchctl output")
         return _scalar(kind, raw)
@@ -95,9 +102,12 @@ class _Parser:
 
 
 def parse_list_output(text: str) -> dict:
-    """The dictionary ``launchctl list <label>`` printed."""
+    """The dictionary ``launchctl list <label>`` printed. Raises only ``ValueError``."""
     parser = _Parser(text)
-    record = parser.value()
+    try:
+        record = parser.value()
+    except RecursionError as exc:  # belt and braces behind _MAX_DEPTH
+        raise ValueError("launchctl output is nested too deeply") from exc
     if parser._peek() == ";":
         parser._next()
     if not isinstance(record, dict) or parser.at != len(parser.items):

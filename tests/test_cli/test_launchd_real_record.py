@@ -126,3 +126,51 @@ def test_launchd_that_cannot_be_read_is_a_query_failure_not_a_mismatch(launchd):
     launchd.query_rc = 1
     with pytest.raises(service_live.ManagerQueryFailed):
         service_live.macos_owned_record(row)
+
+
+# --- deeply nested output fails closed instead of raising RecursionError ----------------
+
+_DEEP = '{\n\t"Label" = ' + "(" * 5000 + ")" * 5000 + ";\n};\n"
+
+
+@pytest.mark.parametrize("text", [_DEEP, "(" * 5000 + ")" * 5000,
+                                  '{ "a" = ' * 3000 + "1" + "; }" * 3000 + ";"])
+def test_deeply_nested_list_text_is_a_value_error(text):
+    with pytest.raises(ValueError):
+        parse_list_output(text)
+
+
+def test_deeply_nested_launchd_answer_never_escapes_the_service_checks(launchd, monkeypatch):
+    from superlocalmemory.cli import daemon_supervisor as supervisor
+
+    real = launchd.__call__
+
+    def deep(argv, **kwargs):
+        if list(argv)[:2] == ["launchctl", "list"]:
+            launchd.calls.append(list(argv))
+            return launchd._result(stdout=_DEEP)
+        return real(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", deep)
+    monkeypatch.setattr(supervisor, "current_platform", lambda: "macos")
+    job = supervisor.find_job(19293)
+    assert job is not None
+    assert supervisor.job_state(job).status == "unknown"
+    assert supervisor.request_start(job).started is False
+    ready, found = supervisor.start_through_service(19293, lambda proc: True)
+    assert ready is None and found == job, "falls back to a direct start, never raises"
+
+
+def test_any_unexpected_failure_in_the_checks_fails_closed(monkeypatch):
+    from pathlib import Path
+
+    from superlocalmemory.cli import daemon_supervisor as supervisor
+
+    def boom(job):
+        raise RuntimeError("unexpected")
+
+    job = supervisor.SupervisorJob("macos", "j", Path("/x"), 1, definition=object())
+    monkeypatch.setitem(supervisor._STATES, "macos", boom)
+    monkeypatch.setitem(supervisor._STARTERS, "macos", boom)
+    assert supervisor.job_state(job).status == "unknown"
+    assert supervisor.request_start(job).started is False
