@@ -1676,6 +1676,8 @@ def delete_memory(request: Request, fact_id: str, profile_id: str = "",
             "deleted": fact_id,
             "erasure_verified": bool(result.get("erasure_verified", False)),
             "erasure_state": result.get("erasure_state", "FAILED"),
+            # Backups still holding the memory (#342); a restore removes it again.
+            "backup_obligations_pending": int(result.get("backup_obligations_pending", 0)),
         }
     except HTTPException:
         raise

@@ -225,16 +225,29 @@ def _finalize_erasure(
             extra_proofs=extra,
         )
         verified = receipt.all_erased and receipt.persisted and tombstoned
+        unproven = [p for p in receipt.proofs if not p.erased]
+        held_by = [p for p in unproven if p.owner == "backup_copies"]
+        pending = sum(len(p.residue) for p in held_by)
+        # #342: when backups are the ONLY owner still holding the fact, the
+        # erasure is done everywhere SLM can act and journalled outside the
+        # backups (a "restore_journal" proof would be unproven otherwise), so a
+        # restore replays it. The backups are an obligation to report, not a
+        # reason to retry: retrying cannot succeed while a backup exists.
+        only_backups = bool(held_by) and len(held_by) == len(unproven)
+        live_done = receipt.persisted and tombstoned and (verified or only_backups)
         if not verified:
-            logger.error(
+            log = logger.info if live_done else logger.error
+            log(
                 "Erasure not verified for %s: state=%s persisted=%s "
-                "tombstoned=%s residue=%s",
+                "tombstoned=%s residue=%s backup_obligations_pending=%d",
                 fact_id[:16], receipt.state, receipt.persisted, tombstoned,
-                [p.owner for p in receipt.proofs if not p.erased],
+                [p.owner for p in unproven], pending,
             )
         return {
             "erasure_id": erasure_id,
             "erasure_verified": verified,
+            "erasure_live_done": live_done,
+            "backup_obligations_pending": pending,
             "erasure_state": receipt.state,
         }
     except Exception as exc:
@@ -438,8 +451,7 @@ def delete_fact_authorized(
             "DELETE fact_id=%s actor=%s source_agent=%s content_chars=%d",
             fact_id[:16], trusted_actor_id, source_agent_id, len(content_preview),
         )
-        erasure_verified = bool(erasure.get("erasure_verified", False))
-        if not erasure_verified:
+        if not erasure.get("erasure_live_done", False):
             logger.error(
                 "Erasure unverified for %s — returning retryable failure",
                 fact_id[:16],
