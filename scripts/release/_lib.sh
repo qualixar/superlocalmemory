@@ -108,14 +108,31 @@ slm_http_status() {
   printf '%s' "${code:-000}"
 }
 
+# slm_github_meta — GitHub's published metadata (its SSH host keys among it).
+# Authenticated when GH_TOKEN or GITHUB_TOKEN is set: anonymous API calls share a
+# small per-IP limit on hosted runners, and the 4.2.33 publish got 403 from it.
+# The token reaches curl as a header read from stdin, never as an argument, so
+# it is not in the process list. A 403/429 is retried like a network error.
+slm_github_meta() {
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  local url=https://api.github.com/meta
+  if [ -n "$token" ]; then
+    printf 'Authorization: Bearer %s\n' "$token" \
+      | curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -H @- "$url"
+  else
+    curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 "$url"
+  fi
+}
+
 # slm_use_deploy_key — route git's ssh through the deploy key in $SLM_DEPLOY_KEY,
 # pinned to GitHub's published host keys (fetched over TLS from api.github.com).
 slm_use_deploy_key() {
   slm_require_env SLM_DEPLOY_KEY
-  local dir
+  local dir meta
   slm_tmpdir dir
   (umask 077 && printf '%s\n' "$SLM_DEPLOY_KEY" >"$dir/key")
-  curl -fsSL --retry 3 https://api.github.com/meta \
+  meta="$(slm_github_meta)" || slm_die "could not fetch GitHub's SSH host keys from api.github.com/meta"
+  printf '%s' "$meta" \
     | python3 -c 'import json,sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' \
       >"$dir/known_hosts"
   test -s "$dir/known_hosts" || slm_die "could not load GitHub's SSH host keys"
