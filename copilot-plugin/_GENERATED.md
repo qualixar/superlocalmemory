@@ -25,6 +25,7 @@ Regenerate: `npm run build:copilot-plugin` (or `node scripts/build-copilot-plugi
 - `.github/hooks/slm-hooks.json`
 - `.github/prompts/slm-bot-memory.prompt.md`
 - `.github/prompts/slm-cache.prompt.md`
+- `.github/prompts/slm-cli.prompt.md`
 - `.github/prompts/slm-compress.prompt.md`
 - `.github/prompts/slm-getting-started-bot.prompt.md`
 - `.github/prompts/slm-governance.prompt.md`

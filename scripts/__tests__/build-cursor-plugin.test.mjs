@@ -153,7 +153,14 @@ describe('cursorPlan', () => {
   });
 
   test('CURSOR_SKILLS is every skill, the bot-host ones included', () => {
-    assert.equal(CURSOR_SKILLS.length, 16);
+    // Derived from plugin-src, so a new skill needs no edit here, only a place in CURSOR_SKILLS.
+    const skillsDir = new URL('../../plugin-src/skills/', import.meta.url);
+    const every = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory()
+        && fs.existsSync(new URL(`${entry.name}/SKILL.md`, skillsDir)))
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual([...CURSOR_SKILLS].sort(), every);
     assert.ok(CURSOR_SKILLS.includes('slm-getting-started-bot'));
     assert.ok(CURSOR_SKILLS.includes('slm-bot-memory'));
   });

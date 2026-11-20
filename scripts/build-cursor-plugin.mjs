@@ -76,6 +76,7 @@ export const CURSOR_SKILLS = Object.freeze([
   'slm-mesh',
   'slm-cache',
   'slm-compress',
+  'slm-cli',
   'slm-status',
   'slm-profile',
   'slm-loop',

@@ -85,7 +85,9 @@ def test_npm_dry_run_contains_no_build_tools_tests_or_compiled_caches() -> None:
     # files / <1 MB. These ceilings sit well above that so they still
     # catch an accidentally shipped build/test surface — and a smuggled
     # src tree (~1.2k files / ~16 MB) trips both by a wide margin.
-    assert artifact["entryCount"] <= 300
+    # The plugin trees carry 17 skills each since slm-cli was added, about
+    # 300 files in all; 400 still leaves a smuggled src tree far over.
+    assert artifact["entryCount"] <= 400
     assert artifact["unpackedSize"] <= 4 * 1024 * 1024
 
 

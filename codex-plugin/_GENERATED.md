@@ -24,6 +24,7 @@ Version: **4.2.31**
 - `commands/slm-loop.md`
 - `skills/slm-bot-memory/SKILL.md`
 - `skills/slm-cache/SKILL.md`
+- `skills/slm-cli/SKILL.md`
 - `skills/slm-compress/SKILL.md`
 - `skills/slm-getting-started-bot/SKILL.md`
 - `skills/slm-governance/SKILL.md`

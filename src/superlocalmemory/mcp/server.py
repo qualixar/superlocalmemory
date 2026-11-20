@@ -129,138 +129,12 @@ def reset_engine():
 
 import os as _os_reg
 
-_ESSENTIAL_TOOLS: set[str] = {
-    # Core memory operations (8)
-    "remember",
-    "recall",
-    "search",
-    "fetch",
-    "expand",
-    "list_recent",
-    "delete_memory",
-    "update_memory",
-    "get_status",
-    "switch_profile",
-    # Session lifecycle (3)
-    "session_init",
-    "observe",
-    "close_session",
-    # Feedback / learning signals — reachable Dash-Core path for
-    # thumbs-up / pin / drift signals.
-    "report_feedback",
-    # v4.0.2 portable Brain evidence: profile-scoped receipt reads/writes.
-    "get_brain_evidence_status",
-    "record_agent_experience",
-    "record_cognitive_turn",
-    "finalize_cognitive_turn",
-    # v4.0.4: explicit, optional observation from the separately installed
-    # Bounded Loops MCP producer. It never participates in recall/ranking.
-    "observe_bounded_loop_evidence",
-    # Update, review, and list form one core correction lifecycle.
-    "review_correction",
-    "list_corrections",
-    # 4.2.30 (D-37): an agent that meets a dispute in recall must be able to
-    # list and settle it with the user's answer.
-    "list_disputes",
-    "settle_dispute",
-    # v4.0.8 (#113): readable summaries. Present here as well as in the named
-    # profiles because this set is the FALLBACK surface — it must mirror
-    # ``full``, and a tool that ships in the smallest profile ("core") cannot be
-    # missing from the fallback without a client silently losing it.
-    "get_memory_summary",
-    # 4.1.21 (#113): saved views — run (read) and manage (write). Mirrors
-    # ``full`` in mcp/profiles.py, as this set must.
-    "run_view",
-    "manage_view",
-    # Memory management (2)
-    "forget",
-    "run_maintenance",
-    # NOTE: prestage_context IS registered (see register_prestage_tool below)
-    # but is deliberately absent from the default surface. Brain evidence is
-    # intentionally present: it is the portable contract for installed agents.
-    # Infinite memory + learning (4)
-    "consolidate_cognitive",
-    "get_soft_prompts",
-    "set_mode",
-    "report_outcome",
-    # v3.4.7: Two-way learning (4)
-    "log_tool_event",
-    "get_assertions",
-    "reinforce_assertion",
-    "contradict_assertion",
-    # v3.4.11: Skill evolution (3)
-    "evolve_skill",
-    "skill_health",
-    "skill_lineage",
-    # v3.6.11: Surface B Optimize tools (5)
-    "slm_compress",
-    "slm_retrieve",
-    "slm_cache_set",
-    "slm_cache_get",
-    "slm_optimize_stats",
-    # v3.8.0: bounded-loop tools (3) — CLI + /slm-loop command + MCP. Kept in
-    # the default exposure so any MCP client discovers gated loops, not just
-    # profile=code/full/power sessions.
-    "slm_loop_run",
-    "slm_loop_history",
-    "slm_loop_show",
-    # 4.1.19 WP8: memory-kind management (4). Varun's call (2026-10-03):
-    # default visibility, not power-only — every normal session gets these,
-    # matching mcp/profiles.py's _PROFILE_KINDS in code/full (this set must
-    # mirror full exactly; see test_prestage_registered.py).
-    "set_memory_kind",
-    "memory_kinds_status",
-    "review_memory_kinds",
-    "confirm_memory_kinds",
-}
+from superlocalmemory.mcp import tool_surface as _tool_surface  # noqa: E402
 
-# v3.4.4: Mesh tools — enabled if mesh_enabled in config or SLM_MCP_MESH_TOOLS=1
-_mesh_tools_enabled = _os_reg.environ.get("SLM_MCP_MESH_TOOLS", "").lower() in ("1", "true")
-if not _mesh_tools_enabled:
-    try:
-        from superlocalmemory.core.config import SLMConfig
-
-        _cfg = SLMConfig.load()
-        _mesh_tools_enabled = getattr(_cfg, "mesh_enabled", True)  # default True in v3.4.3+
-    except Exception:
-        _mesh_tools_enabled = True  # Safe default — mesh broker is always in daemon
-
-if _mesh_tools_enabled:
-    _ESSENTIAL_TOOLS.update(
-        {
-            "mesh_summary",
-            "mesh_peers",
-            "mesh_send",
-            "mesh_inbox",
-            "mesh_wait",
-            "mesh_state",
-            "mesh_lock",
-            "mesh_events",
-            "mesh_status",
-        }
-    )
-
-# Image and document tools: listed by default only while images are on. Read
-# once at start (like mesh); any error means off. Mirrors ``full`` in profiles.py.
-try:
-    from superlocalmemory.runtimes import features as _features
-
-    _media_tools_enabled = bool(_features.media_enabled())
-except Exception:
-    _media_tools_enabled = False
-
-if _media_tools_enabled:
-    _ESSENTIAL_TOOLS.update(
-        {
-            "remember_media",
-            "get_media",
-            "remember_document",
-            "media_status",
-            "media_upload_link",
-        }
-    )
-
-_ESSENTIAL_TOOLS = frozenset(_ESSENTIAL_TOOLS)
+# The essential set, mesh and image rules live in mcp/tool_surface (shared with `slm tool`).
+_mesh_tools_enabled = _tool_surface.mesh_tools_enabled()
+_media_tools_enabled = _tool_surface.media_tools_enabled()
+_ESSENTIAL_TOOLS = _tool_surface.essential_tools()
 
 _all_tools = _os_reg.environ.get("SLM_MCP_ALL_TOOLS") == "1"
 
@@ -279,8 +153,9 @@ _user_allowlist_str = _os_reg.environ.get("SLM_MCP_TOOLS", "").strip()
 # ---------------------------------------------------------------------------
 
 # SLM_MCP_PROFILE from the host's config, else the set saved by `slm tools set`.
+# The profile names are re-exported: tests and older callers read them from this module.
 from superlocalmemory.mcp.profile_names import effective_profile as _effective_profile  # noqa: E402
-from superlocalmemory.mcp.profiles import (  # noqa: E402 (after env setups above)
+from superlocalmemory.mcp.profiles import (  # noqa: E402, F401 (after env setups above)
     _MEDIA_TOOLS,
     _PROFILE_ALIASES,
     _PROFILE_DEFINITIONS,
@@ -289,38 +164,7 @@ from superlocalmemory.mcp.profiles import (  # noqa: E402 (after env setups abov
 _profile = _effective_profile()
 
 
-def _resolve_profile_allowed(
-    profile: str,
-    definitions: dict[str, frozenset[str]],
-    essential: frozenset[str],
-) -> frozenset[str] | None:
-    """Resolve a profile name to its allowed tool frozenset, or None for raw-server routes.
-
-    Returns:
-        None  — for "" (no selection) or "whole" (raw server, all tools).
-        frozenset — the profile's tool set for known profiles.
-
-    Raises:
-        ValueError: if ``profile`` is neither canonical nor an explicitly
-            supported compatibility alias.
-    """
-    canonical = _PROFILE_ALIASES.get(profile, profile)
-    if canonical != profile:
-        logger.warning(
-            "SLM_MCP_PROFILE=%r is deprecated; use %r instead.",
-            profile,
-            canonical,
-        )
-    if not canonical or canonical == "whole":
-        return None
-    if canonical in definitions:
-        return definitions[canonical]
-    from superlocalmemory.mcp.profile_names import (
-        UnknownProfileError,
-        unknown_profile_message,
-    )
-
-    raise UnknownProfileError(unknown_profile_message(profile))
+_resolve_profile_allowed = _tool_surface.resolve_profile_allowed
 
 
 class _FilteredServer:
@@ -352,166 +196,34 @@ class _FilteredServer:
 
 
 # Choose registration target (precedence: ALL > user allowlist > profile > essential)
-if _all_tools:
-    _target = server  # tier1 (unchanged)
-elif _user_allowlist_str:
-    _user_allowlist = frozenset(t.strip() for t in _user_allowlist_str.split(",") if t.strip())
-    _target = _FilteredServer(server, _user_allowlist)  # tier2 (unchanged)
-elif _profile == "whole":
-    _target = server  # NEW raw-server
-elif _profile:
-    _profile_allowed = _resolve_profile_allowed(
-        _profile, _PROFILE_DEFINITIONS, _ESSENTIAL_TOOLS
-    )
-    _target = (
-        server
-        if _profile_allowed is None
-        else _FilteredServer(server, _profile_allowed | (
-            _MEDIA_TOOLS if _PROFILE_ALIASES.get(_profile, _profile) in {"full", "power"}
-            else frozenset()))
-    )
-else:
-    _target = _FilteredServer(server, _ESSENTIAL_TOOLS | _MEDIA_TOOLS)
-
-from superlocalmemory.mcp.resources import register_resources
-from superlocalmemory.mcp.tools_active import register_active_tools
-from superlocalmemory.mcp.tools_code_graph import register_code_graph_tools
-from superlocalmemory.mcp.tools_core import register_core_tools
-from superlocalmemory.mcp.tools_evolution import register_evolution_tools
-from superlocalmemory.mcp.tools_learning import register_learning_tools
-from superlocalmemory.mcp.tools_mesh import register_mesh_tools
-from superlocalmemory.mcp.tools_v3 import register_v3_tools
-from superlocalmemory.mcp.tools_v28 import register_v28_tools
-from superlocalmemory.mcp.tools_v33 import register_v33_tools
-
-register_core_tools(_target, get_engine)
-register_v28_tools(_target, get_engine)
-register_v3_tools(_target, get_engine)
-register_active_tools(_target, get_engine)
-register_v33_tools(_target, get_engine)
-register_resources(server, get_engine)  # Resources always registered (not tools)
-register_code_graph_tools(
-    _target, get_engine
-)  # CodeGraph: filtered like other tools (SLM_MCP_ALL_TOOLS=1 to show all)
-register_mesh_tools(
-    _target, get_engine
-)  # v3.4.4: Mesh P2P tools — ships with SLM, no separate slm-mesh needed
-register_learning_tools(_target, get_engine)  # v3.4.7: Two-way learning tools
-register_evolution_tools(_target, get_engine)  # v3.4.11: Skill evolution tools
-from superlocalmemory.mcp.tools_optimize import register_optimize_tools
-
-register_optimize_tools(_target)  # v3.6.11: Surface B Optimize tools (proxy-free)
-from superlocalmemory.mcp._daemon_proxy import choose_pool as _choose_loop_pool
-from superlocalmemory.mcp.tools_loops import register_loop_tools
-
-register_loop_tools(
-    _target,
-    get_engine,
-    _choose_loop_pool,
-)  # v3.8.0: bounded-loop tools (CLI+command+MCP)
-from superlocalmemory.mcp.tools_ops import register_ops_tools
-
-register_ops_tools(_target, get_engine)  # operational recovery & admin remediation
-from superlocalmemory.mcp.tools_brain import register_brain_tools
-
-register_brain_tools(_target, get_engine)  # v4.0.2 portable Brain receipts
-from superlocalmemory.mcp.tools_summaries import register_summary_tools
-
-register_summary_tools(_target, get_engine)  # v4.0.8 issue #113 summary reads
-from superlocalmemory.mcp.tools_views import register_view_tools
-
-register_view_tools(_target, get_engine)  # 4.1.21 issue #113 saved views
-from superlocalmemory.mcp.tools_kinds import register_kind_tools
-
-register_kind_tools(
-    _target, get_engine
-)  # 4.1.19 WP8: memory-kind management (ships in every profile, not only power)
-from superlocalmemory.mcp.tools_media import (
-    register_document_tools,
-    register_media_resources,
-    register_media_tools,
+_allowed_tools = _tool_surface.surface_for(
+    all_tools=_all_tools,
+    allowlist=_user_allowlist_str,
+    profile=_profile,
+    essential=_ESSENTIAL_TOOLS,
+    resolve=_resolve_profile_allowed,
 )
+_target = server if _allowed_tools is None else _FilteredServer(server, _allowed_tools)
 
-register_media_tools(_target)  # image tools for local AI apps (host-only)
-register_document_tools(_target)  # document tools for local AI apps (host-only)
-from superlocalmemory.mcp.tools_media_upload import register_upload_link_tool
+# One registration list for the MCP server and `slm tool` (mcp/tool_registry), so the
+# two can never disagree about which tools exist or what arguments they take.
+from superlocalmemory.mcp import prestage_bridge as _prestage_bridge
+from superlocalmemory.mcp._daemon_proxy import choose_pool as _choose_loop_pool
+from superlocalmemory.mcp.resources import register_resources
+from superlocalmemory.mcp.tool_registry import register_tools
+from superlocalmemory.mcp.tools_media import register_media_resources
 
-register_upload_link_tool(_target)  # one-time upload link for web apps (remote-only)
-register_media_resources(server)
-from superlocalmemory.mcp.tools_context import register_prestage_tool
-
-
-def _memories_from(results) -> list[dict]:
-    """``engine.recall`` output (a RecallResponse, or a plain list) as prestage rows."""
-    items = getattr(results, "results", results) or []
-    out: list[dict] = []
-    for r in items:
-        if isinstance(r, dict):
-            out.append(
-                {
-                    "id": str(r.get("fact_id") or r.get("id") or ""),
-                    "text": str(r.get("content") or r.get("text") or ""),
-                    "score": float(r.get("score") or r.get("relevance_score") or 0.0),
-                    "source": str(r.get("source") or "recall"),
-                }
-            )
-            continue
-        fact = getattr(r, "fact", r)
-        out.append(
-            {
-                "id": str(getattr(fact, "fact_id", "") or ""),
-                "text": str(getattr(fact, "content", "") or ""),
-                "score": float(getattr(r, "score", 0.0) or 0.0),
-                "source": "recall",
-            }
-        )
-    return out
+_memories_from = _prestage_bridge.memories_from
 
 
 def _prestage_recall(query: str, limit: int, profile_id: str, as_of: str | None = None):
-    """Bridge engine.recall -> prestage_context recall_fn shape.
-
-    Serves ``profile_id`` when one is named, else the engine's (active)
-    profile. The profile travels as an argument of this one recall: the shared
-    engine's profile is never assigned, so no other caller is moved.
-    """
-    engine = get_engine()
-    target = (profile_id or "").strip() or None
-    kwargs = {"profile_id": target, "limit": limit}
-    if as_of is not None:
-        kwargs["as_of"] = as_of
-    # A remote caller never gets what it may not see (pictures, pages, folder files).
-    from superlocalmemory.mcp.remote_visibility import current_view
-    from superlocalmemory.retrieval import remote_view, visibility
-
-    ctx = remote_view.context_for(
-        current_view(),
-        getattr(engine, "_db", None),
-        target or getattr(engine, "profile_id", "default"),
-    )
-    if ctx is None:
-        from superlocalmemory.core.engine_capabilities import CapabilityError
-
-        try:
-            return _memories_from(engine.recall(query, **kwargs))
-        except CapabilityError:
-            # 4.2.3: an MCP stdio process holds a light engine that may not
-            # recall in-process, so every prestage_context said recall_error.
-            # Recall through the worker pool, as session_init does. A
-            # point-in-time view is not forwarded there: refuse, never serve now.
-            if as_of is not None:
-                raise
-            from superlocalmemory.core.answer_check_scope import context_load
-            from superlocalmemory.mcp._pool_adapter import pool_recall
-
-            with context_load():
-                return _memories_from(pool_recall(
-                    query, limit=limit, **({"profile_id": target} if target else {})))
-    with visibility.use(ctx):
-        return _memories_from(engine.recall(query, **kwargs))
+    """Bridge engine.recall -> prestage_context recall_fn shape (mcp/prestage_bridge)."""
+    return _prestage_bridge.prestage_recall(get_engine, query, limit, profile_id, as_of)
 
 
-register_prestage_tool(_target, _prestage_recall)
+register_tools(_target, get_engine, _choose_loop_pool, _prestage_recall)
+register_resources(server, get_engine)  # Resources always registered (not tools)
+register_media_resources(server)
 
 
 # Keep stdio MCP processes thin until a tool truly needs a local LIGHT engine.
@@ -662,7 +374,9 @@ def _stdin_eof_monitor() -> None:
 
 # D-49: every daemon request this process makes is an MCP tool call, so decisions it records
 # (a promotion, a settlement, a label) carry the channel ``mcp`` (core/agent_attribution).
-_os.environ.setdefault("SLM_CLIENT_CHANNEL", "mcp")
+# Set, not defaulted: the channel is the door, and a daemon started by `slm tool` inherits
+# that process's ``cli`` (its embedded MCP server must still say ``mcp``).
+_os.environ["SLM_CLIENT_CHANNEL"] = "mcp"
 
 if not _embedded_in_daemon:
     _stdin_monitor_thread = threading.Thread(

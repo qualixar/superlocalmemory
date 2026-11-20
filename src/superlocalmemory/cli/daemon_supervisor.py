@@ -41,11 +41,17 @@ logger = logging.getLogger(__name__)
 #: daemon that inherits them attributes every caller's work to one agent,
 #: reports one client's tool profile as its own, or reuses the client's
 #: identity material. They are removed from every directly started daemon.
+#: The session ids matter most: the daemon's HTTP MCP mesh tools take their
+#: session from its environment, so an inherited one let any credential-less
+#: local caller read that agent's inbox and send as it.
 CLIENT_SCOPED_ENV = frozenset({
     "SLM_AGENT_ID",
     "SLM_CLIENT",
     "SLM_CLIENT_CHANNEL",
     "SLM_SESSION_ID",
+    "CLAUDE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ID",
+    "SLM_USER_SESSION",
     "SLM_PROJECT_PATH",
     "SLM_PROFILE_ID",
     "SLM_MCP_PROFILE",

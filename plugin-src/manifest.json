@@ -20,6 +20,10 @@
       "hasReadme": false
     },
     {
+      "name": "slm-cli",
+      "hasReadme": false
+    },
+    {
       "name": "slm-compress",
       "hasReadme": false
     },

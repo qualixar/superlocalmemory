@@ -752,6 +752,7 @@ def dispatch(args: Namespace) -> None:
         "trace": cmd_trace,
         "mcp": cmd_mcp,
         "tools": _cmd_tools,
+        "tool": _cmd_tool,
         "flags": _cmd_flags,
         "warmup": cmd_warmup,
         "dashboard": cmd_dashboard,
@@ -3197,6 +3198,7 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("dashboard", "Open the web dashboard on the configured daemon port"),
         ("mcp", "Start the MCP server (used by IDEs)"),
         ("tools", "Show or choose how many MCP tools your apps see"),
+        ("tool", "List, describe or call any MCP tool from a shell (slm tool list)"),
         ("remote", "Let other computers use this SLM over HTTPS with revocable keys"),
         ("warmup", "Pre-load models so the first recall is fast"),
         ("status", "Show daemon status + memory counts"),
@@ -4550,6 +4552,11 @@ def _cmd_flags(args: Namespace) -> None:
 def _cmd_tools(args: Namespace) -> None:
     from superlocalmemory.cli.tools_cmd import cmd_tools
     cmd_tools(args)
+
+
+def _cmd_tool(args: Namespace) -> None:
+    from superlocalmemory.cli.tool_cmd import cmd_tool
+    cmd_tool(args)
 
 
 def cmd_mcp(_args: Namespace) -> None:

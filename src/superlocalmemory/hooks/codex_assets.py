@@ -11,6 +11,7 @@ from pathlib import Path
 
 SKILLS = (
     "slm-cache",
+    "slm-cli",
     "slm-compress",
     "slm-governance",
     "slm-graph",
