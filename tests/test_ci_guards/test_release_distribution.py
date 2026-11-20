@@ -399,7 +399,9 @@ def _run_meta(tmp_path: Path, env_extra: dict[str, str]) -> tuple[list[str], str
         encoding="utf-8",
     )
     fake.chmod(0o755)
-    env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path), **env_extra}
+    from tests._portable import GUARD_ENV
+
+    env = {**GUARD_ENV, "PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path), **env_extra}
     result = subprocess.run(
         ["bash", "-c", f'source "{RELEASE_DIR / "_lib.sh"}" && slm_github_meta'],
         capture_output=True, text=True, env=env, timeout=30,
