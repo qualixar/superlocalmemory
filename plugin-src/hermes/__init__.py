@@ -458,6 +458,7 @@ def register(ctx: Any) -> None:
 def _register_all_skills(ctx: Any) -> None:
     # Explicit registrations keep generated output auditable and make a missing skill visible in doctor tests.
     ctx.register_skill("slm-cache", ROOT / "skills" / "slm-cache" / "SKILL.md")
+    ctx.register_skill("slm-cli", ROOT / "skills" / "slm-cli" / "SKILL.md")
     ctx.register_skill("slm-compress", ROOT / "skills" / "slm-compress" / "SKILL.md")
     ctx.register_skill("slm-governance", ROOT / "skills" / "slm-governance" / "SKILL.md")
     ctx.register_skill("slm-graph", ROOT / "skills" / "slm-graph" / "SKILL.md")

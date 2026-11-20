@@ -3,7 +3,7 @@
 """The Muse CLI plugin, as shipped in muse-plugin/ (14 Oct 2026).
 
 Muse CLI 1.4.7 imports Claude Code plugins, but refused ours: it rejects short
-MCP names in a skill's ``allowed-tools`` (8 of 16 skills), the ``${ComSpec:-}``
+MCP names in a skill's ``allowed-tools`` (8 of 17 skills), the ``${ComSpec:-}``
 launcher in ``.mcp.json``, and it drops SessionStart output that starts with
 ``[`` as malformed JSON, which is how ``slm hook start`` begins. The Muse build
 removes the first two and runs the JSON-emitting SessionStart action instead.
@@ -36,7 +36,7 @@ def test_muse_plugin_is_in_sync_with_its_builder():
 
 def test_no_skill_declares_allowed_tools():
     skills = sorted(MUSE.glob("skills/*/SKILL.md"))
-    assert len(skills) == 16
+    assert len(skills) == 17
     offenders = [s.parent.name for s in skills
                  if "\nallowed-tools:" in s.read_text(encoding="utf-8").split("\n---\n", 1)[0]]
     assert offenders == []

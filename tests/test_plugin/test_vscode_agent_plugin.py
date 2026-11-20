@@ -34,7 +34,7 @@ def test_the_server_is_a_plain_slm_mcp_with_no_placeholders():
 
 
 def test_skills_and_agents_ship_but_claude_only_hooks_do_not():
-    assert len(list(OUT.glob("skills/*/SKILL.md"))) == 16
+    assert len(list(OUT.glob("skills/*/SKILL.md"))) == 17
     assert len(list(OUT.glob("agents/*.md"))) == 4
     assert not (OUT / "hooks").exists() and not (OUT / "scripts").exists()
 

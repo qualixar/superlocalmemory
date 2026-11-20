@@ -106,7 +106,11 @@ def register_v3_tools(server, get_engine: Callable) -> None:
             )
             from superlocalmemory.core.config import SLMConfig
             from superlocalmemory.core.egress_notice import online_check_on
-            from superlocalmemory.mcp.server import reset_engine
+            # The host that registered these tools resets its own engine (`slm tool`
+            # passes one); importing the stdio server here would start its threads.
+            reset_engine = getattr(get_engine, "reset", None)
+            if reset_engine is None:
+                from superlocalmemory.mcp.server import reset_engine
 
             # Use switch_mode() — the correct load-then-patch path that preserves
             # all user-tuned config blocks (forgetting, injection, retrieval, scope,

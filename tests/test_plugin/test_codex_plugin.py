@@ -53,6 +53,7 @@ EXPECTED_SKILLS = [
     # sharing one SLM_DATA_DIR hit the same cross-agent-memory questions).
     "slm-bot-memory",
     "slm-cache",
+    "slm-cli",  # every MCP tool from the shell, generated from the registry
     "slm-compress",
     "slm-getting-started-bot",
     "slm-governance",

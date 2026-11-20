@@ -78,6 +78,8 @@ documentation:
 
 _NO_DAEMON_COMMANDS = {
     "setup", "mode", "provider", "connect", "upgrade-hosts", "migrate", "mcp", "tools", "warmup", "hooks", "codex",
+    # `slm tool` starts the daemon itself, only for a call (list/describe never need it).
+    "tool",
     "flags", "measurement", "cues",
     "config", "evolve", "db",
     # v3.4.22 escape hatches — never auto-start the daemon on these.
@@ -831,6 +833,8 @@ def main() -> None:
     tools_p.add_argument("name", nargs="?", default=None,
                          help="core, code, full (default), power, mesh, whole, or default")
     tools_p.add_argument("--json", action="store_true", help="Output structured JSON")
+    from superlocalmemory.cli.tool_cmd import add_tool_parser
+    add_tool_parser(sub)  # `slm tool list|describe|NAME`: every MCP tool from a shell
     flags_p = sub.add_parser(
         "flags", help="Show or set the 4.2.30 subsystem flags and the kill switch")
     flags_sub = flags_p.add_subparsers(dest="action")

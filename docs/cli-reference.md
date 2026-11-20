@@ -735,6 +735,73 @@ Start the MCP server on stdio, for IDE configurations that run it as a
 subprocess. For HTTP transport the daemon exposes `/mcp/` itself. See [MCP
 Tools Reference](mcp-tools.md).
 
+### `slm tool list|describe|<name>`
+
+Every MCP tool, from a shell. For an agent that can run commands but does not
+have the SuperLocalMemory MCP server, and for scripts and CI jobs.
+
+```bash
+slm tool list [--json] [--tool-set NAME]          # every tool, one line each
+slm tool describe <name> [--json]                 # description and input schema
+slm tool <name> --json '{"query": "auth flow"}'   # call it; also --args-file PATH, or - for stdin
+slm tool <name> --query "auth flow" --limit 5     # one argument per --key value
+slm tool <name> --help                            # the same as describe
+```
+
+The tools are registered once (`superlocalmemory.mcp.tool_registry`) and both
+the MCP server and `slm tool` use that registration, so the names, input
+schemas, descriptions and permission checks are the same, and a call reaches
+the SLM service the same way an MCP call does. What differs:
+
+* **The channel is `cli`.** Decisions made through `slm tool` (a settled
+  dispute, a promoted rule, an applied proposal) are recorded on the `cli`
+  channel. The channel comes from the process, never from an argument, and
+  `SLM_CLIENT_CHANNEL` in the environment does not change it.
+* **The agent** is `SLM_AGENT_ID`, read the way the stdio MCP server reads it.
+* **Arguments are checked before the call** against the tool's input schema.
+  An argument the tool does not take is refused (an MCP client may send extra
+  keys and have them ignored; a command line should say so).
+* **Tool sets.** By default `slm tool` reaches every tool: a tool set exists
+  to keep an app's tool list short, and each tool still checks who may call
+  it. `--tool-set core|code|full|power|mesh|whole` applies the MCP server's
+  filter for that set; `--tool-set mcp` applies exactly what an MCP connection
+  on this computer would see now (`SLM_MCP_PROFILE`, `SLM_MCP_TOOLS`, or the
+  set saved by `slm tools set`).
+
+Output and exit codes: a call prints the tool's JSON result on stdout and
+nothing else. Exit `0` when the tool succeeded, `1` when the tool answered
+with an error or a refusal (its JSON says why), `2` when the call could not be
+made: an unknown tool (`code: unknown_tool`), arguments that do not match
+(`invalid_arguments`, with one line per problem in `details`), or a tool
+outside the chosen tool set (`not_in_tool_set`). `--pretty` indents the JSON;
+`--image-dir DIR` writes images a tool returns (`get_media`, recall
+thumbnails) to files and names them instead of inlining base64.
+
+Mesh tools need a session: `--session <id>` or `SLM_SESSION_ID`, else one
+shared by every command the same agent runs in the same folder. The broker
+keeps a peer for 30 minutes after its last call, so a command-line session is
+reachable while it keeps calling mesh tools; `mesh_wait` blocks for up to its
+`timeout_s` (at most 20 seconds) and then returns. For messages that must
+wait longer, send to `project:<path>` or `broadcast`.
+
+Tools that only make sense for apps on other computers keep refusing a local
+caller: `slm tool media_upload_link` answers `not_for_local`, exit `1`.
+
+#### The session protocol without MCP
+
+The `slm-cli` skill (shipped to every host plugin, generated from the tool
+registry by `python scripts/build_cli_skill.py`) teaches an agent this
+protocol and lists every tool with its command.
+
+| Step | Command |
+|---|---|
+| Session start | `slm session-context "<topic>" --project-dir "$PWD" --json` |
+| Before a non-trivial answer, and before a web search | `slm recall "<question>" --json` |
+| Before editing a file (cue check) | pipe a `PreToolUse` event (`tool_name`, `tool_input.file_path`, `cwd`) to `slm hook cue` |
+| After a decision or rule | `slm remember "<text>" --kind decision --cue path:<glob>` |
+| Pictures and PDFs | `slm tool remember_media --path <file>`, `slm tool remember_document --path <file>`, `slm tool media_status --job-id <id>` |
+| Session end | `slm session close` |
+
 ### `slm mesh status|peers`
 
 Inspect the local agent mesh: broker health and statistics, or the active peer

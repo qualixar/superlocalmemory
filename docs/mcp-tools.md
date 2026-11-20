@@ -33,6 +33,11 @@ SLM supports two transports. Both expose the same tools.
 { "mcpServers": { "superlocalmemory": { "command": "slm", "args": ["mcp"] } } }
 ```
 
+**No MCP client (shell only):** `slm tool <name>` calls any of these tools from
+a command line, with the same input schema and checks, and prints its JSON
+result. `slm tool list` and `slm tool describe <name>` read the same
+registration as the server. See [`slm tool`](cli-reference.md#slm-tool-listdescribename).
+
 See [IDE setup](ide-setup.md) for per-IDE configuration. An AI app on the
 internet reaches a small subset of these tools through [Web
 access](remote-access/README.md).

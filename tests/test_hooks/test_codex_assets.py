@@ -18,6 +18,7 @@ EXPECTED_SKILLS = {
     "slm-session",
     "slm-status",
     "slm-web-access",
+    "slm-cli",
 }
 
 
