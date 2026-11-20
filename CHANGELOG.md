@@ -33,6 +33,7 @@ Nothing changes in the store, and there is nothing to run.
 - Auto-start can reload a service while `slm serve uninstall` is removing it (#337).
 - Hand-over ignores a second service installed for the same data folder on another port (#338).
 - On Linux distributions that ship a user-wide service drop-in, the installed service is not recognised (#339).
+- Deleting a memory that a backup already holds removes it, but the API answers "busy, retry" until that backup is gone (#342). This predates 4.2.32.
 
 ## [4.2.31] — Hooks that fit their time limits and find SLM's tools
 
