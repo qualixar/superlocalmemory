@@ -854,6 +854,11 @@ def start_lock_is_held() -> bool:
             pass
 
 
+def _no_daemon_near(port: int) -> bool:
+    """No daemon record names a live process, the lock is free, the port is unbound."""
+    return not _data_folder_is_owned() and not _has_tcp_listener(port)
+
+
 def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     """Spawn the unified daemon subprocess and wait for readiness.
 
@@ -888,8 +893,12 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     assert_no_durable_root_conflict()
     # The installed service owns the daemon: a detached child of this client
     # would carry the client's environment and collide with the service later.
+    # A service that accepts the start but runs nothing (a Windows task whose
+    # wrapper points at a removed Python) falls back to a direct start, but
+    # only while no daemon owns the folder or the port.
     ready, service_job = _supervisor.start_through_service(
         _target_port, lambda proc: _wait_for_daemon(timeout=60, proc=proc),
+        nothing_started=lambda: _no_daemon_near(_target_port),
     )
     if ready is not None:
         return ready

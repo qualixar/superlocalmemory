@@ -380,15 +380,36 @@ class ServiceProcess:
         return self.returncode
 
 
-def start_through_service(port: int, wait_for_daemon) -> tuple[bool | None, SupervisorJob | None]:
+def _started_nothing(job: SupervisorJob, nothing_started) -> bool:
+    """After a full wait: no service process, and no daemon anywhere near the folder.
+
+    The service manager must report no process for the job (always so on
+    Windows, whose task has no daemon PID), and ``nothing_started()`` must
+    confirm that no daemon record names a live process, the instance lock is
+    free and nothing listens on the port. Any doubt means "something started".
+    """
+    if nothing_started is None or job_pid(job) is not None:
+        return False
+    try:
+        return bool(nothing_started())
+    except Exception as exc:  # noqa: BLE001 - doubt must never double a daemon
+        logger.debug("cannot tell whether the service started a daemon: %s", exc)
+        return False
+
+
+def start_through_service(
+    port: int, wait_for_daemon, *, nothing_started=None,
+) -> tuple[bool | None, SupervisorJob | None]:
     """Start the daemon through its installed service when there is one.
 
     Returns ``(ready, job)``. ``ready`` is None when the caller must start the
     daemon directly: no service owns this folder and port, the service
-    manager refused, or it accepted the start but runs no daemon for the job.
-    ``job`` is the service found (if any), whose settings the direct start
-    must then carry. ``wait_for_daemon(proc)`` waits for the daemon, where
-    ``proc`` is a ``ServiceProcess`` it may poll like a child.
+    manager refused, it accepted the start but runs no daemon for the job, or
+    the wait ran out with no trace of a daemon (``nothing_started``; without
+    it a timed-out wait is a failure). ``job`` is the service found (if any),
+    whose settings the direct start must then carry. ``wait_for_daemon(proc)``
+    waits for the daemon, where ``proc`` is a ``ServiceProcess`` it may poll
+    like a child.
     """
     job = find_job(port)
     if job is None:
@@ -405,14 +426,24 @@ def start_through_service(port: int, wait_for_daemon) -> tuple[bool | None, Supe
                 job.name, outcome.how)
     process = ServiceProcess(job)
     ready = wait_for_daemon(process)
-    if ready or process.returncode is None:
+    if ready:
         return ready, job
-    logger.warning(
-        "the installed service %s accepted the start but runs no daemon "
-        "(disabled, or its program exits at once); starting it directly with "
-        "the service's settings", job.name,
-    )
-    return None, job
+    if process.returncode is not None:
+        logger.warning(
+            "the installed service %s accepted the start but runs no daemon "
+            "(disabled, or its program exits at once); starting it directly with "
+            "the service's settings", job.name,
+        )
+        return None, job
+    if _started_nothing(job, nothing_started):
+        logger.warning(
+            "the installed service %s accepted the start but no daemon appeared "
+            "(its program may point at a Python that is gone); starting it "
+            "directly with the service's settings. Run `slm serve install` to "
+            "repair the service", job.name,
+        )
+        return None, job
+    return ready, job
 
 
 # --- direct start environment ----------------------------------------------------

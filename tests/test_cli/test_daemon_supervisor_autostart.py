@@ -68,11 +68,13 @@ def test_installed_service_is_asked_to_start_and_nothing_is_spawned(start_env, m
 
 
 def test_service_start_that_never_becomes_healthy_reports_failure(start_env, monkeypatch):
+    """A daemon owns the folder but never answers: never start a second one."""
     job = _job(start_env.port)
     monkeypatch.setattr(supervisor, "find_job", lambda port: job)
     monkeypatch.setattr(supervisor, "request_start",
                         lambda j: StartOutcome(True, "kickstarted"))
     monkeypatch.setattr(daemon, "_wait_for_daemon", lambda timeout=60, proc=None: False)
+    monkeypatch.setattr(daemon, "_data_folder_is_owned", lambda: True)
     assert daemon._start_daemon_subprocess(port=start_env.port) is False
     start_env.popen.assert_not_called()
 

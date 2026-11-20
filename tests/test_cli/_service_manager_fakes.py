@@ -189,3 +189,41 @@ class FakeSystemd:
         if verb == "is-active":
             return self._result(stdout="active" if self.pids.get(name) else "inactive")
         raise AssertionError(f"unmodelled systemctl call: {argv}")
+
+
+@dataclass
+class FakeTaskScheduler:
+    """Windows Task Scheduler holding logon tasks that run a ``wscript.exe`` wrapper.
+
+    ``/Run`` succeeds without starting anything: the task's wrapper points at
+    an interpreter that is gone, which Task Scheduler does not check.
+    """
+
+    tasks: dict[str, Path] = field(default_factory=dict)  # name -> wrapper script
+    calls: list[list[str]] = field(default_factory=list)
+    run_rc: int = 0
+
+    @staticmethod
+    def _result(code: int = 0, stdout: str = "", stderr: str = ""):
+        return SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr)
+
+    @staticmethod
+    def _xml(wrapper: Path) -> str:
+        return ('<?xml version="1.0" encoding="UTF-16"?>\n'
+                '<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+                '<Actions Context="Author"><Exec><Command>wscript.exe</Command>'
+                f'<Arguments>"{wrapper}"</Arguments></Exec></Actions></Task>')
+
+    def __call__(self, argv, **kwargs):
+        argv = list(argv)
+        self.calls.append(argv)
+        if argv[:1] != ["schtasks"] or len(argv) < 4 or argv[2] != "/TN":
+            raise AssertionError(f"unexpected command in a Task Scheduler test: {argv}")
+        verb, name = argv[1], argv[3]
+        if name not in self.tasks:
+            return self._result(1, stderr="ERROR: The system cannot find the file specified.")
+        if verb == "/Query":
+            return self._result(stdout=self._xml(self.tasks[name]) if "/XML" in argv else name)
+        if verb == "/Run":
+            return self._result(self.run_rc, stdout="SUCCESS: Attempted to run the task.")
+        raise AssertionError(f"unmodelled schtasks call: {argv}")
