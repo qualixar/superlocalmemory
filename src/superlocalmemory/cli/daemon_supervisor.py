@@ -29,7 +29,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from superlocalmemory.cli.service_inventory import ServiceDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,25 @@ class SupervisorJob:
     path: Path
     port: int
     environment: Mapping[str, str] = field(default_factory=dict)
+    #: The verified definition. The loaded job must match it before it is
+    #: started or trusted; a job without one is never trusted.
+    definition: ServiceDefinition | None = None
+
+
+@dataclass(frozen=True)
+class JobState:
+    """What the service manager holds under a job's name, checked against its file.
+
+    ``running`` / ``idle``: loaded and exactly the installed definition.
+    ``not_loaded``: nothing is loaded under the name.
+    ``stale``: something else is loaded under the name (a definition edited
+    or replaced without a reload, or another installation's job).
+    ``unknown``: the service manager could not be asked or understood.
+    """
+
+    status: str
+    pid: int | None = None
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -162,7 +184,7 @@ def jobs_for(port: int) -> list[SupervisorJob]:
             environment = _ENVIRONMENT_PARSERS[platform](row.content)
         except Exception:  # noqa: BLE001 - a definition we cannot read is not ours to start
             continue
-        jobs.append(SupervisorJob(platform, row.name, row.path, row.port, environment))
+        jobs.append(SupervisorJob(platform, row.name, row.path, row.port, environment, row))
     return jobs
 
 
@@ -175,60 +197,103 @@ def _macos_domain() -> str:
     return f"gui/{os.getuid()}"
 
 
-def _macos_record(job: SupervisorJob) -> dict | None:
-    from superlocalmemory.cli.service_live import launchctl_list
+def _owned_pid(raw) -> int | None:
+    pid = int(raw) if raw is not None else 0
+    return pid if pid > 0 else None
 
-    return launchctl_list(job.name)
+
+def _macos_state(job: SupervisorJob) -> JobState:
+    from superlocalmemory.cli.service_live import macos_owned_record
+
+    record = macos_owned_record(job.definition)
+    if record is None:
+        return JobState("not_loaded")
+    pid = _owned_pid(record.get("PID"))
+    return JobState("running" if pid else "idle", pid)
 
 
 def _linux_properties(job: SupervisorJob) -> dict[str, str]:
+    from superlocalmemory.cli.service_live import ManagerQueryFailed
+
     result = _run(["systemctl", "--user", "show", job.name,
                    "--property=LoadState", "--property=MainPID"])
     if result.returncode:
-        raise OSError("Cannot inspect systemd user unit")
+        raise ManagerQueryFailed("Cannot inspect systemd user unit")
     return dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
 
 
-def job_loaded(job: SupervisorJob) -> bool:
-    """Is the service manager currently holding this definition?"""
+def _linux_state(job: SupervisorJob) -> JobState:
+    from superlocalmemory.cli.service_live import verified_live
+
+    verified_live("linux", job.definition)  # raises unless systemd runs this file
+    properties = _linux_properties(job)
+    if properties.get("LoadState") != "loaded":
+        return JobState("not_loaded")
+    pid = _owned_pid(properties.get("MainPID"))
+    return JobState("running" if pid else "idle", pid)
+
+
+def _windows_state(job: SupervisorJob) -> JobState:
+    # Logon tasks hand the daemon to a script host and never restart it, so
+    # the task has no daemon PID to report.
+    found = _run(["schtasks", "/Query", "/TN", job.name]).returncode == 0
+    return JobState("idle" if found else "not_loaded")
+
+
+_STATES = {"macos": _macos_state, "linux": _linux_state, "windows": _windows_state}
+
+
+def job_state(job: SupervisorJob) -> JobState:
+    """The loaded job under ``job``'s name, trusted only if it is ``job``. Never raises."""
+    from superlocalmemory.cli.service_live import JobMismatch
+
+    if job.definition is None and job.platform != "windows":
+        return JobState("unknown", detail="no verified definition")
     try:
-        if job.platform == "macos":
-            return _macos_record(job) is not None
-        if job.platform == "linux":
-            return _linux_properties(job).get("LoadState") == "loaded"
-        if job.platform == "windows":
-            return _run(["schtasks", "/Query", "/TN", job.name]).returncode == 0
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-    return False
+        return _STATES[job.platform](job)
+    except JobMismatch as exc:
+        return JobState("stale", detail=str(exc))
+    except (OSError, ValueError, TypeError, KeyError, StopIteration,
+            subprocess.SubprocessError) as exc:
+        return JobState("unknown", detail=str(exc))
+
+
+def job_loaded(job: SupervisorJob) -> bool:
+    """Is the service manager holding exactly this definition?"""
+    return job_state(job).status in {"running", "idle"}
 
 
 def job_pid(job: SupervisorJob) -> int | None:
-    """PID of the process the service manager runs for this job, if any.
+    """PID of the process the service manager runs for exactly this definition.
 
-    Windows logon tasks hand the daemon to a script host and never restart
-    it, so the task has no daemon PID to report: always None there.
+    None when nothing runs, when the loaded job is not this definition, when
+    the manager cannot be asked, and always on Windows.
     """
-    try:
-        if job.platform == "macos":
-            record = _macos_record(job)
-            pid = record.get("PID") if record else None
-        elif job.platform == "linux":
-            pid = _linux_properties(job).get("MainPID")
-        else:
-            return None
-        pid = int(pid) if pid is not None else 0
-    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-        return None
-    return pid if pid > 0 else None
+    state = job_state(job)
+    return state.pid if state.status == "running" else None
+
+
+_STALE = ("the loaded service job does not match its installed definition "
+          "(edited or replaced without a reload)")
 
 
 # --- start -----------------------------------------------------------------------
 
+def _refusal(state: JobState) -> StartOutcome | None:
+    if state.status == "stale":
+        return StartOutcome(False, "failed", f"{_STALE}: {state.detail}")
+    if state.status == "unknown":
+        return StartOutcome(False, "failed", f"cannot inspect the service job: {state.detail}")
+    return None
+
+
 def _start_macos(job: SupervisorJob) -> StartOutcome:
     domain = _macos_domain()
     target = f"{domain}/{job.name}"
-    if not job_loaded(job):
+    state = job_state(job)
+    if (refused := _refusal(state)) is not None:
+        return refused
+    if state.status == "not_loaded":
         # The definition is installed but not loaded (for example after
         # ``launchctl bootout``). launchd loads it at the next login anyway;
         # loading it now keeps the daemon under its owner instead of
@@ -247,6 +312,8 @@ def _start_macos(job: SupervisorJob) -> StartOutcome:
 
 
 def _start_linux(job: SupervisorJob) -> StartOutcome:
+    if (refused := _refusal(job_state(job))) is not None:
+        return refused
     result = _run(["systemctl", "--user", "start", job.name])
     if result.returncode == 0:
         return StartOutcome(True, "started")

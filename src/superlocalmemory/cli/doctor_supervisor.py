@@ -25,6 +25,8 @@ class SupervisorCheck:
 
 
 _FIX = "Run `slm restart` so the installed service starts and owns the daemon"
+_STALE_FIX = ("Run `slm serve install` so the service manager loads the installed "
+              "definition, then `slm restart`")
 
 
 def _environment_of(pid: int) -> dict[str, str] | None:
@@ -63,15 +65,23 @@ def _check() -> SupervisorCheck | None:
     jobs = [job for job in supervisor.jobs_for(descriptor.port) if job.platform != "windows"]
     if not jobs:
         return None
-    pids = {job.name: supervisor.job_pid(job) for job in jobs}
-    owner = next((name for name, pid in pids.items() if pid == descriptor.pid), None)
+    states = {job.name: supervisor.job_state(job) for job in jobs}
+    owner = next((name for name, state in states.items()
+                  if state.status == "running" and state.pid == descriptor.pid), None)
     if owner is not None:
         return SupervisorCheck("PASS", f"pid {descriptor.pid} is run by service {owner}")
     job = jobs[0]
-    service_pid = pids[job.name]
+    state = states[job.name]
+    if state.status == "stale":
+        return SupervisorCheck(
+            "WARN",
+            f"the service job loaded as {job.name} does not match its installed "
+            f"definition, so it is not trusted to own daemon pid {descriptor.pid}",
+            _STALE_FIX,
+        )
     detail = (
         f"daemon pid {descriptor.pid} is not owned by its service {job.name} "
-        f"(service pid: {service_pid if service_pid else 'none'}); the service "
+        f"(service pid: {state.pid if state.pid else 'none'}); the service "
         "manager will not restart it and it may run without the service's settings"
     )
     missing = _missing_settings(descriptor.pid, dict(job.environment))

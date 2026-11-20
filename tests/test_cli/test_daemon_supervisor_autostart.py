@@ -21,7 +21,7 @@ import pytest
 
 from superlocalmemory.cli import daemon
 from superlocalmemory.cli import daemon_supervisor as supervisor
-from superlocalmemory.cli.daemon_supervisor import StartOutcome, SupervisorJob
+from superlocalmemory.cli.daemon_supervisor import JobState, StartOutcome, SupervisorJob
 
 CLIENT_ENV = {
     "SLM_AGENT_ID": "agent-under-test",
@@ -135,9 +135,15 @@ class _Runner:
         return SimpleNamespace(returncode=self.codes.get(argv[1], 0), stdout="", stderr="")
 
 
-def _macos(monkeypatch, loaded_states, codes=None):
+def _loaded(monkeypatch, loaded_states):
+    """Stub the verified job state: True is an owned loaded job, False none."""
     states = iter(loaded_states)
-    monkeypatch.setattr(supervisor, "job_loaded", lambda job: next(states))
+    monkeypatch.setattr(supervisor, "job_state", lambda job: JobState(
+        "idle" if next(states) else "not_loaded"))
+
+
+def _macos(monkeypatch, loaded_states, codes=None):
+    _loaded(monkeypatch, loaded_states)
     runner = _Runner(codes or {})
     monkeypatch.setattr(supervisor, "_run", runner)
     monkeypatch.setattr(supervisor, "_macos_domain", lambda: "gui/501")
@@ -172,6 +178,7 @@ def test_macos_load_failure_is_reported_not_raised(monkeypatch):
 
 
 def test_linux_and_windows_use_their_service_managers(monkeypatch):
+    _loaded(monkeypatch, [True, True])
     runner = _Runner({})
     monkeypatch.setattr(supervisor, "_run", runner)
     assert supervisor.request_start(_job(1, "linux")).started
@@ -184,27 +191,25 @@ def test_service_manager_missing_is_a_failed_outcome(monkeypatch):
     def missing(argv):
         raise FileNotFoundError(argv[0])
 
+    _loaded(monkeypatch, [True])
     monkeypatch.setattr(supervisor, "_run", missing)
     outcome = supervisor.request_start(_job(1, "linux"))
     assert not outcome.started and "systemctl" in outcome.detail
 
 
-def test_job_pid_reads_the_service_managers_pid(monkeypatch):
+def test_job_without_a_verified_definition_is_never_trusted(monkeypatch):
+    """The manager's raw answer is not ownership: a PID it reports for a job
+    that was never checked against its file is not the service's daemon."""
     from superlocalmemory.cli import service_live
 
     monkeypatch.setattr(service_live, "launchctl_list",
                         lambda name: {"Label": name, "PID": 4242})
-    assert supervisor.job_pid(_job(1)) == 4242
-    monkeypatch.setattr(service_live, "launchctl_list", lambda name: {"Label": name})
-    assert supervisor.job_pid(_job(1)) is None, "loaded but not running"
-    monkeypatch.setattr(service_live, "launchctl_list", lambda name: None)
-    assert supervisor.job_pid(_job(1)) is None, "not loaded"
-    monkeypatch.setattr(supervisor, "_run", lambda argv: SimpleNamespace(
-        returncode=0, stdout="LoadState=loaded\nMainPID=0\n", stderr=""))
-    assert supervisor.job_pid(_job(1, "linux")) is None
     monkeypatch.setattr(supervisor, "_run", lambda argv: SimpleNamespace(
         returncode=0, stdout="LoadState=loaded\nMainPID=77\n", stderr=""))
-    assert supervisor.job_pid(_job(1, "linux")) == 77
+    for platform in ("macos", "linux"):
+        assert supervisor.job_pid(_job(1, platform)) is None
+        assert supervisor.job_state(_job(1, platform)).status == "unknown"
+        assert not supervisor.request_start(_job(1, platform)).started
     assert supervisor.job_pid(_job(1, "windows")) is None
 
 

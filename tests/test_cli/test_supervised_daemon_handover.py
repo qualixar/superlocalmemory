@@ -125,6 +125,12 @@ def doctor_world(world, monkeypatch):
     world.jobs = [SupervisorJob("macos", "svc", Path("/x/svc.plist"), PORT,
                                 {"SLM_RANKING": "v2-ensemble", "PATH": "/usr/bin"})]
     world.pids = {"svc": None}
+
+    def state(job):
+        pid = world.pids.get(job.name)
+        return supervisor.JobState("running", pid) if pid else supervisor.JobState("idle")
+
+    monkeypatch.setattr(supervisor, "job_state", state)
     monkeypatch.setattr(doctor_supervisor, "_environment_of",
                         lambda pid: {"SLM_AGENT_ID": "x", "PATH": "/other"})
     return doctor_supervisor
