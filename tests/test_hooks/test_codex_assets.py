@@ -185,3 +185,16 @@ def test_an_upgrade_rewrites_a_file_slm_wrote_with_the_old_key(tmp_path) -> None
 
     parsed = tomllib.loads(target.read_text(encoding="utf-8"))
     assert "developer_instructions" in parsed and "instructions" not in parsed
+
+
+def test_the_wheel_ships_every_skill_the_codex_installer_installs() -> None:
+    """A pip install reads Codex skills from the wheel's data files; a skill on the installer's
+    list with no data-file entry makes the whole install fail with "missing"."""
+    root = Path(__file__).resolve().parents[2]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["setuptools"][
+        "data-files"]
+    prefix = "share/superlocalmemory/codex/skills/"
+    shipped = {dest[len(prefix):] for dest in data if dest.startswith(prefix)}
+    assert set(codex_assets.SKILLS) <= shipped
+    for skill in codex_assets.SKILLS:
+        assert data[prefix + skill] == [f"plugin-src/skills/{skill}/SKILL.md"]

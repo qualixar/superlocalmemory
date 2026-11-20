@@ -218,6 +218,7 @@ superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "r
 [tool.setuptools.data-files]
 "share/superlocalmemory/codex/skills/slm-bot-memory" = ["plugin-src/skills/slm-bot-memory/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-cache" = ["plugin-src/skills/slm-cache/SKILL.md"]
+"share/superlocalmemory/codex/skills/slm-cli" = ["plugin-src/skills/slm-cli/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-compress" = ["plugin-src/skills/slm-compress/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-getting-started-bot" = ["plugin-src/skills/slm-getting-started-bot/SKILL.md"]
 "share/superlocalmemory/codex/skills/slm-governance" = ["plugin-src/skills/slm-governance/SKILL.md"]
@@ -245,6 +246,7 @@ superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "r
 # bare-name source that other hosts read.
 "share/superlocalmemory/claude-code/skills/slm-bot-memory" = ["plugin-src/skills/slm-bot-memory/SKILL.md"]
 "share/superlocalmemory/claude-code/skills/slm-cache" = ["plugin-src/skills/slm-cache/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-cli" = ["plugin-src/skills/slm-cli/SKILL.md"]
 "share/superlocalmemory/claude-code/skills/slm-compress" = ["plugin-src/skills/slm-compress/SKILL.md"]
 "share/superlocalmemory/claude-code/skills/slm-getting-started-bot" = ["plugin-src/skills/slm-getting-started-bot/SKILL.md"]
 "share/superlocalmemory/claude-code/skills/slm-governance" = ["plugin-src/skills/slm-governance/SKILL.md"]
