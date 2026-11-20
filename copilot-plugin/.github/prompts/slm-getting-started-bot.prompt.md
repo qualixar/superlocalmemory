@@ -1,7 +1,7 @@
 ---
 name: slm-getting-started-bot
 description: First-session orientation for SuperLocalMemory on a headless bot host (Grok Bot, or any Cursor-format plugin install with no hooks, no dashboard, and no interactive setup wizard). What is different here vs. Claude Code/Codex, which 21 tools are actually available, and the first three calls to make.
-version: "4.2.32"
+version: "4.2.33"
 agent: agent
 tools:
   - session_init
@@ -198,4 +198,4 @@ quality on a shared box.
 
 ---
 
-*SuperLocalMemory v4.2.32 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later*

@@ -5,6 +5,21 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.33] — Deletes that finish, and a service that stays SLM's own
+
+Nothing changes in the store, and there is nothing to run. This release fixes the four known issues listed for 4.2.32.
+
+### Fixed
+
+- Deleting a memory that a backup already holds now succeeds. Before, the delete removed the memory and recorded it outside the backups, then answered "busy, retry" for as long as the backup existed, so a client that followed the retry advice never saw success. The answer now names the backups that still hold the memory (`backup_obligations_pending`); restoring one of them removes the memory again. A delete whose record could not be written still asks for a retry, because a restore would then bring the memory back (#342).
+- Auto-start no longer reloads the service while `slm serve uninstall` is removing it. Auto-start now takes the same lock as `slm serve install` and `uninstall`, and never waits for it: while an installer holds it, the daemon starts directly with the service's settings (#337).
+- When one data folder has services installed for two ports, the hand-over and `slm doctor` now count both. Before, a daemon run by the other port's service looked unowned and was asked to stop, and the two services could keep taking the folder from each other (#338).
+- On Fedora, RHEL, AlmaLinux and other distributions that ship a user-wide systemd drop-in, the service `slm serve install` writes is recognised again by `slm serve status`, `slm doctor`, auto-start and uninstall. A drop-in that only sets timeouts is accepted. One that changes the command, the settings, the user or the files the daemon can reach, or that sits in the unit's own folder, still is not (#339).
+
+### Changed
+
+- Tests no longer inherit a logger level that an earlier test set, and the dashboard load test holds each request to its own idle time on the same machine, so two tests that failed at random on slow CI runners are steady (#343).
+
 ## [4.2.32] — Every tool from the shell, no lost hook events, and one daemon the service owns
 
 Nothing changes in the store, and there is nothing to run.
