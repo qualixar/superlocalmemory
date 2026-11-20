@@ -106,3 +106,37 @@ def test_transform_is_idempotent_and_hosts_derive_the_spelling_they_need():
     assert _node(f"h.claudeCodeAgentTools({json.dumps(claude)}, 'superlocalmemory')") == claude
     assert _node(f"h.directAgentTools({json.dumps(claude)})").count("mcp__plugin_") == 0
     assert _node(f"h.bareAgentTools({json.dumps(claude)})") == md
+
+
+def _registered_tools() -> set[str]:
+    """Every tool name any MCP profile can expose (the server's own registry)."""
+    from superlocalmemory.mcp.profiles import _PROFILE_DEFINITIONS
+    return set().union(*_PROFILE_DEFINITIONS.values())
+
+
+def test_muse_agents_name_each_slm_tool_exactly_once_as_a_real_direct_tool():
+    """Muse installs SLM as a plain MCP server, so the only valid spelling is
+    ``mcp__superlocalmemory__<tool>`` where ``<tool>`` is a registered tool.
+    A double prefix (the plugin form nested inside the direct form) used to pass."""
+    direct, _plugin = _prefixes()
+    real = _registered_tools()
+    assert "recall" in real  # guard: the registry loaded and is not empty
+    for agent in _agents("muse-plugin"):
+        slm = [t for t in _tools(agent) if t.startswith("mcp__")]
+        assert slm, f"{agent.name} declares no SLM tools at all"
+        for entry in slm:
+            assert entry.startswith(direct), (agent.name, entry)
+            name = entry[len(direct):]
+            assert "mcp__" not in name and "plugin_" not in name, (agent.name, entry)
+            assert name in real, f"{agent.name}: {entry} is not a tool the server registers"
+        assert len(slm) == len(set(slm)), f"{agent.name} repeats an SLM tool"
+
+
+def test_claude_plugin_tools_are_real_registered_tools_in_both_spellings():
+    direct, plugin = _prefixes()
+    real = _registered_tools()
+    for agent in _agents("plugin"):
+        for entry in (t for t in _tools(agent) if t.startswith("mcp__")):
+            prefix = direct if entry.startswith(direct) else plugin
+            assert entry.startswith(prefix), (agent.name, entry)
+            assert entry[len(prefix):] in real, (agent.name, entry)
