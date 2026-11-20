@@ -171,9 +171,14 @@ def _windows_definition(name: str) -> ServiceDefinition | None:
     return ServiceDefinition(name, path, port, content, revision, result.stdout)
 
 
-_DANGEROUS_KEYS = frozenset({"ExecStart", "ExecStartPre", "ExecStartPost", "Environment",
-                             "EnvironmentFile", "WorkingDirectory", "User", "Group",
-                             "RootDirectory"})
+# Keys that change what the unit runs, as whom, with which settings, or which files it can
+# reach: a drop-in setting any of them makes the unit something SLM did not write.
+_DANGEROUS_KEYS = frozenset({
+    "ExecStart", "ExecStartPre", "ExecStartPost", "Environment", "EnvironmentFile",
+    "PassEnvironment", "UnsetEnvironment", "WorkingDirectory", "User", "Group",
+    "RootDirectory", "RootImage", "BindPaths", "BindReadOnlyPaths", "ProtectHome",
+    "InaccessiblePaths", "TemporaryFileSystem",
+})
 
 
 def _service_keys(text: str) -> set[str]:
