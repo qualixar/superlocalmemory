@@ -17,6 +17,11 @@
 #   scripts/check-no-internal-leaks.sh            # scan tracked files
 #   scripts/check-no-internal-leaks.sh --staged   # scan what is about to commit
 #
+# Optional private denylist: set SLM_LEAK_DENYLIST to the path of a file kept
+# OUTSIDE this repository, one extended regex per line (case-insensitive, blank
+# lines and lines starting with # ignored). Each line is scanned like the
+# built-in patterns. Unset, or a missing file, changes nothing.
+#
 # Exit 0 clean, 1 if anything matched.
 
 set -uo pipefail
@@ -56,14 +61,14 @@ fi
 [ -z "$FILES" ] && { echo "no files to scan"; exit 0; }
 
 FOUND=0
-scan() {
-  local pattern="$1" why="$2"
+scan_with() {
+  local flags="$1" pattern="$2" why="$3"
   local hits
   hits=$(printf '%s\n' "$FILES" \
     | grep -vE '(^|/)(\.backup|node_modules|dist|build)/' \
     | grep -vE '^scripts/check-no-internal-leaks\.sh$' \
     | tr '\n' '\0' \
-    | xargs -0 grep -InE "$pattern" 2>/dev/null | head -20)
+    | xargs -0 grep "$flags" -- "$pattern" 2>/dev/null | head -20)
   if [ -n "$hits" ]; then
     FOUND=1
     echo ""
@@ -71,6 +76,17 @@ scan() {
     printf '%s\n' "$hits" | sed 's/^/    /' | cut -c1-160
   fi
 }
+scan()    { scan_with -InE  "$1" "$2"; }
+scan_ci() { scan_with -InEi "$1" "$2"; }
+
+# Private denylist (optional). The names live in the caller's file, never here.
+if [ -n "${SLM_LEAK_DENYLIST:-}" ] && [ -f "$SLM_LEAK_DENYLIST" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|'#'*) continue ;; esac
+    scan_ci "$line" "a term from your private denylist"
+  done < "$SLM_LEAK_DENYLIST"
+fi
 
 scan "${PATTERNS[0]}" "$WHY"
 scan "$METHOD"        "$METHOD_WHY"

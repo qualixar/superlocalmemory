@@ -26,10 +26,10 @@ JUNK = ["Users", "User", "LIVE", "VERIFIED", "PASS", "FAIL", "DONE", "Final", "p
         "3f2b1c4e-9a7d-4e2b-8c1d-0a9e8f7d6c5b", "Configure", "Tested", "Comma",
         "2026-09-14 00:55", "2026-04-29 16:57", "/api/v3/consolidation/trigger",
         "/.well-known/oauth-protected-resource", "Xenobot Section Still Has",
-        "Check Accenture", "spill over", "gate.py", "notes.md", "SCREEN RECORDING",
+        "Check Acme", "spill over", "gate.py", "notes.md", "SCREEN RECORDING",
         "/api/*", "[Agantic_official]", "honest/critical beat", "Url", "AUTO-CREATED"]
 
-NAMES = ["SuperLocalMemory", "Claude Code", "SLM 4.1.25", "Varun", "Accenture", "pgbouncer",
+NAMES = ["SuperLocalMemory", "Claude Code", "SLM 4.1.25", "Alex", "Acme", "pgbouncer",
          "vitamin D", "billing service", "llama3.2", "Ollama", "NASA",
          "The Mirror and the Light", "Bank of America", "Xenobot Section", "TCP/IP"]
 
@@ -38,7 +38,7 @@ NOTE = ("Final: PASS. Status LIVE and VERIFIED at 14:55 IST on 2026-09-14 00:55.
         "cf43af4b67a347fd via /api/v3/consolidation/trigger and "
         "/.well-known/oauth-protected-resource.\n"
         "Users: see /Users/yourusername/Documents/notes.md. Comma placement fixed.\n"
-        "Varun asked Accenture about pgbouncer; the Xenobot Section Still Has gaps.")
+        "Alex asked Acme about pgbouncer; the Xenobot Section Still Has gaps.")
 
 
 #: Capitalised everyday words: junk where a sentence or line starts, a name
@@ -70,7 +70,7 @@ def test_a_real_name_still_becomes_an_entity(tmp_path: Path, name: str) -> None:
 
 def test_the_extractor_finds_the_names_in_a_noisy_note_and_none_of_the_junk() -> None:
     got = set(extract_mentions(NOTE))
-    assert {"Varun", "Accenture", "pgbouncer", "Xenobot Section"} <= got
+    assert {"Alex", "Acme", "pgbouncer", "Xenobot Section"} <= got
     assert not got & set(JUNK), got & set(JUNK)
     assert not any(n in got for n in ("Documents", "varun", "notes.md", "Status"))
 

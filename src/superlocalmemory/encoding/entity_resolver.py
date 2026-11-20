@@ -189,7 +189,7 @@ def _looks_like_person(name: str, words: list[str]) -> bool:
     """Two or three capitalised words that read as a person's name.
 
     4.1.25: "Claude Code" was typed person. A product word as the last word,
-    or an everyday English word before it ("Final Report", "Check Accenture"),
+    or an everyday English word before it ("Final Report", "Check Acme"),
     makes it something else; only a surname may be an everyday word ("Alice
     Smith", "Linda Park"). Uncertain names are concepts, which costs little.
     """

@@ -49,7 +49,7 @@ TOPICS = [
 
 ENTITIES_PER_TOPIC = [
     ("varun", "dark_mode", "terminal", "zsh", "iterm"),
-    ("agentassert", "accenture", "patent", "ip", "april_2026"),
+    ("agentassert", "acme", "contract", "ip", "april_2026"),
     ("slm", "v3421", "mesh", "launch", "pypi"),
     ("paper3", "arxiv", "neurips", "locomo", "mrr"),
     ("iclr", "deadline", "submission", "review", "camera_ready"),

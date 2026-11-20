@@ -43,18 +43,18 @@ def _fact(fid: str, content: str, entities: list[str]) -> AtomicFact:
 
 def _seed(db: DatabaseManager) -> None:
     db.store_memory(MemoryRecord(memory_id="m0", content="parent"))
-    for eid, name in [("e1", "Accenture"), ("e2", "Varun"), ("e3", "manager"),
+    for eid, name in [("e1", "Acme"), ("e2", "Alex"), ("e3", "manager"),
                       ("e4", "Paris"), ("e5", "vacation")]:
         db.store_entity(CanonicalEntity(
             entity_id=eid, profile_id="default",
             canonical_name=name, entity_type="thing",
         ))
     # Cluster A (work): e1,e2,e3
-    db.store_fact(_fact("f1", "Varun works at Accenture as an architect", ["e1", "e2", "e3"]))
-    db.store_fact(_fact("f2", "Varun met his manager at Accenture", ["e1", "e2", "e3"]))
-    db.store_fact(_fact("f3", "Accenture promoted Varun", ["e1", "e2"]))
+    db.store_fact(_fact("f1", "Alex works at Acme as an architect", ["e1", "e2", "e3"]))
+    db.store_fact(_fact("f2", "Alex met his manager at Acme", ["e1", "e2", "e3"]))
+    db.store_fact(_fact("f3", "Acme promoted Alex", ["e1", "e2"]))
     # Cluster B (travel): e4,e5
-    db.store_fact(_fact("f4", "Varun booked a vacation to Paris", ["e4", "e5"]))
+    db.store_fact(_fact("f4", "Alex booked a vacation to Paris", ["e4", "e5"]))
     db.store_fact(_fact("f5", "The Paris vacation was relaxing", ["e4", "e5"]))
     EntityCommunityBuilder(db).compute_and_store("default")
 

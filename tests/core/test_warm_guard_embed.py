@@ -340,7 +340,7 @@ class TestNoDoubleEmbed:
         existing_vec = [0.11, 0.22, 0.33]
         fact = AtomicFact(
             fact_id="test001",
-            content="Varun works at Accenture",
+            content="Alex works at Acme",
             fact_type=FactType.SEMANTIC,
             entities=[],
             observation_date="2026-07-26",
@@ -352,7 +352,7 @@ class TestNoDoubleEmbed:
         )
         record = MemoryRecord(
             profile_id="default",
-            content="Varun works at Accenture",
+            content="Alex works at Acme",
             session_date="2026-07-26",
         )
         mock_embedder = MagicMock()
