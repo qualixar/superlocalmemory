@@ -237,10 +237,13 @@ _HOOK_WORDS = {
     "not-integrated": "no SLM hooks there, so none added (`slm codex install` adds them)",
     "skipped": "left alone (you removed SLM hooks)",
     "error": "could not be read",
+    "plugin-managed": ("left untouched: SLM's hooks come from the Claude Code plugin, which "
+                       "updates with `claude plugin update superlocalmemory@qualixar`"),
 }
 
 _HOOK_STATUS = {"updated": "updated", "would-update": "preview", "current": "verified",
-                "not-integrated": "verified", "skipped": "verified", "error": "blocked"}
+                "not-integrated": "verified", "skipped": "verified", "error": "blocked",
+                "plugin-managed": "verified"}
 
 
 def _hook_file_result(result: dict[str, Any], label: str, add_hint: str) -> dict[str, str]:
