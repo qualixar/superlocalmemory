@@ -2,7 +2,8 @@
 #
 #   irm https://raw.githubusercontent.com/qualixar/superlocalmemory/main/scripts/get-slm.ps1 | iex
 #
-# Also turn on pictures and documents (needs 16 GB of memory): `iex` cannot take
+# Start the pictures and documents download now (they are on by default and set up
+# by themselves on 16 GB or more): `iex` cannot take
 # arguments, so set an environment variable first, in the same window:
 #
 #   $env:SLM_MEDIA = "1"; irm https://raw.githubusercontent.com/qualixar/superlocalmemory/main/scripts/get-slm.ps1 | iex

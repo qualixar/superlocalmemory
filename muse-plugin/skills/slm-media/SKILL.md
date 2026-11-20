@@ -1,6 +1,6 @@
 ---
 name: slm-media
-description: Save pictures and PDFs in SuperLocalMemory and find them again by describing them. Covers when to save a picture or document, remember_media, remember_document, get_media, media_status and media_upload_link, how recall returns pictures and PDF pages, the limits, what stays private, turning the feature on with `slm media` (16 GB of memory needed), connecting folders with `slm sources`, and how web apps add files through one-time upload links. Off by default.
+description: Save pictures and PDFs in SuperLocalMemory and find them again by describing them. Covers when to save a picture or document, remember_media, remember_document, get_media, media_status and media_upload_link, how recall returns pictures and PDF pages, the limits, what stays private, how it sets itself up (by itself on a computer with 16 GB of memory or more, one click below that) and how to turn it back on with `slm media`, connecting folders with `slm sources`, and how web apps add files through one-time upload links. On by default.
 when_to_use: |
   - "Save this screenshot / photo / PDF"
   - "Find the picture where ..." or "which page of the PDF says ..."
@@ -229,10 +229,11 @@ Rules for reading them:
 
 ## Optional picture and document models (added in 4.2.30)
 
-Three parts on top of pictures and documents, each **off** until someone turns
-it on. Two download a model, so the size is shown first and nothing downloads
-without a yes. Turning one on is the person's decision: say the size, and never
-pass `--yes` for them unless they asked for the download.
+Three parts on top of pictures and documents, **on by default**. Two download a
+model: on 16 GB of memory or more SLM downloads them by itself, and below that
+the size is shown first and nothing downloads without a yes. A part the person
+turned off stays off, and turning one back on is their decision: say the size,
+and never pass `--yes` for them unless they asked for the download.
 
 ```bash
 slm media pack status                    # each part, its state and its download size
@@ -257,10 +258,10 @@ slm media pack disable captions          # off again (--remove-files also delete
   `from page 3, top left`. Give that place when you cite a picture or a scanned
   page.
 
-The parts are on by default and need pictures and documents set up first and free
-disk space; on 16 GB or more the service downloads both models by itself, one at a
-time, and a part you disabled stays off (below 16 GB it is one click). The kill
-switch turns all three off. Only one of
+A part only acts once its model is on this computer, so it needs pictures and
+documents set up first and free disk space; on 16 GB or more the service
+downloads both models by itself, one at a time, and a part you disabled stays
+off (below 16 GB it is one click). The kill switch turns all three off. Only one of
 these models is in memory at a time, in its own worker, and it is released a
 minute after its last use. The dashboard has the same three switches under
 **Documents & Images**, in plain words. Nothing here adds an MCP tool.

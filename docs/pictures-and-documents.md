@@ -15,7 +15,7 @@ Three optional parts add to this: a short description of each picture (a 0.5 GB 
 | Systems | macOS on Apple Silicon, Windows x64, Linux x86_64 and Linux ARM64 (aarch64) with a glibc such as Debian, Ubuntu or Fedora. Python 3.12, 3.13 or 3.14. |
 | Not supported | Windows on ARM and Intel Macs. Text memory works there as before. |
 
-Below 16 GB the switch is refused with the reason, because the picture model and a large PDF together can push a smaller machine into swapping. If you understand that risk, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from and turn the feature on again; SLM logs that warning once per run of the daemon (or terminal command), not on every save, so look for it near the start of the log.
+Below 16 GB nothing sets itself up and nothing is refused: turn pictures and documents on in the dashboard or with `slm media enable`, which prints "This computer has 8.0 GB of memory; pictures and documents may be slow and the models are released when memory runs low." (the picture model and a large PDF together can push a smaller machine into swapping, so SLM releases the models when memory runs low). To make a smaller computer take the automatic path too, set `SLM_MEDIA_ALLOW_LOW_RAM=1` in the environment SLM starts from; SLM logs a warning once per run of the daemon (or terminal command), not on every save, so look for it near the start of the log.
 
 ## Limits
 
