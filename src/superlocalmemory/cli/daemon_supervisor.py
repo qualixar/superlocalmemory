@@ -107,7 +107,7 @@ class JobState:
 @dataclass(frozen=True)
 class StartOutcome:
     started: bool
-    how: str  # "kickstarted" | "loaded" | "started" | "failed"
+    how: str  # "kickstarted" | "loaded" | "started" | "busy" | "failed"
     detail: str = ""
 
 
@@ -348,12 +348,32 @@ def _start_windows(job: SupervisorJob) -> StartOutcome:
 _STARTERS = {"macos": _start_macos, "linux": _start_linux, "windows": _start_windows}
 
 
+_BUSY = ("an install or uninstall of the SLM service is running; "
+         "starting the daemon directly instead")
+
+
 def request_start(job: SupervisorJob) -> StartOutcome:
-    """Ask the service manager to start ``job``; never raises."""
-    try:
-        return _STARTERS[job.platform](job)
-    except Exception as exc:  # noqa: BLE001 - a failed ask means a direct start
-        return StartOutcome(False, "failed", f"{type(exc).__name__}: {exc}")
+    """Ask the service manager to start ``job``; never raises.
+
+    Holds the lock ``slm serve install`` and ``uninstall`` take (#337), so an
+    auto-start cannot load a definition an installer has just unloaded and is
+    about to delete. It never waits for that lock: while an installer holds
+    it, the answer is "busy" and the caller starts the daemon directly.
+    """
+    from contextlib import ExitStack
+
+    from superlocalmemory.infra import service_mutation
+
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(service_mutation.mutation())
+        except OSError as exc:  # held by an installer, or the lock file is unusable
+            logger.debug("service lock not taken: %s", exc)
+            return StartOutcome(False, "busy", _BUSY)
+        try:
+            return _STARTERS[job.platform](job)
+        except Exception as exc:  # noqa: BLE001 - a failed ask means a direct start
+            return StartOutcome(False, "failed", f"{type(exc).__name__}: {exc}")
 
 
 class ServiceProcess:

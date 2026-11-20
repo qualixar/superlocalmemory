@@ -13,6 +13,7 @@ Every service-manager call here is mocked; nothing reaches launchd/systemd.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -297,3 +298,51 @@ def test_client_thread_settings_never_reach_the_daemon(start_env, monkeypatch):
     env = start_env.popen.call_args.kwargs["env"]
     assert env["OMP_NUM_THREADS"] == "1"
     assert env["KMP_DUPLICATE_LIB_OK"] == "TRUE"
+
+
+# --- #337: auto-start and an installer never change the service at once -----------
+
+def _hold_service_lock(home: Path):
+    """Hold the service-mutation lock the way another process's installer does."""
+    import fcntl
+    import os
+
+    path = home / ".slm-service-mutation.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return fd
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="flock")
+def test_auto_start_skips_the_service_while_an_installer_holds_it(monkeypatch, tmp_path):
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    calls: list = []
+    monkeypatch.setattr(supervisor, "_run", lambda argv: calls.append(argv))
+    fd = _hold_service_lock(tmp_path)
+    try:
+        outcome = supervisor.request_start(_job(1))
+    finally:
+        os.close(fd)
+    assert outcome.started is False
+    assert outcome.how == "busy"
+    assert "install" in outcome.detail
+    assert calls == []  # launchctl was never asked to load the file being removed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="flock")
+def test_auto_start_holds_the_service_lock_while_it_asks_the_manager(monkeypatch, tmp_path):
+    from superlocalmemory.infra import service_mutation
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    seen: list = []
+
+    def starter(job):
+        seen.append(getattr(service_mutation._HELD, "lock", None) is not None)
+        return StartOutcome(True, "started")
+
+    monkeypatch.setitem(supervisor._STARTERS, "linux", starter)
+    assert supervisor.request_start(_job(1, "linux")).started
+    assert seen == [True]
+    assert getattr(service_mutation._HELD, "lock", None) is None  # released after
