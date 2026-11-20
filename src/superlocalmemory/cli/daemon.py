@@ -920,10 +920,13 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     # __kmp_suspend_initialize_thread when lightgbm forks its worker pool.
     # Forcing serial OpenMP eliminates the parallel barrier race entirely.
     # Never the client's identity (agent, channel, tool profile); the service's
-    # settings when a service exists but would not start it.
-    daemon_env = _supervisor.daemon_environment(os.environ, service_job)
-    daemon_env["OMP_NUM_THREADS"] = "1"
-    daemon_env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    # settings when a service exists but would not start it. The serial
+    # OpenMP defaults replace the client's own values, and a value the
+    # service definition sets replaces them in turn (the service wins).
+    daemon_env = _supervisor.daemon_environment(
+        {**os.environ, "OMP_NUM_THREADS": "1", "KMP_DUPLICATE_LIB_OK": "TRUE"},
+        service_job,
+    )
     bootstrap_descriptor = build_descriptor(
         port=_target_port,
         version=_slm_version,

@@ -255,3 +255,27 @@ def test_linux_and_windows_definition_environment_parsing():
            'WshShell.Environment("Process")("SLM_RANKING") = "v2"\n'
            'WshShell.Run """p"" -m m", 0, False\n')
     assert supervisor._windows_environment(vbs) == {"SLM_RANKING": "v2"}
+
+
+# --- thread settings: the service's value wins, the client's never does -------------
+
+def test_service_thread_settings_win_over_the_direct_start_defaults(start_env, monkeypatch):
+    job = _job(start_env.port, OMP_NUM_THREADS="4", KMP_DUPLICATE_LIB_OK="FALSE")
+    monkeypatch.setattr(supervisor, "find_job", lambda port: job)
+    monkeypatch.setattr(supervisor, "request_start",
+                        lambda j: StartOutcome(False, "failed", "refused"))
+    assert daemon._start_daemon_subprocess(port=start_env.port) is True
+    env = start_env.popen.call_args.kwargs["env"]
+    assert env["OMP_NUM_THREADS"] == "4"
+    assert env["KMP_DUPLICATE_LIB_OK"] == "FALSE"
+
+
+def test_client_thread_settings_never_reach_the_daemon(start_env, monkeypatch):
+    """Serial OpenMP prevents a known crash; a client's shell value must not undo it."""
+    monkeypatch.setenv("OMP_NUM_THREADS", "8")
+    monkeypatch.setenv("KMP_DUPLICATE_LIB_OK", "FALSE")
+    monkeypatch.setattr(supervisor, "find_job", lambda port: None)
+    assert daemon._start_daemon_subprocess(port=start_env.port) is True
+    env = start_env.popen.call_args.kwargs["env"]
+    assert env["OMP_NUM_THREADS"] == "1"
+    assert env["KMP_DUPLICATE_LIB_OK"] == "TRUE"
