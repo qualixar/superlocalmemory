@@ -206,3 +206,22 @@ def test_doctor_still_warns_when_the_manager_answers_and_runs_another_process(
     assert found.status == "WARN" and "slm restart" in found.fix
     launchd.jobs[launchd.path.stem].pid = None  # the service runs nothing
     assert live_daemon.check_supervisor_ownership().status == "WARN"
+
+
+def test_doctor_passes_a_daemon_run_by_this_folders_service_on_another_port(
+    live_daemon, monkeypatch,
+):
+    """#338: the daemon on this port may be run by the folder's other service."""
+    from pathlib import Path
+
+    from superlocalmemory.cli.daemon_supervisor import JobState, SupervisorJob
+
+    here = SupervisorJob("macos", "svc-a", Path("/x/a.plist"), int(PORT), {})
+    there = SupervisorJob("macos", "svc-b", Path("/x/b.plist"), int(PORT) + 1, {})
+    monkeypatch.setattr(supervisor, "jobs_for",
+                        lambda port: [here] if port == int(PORT) else [here, there])
+    states = {"svc-a": JobState("idle", None), "svc-b": JobState("running", 777)}
+    monkeypatch.setattr(supervisor, "job_state", lambda job: states[job.name])
+    found = live_daemon.check_supervisor_ownership()
+    assert found.status == "PASS", found
+    assert "svc-b" in found.detail
