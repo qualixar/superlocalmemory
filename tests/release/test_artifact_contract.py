@@ -5,6 +5,7 @@ from __future__ import annotations
 import email.parser
 import tarfile
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -124,6 +125,21 @@ def test_wheel_contains_packaged_codex_skill_assets(
         )
     }
     assert all(any(name.endswith(suffix) for name in names) for suffix in expected_suffixes)
+
+
+def test_wheel_contains_the_claude_code_skills_agents_and_command(
+    built_artifacts: BuiltArtifacts,
+) -> None:
+    """``slm upgrade-hosts`` installs these into a Claude Code that has no plugin, from the wheel."""
+    from superlocalmemory.hooks.claude_code_assets import planned_files
+
+    names = wheel_names(built_artifacts.wheel)
+    root = Path(__file__).resolve().parents[2] / "plugin-src"
+    wanted = set(planned_files(root))
+    assert len(wanted) >= 21
+    prefix = "data/share/superlocalmemory/claude-code/"
+    for rel in wanted:
+        assert any(name.endswith(prefix + rel) for name in names), rel
 
 
 def test_wheel_contains_portable_kit_agents_rules(

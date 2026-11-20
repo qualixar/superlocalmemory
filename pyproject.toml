@@ -239,6 +239,30 @@ superlocalmemory = ["ui/**/*", "optimize/NOTICE", "contracts/schemas/*.json", "r
     "plugin-src/agents/slm-loop-runner.md",
 ]
 "share/superlocalmemory/portable-kit/rules" = ["plugin-src/rules/AGENTS.md", "plugin-src/rules/CLAUDE.md.fragment"]
+# Claude Code without the plugin: what `slm upgrade-hosts` and the daemon install into ~/.claude.
+"share/superlocalmemory/claude-code/skills/slm-bot-memory" = ["plugin-src/skills/slm-bot-memory/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-cache" = ["plugin-src/skills/slm-cache/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-compress" = ["plugin-src/skills/slm-compress/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-getting-started-bot" = ["plugin-src/skills/slm-getting-started-bot/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-governance" = ["plugin-src/skills/slm-governance/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-graph" = ["plugin-src/skills/slm-graph/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-loop" = ["plugin-src/skills/slm-loop/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-media" = ["plugin-src/skills/slm-media/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-mesh" = ["plugin-src/skills/slm-mesh/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-profile" = ["plugin-src/skills/slm-profile/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-recall" = ["plugin-src/skills/slm-recall/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-remember" = ["plugin-src/skills/slm-remember/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-scope" = ["plugin-src/skills/slm-scope/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-session" = ["plugin-src/skills/slm-session/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-status" = ["plugin-src/skills/slm-status/SKILL.md"]
+"share/superlocalmemory/claude-code/skills/slm-web-access" = ["plugin-src/skills/slm-web-access/SKILL.md"]
+"share/superlocalmemory/claude-code/agents" = [
+    "plugin-src/agents/slm-governance-advisor.md",
+    "plugin-src/agents/slm-loop-runner.md",
+    "plugin-src/agents/slm-memory-advisor.md",
+    "plugin-src/agents/slm-optimize-advisor.md",
+]
+"share/superlocalmemory/claude-code/commands" = ["plugin-src/commands/slm-loop.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

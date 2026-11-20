@@ -7,7 +7,9 @@ replace SLM-owned entries and add missing SLM entries. It never replaces a whole
 touches another entry, key or the key order, and never creates hooks in a file that holds no
 SLM hook yet (that person never opted in there).
 
-Two files are SLM's to maintain: Claude Code's ``settings.json`` and Codex's ``hooks.json``.
+Two files are SLM's to maintain: Claude Code's ``settings.json`` and Codex's ``hooks.json``. A
+third kind, the ``slm-*`` skills, subagents and ``/slm-loop`` of a Claude Code wired without the
+plugin, is handled by :mod:`superlocalmemory.hooks.claude_code_assets` in the same once-per-version step.
 SLM tracks no project-level hook file, so there is none to visit. Plugin-managed copies (the
 Claude, Codex, Antigravity, Muse and Copilot plugin caches, the Hermes plugin) belong to their
 host and are never written here.
@@ -258,6 +260,23 @@ def _write_marker(root: Path, version: str, hosts: Mapping[str, Result]) -> None
     os.replace(tmp, root / MARKER_NAME)
 
 
+def _upgrade_claude_assets_quietly(claude_settings: Path | None, version: str) -> Result:
+    """Skills, subagents and ``/slm-loop`` of a non-plugin Claude Code.
+
+    Only what nobody has to be asked about: missing files are added and files SLM wrote and the
+    person never changed are refreshed. A file from before the manifest existed is left for the
+    explicit ``slm upgrade-hosts --apply``, which keeps a backup of it.
+    """
+    from superlocalmemory.hooks import claude_code_assets
+
+    try:
+        return claude_code_assets.upgrade_claude_assets(
+            claude_settings, version=version, apply=True, adopt_unrecorded=False)
+    except Exception as exc:  # noqa: BLE001 - a background default never takes the daemon down
+        logger.warning("claude asset upgrade hit an error", exc_info=True)
+        return _result("error", f"claude assets: {exc}", claude_settings or Path("."))
+
+
 def run_once(*, version: str | None = None, data_root: Path | str | None = None,
              env: Mapping[str, str] | None = None, claude_settings: Path | None = None,
              codex_hooks_path: Path | None = None) -> Result | None:
@@ -277,6 +296,7 @@ def run_once(*, version: str | None = None, data_root: Path | str | None = None,
         return None  # "turn off everything new in 4.2.30" (F-13): not marked done, it runs once lifted
     hosts = upgrade_all(version=version, claude_settings=claude_settings,
                         codex_hooks_path=codex_hooks_path)
+    hosts["claude-code-assets"] = _upgrade_claude_assets_quietly(claude_settings, version)
     if not any(res["status"] in _RETRY_STATUSES for res in hosts.values()):
         try:
             _write_marker(root, version, hosts)

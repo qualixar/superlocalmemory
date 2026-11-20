@@ -4337,8 +4337,15 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
         )
 
     try:  # 4.2.30: are SLM's own hooks current in the host files SLM maintains?
-        from superlocalmemory.cli.host_upgrades import host_hooks_finding, plugin_hosts_finding
+        from superlocalmemory.cli.host_upgrades import (
+            claude_assets_finding,
+            host_hooks_finding,
+            plugin_hosts_finding,
+        )
         _check("Host hooks", *host_hooks_finding())
+        _ca = claude_assets_finding()
+        if _ca is not None:
+            _check("Host assets", *_ca)
         _ph = plugin_hosts_finding()
         if _ph is not None:
             _check("Plugin hosts", *_ph)
