@@ -38,9 +38,11 @@ def world(monkeypatch):
     state = SimpleNamespace(
         jobs=[_job()], pids={"svc": os.getpid()}, held=True,
         holder=SimpleNamespace(pid=FOREIGN_PID, port=PORT), alive=True,
-        stop=MagicMock(return_value=True), freed=True,
+        stop=MagicMock(return_value=True), freed=True, other_ports=[],
     )
-    monkeypatch.setattr(supervisor, "jobs_for", lambda port: state.jobs if port == PORT else [])
+    # jobs_for(None) is every service of this data folder, whatever its port (#338).
+    monkeypatch.setattr(supervisor, "jobs_for", lambda port: (
+        state.jobs if port == PORT else state.jobs + state.other_ports if port is None else []))
     monkeypatch.setattr(supervisor, "job_pid", lambda job: state.pids.get(job.name))
     monkeypatch.setattr(instance_lock, "instance_lock_is_held", lambda *a: state.held)
     monkeypatch.setattr(instance_lock, "wait_until_instance_lock_free",
@@ -196,3 +198,12 @@ def test_doctor_is_silent_without_a_service_or_a_daemon(doctor_world, world):
     assert doctor_world.check_supervisor_ownership() is None
     world.jobs, world.holder = [_job()], None
     assert doctor_world.check_supervisor_ownership() is None
+
+
+def test_a_daemon_run_by_this_folders_service_on_another_port_is_never_stopped(world):
+    """#338: services for one folder on two ports must not take it from each other."""
+    other = SupervisorJob("macos", "svc-b", Path("/x/svc-b.plist"), PORT + 1, {})
+    world.other_ports = [other]
+    world.pids = {"svc": os.getpid(), "svc-b": FOREIGN_PID}
+    assert handover.take_over_if_supervised(PORT) == "holder_supervised"
+    world.stop.assert_not_called()

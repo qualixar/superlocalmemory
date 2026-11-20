@@ -65,7 +65,9 @@ def _check() -> SupervisorCheck | None:
     jobs = [job for job in supervisor.jobs_for(descriptor.port) if job.platform != "windows"]
     if not jobs:
         return None
-    states = {job.name: supervisor.job_state(job) for job in jobs}
+    # The daemon may be run by this folder's service for another port (#338).
+    folder = [job for job in supervisor.jobs_for(None) if job.platform != "windows"]
+    states = {job.name: supervisor.job_state(job) for job in [*jobs, *folder]}
     owner = next((name for name, state in states.items()
                   if state.status == "running" and state.pid == descriptor.pid), None)
     if owner is not None:

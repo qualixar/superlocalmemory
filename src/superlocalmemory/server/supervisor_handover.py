@@ -74,7 +74,7 @@ def _take_over(port: int) -> str:
     if not jobs:
         return "unsupervised"
     me = os.getpid()
-    mine, job_pids = _own_job_names(jobs, me, supervisor.job_pid)
+    mine, _ = _own_job_names(jobs, me, supervisor.job_pid)
     if not mine:
         return "unsupervised"
     if not instance_lock_is_held():
@@ -83,6 +83,10 @@ def _take_over(port: int) -> str:
     if holder is None or not client._descriptor_process_is_alive(holder):
         # Cannot prove who holds the folder: never stop an unknown process.
         return "holder_unknown"
+    # Every service of this folder counts, whatever its port (#338): stopping a
+    # daemon another of its services runs would let the two take the folder
+    # from each other forever.
+    _, job_pids = _own_job_names(supervisor.jobs_for(None), me, supervisor.job_pid)
     if holder.pid in job_pids:
         logger.error(
             "SLM daemon will not start: pid %d, run by another installed service "

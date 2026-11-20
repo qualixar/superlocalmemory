@@ -175,8 +175,14 @@ _ENVIRONMENT_PARSERS = {
 
 # --- discovery -------------------------------------------------------------------
 
-def jobs_for(port: int) -> list[SupervisorJob]:
-    """Every installed definition that owns this data folder on ``port``."""
+def jobs_for(port: int | None) -> list[SupervisorJob]:
+    """Every installed definition that owns this data folder on ``port``.
+
+    ``port=None`` returns every one of this data folder, whatever its port: a
+    folder has one instance lock but can have services for several ports (the
+    port changed and ``slm serve install`` ran again without an uninstall).
+    Ownership questions must look at all of them (#338).
+    """
     platform = current_platform()
     if platform is None:
         return []
@@ -189,7 +195,7 @@ def jobs_for(port: int) -> list[SupervisorJob]:
         return []
     jobs = []
     for row in rows:
-        if row.port != port:
+        if port is not None and row.port != port:
             continue
         try:
             environment = _ENVIRONMENT_PARSERS[platform](row.content)
