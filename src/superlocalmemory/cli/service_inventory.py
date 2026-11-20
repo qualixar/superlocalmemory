@@ -171,6 +171,50 @@ def _windows_definition(name: str) -> ServiceDefinition | None:
     return ServiceDefinition(name, path, port, content, revision, result.stdout)
 
 
+# Keys that change what the unit runs, as whom, with which settings, or which files it can
+# reach: a drop-in setting any of them makes the unit something SLM did not write.
+_DANGEROUS_KEYS = frozenset({
+    "ExecStart", "ExecStartPre", "ExecStartPost", "Environment", "EnvironmentFile",
+    "PassEnvironment", "UnsetEnvironment", "WorkingDirectory", "User", "Group",
+    "RootDirectory", "RootImage", "BindPaths", "BindReadOnlyPaths", "ProtectHome",
+    "InaccessiblePaths", "TemporaryFileSystem",
+})
+
+
+def _service_keys(text: str) -> set[str]:
+    """Keys set in the [Service] section of a systemd INI file; raises ValueError."""
+    keys: set[str] = set()
+    section = ""
+    lines = iter(text.splitlines())
+    for raw in lines:
+        line = raw.strip()
+        while line.endswith("\\"):  # a trailing backslash joins the next line
+            line = line[:-1].rstrip() + " " + next(lines, "").strip()
+            line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("["):
+            if not line.endswith("]"):
+                raise ValueError("unterminated section header")
+            section = line[1:-1]
+        elif "=" not in line or not section:
+            raise ValueError("not an assignment")
+        elif section == "Service":
+            keys.add(line.split("=", 1)[0].strip())
+    return keys
+
+
+def _dropin_is_harmless(path: Path, unit_name: str) -> bool:
+    """True when a drop-in cannot change what the unit runs or where. Fails closed."""
+    if path.parent.name == f"{unit_name}.service.d":
+        return False  # an override of this very unit is never SLM's own definition
+    try:
+        keys = _service_keys(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return False
+    return not any(key in _DANGEROUS_KEYS or key.startswith("Exec") for key in keys)
+
+
 def _linux_effective(path: Path) -> bool:
     # Ask systemd about all override search paths, including runtime/global drop-ins.
     dropins = path.parent / f"{path.name}.d"
@@ -179,8 +223,11 @@ def _linux_effective(path: Path) -> bool:
     result = _run(["systemctl", "--user", "show", path.stem,
                    "--property=FragmentPath", "--property=DropInPaths"])
     properties = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-    return (result.returncode == 0 and properties.get("FragmentPath") == str(path)
-            and properties.get("DropInPaths") == "")
+    if result.returncode != 0 or properties.get("FragmentPath") != str(path):
+        return False
+    # User-wide drop-ins (Fedora ships 10-timeout-abort.conf) are fine if harmless.
+    return all(_dropin_is_harmless(Path(item), path.stem)
+               for item in properties.get("DropInPaths", "").split())
 
 
 def _file_definition(path: Path, platform: str) -> ServiceDefinition | None:
