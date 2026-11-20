@@ -82,6 +82,8 @@ _KNOWN_DEAD: dict[str, str] = {
     "code_graph/git_hooks.py": "seeded 4.0.6 — triage: wire or delete",
     "code_graph/incremental.py": "seeded 4.0.6 — triage",
     "code_graph/watcher.py": "seeded 4.0.6 — triage",
+    "cli/cli_skill.py": "ALIVE — build-time generator for plugin-src/skills/slm-cli/SKILL.md, "
+                        "run by scripts/build_cli_skill.py and checked by a test; not used at runtime",
     "core/embedding_worker.py": "ALIVE — subprocess-spawned by infra/self_heal.py",
     "core/engine_lock.py": "seeded 4.0.6 — triage",
     "core/recall_worker.py": "ALIVE — subprocess-spawned by infra/self_heal.py",
