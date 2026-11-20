@@ -421,7 +421,8 @@ def _upgrade_claude_code(*, apply: bool) -> dict[str, str]:
     assets = upgrade_claude_assets(version=_version(), apply=apply, adopt_unrecorded=True)
     if settings["status"] == "plugin-managed":
         return {"status": "verified", "detail": "Claude Code settings.json, skills, agents and "
-                "commands: come from the Claude Code plugin, so ~/.claude was left untouched"}
+                "commands: come from the Claude Code plugin, so ~/.claude was left untouched; "
+                "the plugin updates with `claude plugin update superlocalmemory@qualixar`"}
     part = _hook_file_result(
         settings, "Claude Code settings.json",
         "`slm hooks install` adds them, or use the Claude Code plugin")

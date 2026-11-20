@@ -135,11 +135,23 @@ def test_wheel_contains_the_claude_code_skills_agents_and_command(
 
     names = wheel_names(built_artifacts.wheel)
     root = Path(__file__).resolve().parents[2] / "plugin-src"
-    wanted = set(planned_files(root))
+    wanted_bytes = planned_files(root)
+    wanted = set(wanted_bytes)
     assert len(wanted) >= 21
     prefix = "data/share/superlocalmemory/claude-code/"
     for rel in wanted:
         assert any(name.endswith(prefix + rel) for name in names), rel
+    # The sub-agents in the wheel are the generated, full-tool-name ones, never plugin-src's bare ones.
+    agents = sorted(rel for rel in wanted if rel.startswith("agents/"))
+    assert len(agents) == 4
+    with zipfile.ZipFile(built_artifacts.wheel) as archive:
+        for rel in agents:
+            member = next(n for n in archive.namelist() if n.endswith(prefix + rel))
+            assert archive.read(member) == wanted_bytes[rel], rel
+            for line in archive.read(member).decode().split("\n---\n", 1)[0].splitlines():
+                if line.startswith("tools:"):
+                    slm = [t.strip() for t in line[6:].split(",") if not t.strip()[:1].isupper()]
+                    assert slm and all(t.startswith("mcp__superlocalmemory__") for t in slm), (rel, line)
 
 
 def test_wheel_contains_portable_kit_agents_rules(

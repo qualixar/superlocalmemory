@@ -56,7 +56,9 @@ claude plugin update superlocalmemory@qualixar
 The same command also refreshes the skills, subagents and `/slm-loop` command of a
 Claude Code that has no plugin. Only files SLM ships are looked at: the
 `slm-*` skills in `~/.claude/skills`, the `slm-*` advisors in `~/.claude/agents` and
-`~/.claude/commands/slm-loop.md`. The preview names each file it would add or
+`~/.claude/commands/slm-loop.md`. The advisors name SLM's tools in full
+(`mcp__superlocalmemory__recall`), the only spelling a Claude Code without the plugin
+resolves, so an advisor that already uses it stays byte-identical. The preview names each file it would add or
 refresh, and the status line says "already current" only when the hooks and all of
 these match this release.
 

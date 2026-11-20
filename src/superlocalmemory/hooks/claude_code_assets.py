@@ -52,6 +52,8 @@ MANIFEST_NAME = ".slm-managed.json"
 #: Only names with this prefix are ever shipped or touched.
 _OWNED_PREFIX = "slm-"
 _KINDS = ("skills", "agents", "commands")
+#: How a Claude Code that reaches SLM as a plain MCP server (no plugin) spells an SLM tool.
+DIRECT_TOOL_PREFIX = "mcp__superlocalmemory__"
 
 
 # -- what this release ships ----------------------------------------------------------------
@@ -68,15 +70,46 @@ def source_root() -> Path | None:
     return None
 
 
+def _agents_dir(root: Path) -> Path:
+    """Where this layout keeps the sub-agents Claude Code can resolve.
+
+    ``plugin-src/agents`` names SLM tools bare (other hosts read it) and is never installed into
+    ``~/.claude``; a checkout reads the generated ``claude-code-assets/agents`` beside it, and the
+    wheel's ``agents`` folder is that same generated folder.
+    """
+    if root.name == "plugin-src":
+        return root.parent / "claude-code-assets" / "agents"
+    return root / "agents"
+
+
+class BareToolNames(ValueError):
+    """A sub-agent names an SLM tool bare; Claude Code would resolve it to nothing."""
+
+
+def _check_direct_form(rel: str, data: bytes) -> None:
+    """Refuse an agent whose SLM tools are not ``mcp__superlocalmemory__<tool>`` (a stale build)."""
+    head = data.decode("utf-8", errors="replace").split("\n---\n", 1)[0]
+    for line in head.splitlines():
+        if not line.startswith("tools:"):
+            continue
+        for tool in (t.strip() for t in line[len("tools:"):].split(",")):
+            if tool and not tool[0].isupper() and not tool.startswith(DIRECT_TOOL_PREFIX):
+                raise BareToolNames(f"{rel} names the tool {tool!r} bare, so Claude Code cannot "
+                                    "resolve it; rebuild with scripts/build-claude-code-assets.mjs")
+
+
 def planned_files(root: Path) -> dict[str, bytes]:
     """Relative POSIX path (``skills/slm-recall/SKILL.md``) to the bytes this release ships."""
     planned: dict[str, bytes] = {}
     for skill in sorted((root / "skills").glob(f"{_OWNED_PREFIX}*")):
         if (skill / "SKILL.md").is_file():
             planned[f"skills/{skill.name}/SKILL.md"] = (skill / "SKILL.md").read_bytes()
-    for kind in ("agents", "commands"):
-        for entry in sorted((root / kind).glob(f"{_OWNED_PREFIX}*.md")) if (root / kind).is_dir() else ():
-            planned[f"{kind}/{entry.name}"] = entry.read_bytes()
+    for kind, folder in (("agents", _agents_dir(root)), ("commands", root / "commands")):
+        for entry in sorted(folder.glob(f"{_OWNED_PREFIX}*.md")) if folder.is_dir() else ():
+            data = entry.read_bytes()
+            if kind == "agents":
+                _check_direct_form(f"agents/{entry.name}", data)
+            planned[f"{kind}/{entry.name}"] = data
     return planned
 
 
@@ -238,7 +271,7 @@ def is_integrated(settings_path: Path | None = None) -> bool:
         root = source_root()
         plan = planned_files(root) if root is not None else {}
         return _integrated(settings_path, plan, _read_manifest(claude_dir))
-    except OSError:
+    except (OSError, BareToolNames):
         return False
 
 
@@ -325,6 +358,11 @@ def upgrade_claude_assets(settings_path: Path | None = None, *, version: str, ap
         return _result("error", "this installation ships no Claude Code skills", claude_dir)
     try:
         plan = planned_files(root)
+    except BareToolNames as exc:
+        return _result("error", f"not installed: {exc}", claude_dir)
+    except OSError as exc:
+        return _result("error", f"could not update Claude Code assets: {exc}", claude_dir)
+    try:
         recorded = _read_manifest(claude_dir)
         if not _integrated(settings_path, plan, recorded):
             return _result("not-integrated", "no SLM skills or hooks there, so none added", claude_dir)

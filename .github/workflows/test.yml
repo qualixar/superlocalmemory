@@ -64,7 +64,7 @@ jobs:
           # Only the generated plugin trees: the build does not own docs/ assets,
           # and binary files there (demo GIFs) differ on every checkout.
           paths=(plugin codex-plugin copilot-plugin cursor-plugin antigravity-plugin
-                 muse-plugin hermes-plugin vscode-agent-plugin
+                 muse-plugin hermes-plugin vscode-agent-plugin claude-code-assets
                  .claude-plugin .cursor-plugin .github/plugin)
           if ! git diff --exit-code --stat -- "${paths[@]}"; then
             echo "::error::Generated plugin files are out of date. Run 'node scripts/build-all-plugins.mjs' and commit the result."

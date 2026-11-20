@@ -25,6 +25,7 @@ export const STEPS = Object.freeze([
   'build-hermes-plugin.mjs',
   'build-muse-plugin.mjs',
   'build-vscode-agent-plugin.mjs',
+  'build-claude-code-assets.mjs',
 ]);
 
 function main(argv) {

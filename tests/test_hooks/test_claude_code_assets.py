@@ -86,6 +86,9 @@ def test_the_wheel_is_told_to_ship_every_file_this_upgrade_installs() -> None:
                 shipped[f"{kind}/{name}" if kind != "skills" else f"skills/{name}/SKILL.md"] = source
     assert set(shipped) == set(PLAN)
     for rel, source in shipped.items():
+        if rel.startswith("agents/"):
+            assert source == f"claude-code-assets/{rel}", (rel, source)  # never plugin-src's bare names
+    for rel, source in shipped.items():
         assert (root / source).read_bytes() == PLAN[rel]
 
 
@@ -589,3 +592,126 @@ def test_a_different_backup_already_on_disk_is_neither_reused_nor_removed(claude
     assert _upgrade(claude_dir)["status"] == "error"
     assert earlier.exists() and new.exists()
     assert len(list((claude_dir / "skills/slm-recall").glob("*.bak-slm-*"))) == 2
+
+
+# -- sub-agents name SLM tools the way a non-plugin Claude Code resolves them -----------------
+
+REPO = Path(__file__).resolve().parents[2]
+DIRECT = "mcp__superlocalmemory__"
+ADVISORS = tuple(rel for rel in PLAN if rel.startswith("agents/"))
+
+
+def _tools(data: bytes) -> list[str]:
+    head = data.decode("utf-8").split("\n---\n", 1)[0]
+    line = next(ln for ln in head.splitlines() if ln.startswith("tools:"))
+    return [t.strip() for t in line[len("tools:"):].split(",") if t.strip()]
+
+
+def _slm_tools_of(source: bytes) -> list[str]:
+    """The SLM entries of a source agent, in order (host built-ins are capitalised)."""
+    return [t for t in _tools(source) if not t[0].isupper()]
+
+
+def _is_registered_slm_tool(name: str) -> bool:
+    import re
+
+    pattern = re.compile(rf"\bdef {re.escape(name)}\(")
+    return any(pattern.search(p.read_text(encoding="utf-8"))
+               for p in (REPO / "src" / "superlocalmemory" / "mcp").glob("*.py"))
+
+
+def _direct_form(source: bytes) -> bytes:
+    """What Claude Code needs for an SLM it talks to as a plain MCP server (an independent oracle)."""
+    text = source.decode("utf-8")
+    fm_end = text.index("\n---\n", 4) + 5
+    head = text[:fm_end]
+    out = []
+    for line in head.split("\n"):
+        if line.startswith("tools:"):
+            entries = [t.strip() for t in line[len("tools:"):].split(",") if t.strip()]
+            line = "tools: " + ", ".join(t if t[0].isupper() else DIRECT + t for t in entries)
+        out.append(line)
+    return ("\n".join(out) + text[fm_end:]).encode("utf-8")
+
+
+def test_installed_advisors_carry_only_direct_slm_tool_names(claude_dir) -> None:
+    assert len(ADVISORS) == 4
+    _upgrade(claude_dir)
+
+    for rel in ADVISORS:
+        tools = _tools((claude_dir / rel).read_bytes())
+        slm = [t for t in tools if not t[0].isupper()]
+        assert slm, rel
+        assert all(t.startswith(DIRECT) for t in slm), (rel, tools)  # not bare, not plugin form
+        assert not any(t.startswith("mcp__plugin_") for t in tools), (rel, tools)
+        assert all(_is_registered_slm_tool(t[len(DIRECT):]) for t in slm), (rel, slm)
+        assert len(slm) == len(set(slm)), rel
+
+
+def test_the_shipped_advisors_are_the_direct_form_of_plugin_src(claude_dir) -> None:
+    """One source of truth: each shipped advisor is plugin-src's, with only the tool line rewritten."""
+    for rel in ADVISORS:
+        assert PLAN[rel] == _direct_form((REPO / "plugin-src" / rel).read_bytes()), rel
+
+
+def test_a_working_direct_advisor_is_left_byte_identical_and_not_backed_up(claude_dir) -> None:
+    agents = claude_dir / "agents"
+    agents.mkdir()
+    # agents that already use mcp__superlocalmemory__, as #330 installed them
+    working = {rel: _direct_form((REPO / "plugin-src" / rel).read_bytes()) for rel in ADVISORS}
+    for rel, data in working.items():
+        (claude_dir / rel).write_bytes(data)
+
+    result = _upgrade(claude_dir, adopt_unrecorded=True)
+
+    for rel, data in working.items():
+        assert (claude_dir / rel).read_bytes() == data, rel
+    assert sorted(result["current"]) >= sorted(ADVISORS)
+    assert not result["adopted"] and not result["refreshed"] and not result.get("backups")
+    assert not list(agents.glob("*.bak-slm-*"))
+
+
+def test_an_older_direct_advisor_is_refreshed_to_the_direct_form_never_to_bare_names(claude_dir) -> None:
+    rel = ADVISOR
+    (claude_dir / "agents").mkdir()
+    working = _direct_form((REPO / "plugin-src" / rel).read_bytes())
+    (claude_dir / rel).write_bytes(working.replace(b"Advises", b"Old text that advises"))
+
+    _upgrade(claude_dir, adopt_unrecorded=True)
+
+    now = (claude_dir / rel).read_bytes()
+    assert now == PLAN[rel]
+    assert all(t.startswith(DIRECT) for t in _slm_tools_of(now))
+
+
+def test_the_daemon_step_installs_direct_form_advisors_too(daemon_files, claude_dir, monkeypatch) -> None:
+    monkeypatch.setattr(claude, "DISABLED_FILE", daemon_files["data_root"] / "no-such-marker")
+
+    hook_upgrade.run_once(version=VERSION, env={}, **daemon_files)
+
+    for rel in ADVISORS:
+        slm = _slm_tools_of((claude_dir / rel).read_bytes())
+        assert slm and all(t.startswith(DIRECT) for t in slm), rel
+
+
+def test_an_agents_source_with_bare_names_is_refused_not_installed(claude_dir, tmp_path) -> None:
+    """A stale or wrongly built agents folder must never reach ~/.claude."""
+    root = tmp_path / "share" / "claude-code"
+    for rel, data in PLAN.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(data)
+    (root / ADVISOR).write_bytes((REPO / "plugin-src" / ADVISOR).read_bytes())  # bare names
+
+    result = _upgrade(claude_dir, source=root)
+
+    assert result["status"] == "error" and "bare" in result["detail"]
+    assert not (claude_dir / ADVISOR).exists()
+
+
+def test_generated_advisors_have_lf_line_endings_and_posix_manifest_keys(claude_dir) -> None:
+    """A Windows checkout holds the same bytes (.gitattributes eol=lf) and the manifest uses ``/``."""
+    for rel in ADVISORS:
+        assert b"\r" not in PLAN[rel], rel
+    _upgrade(claude_dir)
+    keys = json.loads((claude_dir / assets.MANIFEST_NAME).read_text(encoding="utf-8"))["files"]
+    assert ADVISOR in keys and not any("\\" in k for k in keys)

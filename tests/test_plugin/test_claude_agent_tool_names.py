@@ -27,7 +27,7 @@ BUILDER = REPO / "scripts" / "build-plugin.mjs"
 HELPER = REPO / "scripts" / "agent-tool-names.mjs"
 
 # Trees whose agents Claude Code reads, so every SLM tool must be spelled in full.
-CLAUDE_FORMAT_TREES = ("plugin", "muse-plugin")
+CLAUDE_FORMAT_TREES = ("plugin", "muse-plugin", "claude-code-assets")
 
 
 def _tools(agent: Path) -> list[str]:
@@ -130,6 +130,23 @@ def test_muse_agents_name_each_slm_tool_exactly_once_as_a_real_direct_tool():
             assert "mcp__" not in name and "plugin_" not in name, (agent.name, entry)
             assert name in real, f"{agent.name}: {entry} is not a tool the server registers"
         assert len(slm) == len(set(slm)), f"{agent.name} repeats an SLM tool"
+
+
+def test_claude_code_assets_agents_are_the_direct_form_of_plugin_src_and_in_sync():
+    """``slm upgrade-hosts`` installs ``claude-code-assets/agents`` into a plugin-less Claude Code.
+    It is generated from plugin-src by the same transform as Muse's, so the two cannot differ."""
+    builder = REPO / "scripts" / "build-claude-code-assets.mjs"
+    checked = subprocess.run(["node", str(builder), "--check"], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    direct, _plugin = _prefixes()
+    real = _registered_tools()
+    for agent in _agents("claude-code-assets"):
+        source = (REPO / "plugin-src" / "agents" / agent.name).read_text(encoding="utf-8")
+        assert agent.read_text(encoding="utf-8") == _node(f"h.directAgentTools({json.dumps(source)})")
+        assert agent.read_text(encoding="utf-8") == (REPO / "muse-plugin" / "agents" / agent.name).read_text(
+            encoding="utf-8"), "same spelling as the Muse build, the other plain-MCP consumer"
+        for entry in (t for t in _tools(agent) if not t[0].isupper()):
+            assert entry.startswith(direct) and entry[len(direct):] in real, (agent.name, entry)
 
 
 def test_claude_plugin_tools_are_real_registered_tools_in_both_spellings():
