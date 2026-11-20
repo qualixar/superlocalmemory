@@ -177,3 +177,23 @@ def test_codex_plugin_update_refreshes_the_marketplace_snapshot() -> None:
         "codex plugin marketplace upgrade qualixar",
         "codex plugin add superlocalmemory-codex@qualixar",
     ]
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_upgrade_hosts_reports_plugin_managed_claude_code(files, monkeypatch, apply) -> None:
+    """Found on the owner's Mac, 20 Nov 2026 (4.2.31): with SLM's Claude Code plugin
+    installed, ``slm upgrade-hosts --all-detected`` crashed with KeyError 'plugin-managed'
+    before reaching any other host, so plugin users could not refresh Codex, Cursor or the
+    rest from one command. The plugin owns SLM's hooks; the report must say so and go on."""
+    from superlocalmemory.hooks import host_hook_upgrade
+
+    settings, _ = files
+    monkeypatch.setattr(host_hook_upgrade, "claude_plugin_present", lambda _path: True)
+    _write(settings, _old_claude_settings())
+    before = settings.read_bytes()
+
+    result = host_upgrades._upgrade_host("claude-code", apply=apply, already_integrated=True)
+
+    assert result["status"] == "verified", result
+    assert "plugin" in result["detail"] and "claude plugin update" in result["detail"]
+    assert settings.read_bytes() == before
