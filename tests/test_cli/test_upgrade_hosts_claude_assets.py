@@ -160,7 +160,8 @@ def test_doctor_names_stale_assets_without_writing(claude_dir) -> None:
 
     # Every planned file is stale or missing (_old_install writes old text for all but one), so
     # the count is the plan's size: derived, so a new skill needs no edit here.
-    assert status == "WARN" and f"{len(PLAN)} SLM skill" in detail and "slm upgrade-hosts --host claude-code --apply" in fix
+    assert status == "WARN" and f"{len(PLAN)} SLM skill" in detail
+    assert "slm upgrade-hosts --host claude-code --apply" in fix
     assert _tree(claude_dir) == before
 
     host_upgrades._upgrade_host("claude-code", apply=True, already_integrated=True)

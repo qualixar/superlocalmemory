@@ -22,6 +22,7 @@ import pytest
 from superlocalmemory.cli import daemon
 from superlocalmemory.cli import daemon_supervisor as supervisor
 from superlocalmemory.cli.daemon_supervisor import JobState, StartOutcome, SupervisorJob
+from tests._portable import GUARD_ENV
 
 CLIENT_ENV = {
     "SLM_AGENT_ID": "agent-under-test",
@@ -131,7 +132,7 @@ def test_daemon_environment_drops_every_caller_session_and_keeps_the_daemons_set
               "SLM_AGENT_ID": "a", "SLM_CLIENT_CHANNEL": "mcp", "SLM_USER_SESSION": "u"}
     settings = {"SLM_DATA_DIR": "/data", "SLM_DAEMON_PORT": "9999", "SLM_RANKING": "r",
                 "OPENROUTER_API_KEY": "k1", "OPENAI_API_KEY": "k2", "ANTHROPIC_API_KEY": "k3",
-                "PATH": "/x", "HOME": "/h"}
+                "PATH": "/x", "HOME": "/h", **GUARD_ENV}
     assert supervisor.daemon_environment({**caller, **settings}) == settings
     # The service definition's own settings still win, and still never carry a session.
     job = _job(9999, SLM_DATA_DIR="/service-data", OPENAI_API_KEY="service",
