@@ -22,6 +22,18 @@ from superlocalmemory.cli import tool_args, tool_cmd, tool_host
 REPO = Path(__file__).resolve().parents[2]
 
 
+def _unset(monkeypatch, *names: str) -> None:
+    """Remove ``names`` for one test and put back exactly what was there before.
+
+    ``monkeypatch.delenv(raising=False)`` records nothing for a variable that is absent, so a
+    value the code under test sets later (``bind_mesh_session``, ``claim_cli_channel``) would
+    outlive the test. Setting first makes monkeypatch remember the original state.
+    """
+    for name in names:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
 @pytest.fixture(scope="module")
 def host():
     import os
@@ -186,8 +198,7 @@ def test_a_json_result_with_thumbnails_keeps_its_keys(tmp_path):
 # -- the mesh session -------------------------------------------------------------------------
 
 def test_mesh_session_is_named_stable_or_given(monkeypatch, tmp_path):
-    for var in ("SLM_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
-        monkeypatch.delenv(var, raising=False)
+    _unset(monkeypatch, "SLM_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
     monkeypatch.setenv("SLM_AGENT_ID", "alpha")
     monkeypatch.chdir(tmp_path)
     first = tool_host.bind_mesh_session(None)
@@ -201,9 +212,8 @@ def test_the_daemon_is_started_before_the_mesh_session_is_bound(monkeypatch, tmp
     """A daemon this call starts inherits os.environ: it must not see the caller's session."""
     import os
 
-    for var in ("SLM_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID",
-                "SLM_CLIENT_CHANNEL"):  # all restored after the test
-        monkeypatch.delenv(var, raising=False)
+    _unset(monkeypatch, "SLM_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID",
+           "SLM_CLIENT_CHANNEL")
     monkeypatch.chdir(tmp_path)
     seen: list[str | None] = []
     monkeypatch.setattr(tool_cmd, "_ensure_daemon", lambda: seen.append(os.environ.get("SLM_SESSION_ID")))
@@ -299,7 +309,7 @@ def _capture_call(monkeypatch):
 
     monkeypatch.setattr(tool_cmd, "_run", run)
     monkeypatch.setattr(tool_cmd, "_ensure_daemon", lambda: None)
-    monkeypatch.delenv("SLM_CLIENT_CHANNEL", raising=False)  # build_host claims it; restored
+    _unset(monkeypatch, "SLM_CLIENT_CHANNEL")  # build_host claims it
     return sent
 
 
@@ -334,7 +344,7 @@ def test_list_and_describe_failures_are_json_on_stdout(monkeypatch, capsys, comm
     import json
     from argparse import Namespace
 
-    monkeypatch.delenv("SLM_CLIENT_CHANNEL", raising=False)
+    _unset(monkeypatch, "SLM_CLIENT_CHANNEL")
     with pytest.raises(SystemExit) as exited:
         tool_cmd.cmd_tool(Namespace(target=command, rest=rest))
     assert exited.value.code == tool_cmd.EXIT_USAGE
