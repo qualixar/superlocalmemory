@@ -889,7 +889,7 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     # The installed service owns the daemon: a detached child of this client
     # would carry the client's environment and collide with the service later.
     ready, service_job = _supervisor.start_through_service(
-        _target_port, lambda: _wait_for_daemon(timeout=60),
+        _target_port, lambda proc: _wait_for_daemon(timeout=60, proc=proc),
     )
     if ready is not None:
         return ready

@@ -159,10 +159,12 @@ def test_macos_loaded_job_is_kickstarted_without_restart(monkeypatch):
 
 
 def test_macos_unloaded_job_is_loaded_not_bypassed(monkeypatch):
-    runner = _macos(monkeypatch, [False])
+    runner = _macos(monkeypatch, [False, True])
     outcome = supervisor.request_start(_job(1))
     assert outcome == StartOutcome(True, "loaded")
-    assert runner.calls == [["launchctl", "bootstrap", "gui/501", "/nonexistent/job.plist"]]
+    # Loaded is not running: the job is kicked too (a no-op if RunAtLoad ran it).
+    assert runner.calls == [["launchctl", "bootstrap", "gui/501", "/nonexistent/job.plist"],
+                            ["launchctl", "kickstart", "gui/501/com.example.slm.test"]]
 
 
 def test_macos_concurrent_loader_wins_then_job_is_kickstarted(monkeypatch):

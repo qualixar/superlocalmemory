@@ -27,6 +27,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
@@ -61,6 +62,10 @@ CLIENT_SCOPED_ENV = frozenset({
 _CLIENT_SCOPED_PREFIXES = ("SLM_HOOK_",)
 
 _TIMEOUT_S = 10
+#: How long a started job may show no process before it is taken as not
+#: running. launchd and systemd spawn within a second; the service's own
+#: restart throttle (30 s) is far longer, so a crash loop is caught here.
+_NO_PID_GRACE_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -293,20 +298,26 @@ def _start_macos(job: SupervisorJob) -> StartOutcome:
     state = job_state(job)
     if (refused := _refusal(state)) is not None:
         return refused
+    how = "kickstarted"
     if state.status == "not_loaded":
         # The definition is installed but not loaded (for example after
         # ``launchctl bootout``). launchd loads it at the next login anyway;
         # loading it now keeps the daemon under its owner instead of
         # starting an unowned copy that the service would later collide with.
         loaded = _run(["launchctl", "bootstrap", domain, str(job.path)])
-        if loaded.returncode == 0:
-            return StartOutcome(True, "loaded")
-        if not job_loaded(job):  # another client may have loaded it first
+        after = job_state(job)  # another client may have loaded it first
+        if (refused := _refusal(after)) is not None:
+            return refused
+        if after.status == "not_loaded":
             return StartOutcome(False, "failed", (loaded.stderr or "").strip()
                                 or f"launchctl bootstrap exited {loaded.returncode}")
+        how = "loaded" if loaded.returncode == 0 else how
+    # Always kick, even right after loading: a loaded job is not a running
+    # one (it may be disabled, or RunAtLoad may be off). Without -k a job
+    # that is already running is left alone.
     kicked = _run(["launchctl", "kickstart", target])
     if kicked.returncode == 0:
-        return StartOutcome(True, "kickstarted")
+        return StartOutcome(True, how)
     return StartOutcome(False, "failed", (kicked.stderr or "").strip()
                         or f"launchctl kickstart exited {kicked.returncode}")
 
@@ -340,26 +351,66 @@ def request_start(job: SupervisorJob) -> StartOutcome:
         return StartOutcome(False, "failed", str(exc))
 
 
+class ServiceProcess:
+    """A ``Popen``-like view of the daemon the service manager runs for a job.
+
+    The readiness wait polls it like a child process. ``poll()`` stays None
+    while the manager runs a process for the job, and while it may still be
+    spawning one; it returns 1 (and keeps returning it) once the manager has
+    reported the job with no process for ``_NO_PID_GRACE_S``: the job is
+    disabled, or its program exits at once. It never reports an exit it
+    cannot observe -- on Windows, when the manager cannot be asked, or when
+    the loaded job stopped matching its definition, it stays None and the
+    wait runs its normal course, so a slow service daemon is never doubled.
+    """
+
+    def __init__(self, job: SupervisorJob, clock=time.monotonic):
+        self.job, self._clock = job, clock
+        self._quiet_since = clock()
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        if self.returncode is not None or self.job.platform == "windows":
+            return self.returncode
+        if job_state(self.job).status not in {"idle", "not_loaded"}:
+            self._quiet_since = self._clock()
+            return None
+        if self._clock() - self._quiet_since >= _NO_PID_GRACE_S:
+            self.returncode = 1
+        return self.returncode
+
+
 def start_through_service(port: int, wait_for_daemon) -> tuple[bool | None, SupervisorJob | None]:
     """Start the daemon through its installed service when there is one.
 
     Returns ``(ready, job)``. ``ready`` is None when the caller must start the
-    daemon directly: no service owns this folder and port, or the service
-    manager refused. ``job`` is the service found (if any), whose settings
-    the direct start must then carry.
+    daemon directly: no service owns this folder and port, the service
+    manager refused, or it accepted the start but runs no daemon for the job.
+    ``job`` is the service found (if any), whose settings the direct start
+    must then carry. ``wait_for_daemon(proc)`` waits for the daemon, where
+    ``proc`` is a ``ServiceProcess`` it may poll like a child.
     """
     job = find_job(port)
     if job is None:
         logger.debug("no installed service for port %d; starting the daemon directly", port)
         return None, None
     outcome = request_start(job)
-    if outcome.started:
-        logger.info("asked the installed service %s to start the daemon (%s)",
-                    job.name, outcome.how)
-        return wait_for_daemon(), job
+    if not outcome.started:
+        logger.warning(
+            "could not start the daemon through the installed service %s (%s); "
+            "starting it directly with the service's settings", job.name, outcome.detail,
+        )
+        return None, job
+    logger.info("asked the installed service %s to start the daemon (%s)",
+                job.name, outcome.how)
+    process = ServiceProcess(job)
+    ready = wait_for_daemon(process)
+    if ready or process.returncode is None:
+        return ready, job
     logger.warning(
-        "could not start the daemon through the installed service %s (%s); "
-        "starting it directly with the service's settings", job.name, outcome.detail,
+        "the installed service %s accepted the start but runs no daemon "
+        "(disabled, or its program exits at once); starting it directly with "
+        "the service's settings", job.name,
     )
     return None, job
 
