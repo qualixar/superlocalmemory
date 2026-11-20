@@ -45,6 +45,9 @@ DEFAULT_DELIVERY_TIMEOUT_MS = 150
 #: the wait ends this long after the hook started, whatever the work before
 #: it cost, leaving room for the spool append and the perf log.
 HOOK_BUDGET_MS = 150
+#: The hook's wait for the spool lock: the rest of its 200 ms cap. Past it the
+#: spool writes the batch beside the lock, so a short wait costs no event.
+SPOOL_LOCK_WAIT_S = 0.05
 _MIN_WAIT_MS = 10
 #: Each summary column keeps at most this many characters (as before).
 MAX_SUMMARY_LEN = 500
@@ -222,7 +225,8 @@ def deliver(events: Sequence[Mapping], *, profile: str,
     if _acked_by_daemon(batch, _deadline_s(started)):
         return "daemon"
     try:
-        result = event_spool.append_events(batch, profile=profile)
+        result = event_spool.append_events(batch, profile=profile,
+                                           wait_s=SPOOL_LOCK_WAIT_S)
     except Exception as exc:
         _breadcrumb(f"hook events not saved ({len(batch)}): {type(exc).__name__}")
         return "spool_failed"

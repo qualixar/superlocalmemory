@@ -20,6 +20,10 @@ LAYOUT (``<data root>/hook_spool``)
   event with a single ``O_APPEND`` write while holding ``.lock``.
 * ``<profile>.<ns>.draining`` -- a file the daemon claimed (renamed under the
   same lock). Nobody appends to it again; the daemon drains it, then deletes it.
+* ``<profile>.<ns>-<pid>-<rand>.draining`` -- a batch a producer wrote beside
+  the lock because the lock stayed busy past its wait. Written in full as
+  ``.<profile>.<ns>-<pid>-<rand>.part`` and renamed, so the daemon never sees
+  half of it; drained like any claimed file. A busy lock never costs an event.
 * ``stats.json`` -- events refused (spool full, oversized) and unreadable
   lines found while draining, per profile, for ``slm doctor``.
 
@@ -46,13 +50,16 @@ DEFAULT_MAX_BYTES = 16 * 1024 * 1024
 #: One event line. Hook summaries are capped at 500 characters, so a real
 #: event is far below this; anything above it is refused and counted.
 MAX_LINE_BYTES = 16 * 1024
-#: How long a producer waits for the spool lock. Holders keep it for one
-#: append or one rename (microseconds), so this is only reached when a
-#: process died holding it -- flock releases on exit, so that self-heals too.
+#: How long a caller waits for the spool lock. Holders keep it for one append
+#: or one claim pass: a directory scan, an open and a write or a rename, which
+#: is milliseconds on a loaded machine with a slow disk, not microseconds.
+#: Many producers at once can queue past this wait; a producer that does then
+#: writes its batch beside the lock (see the module docstring) instead of failing.
 LOCK_WAIT_S = 1.0
 
 _ACTIVE_SUFFIX = ".jsonl"
 _DRAINING_SUFFIX = ".draining"
+_PART_SUFFIX = ".part"
 _STATS_NAME = "stats.json"
 _LOCK_NAME = ".lock"
 _SAFE_PROFILE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # no dot: files group by name.split(".")[0]
@@ -148,15 +155,19 @@ def _unlock(fd: int) -> None:
     fcntl.flock(fd, fcntl.LOCK_UN)
 
 
+class SpoolLockBusy(TimeoutError):
+    """The spool lock stayed held past the caller's wait."""
+
+
 @contextmanager
 def spool_lock(root: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[None]:
-    """Hold the spool lock; raise ``TimeoutError`` after ``wait_s``."""
+    """Hold the spool lock; raise ``SpoolLockBusy`` (a ``TimeoutError``) after ``wait_s``."""
     fd = os.open(str(_ensure_dir(root) / _LOCK_NAME), os.O_RDWR | os.O_CREAT, 0o600)
     try:
         deadline = time.monotonic() + max(0.0, wait_s)
         while not _try_lock(fd):
             if time.monotonic() >= deadline:
-                raise TimeoutError("hook spool lock is busy")
+                raise SpoolLockBusy("hook spool lock is busy")
             time.sleep(0.002)
         try:
             yield
@@ -230,17 +241,42 @@ def _encode(event: Mapping) -> bytes | None:
     return line if len(line) <= MAX_LINE_BYTES else None
 
 
+def _admit(lines: Sequence[bytes | None], size: int, cap: int) -> tuple[list[bytes], int]:
+    """The lines that fit under ``cap`` given ``size`` already spooled, and how
+    many are refused (unencodable, oversized, or past the cap)."""
+    accepted: list[bytes] = []
+    dropped = 0
+    for line in lines:
+        if line is None or size + len(line) > cap:
+            dropped += 1
+            continue
+        accepted.append(line)
+        size += len(line)
+    return accepted, dropped
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
 def append_events(
     events: Sequence[Mapping],
     *,
     profile: str,
     root: str | Path | None = None,
     max_bytes: int | None = None,
+    wait_s: float = LOCK_WAIT_S,
 ) -> AppendResult:
     """Append ``events`` to ``profile``'s spool; refuse (and count) past the cap.
 
-    Raises ``TimeoutError``/``OSError`` only when the spool itself cannot be
-    used; the caller reports that, it is never swallowed here.
+    ``wait_s`` bounds the wait for the lock. Past it the batch is written
+    beside the lock instead (:func:`_append_beside`), so a busy lock delays
+    an event by at most ``wait_s`` and never loses it.
+
+    Raises ``OSError`` only when the spool itself cannot be used; the caller
+    reports that, it is never swallowed here.
     """
     base = spool_root(root)
     cap = max_bytes if max_bytes is not None else _max_bytes_default()
@@ -248,24 +284,51 @@ def append_events(
     # Encode (and screen) before taking the lock: the screen reads the flag file and
     # runs its patterns, and every other hook process waits while the lock is held.
     lines = [_encode(event) for event in events]
-    with spool_lock(base):
-        size = _spooled_bytes(base, stem)
-        accepted: list[bytes] = []
-        dropped = 0
-        for line in lines:
-            if line is None or size + len(line) > cap:
-                dropped += 1
-                continue
-            accepted.append(line)
-            size += len(line)
-        if accepted:
-            path = base / f"{stem}{_ACTIVE_SUFFIX}"
-            fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        with spool_lock(base, wait_s):
+            accepted, dropped = _admit(lines, _spooled_bytes(base, stem), cap)
+            if accepted:
+                path = base / f"{stem}{_ACTIVE_SUFFIX}"
+                fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                try:
+                    _write_all(fd, b"".join(accepted))
+                finally:
+                    os.close(fd)
+            if dropped:
+                _bump_counts_locked(base, stem, dropped=dropped)
+        return AppendResult(written=len(accepted), dropped=dropped)
+    except SpoolLockBusy:
+        pass  # raised only while waiting: nothing above was written
+    return _append_beside(base, stem, lines, cap)
+
+
+def _append_beside(base: Path, stem: str, lines: Sequence[bytes | None],
+                   cap: int) -> AppendResult:
+    """Write a batch to a file of its own when the lock stayed busy.
+
+    The file appears under its ``.draining`` name only once it is complete
+    (written as ``.part``, then renamed), so the daemon drains all of it or
+    none of it. The cap is checked without the lock, so concurrent producers
+    on this path can pass it by at most their own batches. Refused events are
+    still counted, under the lock with the ordinary wait; if even that stays
+    busy the ``TimeoutError`` reaches the caller, which reports it.
+    """
+    accepted, dropped = _admit(lines, _spooled_bytes(base, stem), cap)
+    if accepted:
+        token = f"{time.time_ns():020d}-{os.getpid()}-{os.urandom(4).hex()}"
+        part = base / f".{stem}.{token}{_PART_SUFFIX}"
+        fd = os.open(str(part), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
             try:
-                os.write(fd, b"".join(accepted))
+                _write_all(fd, b"".join(accepted))
             finally:
                 os.close(fd)
-        if dropped:
+            os.replace(part, base / f"{stem}.{token}{_DRAINING_SUFFIX}")
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
+    if dropped:
+        with spool_lock(base):
             _bump_counts_locked(base, stem, dropped=dropped)
     return AppendResult(written=len(accepted), dropped=dropped)
 
@@ -283,6 +346,7 @@ def claim_ready(root: str | Path | None = None) -> list[Path]:
     base = spool_root(root)
     if not base.is_dir():
         return []
+    _sweep_stale_parts(base)
     with spool_lock(base):
         for path in sorted(base.glob(f"*{_ACTIVE_SUFFIX}")):
             stem = path.name[: -len(_ACTIVE_SUFFIX)]
@@ -290,6 +354,21 @@ def claim_ready(root: str | Path | None = None) -> list[Path]:
             os.replace(path, target)
     return sorted(base.glob(f"*{_DRAINING_SUFFIX}"),
                   key=lambda p: (p.name.split(".", 1)[0], p.name))
+
+
+#: A ``.part`` file this old belongs to a producer that died before its rename
+#: (a live one renames within milliseconds); its batch was never acknowledged.
+_STALE_PART_S = 3600.0
+
+
+def _sweep_stale_parts(base: Path) -> None:
+    cutoff = time.time() - _STALE_PART_S
+    for path in base.glob(f".*{_PART_SUFFIX}"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def erase_profile(root: str | Path | None, profile: str) -> int:
@@ -303,6 +382,10 @@ def erase_profile(root: str | Path | None, profile: str) -> int:
         for path in _profile_files(base, stem):
             removed += _count_lines(path)
             path.unlink(missing_ok=True)
+        # A producer that died between writing beside the lock and renaming.
+        for path in base.glob(f".{stem}.*{_PART_SUFFIX}"):
+            if path.name.split(".", 2)[1] == stem:
+                path.unlink(missing_ok=True)
         data = _read_stats_file(base)
         profiles = dict(data.get("profiles") or {})
         if profiles.pop(stem, None) is not None:
@@ -373,7 +456,7 @@ def read_stats(root: str | Path | None = None) -> SpoolStats:
 
 
 __all__ = [
-    "AppendResult", "DEFAULT_MAX_BYTES", "MAX_LINE_BYTES", "SPOOL_DIR_NAME",
-    "SpoolStats", "append_events", "claim_ready", "erase_profile", "profile_stem", "read_stats",
+    "AppendResult", "DEFAULT_MAX_BYTES", "LOCK_WAIT_S", "MAX_LINE_BYTES", "SPOOL_DIR_NAME",
+    "SpoolLockBusy", "SpoolStats", "append_events", "claim_ready", "erase_profile", "profile_stem", "read_stats",
     "record_counts", "spool_lock", "spool_root",
 ]
