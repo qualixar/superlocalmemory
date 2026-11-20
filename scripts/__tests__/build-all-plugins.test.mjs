@@ -20,6 +20,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 const OUTPUT_DIRS = [
   'plugin', 'copilot-plugin', 'codex-plugin', 'antigravity-plugin',
   'hermes-plugin', '.cursor-plugin', 'cursor-plugin', 'muse-plugin', 'vscode-agent-plugin',
+  'claude-code-assets',
 ];
 
 function walk(dir, out = []) {
@@ -52,7 +53,7 @@ describe('build-all-plugins', () => {
     assert.deepEqual(steps, [
       'build-plugin.mjs', 'build-copilot-plugin.mjs', 'build-codex-plugin.mjs',
       'build-antigravity-plugin.mjs', 'build-hermes-plugin.mjs', 'build-muse-plugin.mjs',
-      'build-vscode-agent-plugin.mjs',
+      'build-vscode-agent-plugin.mjs', 'build-claude-code-assets.mjs',
     ]);
   });
 

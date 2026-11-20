@@ -105,6 +105,7 @@
     "hermes-plugin/",
     "antigravity-plugin/",
     "muse-plugin/",
+    "claude-code-assets/",
     "docs/pi-dev-integration.md",
     "README.md",
     "LICENSE",

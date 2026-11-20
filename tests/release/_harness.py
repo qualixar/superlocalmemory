@@ -33,7 +33,7 @@ _SNAPSHOT_FILES = (
 # ``tool.setuptools.data-files``.  Omitting them creates a test snapshot that
 # cannot build although the checkout can, which makes the installed-artifact
 # release witness meaningless.
-_SNAPSHOT_TREES = ("plugin-src",)
+_SNAPSHOT_TREES = ("plugin-src", "claude-code-assets")
 
 
 def _ignore_snapshot_paths(_directory: str, names: list[str]) -> set[str]:

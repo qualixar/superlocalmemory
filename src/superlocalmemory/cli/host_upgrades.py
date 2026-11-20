@@ -120,6 +120,15 @@ def _detected_hosts(home: Path | None = None) -> list[str]:
             detected.append("claude-code")
     except Exception:
         pass
+    # A skills-only install (SLM's skills and agents in ~/.claude, no hooks) is the one this refresh
+    # exists for; it is found by the same test the refresh itself uses.
+    try:
+        from superlocalmemory.hooks.claude_code_assets import is_integrated
+
+        if is_integrated():
+            detected.append("claude-code")
+    except Exception:
+        pass
 
     # Hermes has a native YAML mapping rather than the portable-kit schema.
     # Detect it for reporting, but never overwrite it with an invented format.
@@ -239,11 +248,12 @@ _HOOK_WORDS = {
     "error": "could not be read",
     "plugin-managed": ("left untouched: SLM's hooks come from the Claude Code plugin, which "
                        "updates with `claude plugin update superlocalmemory@qualixar`"),
+    "changed-meanwhile": "changed while it was being upgraded, so nothing was written (try again)",
 }
 
 _HOOK_STATUS = {"updated": "updated", "would-update": "preview", "current": "verified",
                 "not-integrated": "verified", "skipped": "verified", "error": "blocked",
-                "plugin-managed": "verified"}
+                "plugin-managed": "verified", "changed-meanwhile": "blocked"}
 
 
 def _hook_file_result(result: dict[str, Any], label: str, add_hint: str) -> dict[str, str]:
@@ -303,6 +313,28 @@ def host_hooks_finding() -> tuple[str, str, str]:
             "(plugin hosts take hooks from their plugin)", "")
 
 
+def claude_assets_finding() -> tuple[str, str, str] | None:
+    """``slm doctor``: are SLM's skills, subagents and ``/slm-loop`` current in a non-plugin Claude Code.
+
+    Read-only. ``None`` when there is nothing to say: the plugin owns them, or SLM is not there.
+    """
+    from superlocalmemory.hooks.claude_code_assets import upgrade_claude_assets
+
+    result = upgrade_claude_assets(version=_version(), apply=False, adopt_unrecorded=True)
+    status = result["status"]
+    if status in ("plugin-managed", "not-integrated"):
+        return None
+    fix = "slm upgrade-hosts --host claude-code --apply"
+    if status == "error":
+        return "WARN", f"Claude Code skills and agents could not be checked: {result['detail']}", ""
+    if status == "would-update":
+        count = len(result["added"]) + len(result["refreshed"]) + len(result["adopted"])
+        return ("WARN", f"{count} SLM skill, agent or command file(s) in ~/.claude are older than this "
+                "release or missing (the daemon adds missing ones by itself; yours are never "
+                "replaced without a backup)", fix)
+    return "PASS", "SLM skills, agents and command in ~/.claude are current" + _asset_notes(result), ""
+
+
 def plugin_hosts_finding() -> tuple[str, str, str] | None:
     """``slm doctor``: the exact command each connected plugin host needs for this release."""
     lines = []
@@ -316,14 +348,95 @@ def plugin_hosts_finding() -> tuple[str, str, str] | None:
             "if you use a plugin there, run: " + " | ".join(lines), "")
 
 
+#: Severity of a per-part status, highest first: the line reports the worst part.
+_STATUS_ORDER = ("blocked", "updated", "preview", "verified")
+
+
+def _asset_words(result: dict[str, Any], apply: bool) -> str:
+    """Plain words for the skills, subagents and command part of Claude Code's upgrade line."""
+    status = result["status"]
+    if status == "plugin-managed":
+        return "come from the Claude Code plugin, so ~/.claude was left untouched"
+    if status == "not-integrated":
+        return "no SLM skills or hooks there, so none added"
+    if status == "error":
+        return result["detail"]
+    added, refreshed, adopted = result["added"], result["refreshed"], result["adopted"]
+    parts = []
+    if added:
+        parts.append(f"{'would add' if not apply else 'added'} {len(added)}")
+    if refreshed or adopted:
+        parts.append(f"{'would refresh' if not apply else 'refreshed'} {len(refreshed) + len(adopted)}")
+    text = " and ".join(parts) if parts else (
+        "already current" if status == "current" else "nothing changed")
+    if adopted:
+        text += (f" ({len(adopted)} from before SLM kept a record, "
+                 f"each copied aside as .bak-slm-{_version()} first)")
+    return text + _asset_notes(result)
+
+
+def _asset_notes(result: dict[str, Any]) -> str:
+    notes = ""
+    if result["preserved"]:
+        names = ", ".join(result["preserved"])
+        notes += (f"; kept {len(result['preserved'])} file(s) you changed after SLM wrote them "
+                  f"({names}); move one aside and re-run to take the new version")
+    if result["held"]:
+        notes += (f"; {len(result['held'])} older file(s) not written by a recorded SLM version were "
+                  "left for `slm upgrade-hosts --apply`, which keeps a backup of each")
+    if result["outside"]:
+        notes += (f"; {len(result['outside'])} path(s) resolve outside ~/.claude and were NOT "
+                  f"refreshed ({result['outside'][0]})")
+    if result["removed"]:
+        notes += f"; {len(result['removed'])} file(s) you removed were not put back"
+    if result["blocked"]:
+        notes += (f"; {len(result['blocked'])} path(s) are a folder or a broken link where SLM "
+                  f"expects a file and were left alone ({result['blocked'][0]})")
+    return notes
+
+
+def _asset_listing(result: dict[str, Any], apply: bool) -> str:
+    """One indented line per file that would be, or was, added or refreshed."""
+    tense = {"added": "added" if apply else "would add",
+             "refreshed": "refreshed" if apply else "would refresh",
+             "adopted": "refreshed" if apply else "would refresh"}
+    lines = [f"\n        {tense[kind]}: {rel}" for kind in tense for rel in result[kind]]
+    return "".join(lines)
+
+
+def _asset_status(result: dict[str, Any]) -> str:
+    return {"updated": "updated", "would-update": "preview", "error": "blocked",
+            "changed-meanwhile": "blocked"}.get(result["status"], "verified")
+
+
+def _upgrade_claude_code(*, apply: bool) -> dict[str, str]:
+    """Claude Code's hooks in settings.json plus its skills, subagents and ``/slm-loop``.
+
+    Both parts are always looked at, so the line cannot say "already current" for one while the
+    other is stale. With SLM's plugin installed both are the plugin's and nothing here is written.
+    """
+    from superlocalmemory.hooks.claude_code_assets import upgrade_claude_assets
+
+    settings = _hook_upgrade().upgrade_claude_settings(version=_version(), apply=apply)
+    assets = upgrade_claude_assets(version=_version(), apply=apply, adopt_unrecorded=True)
+    if settings["status"] == "plugin-managed":
+        return {"status": "verified", "detail": "Claude Code settings.json, skills, agents and "
+                "commands: come from the Claude Code plugin, so ~/.claude was left untouched; "
+                "the plugin updates with `claude plugin update superlocalmemory@qualixar`"}
+    part = _hook_file_result(
+        settings, "Claude Code settings.json",
+        "`slm hooks install` adds them, or use the Claude Code plugin")
+    detail = f"{part['detail']}; skills/agents/commands: {_asset_words(assets, apply)}"
+    detail += _asset_listing(assets, apply)
+    statuses = (part["status"], _asset_status(assets))
+    status = next(s for s in _STATUS_ORDER if s in statuses)
+    return {"status": status, "detail": detail}
+
+
 def _upgrade_host(host: str, *, apply: bool, already_integrated: bool) -> dict[str, str]:
     """Refresh assets without degrading a working, host-specific MCP block."""
     if host == "claude-code":
-        return _hook_file_result(
-            _hook_upgrade().upgrade_claude_settings(version=_version(), apply=apply),
-            "Claude Code settings.json",
-            "`slm hooks install` adds them, or use the Claude Code plugin",
-        )
+        return _upgrade_claude_code(apply=apply)
 
     if host == "hermes":
         if already_integrated:

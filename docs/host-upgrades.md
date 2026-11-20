@@ -53,6 +53,30 @@ claude plugin marketplace update qualixar
 claude plugin update superlocalmemory@qualixar
 ```
 
+The same command also refreshes the skills, subagents and `/slm-loop` command of a
+Claude Code that has no plugin. Only files SLM ships are looked at: the
+`slm-*` skills in `~/.claude/skills`, the `slm-*` advisors in `~/.claude/agents` and
+`~/.claude/commands/slm-loop.md`. The advisors name SLM's tools in full
+(`mcp__superlocalmemory__recall`), the only spelling a Claude Code without the plugin
+resolves, so an advisor that already uses it stays byte-identical. The preview names each file it would add or
+refresh, and the status line says "already current" only when the hooks and all of
+these match this release.
+
+- A file SLM wrote and you never changed is refreshed in place. A skill that is new
+  in this release is added.
+- A file you changed after SLM wrote it is kept and named in the output. Move it
+  aside and run the command again to take the new version.
+- A file from before SLM kept a record of what it wrote, and a file that differs
+  from this release, is replaced only by `slm upgrade-hosts --apply`, and only
+  after the old copy is saved next to it as `<name>.bak-slm-<version>`.
+- A skill or agent you deleted is not put back. Anything SLM does not ship is never
+  read or written.
+- A path that resolves outside `~/.claude` (a skill folder linked to a checkout, or
+  a skills folder kept in a dotfiles repository) is reported and left alone.
+- With the plugin installed, `~/.claude` is not touched at all.
+
+SLM's record of what it wrote is `~/.claude/.slm-managed.json`.
+
 Then restart the affected host application. Finally verify the local runtime:
 
 ```bash
@@ -72,6 +96,10 @@ Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json`.
 - The first change to a file keeps a copy next to it: `settings.json.bak-slm-<version>`.
 - A file that already holds the current entries is not written again.
 - A file that cannot be read is reported and left alone; the upgrade tries again next start.
+- The same step adds the skills, subagents and command that are missing from a Claude
+  Code without the plugin, and refreshes the ones SLM wrote and you did not change. It
+  never replaces a file from before SLM kept a record; `slm upgrade-hosts --host
+  claude-code --apply` does that, with a backup.
 - `SLM_NO_HOOK_UPGRADE=1` turns the automatic upgrade off. The marker
   `hooks-upgraded.json` in the SLM data folder records the version that ran.
 - On demand: `slm upgrade-hosts --host claude-code --apply` (or `--host codex`) does the
