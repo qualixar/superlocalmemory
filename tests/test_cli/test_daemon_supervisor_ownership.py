@@ -173,3 +173,36 @@ def test_doctor_never_calls_a_stale_jobs_process_owned(launchd, live_daemon):
     assert found.status == "WARN"
     assert "does not match its installed definition" in found.detail
     assert "slm serve install" in found.fix
+
+
+# A WARN must name a fix that can work. When the service manager cannot be
+# asked (no user bus, no GUI domain over a remote shell), `slm restart` changes
+# nothing, so the ownership check is skipped on both platforms instead.
+
+def test_doctor_skips_when_launchd_cannot_be_asked(launchd, live_daemon):
+    launchd.query_rc = 1
+    assert live_daemon.check_supervisor_ownership() is None
+
+
+def test_doctor_skips_on_linux_without_a_user_bus(systemd, live_daemon):
+    systemd.bus_rc = 1
+    assert live_daemon.check_supervisor_ownership() is None
+
+
+def test_doctor_skips_when_the_user_bus_goes_away_after_discovery(
+    systemd, live_daemon, monkeypatch,
+):
+    jobs = supervisor.jobs_for(int(PORT))
+    monkeypatch.setattr(supervisor, "jobs_for", lambda port: jobs)
+    systemd.bus_rc = 1
+    assert live_daemon.check_supervisor_ownership() is None
+
+
+def test_doctor_still_warns_when_the_manager_answers_and_runs_another_process(
+    launchd, live_daemon,
+):
+    launchd.jobs[launchd.path.stem].pid = 888  # the service runs something else
+    found = live_daemon.check_supervisor_ownership()
+    assert found.status == "WARN" and "slm restart" in found.fix
+    launchd.jobs[launchd.path.stem].pid = None  # the service runs nothing
+    assert live_daemon.check_supervisor_ownership().status == "WARN"

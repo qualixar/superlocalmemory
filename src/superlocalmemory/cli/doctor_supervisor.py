@@ -70,6 +70,11 @@ def _check() -> SupervisorCheck | None:
                   if state.status == "running" and state.pid == descriptor.pid), None)
     if owner is not None:
         return SupervisorCheck("PASS", f"pid {descriptor.pid} is run by service {owner}")
+    if any(state.status == "unknown" for state in states.values()):
+        # The service manager cannot be asked (no user bus, no GUI domain in a
+        # remote shell). Nothing here is fixable by `slm restart`, and Linux
+        # cannot even discover the unit then, so skip on every platform.
+        return None
     job = jobs[0]
     state = states[job.name]
     if state.status == "stale":
