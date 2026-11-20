@@ -1,0 +1,250 @@
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Licensed under AGPL-3.0-or-later - see LICENSE file
+
+"""Auto-start goes through the installed service; a direct start is scrubbed.
+
+Reproduces the split-brain seen after an upgrade: with the service unloaded,
+an already-running MCP client auto-started a detached daemon that carried the
+client's environment (agent name, channel, tool profile) and none of the
+service's own settings, then held the port so the service's daemon exited.
+Every service-manager call here is mocked; nothing reaches launchd/systemd.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from superlocalmemory.cli import daemon
+from superlocalmemory.cli import daemon_supervisor as supervisor
+from superlocalmemory.cli.daemon_supervisor import StartOutcome, SupervisorJob
+
+CLIENT_ENV = {
+    "SLM_AGENT_ID": "agent-under-test",
+    "SLM_CLIENT_CHANNEL": "mcp",
+    "SLM_MCP_PROFILE": "whole",
+    "SLM_SKIP_DEP_CHECK": "1",
+    "SLM_DAEMON_INSTANCE_ID": "client-instance",
+    "SLM_DAEMON_CAPABILITY": "client-capability",
+    "SLM_HOOK_DAEMON_TIMEOUT": "3",
+}
+
+
+def _job(port: int, platform: str = "macos", **environment: str) -> SupervisorJob:
+    return SupervisorJob(platform, "com.example.slm.test", Path("/nonexistent/job.plist"),
+                         port, dict(environment))
+
+
+@pytest.fixture
+def start_env(monkeypatch, free_port):
+    for key, value in CLIENT_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("SLM_RANKING", "client-ranking")
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(daemon, "_has_tcp_listener", lambda port: False)
+    monkeypatch.setattr(daemon, "assert_no_durable_root_conflict", lambda: None)
+    popen = MagicMock()
+    popen.return_value.poll.return_value = None
+    monkeypatch.setattr("subprocess.Popen", popen)
+    monkeypatch.setattr(daemon, "_wait_for_daemon", lambda timeout=60, proc=None: True)
+    return SimpleNamespace(port=free_port, popen=popen)
+
+
+# --- (a) the service starts its own daemon ---------------------------------------
+
+def test_installed_service_is_asked_to_start_and_nothing_is_spawned(start_env, monkeypatch):
+    job = _job(start_env.port, SLM_RANKING="v2-ensemble")
+    monkeypatch.setattr(supervisor, "find_job", lambda port: job if port == start_env.port else None)
+    asked = MagicMock(return_value=StartOutcome(True, "kickstarted"))
+    monkeypatch.setattr(supervisor, "request_start", asked)
+
+    assert daemon._start_daemon_subprocess(port=start_env.port) is True
+    asked.assert_called_once_with(job)
+    start_env.popen.assert_not_called()
+
+
+def test_service_start_that_never_becomes_healthy_reports_failure(start_env, monkeypatch):
+    job = _job(start_env.port)
+    monkeypatch.setattr(supervisor, "find_job", lambda port: job)
+    monkeypatch.setattr(supervisor, "request_start",
+                        lambda j: StartOutcome(True, "kickstarted"))
+    monkeypatch.setattr(daemon, "_wait_for_daemon", lambda timeout=60, proc=None: False)
+    assert daemon._start_daemon_subprocess(port=start_env.port) is False
+    start_env.popen.assert_not_called()
+
+
+def test_failed_service_start_falls_back_to_scrubbed_spawn_with_service_settings(
+    start_env, monkeypatch, caplog,
+):
+    job = _job(start_env.port, SLM_RANKING="v2-ensemble", SLM_AGENT_ID="never-from-a-job")
+    monkeypatch.setattr(supervisor, "find_job", lambda port: job)
+    monkeypatch.setattr(supervisor, "request_start",
+                        lambda j: StartOutcome(False, "failed", "domain unavailable"))
+
+    assert daemon._start_daemon_subprocess(port=start_env.port) is True
+    start_env.popen.assert_called_once()
+    env = start_env.popen.call_args.kwargs["env"]
+    assert env["SLM_RANKING"] == "v2-ensemble", "service settings must reach the daemon"
+    for key in ("SLM_AGENT_ID", "SLM_CLIENT_CHANNEL", "SLM_MCP_PROFILE",
+                "SLM_SKIP_DEP_CHECK", "SLM_HOOK_DAEMON_TIMEOUT"):
+        assert key not in env, key
+    assert env["SLM_DAEMON_INSTANCE_ID"] != "client-instance"
+    assert env["SLM_DAEMON_CAPABILITY"] != "client-capability"
+    assert job.name in caplog.text and "directly" in caplog.text
+
+
+# --- (b) a direct start never inherits the client ------------------------------
+
+def test_direct_spawn_without_service_never_inherits_client_identity(start_env, monkeypatch):
+    monkeypatch.setattr(supervisor, "find_job", lambda port: None)
+    asked = MagicMock()
+    monkeypatch.setattr(supervisor, "request_start", asked)
+
+    assert daemon._start_daemon_subprocess(port=start_env.port) is True
+    asked.assert_not_called()
+    env = start_env.popen.call_args.kwargs["env"]
+    for key in ("SLM_AGENT_ID", "SLM_CLIENT_CHANNEL", "SLM_MCP_PROFILE",
+                "SLM_SKIP_DEP_CHECK", "SLM_HOOK_DAEMON_TIMEOUT"):
+        assert key not in env, key
+    assert env["SLM_DAEMON_INSTANCE_ID"] != "client-instance"
+    assert env["SLM_RANKING"] == "client-ranking", "operator settings are not client identity"
+    assert env["OMP_NUM_THREADS"] == "1"
+    assert os.environ["SLM_AGENT_ID"] == "agent-under-test", "the client's own env is untouched"
+
+
+def test_daemon_environment_is_pure_and_service_values_win():
+    base = {"SLM_AGENT_ID": "a", "SLM_RANKING": "client", "PATH": "/x"}
+    job = _job(1, SLM_RANKING="service", SLM_MCP_PROFILE="never")
+    env = supervisor.daemon_environment(base, job)
+    assert env == {"SLM_RANKING": "service", "PATH": "/x"}
+    assert base == {"SLM_AGENT_ID": "a", "SLM_RANKING": "client", "PATH": "/x"}
+
+
+# --- the service-manager commands ------------------------------------------------
+
+class _Runner:
+    def __init__(self, codes: dict[str, int]):
+        self.codes, self.calls = codes, []
+
+    def __call__(self, argv):
+        self.calls.append(argv)
+        return SimpleNamespace(returncode=self.codes.get(argv[1], 0), stdout="", stderr="")
+
+
+def _macos(monkeypatch, loaded_states, codes=None):
+    states = iter(loaded_states)
+    monkeypatch.setattr(supervisor, "job_loaded", lambda job: next(states))
+    runner = _Runner(codes or {})
+    monkeypatch.setattr(supervisor, "_run", runner)
+    monkeypatch.setattr(supervisor, "_macos_domain", lambda: "gui/501")
+    return runner
+
+
+def test_macos_loaded_job_is_kickstarted_without_restart(monkeypatch):
+    runner = _macos(monkeypatch, [True])
+    outcome = supervisor.request_start(_job(1))
+    assert outcome == StartOutcome(True, "kickstarted")
+    assert runner.calls == [["launchctl", "kickstart", "gui/501/com.example.slm.test"]]
+    assert "-k" not in runner.calls[0], "a running job must never be killed"
+
+
+def test_macos_unloaded_job_is_loaded_not_bypassed(monkeypatch):
+    runner = _macos(monkeypatch, [False])
+    outcome = supervisor.request_start(_job(1))
+    assert outcome == StartOutcome(True, "loaded")
+    assert runner.calls == [["launchctl", "bootstrap", "gui/501", "/nonexistent/job.plist"]]
+
+
+def test_macos_concurrent_loader_wins_then_job_is_kickstarted(monkeypatch):
+    runner = _macos(monkeypatch, [False, True], {"bootstrap": 5})
+    assert supervisor.request_start(_job(1)) == StartOutcome(True, "kickstarted")
+    assert [c[1] for c in runner.calls] == ["bootstrap", "kickstart"]
+
+
+def test_macos_load_failure_is_reported_not_raised(monkeypatch):
+    _macos(monkeypatch, [False, False], {"bootstrap": 119})
+    outcome = supervisor.request_start(_job(1))
+    assert not outcome.started and "119" in outcome.detail
+
+
+def test_linux_and_windows_use_their_service_managers(monkeypatch):
+    runner = _Runner({})
+    monkeypatch.setattr(supervisor, "_run", runner)
+    assert supervisor.request_start(_job(1, "linux")).started
+    assert supervisor.request_start(_job(1, "windows")).started
+    assert runner.calls == [["systemctl", "--user", "start", "com.example.slm.test"],
+                            ["schtasks", "/Run", "/TN", "com.example.slm.test"]]
+
+
+def test_service_manager_missing_is_a_failed_outcome(monkeypatch):
+    def missing(argv):
+        raise FileNotFoundError(argv[0])
+
+    monkeypatch.setattr(supervisor, "_run", missing)
+    outcome = supervisor.request_start(_job(1, "linux"))
+    assert not outcome.started and "systemctl" in outcome.detail
+
+
+def test_job_pid_reads_the_service_managers_pid(monkeypatch):
+    from superlocalmemory.cli import service_live
+
+    monkeypatch.setattr(service_live, "launchctl_list",
+                        lambda name: {"Label": name, "PID": 4242})
+    assert supervisor.job_pid(_job(1)) == 4242
+    monkeypatch.setattr(service_live, "launchctl_list", lambda name: {"Label": name})
+    assert supervisor.job_pid(_job(1)) is None, "loaded but not running"
+    monkeypatch.setattr(service_live, "launchctl_list", lambda name: None)
+    assert supervisor.job_pid(_job(1)) is None, "not loaded"
+    monkeypatch.setattr(supervisor, "_run", lambda argv: SimpleNamespace(
+        returncode=0, stdout="LoadState=loaded\nMainPID=0\n", stderr=""))
+    assert supervisor.job_pid(_job(1, "linux")) is None
+    monkeypatch.setattr(supervisor, "_run", lambda argv: SimpleNamespace(
+        returncode=0, stdout="LoadState=loaded\nMainPID=77\n", stderr=""))
+    assert supervisor.job_pid(_job(1, "linux")) == 77
+    assert supervisor.job_pid(_job(1, "windows")) is None
+
+
+def test_jobs_are_matched_by_port_and_carry_their_definition_environment(monkeypatch):
+    import plistlib
+
+    from superlocalmemory.cli import service_inventory
+
+    def row(name, port):
+        content = plistlib.dumps({"Label": name, "EnvironmentVariables": {
+            "SLM_DAEMON_PORT": str(port), "SLM_RANKING": "v2-ensemble"}}).decode()
+        return service_inventory.ServiceDefinition(name, Path(f"/x/{name}.plist"),
+                                                   port, content, ())
+
+    monkeypatch.setattr(supervisor, "current_platform", lambda: "macos")
+    monkeypatch.setattr(service_inventory, "definitions",
+                        lambda platform: [row("a", 9001), row("b", 9002)])
+    jobs = supervisor.jobs_for(9002)
+    assert [j.name for j in jobs] == ["b"]
+    assert jobs[0].environment["SLM_RANKING"] == "v2-ensemble"
+    assert supervisor.find_job(9999) is None
+
+
+def test_discovery_failure_means_no_service(monkeypatch):
+    from superlocalmemory.cli import service_inventory
+
+    monkeypatch.setattr(supervisor, "current_platform", lambda: "linux")
+
+    def broken(platform):
+        raise OSError("systemctl missing")
+
+    monkeypatch.setattr(service_inventory, "definitions", broken)
+    assert supervisor.find_job(8765) is None
+
+
+def test_linux_and_windows_definition_environment_parsing():
+    unit = ("[Unit]\nDescription=x\n[Service]\nExecStart=/p -m m\n"
+            'Environment="SLM_DATA_DIR=/d"\nEnvironment="SLM_RANKING=v2"\n')
+    assert supervisor._linux_environment(unit) == {"SLM_DATA_DIR": "/d", "SLM_RANKING": "v2"}
+    vbs = ('Set WshShell = CreateObject("WScript.Shell")\n'
+           'WshShell.Environment("Process")("SLM_RANKING") = "v2"\n'
+           'WshShell.Run """p"" -m m", 0, False\n')
+    assert supervisor._windows_environment(vbs) == {"SLM_RANKING": "v2"}

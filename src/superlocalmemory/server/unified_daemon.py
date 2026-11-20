@@ -7564,6 +7564,11 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     # with the old daemon letting go, so wait a bounded time before giving up;
     # returning (not raising) keeps the exit code 0 so no service manager loops.
     instance_lock = get_instance_lock()
+    # Started by the installed service while an unowned daemon holds the
+    # folder: take it back once instead of exiting 0 behind it for good.
+    from superlocalmemory.server import supervisor_handover
+
+    supervisor_handover.take_over_if_supervised(port)
     if not acquire_with_backoff(instance_lock, _instance_lock_wait_s()):
         logger.error(
             "SLM daemon will not start: another SLM daemon owns this data "

@@ -16,14 +16,13 @@ def _run(argv: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, timeout=10, **kwargs)
 
 
-def _macos(row: ServiceDefinition) -> bool:
+def launchctl_list(name: str) -> dict | None:
+    """The loaded job's ``launchctl list`` record, or None when it is not loaded."""
     import plistlib  # macOS path only: the other platforms never load it
 
-    from superlocalmemory.cli.service_inventory import _port
-
-    result = _run(["launchctl", "list", row.name])
+    result = _run(["launchctl", "list", name])
     if result.returncode in {3, 113}:  # ESRCH / launchctl's absent-service status
-        return False
+        return None
     if result.returncode:
         raise OSError("Cannot inspect loaded LaunchAgent")
     try:
@@ -36,6 +35,19 @@ def _macos(row: ServiceDefinition) -> bool:
         if converted.returncode:
             raise OSError("Cannot parse loaded LaunchAgent")
         payload = json.loads(converted.stdout)
+    if not isinstance(payload, dict):
+        raise OSError("Cannot parse loaded LaunchAgent")
+    return payload
+
+
+def _macos(row: ServiceDefinition) -> bool:
+    import plistlib  # macOS path only: the other platforms never load it
+
+    from superlocalmemory.cli.service_inventory import _port
+
+    payload = launchctl_list(row.name)
+    if payload is None:
+        return False
     expected = plistlib.loads(row.content.encode())
     argv = payload.get("ProgramArguments", [])
     if (payload.get("Label") != row.name

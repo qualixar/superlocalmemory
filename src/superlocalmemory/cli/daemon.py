@@ -30,6 +30,7 @@ import time
 from typing import TYPE_CHECKING
 
 from superlocalmemory.cli import daemon_startup as _startup
+from superlocalmemory.cli import daemon_supervisor as _supervisor
 from superlocalmemory.cli.daemon_errors import (  # noqa: F401 - re-exported
     DaemonServerError,
     server_error_from,
@@ -885,6 +886,13 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
         logger.warning("daemon port %d is already owned; refusing a second start", _target_port)
         return False
     assert_no_durable_root_conflict()
+    # The installed service owns the daemon: a detached child of this client
+    # would carry the client's environment and collide with the service later.
+    ready, service_job = _supervisor.start_through_service(
+        _target_port, lambda: _wait_for_daemon(timeout=60),
+    )
+    if ready is not None:
+        return ready
 
     import subprocess
 
@@ -911,7 +919,9 @@ def _start_daemon_subprocess(*, port: int | None = None) -> bool:
     # initialized by an earlier import, causing the SIGSEGV at
     # __kmp_suspend_initialize_thread when lightgbm forks its worker pool.
     # Forcing serial OpenMP eliminates the parallel barrier race entirely.
-    daemon_env = os.environ.copy()
+    # Never the client's identity (agent, channel, tool profile); the service's
+    # settings when a service exists but would not start it.
+    daemon_env = _supervisor.daemon_environment(os.environ, service_job)
     daemon_env["OMP_NUM_THREADS"] = "1"
     daemon_env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
     bootstrap_descriptor = build_descriptor(

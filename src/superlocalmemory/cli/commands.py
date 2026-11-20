@@ -3550,6 +3550,11 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
 
     daemon_check = check_daemon()
     _check("Daemon", daemon_check.status, daemon_check.detail, daemon_check.fix)
+    from superlocalmemory.cli.doctor_supervisor import check_supervisor_ownership
+
+    owner_check = check_supervisor_ownership()
+    if owner_check is not None:  # only when a service is installed and a daemon runs
+        _check("Daemon service owner", owner_check.status, owner_check.detail, owner_check.fix)
     if daemon_check.feature_warning:
         # Optional probe trouble is its own line; it never rewrites the daemon verdict.
         # Slowness alone is never a reason to restart the daemon.
