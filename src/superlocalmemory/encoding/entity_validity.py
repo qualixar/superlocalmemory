@@ -9,7 +9,7 @@ Measured on a clone of the author's store after the first entity repair
 "Users" (529 facts, from /Users/... paths), "LIVE", "VERIFIED", "PASS",
 "Final", "IST", 16-hex fact ids (211 facts each), "2026-09-14 00:55",
 "/api/v3/consolidation/trigger", "Xenobot Section Still Has", "Check
-Accenture" and "spill over". None of those names a person, product, place or
+Acme" and "spill over". None of those names a person, product, place or
 thing. Every name, from the rule-based extractor, a model or an old store,
 passes through ``valid_name`` before it can become or reach an entity.
 
@@ -23,7 +23,7 @@ Rejected:
   unit (IST, UTC, AM, MB);
 * a lower-case everyday word ("plan") or a phrase of them ("spill over");
 * a phrase that starts or ends with a sentence word, or has one inside other
-  than a connector ("Xenobot Section Still Has", "Check Accenture");
+  than a connector ("Xenobot Section Still Has", "Check Acme");
 * a single Capitalised everyday word ("Final", "Users", "Tested") unless the
   text shows it capitalised where a sentence does not start ("the Atlas
   report"): capitalised at the start of a sentence, a line or a label it is

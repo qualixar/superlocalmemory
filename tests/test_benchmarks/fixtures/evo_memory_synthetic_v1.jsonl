@@ -1,6 +1,6 @@
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #0","idx":0,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #1","idx":1,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #2","idx":2,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #1","idx":1,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #2","idx":2,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #3","idx":3,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #4","idx":4,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #5","idx":5,"topic":"system_architecture","type":"seed"}
@@ -9,8 +9,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #8","idx":8,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #9","idx":9,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #10","idx":10,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #11","idx":11,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #12","idx":12,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #11","idx":11,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #12","idx":12,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #13","idx":13,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #14","idx":14,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #15","idx":15,"topic":"system_architecture","type":"seed"}
@@ -19,8 +19,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #18","idx":18,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #19","idx":19,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #20","idx":20,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #21","idx":21,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #22","idx":22,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #21","idx":21,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #22","idx":22,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #23","idx":23,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #24","idx":24,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #25","idx":25,"topic":"system_architecture","type":"seed"}
@@ -29,8 +29,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #28","idx":28,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #29","idx":29,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #30","idx":30,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #31","idx":31,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #32","idx":32,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #31","idx":31,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #32","idx":32,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #33","idx":33,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #34","idx":34,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #35","idx":35,"topic":"system_architecture","type":"seed"}
@@ -39,8 +39,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #38","idx":38,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #39","idx":39,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #40","idx":40,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #41","idx":41,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #42","idx":42,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #41","idx":41,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #42","idx":42,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #43","idx":43,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #44","idx":44,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #45","idx":45,"topic":"system_architecture","type":"seed"}
@@ -49,8 +49,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #48","idx":48,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #49","idx":49,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #50","idx":50,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #51","idx":51,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #52","idx":52,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #51","idx":51,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #52","idx":52,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #53","idx":53,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #54","idx":54,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #55","idx":55,"topic":"system_architecture","type":"seed"}
@@ -59,8 +59,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #58","idx":58,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #59","idx":59,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #60","idx":60,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #61","idx":61,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #62","idx":62,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #61","idx":61,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #62","idx":62,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #63","idx":63,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #64","idx":64,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #65","idx":65,"topic":"system_architecture","type":"seed"}
@@ -69,8 +69,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #68","idx":68,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #69","idx":69,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #70","idx":70,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #71","idx":71,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #72","idx":72,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #71","idx":71,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #72","idx":72,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #73","idx":73,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #74","idx":74,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #75","idx":75,"topic":"system_architecture","type":"seed"}
@@ -79,8 +79,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #78","idx":78,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #79","idx":79,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #80","idx":80,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #81","idx":81,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #82","idx":82,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #81","idx":81,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #82","idx":82,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #83","idx":83,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #84","idx":84,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #85","idx":85,"topic":"system_architecture","type":"seed"}
@@ -89,8 +89,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #88","idx":88,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #89","idx":89,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #90","idx":90,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #91","idx":91,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #92","idx":92,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #91","idx":91,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #92","idx":92,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #93","idx":93,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #94","idx":94,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #95","idx":95,"topic":"system_architecture","type":"seed"}
@@ -99,8 +99,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #98","idx":98,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #99","idx":99,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #100","idx":100,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #101","idx":101,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #102","idx":102,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #101","idx":101,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #102","idx":102,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #103","idx":103,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #104","idx":104,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #105","idx":105,"topic":"system_architecture","type":"seed"}
@@ -109,8 +109,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #108","idx":108,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #109","idx":109,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #110","idx":110,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #111","idx":111,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #112","idx":112,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #111","idx":111,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #112","idx":112,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #113","idx":113,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #114","idx":114,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #115","idx":115,"topic":"system_architecture","type":"seed"}
@@ -119,8 +119,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #118","idx":118,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #119","idx":119,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #120","idx":120,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #121","idx":121,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #122","idx":122,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #121","idx":121,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #122","idx":122,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #123","idx":123,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #124","idx":124,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #125","idx":125,"topic":"system_architecture","type":"seed"}
@@ -129,8 +129,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #128","idx":128,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #129","idx":129,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #130","idx":130,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #131","idx":131,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #132","idx":132,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #131","idx":131,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #132","idx":132,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #133","idx":133,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #134","idx":134,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #135","idx":135,"topic":"system_architecture","type":"seed"}
@@ -139,8 +139,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #138","idx":138,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #139","idx":139,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #140","idx":140,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #141","idx":141,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #142","idx":142,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #141","idx":141,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #142","idx":142,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #143","idx":143,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #144","idx":144,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #145","idx":145,"topic":"system_architecture","type":"seed"}
@@ -149,8 +149,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #148","idx":148,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #149","idx":149,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #150","idx":150,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #151","idx":151,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #152","idx":152,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #151","idx":151,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #152","idx":152,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #153","idx":153,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #154","idx":154,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #155","idx":155,"topic":"system_architecture","type":"seed"}
@@ -159,8 +159,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #158","idx":158,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #159","idx":159,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #160","idx":160,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #161","idx":161,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #162","idx":162,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #161","idx":161,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #162","idx":162,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #163","idx":163,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #164","idx":164,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #165","idx":165,"topic":"system_architecture","type":"seed"}
@@ -169,8 +169,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #168","idx":168,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #169","idx":169,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #170","idx":170,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #171","idx":171,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #172","idx":172,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #171","idx":171,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #172","idx":172,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #173","idx":173,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #174","idx":174,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #175","idx":175,"topic":"system_architecture","type":"seed"}
@@ -179,8 +179,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #178","idx":178,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #179","idx":179,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #180","idx":180,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #181","idx":181,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #182","idx":182,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #181","idx":181,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #182","idx":182,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #183","idx":183,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #184","idx":184,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #185","idx":185,"topic":"system_architecture","type":"seed"}
@@ -189,8 +189,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #188","idx":188,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #189","idx":189,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #190","idx":190,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #191","idx":191,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #192","idx":192,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #191","idx":191,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #192","idx":192,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #193","idx":193,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #194","idx":194,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #195","idx":195,"topic":"system_architecture","type":"seed"}
@@ -199,8 +199,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #198","idx":198,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #199","idx":199,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #200","idx":200,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #201","idx":201,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #202","idx":202,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #201","idx":201,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #202","idx":202,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #203","idx":203,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #204","idx":204,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #205","idx":205,"topic":"system_architecture","type":"seed"}
@@ -209,8 +209,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #208","idx":208,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #209","idx":209,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #210","idx":210,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #211","idx":211,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #212","idx":212,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #211","idx":211,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #212","idx":212,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #213","idx":213,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #214","idx":214,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #215","idx":215,"topic":"system_architecture","type":"seed"}
@@ -219,8 +219,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #218","idx":218,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #219","idx":219,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #220","idx":220,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #221","idx":221,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #222","idx":222,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #221","idx":221,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #222","idx":222,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #223","idx":223,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #224","idx":224,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #225","idx":225,"topic":"system_architecture","type":"seed"}
@@ -229,8 +229,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #228","idx":228,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #229","idx":229,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #230","idx":230,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #231","idx":231,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #232","idx":232,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #231","idx":231,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #232","idx":232,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #233","idx":233,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #234","idx":234,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #235","idx":235,"topic":"system_architecture","type":"seed"}
@@ -239,8 +239,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #238","idx":238,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #239","idx":239,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #240","idx":240,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #241","idx":241,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #242","idx":242,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #241","idx":241,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #242","idx":242,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #243","idx":243,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #244","idx":244,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #245","idx":245,"topic":"system_architecture","type":"seed"}
@@ -249,8 +249,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #248","idx":248,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #249","idx":249,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #250","idx":250,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #251","idx":251,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #252","idx":252,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #251","idx":251,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #252","idx":252,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #253","idx":253,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #254","idx":254,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #255","idx":255,"topic":"system_architecture","type":"seed"}
@@ -259,8 +259,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #258","idx":258,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #259","idx":259,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #260","idx":260,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #261","idx":261,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #262","idx":262,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #261","idx":261,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #262","idx":262,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #263","idx":263,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #264","idx":264,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #265","idx":265,"topic":"system_architecture","type":"seed"}
@@ -269,8 +269,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #268","idx":268,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #269","idx":269,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #270","idx":270,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #271","idx":271,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #272","idx":272,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #271","idx":271,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #272","idx":272,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #273","idx":273,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #274","idx":274,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #275","idx":275,"topic":"system_architecture","type":"seed"}
@@ -279,8 +279,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #278","idx":278,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #279","idx":279,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #280","idx":280,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #281","idx":281,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #282","idx":282,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #281","idx":281,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #282","idx":282,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #283","idx":283,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #284","idx":284,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #285","idx":285,"topic":"system_architecture","type":"seed"}
@@ -289,8 +289,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #288","idx":288,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #289","idx":289,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #290","idx":290,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #291","idx":291,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #292","idx":292,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #291","idx":291,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #292","idx":292,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #293","idx":293,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #294","idx":294,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #295","idx":295,"topic":"system_architecture","type":"seed"}
@@ -299,8 +299,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #298","idx":298,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #299","idx":299,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #300","idx":300,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #301","idx":301,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #302","idx":302,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #301","idx":301,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #302","idx":302,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #303","idx":303,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #304","idx":304,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #305","idx":305,"topic":"system_architecture","type":"seed"}
@@ -309,8 +309,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #308","idx":308,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #309","idx":309,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #310","idx":310,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #311","idx":311,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #312","idx":312,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #311","idx":311,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #312","idx":312,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #313","idx":313,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #314","idx":314,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #315","idx":315,"topic":"system_architecture","type":"seed"}
@@ -319,8 +319,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #318","idx":318,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #319","idx":319,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #320","idx":320,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #321","idx":321,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #322","idx":322,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #321","idx":321,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #322","idx":322,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #323","idx":323,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #324","idx":324,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #325","idx":325,"topic":"system_architecture","type":"seed"}
@@ -329,8 +329,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #328","idx":328,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #329","idx":329,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #330","idx":330,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #331","idx":331,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #332","idx":332,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #331","idx":331,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #332","idx":332,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #333","idx":333,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #334","idx":334,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #335","idx":335,"topic":"system_architecture","type":"seed"}
@@ -339,8 +339,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #338","idx":338,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #339","idx":339,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #340","idx":340,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #341","idx":341,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #342","idx":342,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #341","idx":341,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #342","idx":342,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #343","idx":343,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #344","idx":344,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #345","idx":345,"topic":"system_architecture","type":"seed"}
@@ -349,8 +349,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #348","idx":348,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #349","idx":349,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #350","idx":350,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #351","idx":351,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #352","idx":352,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #351","idx":351,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #352","idx":352,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #353","idx":353,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #354","idx":354,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #355","idx":355,"topic":"system_architecture","type":"seed"}
@@ -359,8 +359,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #358","idx":358,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #359","idx":359,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #360","idx":360,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #361","idx":361,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #362","idx":362,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #361","idx":361,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #362","idx":362,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #363","idx":363,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #364","idx":364,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #365","idx":365,"topic":"system_architecture","type":"seed"}
@@ -369,8 +369,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #368","idx":368,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #369","idx":369,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #370","idx":370,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #371","idx":371,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #372","idx":372,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #371","idx":371,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #372","idx":372,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #373","idx":373,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #374","idx":374,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #375","idx":375,"topic":"system_architecture","type":"seed"}
@@ -379,8 +379,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #378","idx":378,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #379","idx":379,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #380","idx":380,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #381","idx":381,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #382","idx":382,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #381","idx":381,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #382","idx":382,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #383","idx":383,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #384","idx":384,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #385","idx":385,"topic":"system_architecture","type":"seed"}
@@ -389,8 +389,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #388","idx":388,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #389","idx":389,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #390","idx":390,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #391","idx":391,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #392","idx":392,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #391","idx":391,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #392","idx":392,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #393","idx":393,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #394","idx":394,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #395","idx":395,"topic":"system_architecture","type":"seed"}
@@ -399,8 +399,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #398","idx":398,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #399","idx":399,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #400","idx":400,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #401","idx":401,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #402","idx":402,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #401","idx":401,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #402","idx":402,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #403","idx":403,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #404","idx":404,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #405","idx":405,"topic":"system_architecture","type":"seed"}
@@ -409,8 +409,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #408","idx":408,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #409","idx":409,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #410","idx":410,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #411","idx":411,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #412","idx":412,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #411","idx":411,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #412","idx":412,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #413","idx":413,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #414","idx":414,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #415","idx":415,"topic":"system_architecture","type":"seed"}
@@ -419,8 +419,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #418","idx":418,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #419","idx":419,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #420","idx":420,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #421","idx":421,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #422","idx":422,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #421","idx":421,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #422","idx":422,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #423","idx":423,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #424","idx":424,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #425","idx":425,"topic":"system_architecture","type":"seed"}
@@ -429,8 +429,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #428","idx":428,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #429","idx":429,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #430","idx":430,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #431","idx":431,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #432","idx":432,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #431","idx":431,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #432","idx":432,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #433","idx":433,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #434","idx":434,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #435","idx":435,"topic":"system_architecture","type":"seed"}
@@ -439,8 +439,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #438","idx":438,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #439","idx":439,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #440","idx":440,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #441","idx":441,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #442","idx":442,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #441","idx":441,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #442","idx":442,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #443","idx":443,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #444","idx":444,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #445","idx":445,"topic":"system_architecture","type":"seed"}
@@ -449,8 +449,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #448","idx":448,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #449","idx":449,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #450","idx":450,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #451","idx":451,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #452","idx":452,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #451","idx":451,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #452","idx":452,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #453","idx":453,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #454","idx":454,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #455","idx":455,"topic":"system_architecture","type":"seed"}
@@ -459,8 +459,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #458","idx":458,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #459","idx":459,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #460","idx":460,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #461","idx":461,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #462","idx":462,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #461","idx":461,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #462","idx":462,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #463","idx":463,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #464","idx":464,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #465","idx":465,"topic":"system_architecture","type":"seed"}
@@ -469,8 +469,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #468","idx":468,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #469","idx":469,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #470","idx":470,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #471","idx":471,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #472","idx":472,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #471","idx":471,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #472","idx":472,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #473","idx":473,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #474","idx":474,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #475","idx":475,"topic":"system_architecture","type":"seed"}
@@ -479,8 +479,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #478","idx":478,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #479","idx":479,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #480","idx":480,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #481","idx":481,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #482","idx":482,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #481","idx":481,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #482","idx":482,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #483","idx":483,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #484","idx":484,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #485","idx":485,"topic":"system_architecture","type":"seed"}
@@ -489,8 +489,8 @@
 {"day":0,"entities":["ats","referral"],"fact":"Hiring record ats advanced to referral #488","idx":488,"topic":"hiring_pipeline","type":"seed"}
 {"day":0,"entities":["issue","user_feedback"],"fact":"Community thread issue escalated via user_feedback #489","idx":489,"topic":"community_feedback","type":"seed"}
 {"day":0,"entities":["varun","dark_mode"],"fact":"Varun prefers varun terminals on dark_mode #490","idx":490,"topic":"tooling_prefs","type":"seed"}
-{"day":0,"entities":["accenture","patent"],"fact":"AgentAssert accenture decision recorded on patent #491","idx":491,"topic":"legal_ip","type":"seed"}
-{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.21 ships mesh launch #492","idx":492,"topic":"product_roadmap","type":"seed"}
+{"day":0,"entities":["acme","contract"],"fact":"AgentAssert acme decision recorded on contract #491","idx":491,"topic":"legal_ip","type":"seed"}
+{"day":0,"entities":["mesh","launch"],"fact":"SuperLocalMemory v3.4.22 ships mesh launch #492","idx":492,"topic":"product_roadmap","type":"seed"}
 {"day":0,"entities":["locomo","mrr"],"fact":"Research note locomo published at mrr #493","idx":493,"topic":"research_notes","type":"seed"}
 {"day":0,"entities":["camera_ready","iclr"],"fact":"Conference camera_ready deadline on iclr #494","idx":494,"topic":"conference_deadlines","type":"seed"}
 {"day":0,"entities":["engine","recall"],"fact":"Memory engine engine wired to recall #495","idx":495,"topic":"system_architecture","type":"seed"}

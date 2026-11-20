@@ -38,8 +38,8 @@ def _engine(db: MagicMock, config: RetrievalConfig | None = None) -> RetrievalEn
 
 def _summary_rows():
     return [
-        {"community_id": 0, "summary": "Work at Accenture.",
-         "keywords": "accenture, varun", "fact_ids_json": '["f1", "f2", "f3"]',
+        {"community_id": 0, "summary": "Work at Acme.",
+         "keywords": "acme, alex", "fact_ids_json": '["f1", "f2", "f3"]',
          "fact_count": 3},
         {"community_id": 1, "summary": "Paris vacation.",
          "keywords": "paris, vacation", "fact_ids_json": '["f8", "f9"]',
@@ -57,7 +57,7 @@ class TestCommunityContext:
         ctx = eng._community_context(results, "default")
         assert ctx is not None
         assert ctx["community_id"] == 0
-        assert ctx["summary"] == "Work at Accenture."
+        assert ctx["summary"] == "Work at Acme."
         assert ctx["matched_results"] == 2
         # Sample is bounded to the ids THIS query actually matched, not the
         # whole stored membership — "f3" never appeared in the results.
@@ -91,8 +91,8 @@ class TestCommunityContext:
         """An older row with no `fact_count` column still reports a real count."""
         db = MagicMock()
         db.execute.return_value = [
-            {"community_id": 0, "summary": "Work at Accenture.",
-             "keywords": "accenture, varun", "fact_ids_json": '["f1", "f2", "f3"]',
+            {"community_id": 0, "summary": "Work at Acme.",
+             "keywords": "acme, alex", "fact_ids_json": '["f1", "f2", "f3"]',
              "fact_count": 0},
         ]
         eng = _engine(db)

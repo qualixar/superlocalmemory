@@ -89,7 +89,7 @@ def test_restoring_a_fact_under_the_same_id_keeps_its_associations(db) -> None:
     ))
     db.store_fact(AtomicFact(
         fact_id="f1", memory_id="m1", profile_id="default",
-        content="Varun works at Accenture",
+        content="Alex works at Acme",
     ))
     _associate(db, "f1")
     before = _associations(db, "f1")
@@ -216,7 +216,7 @@ def test_a_second_profile_cannot_destroy_the_first_profiles_fact(
 
     engine.store_fact_direct(AtomicFact(
         fact_id="external-record-42", profile_id="default",
-        content="Varun works at Accenture as an architect",
+        content="Alex works at Acme as an architect",
     ))
     _associate(db, "external-record-42")
     before_associations = _associations(db, "external-record-42")
