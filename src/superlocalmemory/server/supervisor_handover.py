@@ -94,7 +94,10 @@ def _take_over(port: int) -> str:
         "installed service %s; asking it to hand over so the service's daemon "
         "and settings take effect", holder.pid, mine[0],
     )
-    if client.stop_daemon() and wait_until_instance_lock_free(timeout_s=_HANDOVER_WAIT_S):
+    # Bound to the holder checked above: if another daemon has replaced it
+    # since, nothing is stopped.
+    if (client.stop_daemon(expected=holder)
+            and wait_until_instance_lock_free(timeout_s=_HANDOVER_WAIT_S)):
         logger.warning("hand-over complete: pid %d stopped", holder.pid)
         return "took_over"
     logger.error(

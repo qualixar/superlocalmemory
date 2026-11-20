@@ -26,6 +26,7 @@ from superlocalmemory.server import supervisor_handover as handover
 
 PORT = 18765
 FOREIGN_PID = 999_001
+_REAL_STOP = client.stop_daemon
 
 
 def _job(name="svc"):
@@ -114,6 +115,46 @@ def test_start_server_offers_hand_over_before_waiting_for_the_folder(monkeypatch
     unified_daemon.start_server(port=PORT)
     assert [step for step, _ in order] == ["handover", "acquire"]
     assert order[0] == ("handover", PORT)
+
+
+# --- the stop is bound to the holder that was checked ---------------------------
+
+def _record(pid, instance):
+    return SimpleNamespace(pid=pid, port=PORT, instance_id=instance, state="ready")
+
+
+@pytest.fixture
+def real_stop(world, monkeypatch):
+    """The real ``stop_daemon``, with only its HTTP request and wait faked."""
+    sent = []
+    monkeypatch.setattr(client, "stop_daemon", _REAL_STOP)
+    monkeypatch.setattr(client, "daemon_request", lambda method, path, **kw: (
+        sent.append(kw.get("expected_descriptor")) or {"status": "stopping"}))
+    monkeypatch.setattr(client, "wait_for_owned_daemon_shutdown", lambda *a, **k: True)
+    return sent
+
+
+def test_hand_over_never_stops_a_daemon_that_replaced_the_checked_one(world, real_stop,
+                                                                       monkeypatch):
+    checked, replacement = _record(FOREIGN_PID, "unowned"), _record(999_002, "newcomer")
+    reads = iter([checked])
+    monkeypatch.setattr(client, "read_descriptor", lambda: next(reads, replacement))
+    assert handover.take_over_if_supervised(PORT) == "stop_failed"
+    assert real_stop == [], "the record changed after the check: nothing may be stopped"
+
+
+def test_hand_over_stops_exactly_the_checked_daemon(world, real_stop, monkeypatch):
+    checked = _record(FOREIGN_PID, "unowned")
+    monkeypatch.setattr(client, "read_descriptor", lambda: checked)
+    assert handover.take_over_if_supervised(PORT) == "took_over"
+    assert [d.instance_id for d in real_stop] == ["unowned"]
+
+
+def test_plain_stop_still_stops_whatever_daemon_owns_the_folder(real_stop, monkeypatch):
+    monkeypatch.setattr(client, "read_descriptor", lambda: _record(4, "current"))
+    monkeypatch.setattr(client, "_descriptor_process_is_alive", lambda d: True)
+    assert client.stop_daemon() is True
+    assert [d.instance_id for d in real_stop] == ["current"]
 
 
 # --- slm doctor --------------------------------------------------------------------

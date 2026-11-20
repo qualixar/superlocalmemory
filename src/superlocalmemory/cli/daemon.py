@@ -1247,8 +1247,18 @@ def _describe_daemon_unavailability() -> dict[str, str]:
     return daemon_diagnosis.describe(sys.modules[__name__])
 
 
-def stop_daemon() -> bool:
+def _is_same_daemon(descriptor, expected) -> bool:
+    return (descriptor is not None and descriptor.pid == expected.pid
+            and descriptor.instance_id == expected.instance_id)
+
+
+def stop_daemon(expected=None) -> bool:
     """Stop only the daemon proven to belong to this data namespace.
+
+    ``expected``: a daemon record the caller already checked. The stop is
+    then bound to that exact instance; if the folder's record now names any
+    other daemon, nothing is stopped and False is returned. The request
+    carries the instance id, so the daemon refuses it too if it changed.
 
     Machine-wide process-name scans are forbidden: they can kill another SLM
     installation or a user's live workers during tests. V3.7 uses the owned
@@ -1276,6 +1286,8 @@ def stop_daemon() -> bool:
     stall-prone preflight round trip.
     """
     descriptor = read_descriptor()
+    if expected is not None and not _is_same_daemon(descriptor, expected):
+        return False
     legacy = _verified_legacy_health() if descriptor is None else None
     if descriptor is None and legacy is None:
         return False
@@ -1290,6 +1302,8 @@ def stop_daemon() -> bool:
             # "starting" must not make this command hang indefinitely.
             ready = _startup.wait_for_starting_daemon(seconds=_startup.stop_wait_budget())
             descriptor = ready[0] if ready is not None else descriptor
+            if expected is not None and not _is_same_daemon(descriptor, expected):
+                return False
         response = daemon_request(
             "POST",
             "/stop",
