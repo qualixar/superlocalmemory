@@ -19,6 +19,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/qualixar/superlocalmemory?style=flat&logo=github)](https://github.com/qualixar/superlocalmemory/stargazers)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/qualixar/superlocalmemory/blob/main/LICENSE)
 [![Research: 4 arXiv papers](https://img.shields.io/badge/arXiv-4_papers-b31b1b)](#research)
+[![Featured in Awesome AI Agents](https://img.shields.io/badge/Featured_in-Awesome_AI_Agents-2ea44f)](https://github.com/NipunaRanasinghe/awesome-ai-agents)
 
 **[Install](#install)** · **[See it work](#30-second-example)** · **[Full demo](https://www.youtube.com/watch?v=9Y0wAT07KTc)** · **[Every capability](#everything-slm-does)** · **[Docs](#documentation)** · **[Website](https://www.superlocalmemory.com)**
 
