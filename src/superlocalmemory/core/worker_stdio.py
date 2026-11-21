@@ -24,11 +24,26 @@ from typing import TextIO
 
 
 def claim_protocol_channel() -> TextIO:
-    """The stream to write protocol replies to (UTF-8, line-buffered)."""
+    """The stream to write protocol replies to (UTF-8, line-buffered).
+
+    A worker with no stdout at all (a windowless interpreter) has nowhere to
+    answer: that is raised here, at start, as one clear error, instead of a
+    ``NoneType`` failure on the first reply.
+    """
+    if sys.stdout is None:
+        raise RuntimeError(
+            "the worker has no stdout to send its replies on (started without a console "
+            "or pipe); the parent must start it with stdout=subprocess.PIPE")
+    reply_fd: int | None = None
     try:
         reply_fd = os.dup(sys.stdout.fileno())
         os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     except (AttributeError, OSError, ValueError):
+        if reply_fd is not None:  # the copy was made but the redirect failed: do not leak it
+            try:
+                os.close(reply_fd)
+            except OSError:
+                pass
         return sys.stdout  # no real descriptors (embedded use): nothing to move
     channel = open(reply_fd, "w", encoding="utf-8", newline="\n", buffering=1)  # noqa: SIM115
     sys.stdout = sys.stderr

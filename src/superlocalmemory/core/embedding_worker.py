@@ -42,10 +42,11 @@ def _exit_now(*_args) -> None:
     """SIGTERM: leave at once. ``sys.exit`` would wait for every non-daemon thread
     the model libraries started, so a stop could hang for as long as they run and
     the model stayed in memory (seen: a 3.3 GB picture worker outliving SIGTERM)."""
-    try:
-        sys.stdout.flush()
-    except Exception:  # noqa: BLE001 - leaving anyway
-        pass
+    for stream in (sys.stdout, globals().get("_PROTOCOL")):  # reply channel: worker_stdio.py
+        try:
+            stream.flush()
+        except Exception:  # noqa: BLE001 - leaving anyway
+            pass
     os._exit(0)
 
 

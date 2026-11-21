@@ -142,3 +142,84 @@ def test_outbound_body_that_is_not_utf8_is_blocked_not_a_decode_error() -> None:
         outbound_content(b"ab\x81cd", "https://api.example.com/v1/embeddings")
     # This machine is not screened: the bytes go as they are.
     assert outbound_content(b"ab\x81cd", "http://127.0.0.1:11434/api") == b"ab\x81cd"
+
+
+# -- the channel's edge cases -------------------------------------------------
+
+
+class _Stream:
+    """A stand-in for ``sys.stdout`` / ``sys.stderr`` backed by a real descriptor."""
+
+    def __init__(self, fd: int) -> None:
+        self._fd = fd
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def flush(self) -> None:
+        pass
+
+
+def test_a_worker_without_stdout_fails_with_a_clear_error(monkeypatch) -> None:
+    from superlocalmemory.core.worker_stdio import claim_protocol_channel
+
+    monkeypatch.setattr(sys, "stdout", None)  # as under pythonw
+    with pytest.raises(RuntimeError, match="no stdout"):
+        claim_protocol_channel()
+
+
+def test_the_duplicated_descriptor_is_closed_when_the_redirect_fails(monkeypatch) -> None:
+    import os
+    from unittest.mock import patch
+
+    from superlocalmemory.core.worker_stdio import claim_protocol_channel
+
+    out_r, out_w = os.pipe()
+    err_r, err_w = os.pipe()
+    duplicated: list[int] = []
+    real_dup = os.dup
+
+    def dup(fd):
+        new = real_dup(fd)
+        duplicated.append(new)
+        return new
+
+    stdout = _Stream(out_w)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", _Stream(err_w))
+    try:
+        # Patched only around the call: the test runner itself uses dup2.
+        with patch.object(os, "dup", dup), patch.object(os, "dup2", side_effect=OSError("no")):
+            channel = claim_protocol_channel()
+        assert channel is stdout  # nothing moved: the plain stream
+        assert len(duplicated) == 1
+        with pytest.raises(OSError):
+            os.fstat(duplicated[0])  # closed, not leaked
+    finally:
+        for fd in (out_r, out_w, err_r, err_w):
+            os.close(fd)
+
+
+@pytest.mark.parametrize("module", ["embedding_worker", "reranker_worker"])
+def test_sigterm_exit_flushes_the_reply_channel(monkeypatch, module) -> None:
+    import importlib
+    import os
+
+    worker = importlib.import_module(f"superlocalmemory.core.{module}")
+    flushed: list[str] = []
+
+    class _Channel:
+        def flush(self) -> None:
+            flushed.append("reply")
+
+    class _Left(Exception):
+        pass
+
+    def fake_exit(code):
+        raise _Left
+
+    monkeypatch.setattr(worker, "_PROTOCOL", _Channel())
+    monkeypatch.setattr(os, "_exit", fake_exit)
+    with pytest.raises(_Left):
+        worker._exit_now()
+    assert flushed == ["reply"]
