@@ -26,6 +26,21 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: The JSON text columns whose readers use :func:`load_json_column`, as
+#: ``(table, column)``. ``slm doctor`` counts binary values in exactly these.
+TOLERATED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("atomic_facts", "entities_json"),
+    ("atomic_facts", "canonical_entities_json"),
+    ("atomic_facts", "source_turn_ids_json"),
+    ("atomic_facts", "langevin_position"),
+    ("atomic_facts", "shared_with"),
+    ("memory_scenes", "fact_ids_json"),
+    ("memory_scenes", "entity_ids_json"),
+    ("entity_profiles", "fact_ids_json"),
+    ("memories", "metadata_json"),
+    ("memories", "shared_with"),
+)
+
 _REPORTED: set[str] = set()
 _LOCK = threading.Lock()
 
@@ -37,8 +52,8 @@ def _report(column: str, row: object) -> None:
         _REPORTED.add(column)
     logger.warning(
         "%s holds bytes that are not UTF-8 text (row %s); read as empty so saves keep "
-        "working. Find such rows with: SELECT rowid FROM <table> WHERE typeof(<column>)"
-        "='blob'", column, row if row is not None else "?",
+        "working. `slm doctor` counts such values per column", column,
+        row if row is not None else "?",
     )
 
 
@@ -55,4 +70,4 @@ def load_json_column(raw: Any, default: Any, *, column: str, row: object = None)
     return json.loads(raw)
 
 
-__all__ = ["load_json_column"]
+__all__ = ["TOLERATED_COLUMNS", "load_json_column"]
