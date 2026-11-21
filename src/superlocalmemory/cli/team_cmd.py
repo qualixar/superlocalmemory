@@ -20,7 +20,7 @@ UX-20 / UX-21: the dashboard pointed at a reset control that did not exist).
 from __future__ import annotations
 
 import sys
-from argparse import Namespace
+from argparse import SUPPRESS, Namespace
 from typing import Any, NoReturn
 
 from superlocalmemory.cli.daemon import DaemonRefused, daemon_request
@@ -36,24 +36,32 @@ def register_team_parser(sub: Any) -> None:
     p = sub.add_parser("team", help="Workspace login policy: status, require-login on/off")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     tsub = p.add_subparsers(dest="team_command", title="team subcommands")
-    tsub.add_parser("status", help="is login required, and how many users exist")
+    leaf_json = {"action": "store_true", "dest": "json", "default": SUPPRESS,
+                 "help": "machine-readable output (same as `slm team --json ...`)"}
+    st = tsub.add_parser("status", help="is login required, and how many users exist")
+    st.add_argument("--json", **leaf_json)
     pol = tsub.add_parser("policy", help="require login for this workspace, or stop requiring it")
+    pol.add_argument("--json", **leaf_json)
     pol.add_argument("--require-login", choices=["on", "off"], required=True,
                      help="on: every user signs in; off: the machine owner is the user")
     adm = tsub.add_parser("admin", help="make an account an administrator of a workspace")
     adm.add_argument("username")
     adm.add_argument("--profile", default=None, help="workspace (default: the active one)")
+    adm.add_argument("--json", **leaf_json)
     rst = tsub.add_parser("reset-password", help="set a new password for an account")
     rst.add_argument("username")
     rst.add_argument("--password-stdin", action="store_true",
                      help="read the new password from standard input (for scripts)")
+    rst.add_argument("--json", **{**leaf_json, "help": "machine-readable output; needs "
+                                                       "--password-stdin (JSON never prompts)"})
 
 
-def _fail(args: Namespace, command: str, message: str) -> NoReturn:
+def _fail(args: Namespace, command: str, message: str, code: str = "failed",
+          **fields: Any) -> NoReturn:
     if getattr(args, "json", False):
         from superlocalmemory.cli.json_output import json_print
 
-        json_print(command, error={"message": message})
+        json_print(command, error={"code": code, "message": message, **fields})
     else:
         print(message)
     sys.exit(1)
@@ -89,6 +97,10 @@ def _user_id(args: Namespace, command: str, username: str) -> str:
 def _new_password(args: Namespace, command: str) -> str:
     if getattr(args, "password_stdin", False):
         password = sys.stdin.readline().rstrip("\n")
+    elif getattr(args, "json", False):
+        _fail(args, command, "JSON never prompts: pass the new password on standard input "
+              "with --password-stdin.", code="input_required",
+              missing_flags=["--password-stdin"])
     else:
         import getpass
 

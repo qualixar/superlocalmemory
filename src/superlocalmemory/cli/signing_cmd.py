@@ -42,6 +42,9 @@ def register_signing_parsers(sub: Any) -> None:
                     help="Do not ask for the final yes (needed when no terminal is attached)")
     rs.add_argument("--profile", default="", help="Profile the decision is recorded under")
     rs.add_argument("--db", default=None, help="Store file (default: yours)")
+    rs.add_argument("--json", action="store_true",
+                    help="machine-readable output; without --yes the answer is "
+                         "confirmation_required (JSON never prompts)")
 
 
 def _status(args: Namespace) -> int:
@@ -94,6 +97,8 @@ def _resign(args: Namespace) -> int:
     from superlocalmemory.trust import signatures
     from superlocalmemory.trust import signing_key as sk
 
+    if getattr(args, "json", False):
+        return _resign_json(args)
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     if not interactive and not getattr(args, "yes", False):
         print("Nothing changed: without a terminal to ask at, pass --yes to sign again.",
@@ -136,6 +141,51 @@ def _resign(args: Namespace) -> int:
     finally:
         conn.close()
     print(f"Signed {done} memories again under the current key.")
+    return 0
+
+
+def _resign_json(args: Namespace) -> int:
+    """``slm signing resign --json``: the same steps; refusals are error envelopes."""
+    from superlocalmemory.cli import doctor_trust
+    from superlocalmemory.cli.doctor_truth import _db_path
+    from superlocalmemory.cli.json_mode import fail
+    from superlocalmemory.cli.json_output import json_print
+    from superlocalmemory.trust import signatures
+    from superlocalmemory.trust import signing_key as sk
+
+    command = "signing resign"
+    if _daemon_running():
+        fail(command, "daemon_running", "SLM is running. Stop it first "
+             "(`slm serve stop --json`), then run this again.", exit_code=2)
+    path = _db_path(args)
+    if not path.is_file():
+        fail(command, "no_store", f"No store at {path}", exit_code=2)
+    loaded = doctor_trust.read_key()
+    if loaded.signer is None:
+        fail(command, "no_signing_key", sk.words(loaded.status), exit_code=2)
+    conn = sqlite3.connect(str(path), timeout=30)
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        other = conn.execute("SELECT COUNT(*) FROM fact_signatures WHERE key_id != ?",
+                             (loaded.signer.key_id,)).fetchone()[0]
+        report = signatures.verify(conn, loaded.signer, sample=0)
+        removed = report.missing
+        record_bad = report.record in (signatures.RECORD_MISSING, signatures.RECORD_FORGED,
+                                       signatures.RECORD_OTHER_KEY)
+        counts = {"other_key": other, "lost_signature": removed, "record_bad": bool(record_bad)}
+        if not (other or removed or record_bad):
+            json_print(command, data={"signed": 0, "needed": False, **counts})
+            return 0
+        if not getattr(args, "yes", False):
+            fail(command, "confirmation_required", "Signing again blesses what is in the "
+                 "store now. Pass --yes to sign again.", flag="--yes", **counts)
+        with conn:
+            done = signatures.resign(conn, loaded.signer, only_other_key=True,
+                                     include_missing=True)
+            _record(conn, args, loaded.signer.key_id, done, other, removed)
+    finally:
+        conn.close()
+    json_print(command, data={"signed": done, "needed": True, **counts})
     return 0
 
 

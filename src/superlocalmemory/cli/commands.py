@@ -839,6 +839,11 @@ def dispatch(args: Namespace) -> None:
         "embedder": _cmd_embedder_dispatch,
     }
     handler = handlers.get(args.command)
+    if handler and getattr(args, "json", False):
+        # Wizards, servers and launchers have their own JSON form (json_commands).
+        from superlocalmemory.cli.json_commands import handler_for
+
+        handler = handler_for(args) or handler
     if handler:
         from superlocalmemory.cli.daemon import DaemonRefused
 

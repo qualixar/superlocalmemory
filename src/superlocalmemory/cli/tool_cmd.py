@@ -58,6 +58,10 @@ def add_tool_parser(sub: Any) -> None:
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--json", action="store_true", dest="json",
+                        help="JSON for list and describe; a call always prints JSON, so it "
+                             "changes nothing there. After a tool name, --json '{...}' "
+                             "passes the tool's arguments instead.")
     parser.add_argument("target", metavar="list|describe|TOOL",
                         help="list, describe, or the name of a tool to call")
     parser.add_argument("rest", nargs=argparse.REMAINDER, metavar="...",
@@ -304,6 +308,10 @@ def cmd_tool(args: argparse.Namespace) -> None:
     _quiet_logs()
     target = args.target
     rest = list(args.rest or [])
+    # `slm --json tool list` / `slm tool --json describe X`: list and describe print
+    # text unless asked; a call always prints JSON, so it needs nothing.
+    if getattr(args, "json", False) and target in ("list", "describe") and "--json" not in rest:
+        rest.append("--json")
     if target == "list":
         _cmd_list(rest)
     elif target == "describe":

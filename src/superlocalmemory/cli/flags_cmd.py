@@ -72,11 +72,18 @@ def cmd_flags(args: Namespace) -> int:
         _show(home, getattr(args, "json", False))
         return 0
     value = str(getattr(args, "value", "") or "").strip().lower()
+    as_json = bool(getattr(args, "json", False))
     if action == "kill":
-        if not _kill_through_daemon(value == "on"):
+        recorded = _kill_through_daemon(value == "on")
+        if not recorded:
             set_kill_switch(home, value == "on")
             print("(SuperLocalMemory is not running, so this change is not in the list of "
                   "decisions)", file=sys.stderr)
+        if as_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print("flags kill", data={"kill_switch": kill_switch_on(home, {}),
+                                           "recorded_as_decision": recorded})
+            return 0
         print(f"kill switch {'on' if kill_switch_on(home, {}) else 'off'}")
         if value == "on":
             from superlocalmemory.core.kill_switch import DOES_NOT_WORDS, DOES_WORDS
@@ -90,9 +97,18 @@ def cmd_flags(args: Namespace) -> int:
         return rollback_retirements(args)
     flag_id = getattr(args, "flag", "") or ""
     if flag_id not in FLAGS:
+        if as_json:
+            from superlocalmemory.cli.json_mode import fail
+            fail("flags set", "unknown_flag", f"Unknown flag {flag_id!r}.", exit_code=2,
+                 flags=list(FLAGS))
         print(f"unknown flag {flag_id!r}; one of: {', '.join(FLAGS)}")
         return 2
     write_flag(home, flag_id, FlagState(value))
+    if as_json:
+        from superlocalmemory.cli.json_output import json_print
+        state = FeatureFlags(home, environ={}).state(flag_id).value
+        json_print("flags set", data={"flag": flag_id, "state": state})
+        return 0
     print(f"{flag_id} = {FeatureFlags(home, environ={}).state(flag_id).value}")
     return 0
 
