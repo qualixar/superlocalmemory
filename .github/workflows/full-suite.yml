@@ -26,8 +26,11 @@ on:
         type: string
         default: "[0, 1, 2, 3, 4, 5]"
 
+# A new push to an rc/** branch replaces its running suite. A manual run replaces
+# only an earlier run with the same runner and shards: dispatching stuck shards on
+# Linux must never cancel the shards still running on macOS (it did on 21 Nov).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.runner || 'push' }}-${{ inputs.shards || 'all' }}
   cancel-in-progress: true
 
 jobs:

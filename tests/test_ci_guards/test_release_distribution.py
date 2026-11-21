@@ -381,3 +381,70 @@ def test_checklist_names_every_human_gated_channel() -> None:
     assert "NousResearch/hermes-agent" not in body
     assert body.count("- [ ]") >= 10
     assert "4.2.8" in body
+
+
+# --- 4.2.33 publish: the plugin-repo leg got 403 from api.github.com/meta -------------
+
+def _run_meta(tmp_path: Path, env_extra: dict[str, str]) -> tuple[list[str], str]:
+    """Run slm_github_meta with a fake curl that records its arguments and stdin."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "curl.log"
+    fake = bindir / "curl"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$@" > "{log}.args"\n'
+        f'cat > "{log}.stdin"\n'
+        "printf '{\"ssh_keys\": [\"ssh-ed25519 AAAA\"]}'\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    from tests._portable import GUARD_ENV
+
+    env = {**GUARD_ENV, "PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path), **env_extra}
+    result = subprocess.run(
+        ["bash", "-c", f'source "{RELEASE_DIR / "_lib.sh"}" && slm_github_meta'],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ssh_keys" in result.stdout
+    args = (tmp_path / "curl.log.args").read_text(encoding="utf-8").splitlines()
+    return args, (tmp_path / "curl.log.stdin").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_github_meta_is_fetched_with_the_token_on_stdin_never_in_argv(tmp_path: Path) -> None:
+    """Anonymous calls share a small per-IP limit on hosted runners; authenticate.
+
+    The token goes to curl as a header read from stdin, so it never appears in
+    the process list or in a traced command line.
+    """
+    args, stdin = _run_meta(tmp_path, {"GH_TOKEN": "tok-secret-123"})
+    assert "Authorization: Bearer tok-secret-123" in stdin
+    assert not any("tok-secret-123" in a for a in args)
+    assert "@-" in args
+    assert "https://api.github.com/meta" in args
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_github_meta_without_a_token_is_still_fetched(tmp_path: Path) -> None:
+    args, stdin = _run_meta(tmp_path, {})
+    assert stdin == "" and "@-" not in args
+    assert "https://api.github.com/meta" in args
+
+
+def test_deploy_key_setup_uses_the_authenticated_meta_fetch() -> None:
+    source = (RELEASE_DIR / "_lib.sh").read_text(encoding="utf-8")
+    body = source.split("slm_use_deploy_key() {", 1)[1].split("\n}", 1)[0]
+    assert "slm_github_meta" in body
+    assert "curl" not in body
+
+
+# --- full suite: a partial dispatch must not cancel a running full run ----------------
+
+def test_full_suite_runs_with_different_inputs_never_cancel_each_other() -> None:
+    """21 Nov: dispatching shards [4,5] on Linux cancelled shards 0-3 on macOS."""
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "full-suite.yml").read_text(encoding="utf-8"))
+    group = workflow["concurrency"]["group"]
+    assert "inputs.runner" in group and "inputs.shards" in group
