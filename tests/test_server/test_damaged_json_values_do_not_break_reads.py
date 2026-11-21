@@ -53,6 +53,8 @@ def damaged_store(engine_with_mock_deps):
         done = build_engine_ingestion_command(engine).materialize(receipt.operation_id)
         assert done.state is IngestionState.COMPLETE, done.last_error
     for table, column in TOLERATED_COLUMNS:
+        if table == "doc_pages":
+            continue  # lives in the media store, covered by tests/test_documents
         hit = engine._db.execute(f"UPDATE {table} SET {column} = ? RETURNING rowid", (NOT_TEXT,))
         assert hit, f"no {table} rows to damage for {column}"
     app = create_app()

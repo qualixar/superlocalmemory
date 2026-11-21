@@ -8,17 +8,20 @@ A writer that binds ``bytes`` to a TEXT column leaves a BLOB there. When those
 bytes were not UTF-8 text, every save whose enrichment read the row failed with
 "'utf-8' codec can't decode ..." and was dead-lettered. The readers now treat
 such a value as empty (``storage/json_columns.py``), so saves keep working, and
-a later save that writes the value rebuilds it from its source and keeps the
-original bytes. A BLOB that holds UTF-8 text reads normally and is only
-mentioned. This row says where the values are, per ``table.column``, so an
-agent or a person can look. It opens the store read-only and never repairs
-anything.
+a later save that writes the value either rebuilds it from its source and keeps
+the original bytes, or skips the row, per column (the fix text says which). A
+BLOB that holds UTF-8 text reads normally and is only mentioned. This row says
+where the values are, per ``table.column``, so an agent or a person can look. It opens the store read-only and never
+repairs anything.
 """
 
 from __future__ import annotations
 
 import shlex
 import sqlite3
+import subprocess
+import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from superlocalmemory.storage.json_columns import TOLERATED_COLUMNS
@@ -46,12 +49,24 @@ def binary_json_value_kinds(
     One scan per table, reading only the rows that have a BLOB in one of its
     columns. A table or column the store does not have is skipped.
     ``include_zero`` keeps the columns with none (to show what was checked).
+    The media store (``media.db``) is scanned too when it sits next to the database.
     """
     by_table: dict[str, list[str]] = {}
     for table, column in TOLERATED_COLUMNS:
         by_table.setdefault(table, []).append(column)
+    db_path = Path(db_path)
+    # ``doc_pages`` lives in the media store (media.db, next to the memory database).
+    media = db_path.parent / "media.db"
     kinds: dict[str, tuple[int, int]] = {}
-    conn = _readonly(Path(db_path))
+    for path in (db_path, *([media] if media.exists() and media != db_path else [])):
+        kinds.update(_scan(path, by_table, include_zero))
+    return kinds
+
+
+def _scan(db_path: Path, by_table: dict[str, list[str]],
+          include_zero: bool) -> dict[str, tuple[int, int]]:
+    kinds: dict[str, tuple[int, int]] = {}
+    conn = _readonly(db_path)
     try:
         for table, wanted in by_table.items():
             present = {str(r[1]) for r in conn.execute(f'PRAGMA table_info("{table}")')}
@@ -80,10 +95,51 @@ def binary_json_values(db_path: str | Path, *, include_zero: bool = False) -> di
             in binary_json_value_kinds(db_path, include_zero=include_zero).items()}
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def _quote_path(path: str) -> str:
+    """A path as one shell word: ``shlex.quote`` on POSIX, double quotes on Windows."""
+    return subprocess.list2cmdline([path]) if _is_windows() else shlex.quote(path)
+
+
+def _database_of(db_path: Path, table: str) -> Path:
+    """The file a tolerated table lives in: ``doc_pages`` is in ``media.db``, the rest in the memory database."""
+    return db_path.parent / "media.db" if table == "doc_pages" else db_path
+
+
 def _show_query(db_path: Path, key: str) -> str:
     table, column = key.split(".", 1)
-    return (f"sqlite3 -readonly {shlex.quote(str(db_path))} \"SELECT rowid FROM {table} "
-            f"WHERE typeof({column})='blob'\"")
+    return (f"sqlite3 -readonly {_quote_path(str(_database_of(db_path, table)))} "
+            f"\"SELECT rowid FROM {table} WHERE typeof({column})='blob'\"")
+
+
+#: What a writer does with a value that is not text, per column. "rebuilt" means the
+#: new value is made from its source and the original bytes are kept; "left" means
+#: the writer skips that row and the bytes stay exactly as they are.
+_REBUILT_LEDGER = "rebuilt from the fact when it is next written; the original bytes are kept in the change ledger"
+_FATE: dict[str, str] = {
+    "atomic_facts.entities_json": _REBUILT_LEDGER,
+    "atomic_facts.canonical_entities_json": _REBUILT_LEDGER,
+    "atomic_facts.source_turn_ids_json": _REBUILT_LEDGER,
+    "atomic_facts.langevin_position": _REBUILT_LEDGER,
+    "entity_profiles.fact_ids_json":
+        "rebuilt from the facts that carry the entity when the profile is next written; "
+        "the bytes are kept in a version row",
+    "memory_scenes.entity_ids_json":
+        "rebuilt from the scene's facts when the scene is next written; the bytes are kept in a version row",
+    "memory_scenes.fact_ids_json":
+        "the scene is left as it is and a new fact starts a scene of its own",
+    "memories.metadata_json": "left as it is: writers skip that row",
+    "memories.shared_with": "left as it is: writers skip that row",
+    "atomic_facts.shared_with": "left as it is: writers skip that row",
+    "doc_pages.fact_ids_json": "read as no facts and left as it is",
+}
+
+
+def _fates(keys: Sequence[str]) -> str:
+    return "; ".join(f"{key}: {_FATE.get(key, 'read as empty and left as it is')}" for key in keys)
 
 
 def _ranked(counts: dict[str, int]) -> str:
@@ -112,12 +168,11 @@ def binary_json_values_finding(db_path: str | Path) -> tuple[str, str, str]:
               f"{'reads' if total == 1 else 'read'} as empty ({_ranked(unreadable)})")
     if n_read:
         detail += f"; {n_read} more {holds} UTF-8 JSON and {reads} normally ({_ranked(readable)})"
-    first = sorted(unreadable.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+    ordered = [k for k, _n in sorted(unreadable.items(), key=lambda kv: (-kv[1], kv[0]))]
     fix = ("These rows are read safely: a value that is not text reads as empty, so saves keep "
-           "working. This check changes nothing. The next save that writes one of these values "
-           "rebuilds it from its source and keeps the original bytes (in a version row for "
-           "entity profiles and scenes, in the change ledger for fact columns). To see them: "
-           + _show_query(db_path, first)
+           "working. This check changes nothing. What a writer does with each column: "
+           + _fates(ordered)
+           + ". To see them: " + _show_query(db_path, ordered[0])
            + " (the same query with the other table and column names shows the rest)")
     return ("WARN", detail, fix)
 

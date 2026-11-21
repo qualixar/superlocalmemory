@@ -10,6 +10,8 @@ import json
 import logging
 from typing import Any, Iterator, Sequence
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 logger = logging.getLogger(__name__)
 
 CHUNK = 400
@@ -32,7 +34,8 @@ def fact_ids_by_document(store: Any, document_ids: Sequence[str]) -> dict[str, l
         rows = store._read().execute(
             f"SELECT document_id, fact_ids_json FROM doc_pages WHERE document_id IN ({marks(len(chunk))})", chunk)
         for doc_id, text in rows.fetchall():
-            out[doc_id].extend(json.loads(text or "[]"))
+            out[doc_id].extend(load_json_column(
+                text, [], column="doc_pages.fact_ids_json", row=doc_id))
     return out
 
 

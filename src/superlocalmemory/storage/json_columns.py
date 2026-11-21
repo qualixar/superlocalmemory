@@ -43,6 +43,7 @@ TOLERATED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("entity_profiles", "fact_ids_json"),
     ("memories", "metadata_json"),
     ("memories", "shared_with"),
+    ("doc_pages", "fact_ids_json"),
 )
 
 _REPORTED: set[str] = set()

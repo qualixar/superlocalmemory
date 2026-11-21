@@ -82,7 +82,9 @@ def test_binary_values_are_counted_per_column_and_warned(tmp_path) -> None:
     # The hint says what is true: nothing is changed by the check, a later save
     # that writes the value rebuilds it, and the bytes are kept.
     assert "nothing is changed" not in fix
-    assert "rebuilds" in fix and "keeps the original bytes" in fix
+    assert "atomic_facts.entities_json: rebuilt from the fact" in fix
+    assert "memory_scenes.entity_ids_json: rebuilt from the scene's facts" in fix
+    assert "change ledger" in fix and "version row" in fix
     assert "read as empty" in detail
 
 
@@ -91,8 +93,9 @@ def test_every_tolerated_column_is_checked(tmp_path) -> None:
     from superlocalmemory.storage.json_columns import TOLERATED_COLUMNS
 
     db = _store(tmp_path)
+    # doc_pages lives in media.db, which this store does not have.
     assert set(binary_json_values(db, include_zero=True)) == {
-        f"{t}.{c}" for t, c in TOLERATED_COLUMNS}
+        f"{t}.{c}" for t, c in TOLERATED_COLUMNS if t != "doc_pages"}
 
 
 def test_a_store_without_some_tables_is_not_a_finding(tmp_path) -> None:
@@ -184,7 +187,7 @@ def test_the_check_scans_each_table_once(tmp_path, monkeypatch) -> None:
     dsv.binary_json_values(db, include_zero=True)
 
     scans = [q for q in seen if "typeof" in q]
-    assert len(scans) == len({t for t, _c in TOLERATED_COLUMNS})  # one per table, not per column
+    assert len(scans) == len({t for t, _c in TOLERATED_COLUMNS if t != "doc_pages"})  # one per table, not per column
 
 
 def test_a_database_path_with_a_quote_gives_a_runnable_hint(tmp_path) -> None:
@@ -202,3 +205,52 @@ def test_a_database_path_with_a_quote_gives_a_runnable_hint(tmp_path) -> None:
     argv = shlex.split(command)
     assert argv[:2] == ["sqlite3", "-readonly"] and argv[2] == str(db)
     assert argv[3] == "SELECT rowid FROM atomic_facts WHERE typeof(entities_json)='blob'"
+
+
+def test_the_fix_text_says_per_column_what_a_writer_does(tmp_path) -> None:
+    from superlocalmemory.cli.doctor_stored_values import _FATE, binary_json_values_finding
+    from superlocalmemory.storage.json_columns import TOLERATED_COLUMNS
+
+    assert {f"{t}.{c}" for t, c in TOLERATED_COLUMNS} <= set(_FATE)  # no column goes unsaid
+    db = _store(tmp_path)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("INSERT INTO memories (memory_id, profile_id, content, metadata_json) "
+                     "VALUES ('m1','default','x',?)", (NOT_TEXT,))
+    status, _detail, fix = binary_json_values_finding(db)
+    assert status == "WARN"
+    assert "memories.metadata_json: left as it is: writers skip that row" in fix
+    assert "rebuilt" not in fix and "ledger" not in fix  # it does not claim a rebuild it never does
+
+
+def test_a_damaged_doc_page_list_is_counted_from_the_media_store(tmp_path) -> None:
+    from superlocalmemory.cli.doctor_stored_values import binary_json_values_finding
+
+    db = _store(tmp_path)
+    with sqlite3.connect(str(tmp_path / "media.db")) as conn:
+        conn.execute("CREATE TABLE doc_pages (document_id TEXT, page_no INTEGER, fact_ids_json TEXT)")
+        conn.execute("INSERT INTO doc_pages VALUES ('d1', 1, ?)", (NOT_TEXT,))
+    status, detail, fix = binary_json_values_finding(db)
+    assert status == "WARN" and "doc_pages.fact_ids_json: 1" in detail
+    assert "media.db" in fix  # the query is run against the file the table is in
+
+
+def test_the_hint_is_quoted_for_the_platform(tmp_path, monkeypatch) -> None:
+    import shlex
+    import subprocess
+
+    from superlocalmemory.cli import doctor_stored_values as dsv
+
+    folder = tmp_path / "it's here"
+    folder.mkdir()
+    db = _store(folder)
+    _damage(db, {"atomic_facts": 1})
+    sql = "SELECT rowid FROM atomic_facts WHERE typeof(entities_json)='blob'"
+
+    monkeypatch.setattr(dsv, "_is_windows", lambda: False)
+    posix = dsv._show_query(db, "atomic_facts.entities_json")
+    assert shlex.split(posix) == ["sqlite3", "-readonly", str(db), sql]
+
+    monkeypatch.setattr(dsv, "_is_windows", lambda: True)
+    windows = dsv._show_query(db, "atomic_facts.entities_json")
+    assert windows == f'sqlite3 -readonly {subprocess.list2cmdline([str(db)])} "{sql}"'
+    assert f'"{db}"' in windows  # a path with a space is in double quotes, not shlex single quotes
