@@ -2391,7 +2391,6 @@ class DatabaseManager:
         The profile it replaces is kept as a version first (WS-6).
         """
         from superlocalmemory.compiler import versions
-
         from superlocalmemory.storage.damaged_values import damaged_ids
 
         with versions.atomic(self):
@@ -2439,7 +2438,6 @@ class DatabaseManager:
     def store_scene(self, scene: MemoryScene) -> str:
         """Persist a memory scene. Returns scene_id (the scene it replaces is kept as a version)."""
         from superlocalmemory.compiler import versions
-
         from superlocalmemory.storage.damaged_values import damaged_ids
 
         with versions.atomic(self):

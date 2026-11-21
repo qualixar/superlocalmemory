@@ -390,3 +390,37 @@ def test_erasing_a_fact_removes_the_scene_version_that_kept_a_damaged_list(
 
     alive = {r["version_id"] for r in _rows(engine, "SELECT version_id FROM artifact_versions")}
     assert kept[0] not in alive
+
+
+def test_keep_bytes_fails_closed_when_the_row_cannot_be_read() -> None:
+    from superlocalmemory.storage.damaged_values import keep_bytes
+
+    class Broken:
+        def execute(self, *_a, **_k):
+            raise sqlite3.OperationalError("database is locked")
+
+    cols = ("langevin_position", "entities_json")
+    assert keep_bytes(Broken(), "atomic_facts", "fact_id", "f1", "default", cols) == set(cols)
+
+
+@pytest.mark.parametrize("column", ["langevin_position", "source_turn_ids_json",
+                                    "entities_json", "canonical_entities_json"])
+def test_undoing_the_damaged_values_run_restores_the_bytes(engine_with_mock_deps, column) -> None:
+    from superlocalmemory.storage import enrichment_ledger as ledger
+    from superlocalmemory.storage.damaged_values import RUN_ID, keep_bytes
+
+    engine = engine_with_mock_deps
+    _seed(engine)
+    fact_id = _rows(engine, "SELECT fact_id FROM atomic_facts")[0]["fact_id"]
+    engine._db.execute(f"UPDATE atomic_facts SET {column} = ? WHERE fact_id = ?",
+                       (NOT_TEXT, fact_id))
+    assert keep_bytes(engine._db, "atomic_facts", "fact_id", fact_id, "default", (column,)) == set()
+    engine._db.execute(f"UPDATE atomic_facts SET {column} = ? WHERE fact_id = ?",
+                       ("[]", fact_id))  # the writer rebuilt it
+
+    outcome = ledger.undo_changes(engine._db, RUN_ID)  # used to raise 'not an enrichable field'
+
+    assert outcome == {"restored": 1, "conflicts": 0}
+    back = _rows(engine, f"SELECT {column} AS v FROM atomic_facts WHERE fact_id = ?",
+                 (fact_id,))[0]["v"]
+    assert back == NOT_TEXT

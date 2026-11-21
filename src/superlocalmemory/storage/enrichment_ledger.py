@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 
 from superlocalmemory.core.description_metadata import VERSION
 from superlocalmemory.storage.json_columns import is_damaged, load_json_column
+
+logger = logging.getLogger(__name__)
 
 FIELDS = {
     'atomic_facts': frozenset({'observation_date', 'referenced_date', 'interval_start',
@@ -92,6 +95,29 @@ def add(db, run_id, profile_id, table, target_id, field, value, *, replace_guess
     return True
 
 
+def _restore_damaged(db, row, table, target_id, field, before):
+    """Put back the bytes ``storage/damaged_values.keep_bytes`` kept (the run ``damaged-values``).
+
+    These rows record no "after" (the rebuilt value was written by the writer, not
+    by this ledger), so there is nothing to compare: the original bytes are restored
+    as they were. Only the tolerated JSON columns are touched; a row for anything
+    else is skipped with a warning.
+    """
+    from superlocalmemory.storage.json_columns import TOLERATED_COLUMNS
+
+    if (table, field) not in TOLERATED_COLUMNS or table not in IDS or not isinstance(before, bytes):
+        logger.warning('damaged-values undo skipped %s.%s of %s: not a kept JSON-column value',
+                       table, field, target_id)
+        return False
+    found = db.execute(f'SELECT 1 FROM {table} WHERE {IDS[table]}=? AND profile_id=?',
+                       (target_id, row['profile_id']))
+    if not found:
+        return False  # an erased row must stay erased
+    db.execute(f'UPDATE {table} SET {field}=? WHERE {IDS[table]}=? AND profile_id=?',
+               (before, target_id, row['profile_id']))
+    return True
+
+
 def undo_changes(db, run_id):
     restored = conflicts = 0
     changed_facts = set()
@@ -101,6 +127,10 @@ def undo_changes(db, run_id):
         row = dict(raw)
         table, target_id, field = row['target_table'], row['target_id'], row['field']
         before, after = loads(row['before_json']), loads(row['after_json'])
+        if row.get('source') == 'damaged_value':
+            if _restore_damaged(db, row, table, target_id, field, before):
+                restored += 1  # entity memberships are left alone: the bytes read as no entities
+            continue
         if field == '__row__' and table == 'fact_temporal_validity':
             current = db.execute('SELECT * FROM fact_temporal_validity WHERE fact_id=? '
                                  'AND profile_id=?', (target_id, row['profile_id']))

@@ -139,7 +139,6 @@ class ObservationBuilder:
     def _save_profile(self, profile: EntityProfile) -> None:
         """Upsert entity profile to DB (the profile it replaces is kept as a version, WS-6)."""
         from superlocalmemory.compiler import versions
-
         from superlocalmemory.storage.damaged_values import damaged_ids
 
         with versions.atomic(self._db):

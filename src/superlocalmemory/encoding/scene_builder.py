@@ -406,7 +406,6 @@ class SceneBuilder:
     def _save_scene(self, scene: MemoryScene) -> None:
         """Upsert scene to DB (the scene it replaces is kept as a version, WS-6)."""
         from superlocalmemory.compiler import versions
-
         from superlocalmemory.storage.damaged_values import damaged_ids
 
         with versions.atomic(self._db):

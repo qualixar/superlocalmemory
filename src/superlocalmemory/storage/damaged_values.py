@@ -49,7 +49,8 @@ def keep_bytes(db: Any, table: str, id_column: str, target_id: str, profile_id: 
 
     Columns that are not damaged are not looked at. An empty result means the
     writer may replace every damaged column. A column in the result still holds
-    its bytes and must be left as it is.
+    its bytes and must be left as it is. When the row cannot be read at all, every
+    wanted column is returned (nothing is known to be safe to replace).
     """
     unkept: set[str] = set()
     wanted = [c for c in columns]
@@ -61,8 +62,9 @@ def keep_bytes(db: Any, table: str, id_column: str, target_id: str, profile_id: 
             + f' FROM "{table}" WHERE "{id_column}" = ? AND profile_id = ?',
             (target_id, profile_id))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("damaged-value read of %s skipped: %s", table, exc)
-        return unkept
+        logger.warning("damaged-value read of %s failed (%s); its columns are left as they are",
+                       table, exc)
+        return set(wanted)  # cannot tell what is damaged: fail closed, replace nothing
     if not rows:
         return unkept
     row = dict(rows[0])
