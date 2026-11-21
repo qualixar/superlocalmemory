@@ -4,7 +4,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { block, withFragment, START, END } from '../sync-skill-fallback.mjs';
+import { block, demote, withFragment, START, END } from '../sync-skill-fallback.mjs';
 
 const FOOTER = '\n---\n\n*SuperLocalMemory v9.9.9 · Qualixar · AGPL-3.0-or-later*\n';
 
@@ -25,6 +25,13 @@ describe('sync-skill-fallback', () => {
     assert.ok(!twice.includes('old words'));
     assert.equal(withFragment(twice, 'new words'), twice);
     assert.equal(twice.split(START).length, 2);
+  });
+
+  test('goes inside the SuperLocalMemory section of a rules document', () => {
+    const rules = '<!-- BEGIN SuperLocalMemory v9 -->\n### Recall\nx\n\n<!-- END SuperLocalMemory v9 -->\n\nfooter\n';
+    const out = withFragment(rules, demote('## Shell\nuse it'));
+    assert.ok(out.indexOf('### Shell') < out.indexOf('<!-- END SuperLocalMemory'));
+    assert.ok(out.indexOf('### Shell') > out.indexOf('### Recall'));
   });
 
   test('refuses an unterminated block', () => {

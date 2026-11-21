@@ -8,6 +8,7 @@
 - Packages: `npm install -g superlocalmemory` or `pipx install superlocalmemory` (Python 3.12+).
 - Then: `slm init --auto`, `slm serve start`, `slm warmup`, `slm connect <host>` (Claude Code: `claude plugin install superlocalmemory@qualixar`).
 - MCP: stdio `slm mcp`, or HTTP `http://127.0.0.1:8765/mcp/`. Call `session_init` at session start; `remember` and `recall` while working; `expand` to see more of one result.
+- No MCP (blocked by policy, or a bot, script or agent framework that only runs commands): every MCP tool runs as `slm tool <name> --json '{...}'` with the same arguments and checks (`slm tool list`, `slm tool describe <name>`), and every `slm` command answers in one line of JSON with `--json`, `slm --json <command>` or `SLM_JSON=1` (exit 0 success, 1 failed, 2 could not run). `slm help --json` lists every command.
 
 ## Docs
 

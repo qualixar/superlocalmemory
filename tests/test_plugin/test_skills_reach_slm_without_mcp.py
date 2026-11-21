@@ -74,3 +74,16 @@ def test_every_distribution_ships_the_fragment(tree, pattern):
                for f in files if "When SLM's MCP tools are not in your tool list" not in
                f.read_text(encoding="utf-8")]
     assert missing == [], f"{tree} ships skills without the shell route: {missing}"
+
+
+RULE_DOCS = (
+    "plugin-src/rules/CLAUDE.md.fragment", "plugin-src/rules/AGENTS.md", "codex-plugin/AGENTS.md",
+    "copilot-plugin/.github/copilot-instructions.md",
+)
+
+
+@pytest.mark.parametrize("doc", RULE_DOCS)
+def test_rules_documents_teach_the_shell_route(doc):
+    text = (REPO / doc).read_text(encoding="utf-8")
+    assert "### When SLM's MCP tools are not in your tool list" in text, doc
+    assert "slm tool <name> --json" in text and "SLM_JSON=1" in text, doc
