@@ -331,6 +331,10 @@ class WorkerPool:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                # UTF-8 JSON lines; a stray byte (a library printing on the
+                # worker's stdout) is a malformed line, never a decode error.
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=env,
                 **popen_platform_kwargs(),
