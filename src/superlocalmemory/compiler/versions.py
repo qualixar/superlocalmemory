@@ -175,9 +175,25 @@ def _columns(conn: Any, table: str) -> list[str]:
     return [str(r["name"]) for r in _select(conn, "SELECT name FROM pragma_table_info(?)", (table,))]
 
 
+BLOB_KEY = "__blob_hex__"
+
+
 def _record(row: Mapping[str, Any]) -> dict[str, Any]:
-    """The row as stored: BLOBs left out (derived from the text, rebuilt)."""
-    return {k: v for k, v in row.items() if not isinstance(v, (bytes, bytearray, memoryview))}
+    """The row as stored. A BLOB is kept as ``{"__blob_hex__": "<hex>"}``.
+
+    A JSON text column can hold bytes that are not text (a value a writer bound
+    as bytes). The version row is where those bytes stay recoverable after the
+    live row is rebuilt; ``write_row`` turns the hex back into the same bytes.
+    """
+    return {k: ({BLOB_KEY: bytes(v).hex()} if isinstance(v, (bytes, bytearray, memoryview)) else v)
+            for k, v in row.items()}
+
+
+def _unrecord(value: Any) -> Any:
+    """The inverse of :func:`_record` for one value."""
+    if isinstance(value, dict) and set(value) == {BLOB_KEY} and isinstance(value[BLOB_KEY], str):
+        return bytes.fromhex(value[BLOB_KEY])
+    return value
 
 
 def content_hash(spec: ArtifactSpec, row: Mapping[str, Any]) -> str:
@@ -301,7 +317,7 @@ def get_version(conn: Any, profile_id: str, version_id: str) -> dict | None:
 def write_row(conn: Any, spec: ArtifactSpec, row: Mapping[str, Any]) -> None:
     """Write a recorded row back: update it by its key, or insert it when it is gone."""
     columns = set(_columns(conn, spec.table))
-    data = {k: v for k, v in row.items() if k in columns}
+    data = {k: _unrecord(v) for k, v in row.items() if k in columns}
     keys = {c: data[c] for c in spec.key_columns if c in data}
     if len(keys) != len(spec.key_columns):
         raise ValueError("the recorded row lacks its key columns")

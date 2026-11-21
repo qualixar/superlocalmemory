@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 from superlocalmemory.storage.embedding_codec import decode_embedding
 from superlocalmemory.storage.erasure_derived import THEME_CHARS
-from superlocalmemory.storage.json_columns import load_json_column
+from superlocalmemory.storage.json_columns import load_json_column, load_json_column_checked
 from superlocalmemory.storage.models import AtomicFact, MemoryScene
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,8 @@ class SceneBuilder:
         )
         for row in rows:
             d = dict(row)
-            fids = json.loads(d.get("fact_ids_json", "[]"))
+            fids = load_json_column(d.get("fact_ids_json"), [],
+                                    column="memory_scenes.fact_ids_json", row=d.get("scene_id"))
             if fact_id in fids:
                 return self._row_to_scene(d)
         return None
@@ -194,9 +195,23 @@ class SceneBuilder:
     def _add_to_scene(
         self, scene: MemoryScene, fact: AtomicFact, profile_id: str
     ) -> MemoryScene:
-        """Add a fact to an existing scene."""
+        """Add a fact to an existing scene.
+
+        A stored list that holds bytes which are not text reads as empty. Writing
+        "empty plus the new fact" over it would drop what the scene held, so:
+        a damaged entity list is rebuilt from the scene's facts, and a scene whose
+        fact list is damaged is left untouched (the fact starts a scene of its own).
+        """
+        fact_ids_damaged, entity_ids_damaged = self._damaged_lists(scene.scene_id, profile_id)
+        if fact_ids_damaged:
+            return self._create_scene(fact, profile_id)
+        entity_ids = list(scene.entity_ids)
+        if entity_ids_damaged:
+            entity_ids = []
+            for member in self._db.get_facts_by_ids(list(scene.fact_ids), profile_id):
+                entity_ids.extend(e for e in member.canonical_entities if e not in entity_ids)
         new_fact_ids = [*scene.fact_ids, fact.fact_id]
-        new_entity_ids = list(set(scene.entity_ids) | set(fact.canonical_entities))
+        new_entity_ids = list(set(entity_ids) | set(fact.canonical_entities))
         updated = MemoryScene(
             scene_id=scene.scene_id,
             profile_id=profile_id,
@@ -208,6 +223,19 @@ class SceneBuilder:
         )
         self._save_scene(updated)
         return updated
+
+    def _damaged_lists(self, scene_id: str, profile_id: str) -> tuple[bool, bool]:
+        """Whether the stored ``(fact_ids_json, entity_ids_json)`` of a scene are bytes, not text."""
+        rows = self._db.execute(
+            "SELECT fact_ids_json, entity_ids_json FROM memory_scenes "
+            "WHERE scene_id = ? AND profile_id = ?", (scene_id, profile_id))
+        if not rows:
+            return False, False
+        row = dict(rows[0])
+        return (load_json_column_checked(row["fact_ids_json"], [], column="memory_scenes.fact_ids_json",
+                                         row=scene_id)[1],
+                load_json_column_checked(row["entity_ids_json"], [], column="memory_scenes.entity_ids_json",
+                                         row=scene_id)[1])
 
     def _get_scenes(self, profile_id: str) -> list[MemoryScene]:
         """Load all scenes from DB."""

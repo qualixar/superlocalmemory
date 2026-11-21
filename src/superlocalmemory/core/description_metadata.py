@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 
 from superlocalmemory.core.enriched_fact import temporal_fields
@@ -39,7 +38,11 @@ def parent_labels(db, memory: dict) -> dict:
             'AND memory_id!=? AND scope=? AND shared_with IS ? LIMIT 20',
             (memory['profile_id'], memory['session_id'], memory['memory_id'],
              memory.get('scope', 'personal'), memory.get('shared_with')))
-        values = [json.loads(r['metadata_json'] or '{}') for r in siblings]
+        from superlocalmemory.storage.json_columns import load_json_column
+
+        # A sibling whose metadata is bytes, not text, offers no label.
+        values = [load_json_column(r['metadata_json'], {}, column='memories.metadata_json')
+                  for r in siblings]
         for key, found in (('tags', tags), ('project', project)):
             candidates = [v[key] for v in values if v.get(key)]
             if not found and len(candidates) >= 2 and all(v == candidates[0] for v in candidates):

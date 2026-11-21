@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from superlocalmemory.storage.json_columns import load_json_column
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 
 def merge_metadata(old: dict, new: dict, dates=()) -> dict:
@@ -56,6 +56,11 @@ def reuse_source(db, request, metadata: dict, fact) -> str | None:
     )
     for row in candidates:
         stored = dict(row)
+        # A source row whose metadata or audience is bytes, not text, cannot be
+        # compared and must not be merged into (the merge would write over its
+        # bytes): it is not a match, and the new observation gets its own row.
+        if is_damaged(stored.get("metadata_json")) or is_damaged(stored.get("shared_with")):
+            continue
         old = json.loads(stored.get("metadata_json") or "{}")
         if _picture_identity(old) != _picture_identity(metadata):
             continue

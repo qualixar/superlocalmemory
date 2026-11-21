@@ -327,8 +327,20 @@ def run_maintenance(
     if config.math.langevin_persist_positions:
         try:
             backfilled = 0
+            # A position stored as bytes that are not text reads as None. It is
+            # a derived value, so it is re-seeded like a missing one, but the
+            # bytes are kept in the change ledger first; if they cannot be
+            # kept the fact is left as it is.
+            from superlocalmemory.storage.damaged_values import damaged_ids, keep_bytes
+
+            damaged_positions = damaged_ids(db, "atomic_facts", "fact_id", profile_id,
+                                            "langevin_position")
             for f in facts:
                 if f.langevin_position is not None:
+                    continue
+                if f.fact_id in damaged_positions and keep_bytes(
+                        db, "atomic_facts", "fact_id", f.fact_id, profile_id,
+                        ("langevin_position",)):
                     continue
                 age_days = _age_days(f.created_at)
                 # The seed is now a measurement of this fact's retention, not

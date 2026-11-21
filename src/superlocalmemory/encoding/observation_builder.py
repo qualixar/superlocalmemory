@@ -18,7 +18,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from superlocalmemory.storage.json_columns import load_json_column
+from superlocalmemory.storage.json_columns import load_json_column_checked
 from superlocalmemory.storage.models import AtomicFact, EntityProfile
 
 logger = logging.getLogger(__name__)
@@ -47,10 +47,16 @@ class ObservationBuilder:
 
         Appends fact to profile's fact list and regenerates summary.
         """
-        existing = self._get_profile(entity_id, profile_id)
+        existing, damaged = self._load_profile(entity_id, profile_id)
 
         if existing is not None:
             fact_ids = existing.fact_ids
+            if damaged:
+                # The stored list holds bytes that are not text. An empty list
+                # plus the new fact would replace every earlier fact: rebuild
+                # the list from the facts that carry the entity, as
+                # build_all_profiles does. The bytes stay in the version row.
+                fact_ids = [f.fact_id for f in self._db.get_facts_by_entity(entity_id, profile_id)]
             if new_fact.fact_id not in fact_ids:
                 fact_ids = [*fact_ids, new_fact.fact_id]
             summary = self._build_summary(entity_id, fact_ids, profile_id)
@@ -107,23 +113,28 @@ class ObservationBuilder:
 
     def _get_profile(self, entity_id: str, profile_id: str) -> EntityProfile | None:
         """Load entity profile from DB."""
+        return self._load_profile(entity_id, profile_id)[0]
+
+    def _load_profile(self, entity_id: str, profile_id: str) -> tuple[EntityProfile | None, bool]:
+        """The stored profile and whether its fact list was damaged (bytes, not text)."""
         rows = self._db.execute(
             "SELECT * FROM entity_profiles WHERE entity_id = ? AND profile_id = ?",
             (entity_id, profile_id),
         )
         if not rows:
-            return None
+            return None, False
         d = dict(rows[0])
+        fact_ids, damaged = load_json_column_checked(
+            d.get("fact_ids_json"), [], column="entity_profiles.fact_ids_json",
+            row=d["profile_entry_id"])
         return EntityProfile(
             profile_entry_id=d["profile_entry_id"],
             entity_id=d["entity_id"],
             profile_id=d["profile_id"],
             knowledge_summary=d.get("knowledge_summary", ""),
-            fact_ids=load_json_column(d.get("fact_ids_json"), [],
-                                      column="entity_profiles.fact_ids_json",
-                                      row=d["profile_entry_id"]),
+            fact_ids=fact_ids,
             last_updated=d.get("last_updated", ""),
-        )
+        ), damaged
 
     def _save_profile(self, profile: EntityProfile) -> None:
         """Upsert entity profile to DB (the profile it replaces is kept as a version, WS-6)."""

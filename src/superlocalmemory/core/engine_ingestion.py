@@ -386,10 +386,17 @@ def build_immediate_admission_handler(
             import json
             parent = dict(parent_rows[0])
             labels = parent_labels(db, parent)
-            existing_metadata = json.loads(parent['metadata_json'] or '{}')
+            from superlocalmemory.storage.json_columns import is_damaged, load_json_column
+
+            # Metadata that is bytes, not text, is never merged into: the
+            # labels would be written over it and its bytes lost.
+            damaged_metadata = is_damaged(parent['metadata_json'])
+            existing_metadata = load_json_column(parent['metadata_json'], {},
+                                                 column='memories.metadata_json',
+                                                 row=fact.memory_id)
             additions = {key: value for key, value in labels.items()
                          if not existing_metadata.get(key)}
-            if additions:
+            if additions and not damaged_metadata:
                 db.execute('UPDATE memories SET metadata_json=? WHERE memory_id=? AND profile_id=?',
                            (json.dumps({**existing_metadata, **additions}),
                             fact.memory_id, request.profile_id))

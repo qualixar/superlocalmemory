@@ -8,6 +8,7 @@ import base64
 import json
 
 from superlocalmemory.core.description_metadata import VERSION
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 FIELDS = {
     'atomic_facts': frozenset({'observation_date', 'referenced_date', 'interval_start',
@@ -36,7 +37,10 @@ def read(db, table, target_id, profile_id, field):
         return None, False
     row = dict(rows[0])
     if table == 'memories':
-        return json.loads(row['metadata_json'] or '{}').get(field), True
+        if is_damaged(row['metadata_json']):
+            return None, False  # bytes that are not text: never merged into or written over
+        return load_json_column(row['metadata_json'], {}, column='memories.metadata_json',
+                                row=target_id).get(field), True
     if field not in row:
         return None, False  # an older schema without this column: nothing to add
     return row[field], True
@@ -46,7 +50,10 @@ def write(db, table, target_id, profile_id, field, value):
     if table == 'memories':
         rows = db.execute('SELECT metadata_json FROM memories WHERE memory_id=? AND profile_id=?',
                           (target_id, profile_id))
-        metadata = json.loads(rows[0]['metadata_json'] or '{}')
+        if is_damaged(rows[0]['metadata_json']):
+            return  # bytes that are not text: left as they are
+        metadata = load_json_column(rows[0]['metadata_json'], {}, column='memories.metadata_json',
+                                    row=target_id)
         if value is None:
             metadata.pop(field, None)
         else:
@@ -125,10 +132,12 @@ def undo_changes(db, run_id):
         write(db, table, target_id, row['profile_id'], field, before)
         restored += 1
         if table == 'atomic_facts' and field == 'canonical_entities_json':
-            ids = json.loads(before or '[]')
+            ids = load_json_column(before, [], column='atomic_facts.canonical_entities_json',
+                                   row=target_id)
             # Only remove memberships added by this run; existing memberships
             # (including their count bookkeeping) stay byte-for-byte intact.
-            added = set(json.loads(after or '[]')) - set(ids)
+            added = set(load_json_column(after, [], column='atomic_facts.canonical_entities_json',
+                                         row=target_id)) - set(ids)
             for entity_id in added:
                 db.execute('DELETE FROM fact_entity_associations WHERE fact_id=? '
                            'AND profile_id=? AND entity_id=?',

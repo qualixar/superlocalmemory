@@ -13,8 +13,12 @@ attempts later each of those saves was dead-lettered. This is the only path
 found that gives that exact text on macOS and Linux.
 
 The fix reads such a value as absent (the column's empty value) and reports it
-once; the damaged row itself is left as it is (nothing is rewritten or
-invented), and a BLOB that does hold UTF-8 JSON is still read.
+once; reading never changes the row, and a BLOB that does hold UTF-8 JSON is
+still read. A later save that writes one of these values does not build it from
+the empty read: it rebuilds it from its source (an entity profile from the facts
+of the entity) and keeps the original bytes recoverable, in a version row
+(entity profiles, scenes) or the change ledger (fact columns). Rows no save
+writes keep their bytes exactly as they were.
 """
 
 from __future__ import annotations
@@ -72,6 +76,9 @@ def test_a_later_save_completes_past_a_column_holding_non_utf8_bytes(
     engine = engine_with_mock_deps
     for text in EARLIER:
         assert _save(engine, text).state is IngestionState.COMPLETE
+    profiles_before = {
+        dict(r)["entity_id"]: json.loads(dict(r)["fact_ids_json"])
+        for r in engine._db.execute("SELECT entity_id, fact_ids_json FROM entity_profiles")}
     damaged = engine._db.execute(
         f"UPDATE {table} SET {column} = ? RETURNING rowid", (NOT_TEXT,))
     assert damaged, f"no {table} rows to damage; the test proves nothing"
@@ -85,10 +92,36 @@ def test_a_later_save_completes_past_a_column_holding_non_utf8_bytes(
     # were, or real JSON (a row the save legitimately rebuilt, such as an entity
     # profile that now lists the new fact).
     values = [dict(r)["v"] for r in engine._db.execute(f"SELECT {column} AS v FROM {table}")]
+    still_damaged = sum(1 for v in values if v == NOT_TEXT)
     for value in values:
         if value is None or value == NOT_TEXT:
             continue
         json.loads(value)
+    kept = [
+        hex_value
+        for row in engine._db.execute(
+            "SELECT row_json FROM artifact_versions WHERE artifact IN ('entity_profile','scene')")
+        for value in json.loads(dict(row)["row_json"]).values()
+        if isinstance(value, dict) and "__blob_hex__" in value
+        for hex_value in [value["__blob_hex__"]]]
+
+    if table != "entity_profiles":
+        # No save rewrites these here: each damaged row keeps its bytes exactly.
+        assert still_damaged == len(damaged)
+        return
+    # An entity profile the save rewrote: rebuilt from the facts of its entity,
+    # so it still lists every earlier fact, and its old bytes are in the version row.
+    new_ids = set(result.fact_ids)
+    after = {dict(r)["entity_id"]: json.loads(dict(r)["fact_ids_json"])
+             for r in engine._db.execute(
+                 "SELECT entity_id, fact_ids_json FROM entity_profiles WHERE fact_ids_json != ?",
+                 (NOT_TEXT,))}
+    rewritten = {e: ids for e, ids in after.items() if new_ids & set(ids)}
+    assert rewritten, "the new fact is in no entity profile"
+    for entity_id, ids in rewritten.items():
+        assert set(profiles_before[entity_id]) <= set(ids), entity_id
+    assert still_damaged + len(rewritten) == len(damaged)
+    assert kept == [NOT_TEXT.hex()] * len(rewritten)
 
 
 def test_a_blob_holding_utf8_json_is_still_read(caplog) -> None:
@@ -108,12 +141,21 @@ def _strict(raw, default, **_kwargs):
     return default if raw is None or raw in ("", b"") else json.loads(raw)
 
 
+def _strict_checked(raw, default, **kwargs):
+    return _strict(raw, default, **kwargs), False
+
+
 _READERS = (
     "superlocalmemory.storage.json_columns.load_json_column",
     "superlocalmemory.encoding.scene_builder.load_json_column",
     "superlocalmemory.encoding.observation_builder.load_json_column",
     "superlocalmemory.storage.fact_context.load_json_column",
     "superlocalmemory.storage.source_identity.load_json_column",
+)
+_CHECKED_READERS = (
+    "superlocalmemory.storage.json_columns.load_json_column_checked",
+    "superlocalmemory.encoding.scene_builder.load_json_column_checked",
+    "superlocalmemory.encoding.observation_builder.load_json_column_checked",
 )
 
 
@@ -142,6 +184,8 @@ def test_a_save_dead_lettered_on_a_damaged_row_retries_and_clears(engine_with_mo
     with ExitStack() as stack:
         for target in _READERS:
             stack.enter_context(patch(target, _strict, create=True))
+        for target in _CHECKED_READERS:
+            stack.enter_context(patch(target, _strict_checked, create=True))
         for _ in range(_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS):
             failed = command.materialize(operation_id)
     assert failed.state is IngestionState.FAILED
@@ -166,4 +210,5 @@ def test_a_save_dead_lettered_on_a_damaged_row_retries_and_clears(engine_with_mo
         still_damaged = conn.execute(
             "SELECT COUNT(*) FROM atomic_facts WHERE entities_json = ?", (NOT_TEXT,)).fetchone()[0]
     assert left == 0
-    assert still_damaged >= 1  # the old rows are left as they were, never rewritten
+    # Exactly the earlier facts: no save rewrites an older fact, so each keeps its bytes.
+    assert still_damaged == len(EARLIER)
