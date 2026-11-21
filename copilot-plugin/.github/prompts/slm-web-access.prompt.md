@@ -1,7 +1,7 @@
 ---
 name: slm-web-access
 description: Set up and troubleshoot SuperLocalMemory Web access, the optional link that lets web apps (ChatGPT, Claude on the web, Muse, Composio, other remote MCP clients) use the memory on this computer. Covers turning it on from the dashboard, adding and removing apps, read/save/session permissions, the second yes for bot messages and pictures (the Web access switches in Connected apps), one-time upload links for pictures and PDFs, what leaves the computer, renewal, the connection states, the errors a web app can see, and the copy-paste instructions for web agents.
-version: "4.2.33"
+version: "4.2.34"
 agent: agent
 tools:
   - get_status
@@ -197,4 +197,4 @@ The slm-cli skill has the full command reference.
 
 ---
 
-*SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later*

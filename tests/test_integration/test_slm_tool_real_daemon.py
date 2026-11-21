@@ -167,6 +167,13 @@ def doors(tmp_path_factory):
         daemon.stop(foreign_before)
 
 
+def _as_cli_failure(mcp_answer: object) -> object:
+    """An MCP failure as ``slm tool`` reports it: the same body, ``error`` as {code, message}."""
+    from superlocalmemory.cli.tool_host import _failure_body  # noqa: PLC0415
+
+    return _failure_body(mcp_answer)
+
+
 def _same_shape(left: object, right: object) -> bool:
     """Same keys at the top level (and the same type for each), values aside."""
     if isinstance(left, dict) and isinstance(right, dict):
@@ -200,12 +207,13 @@ def test_pictures_answer_the_same_through_both_doors(doors):
     rc, cli_answer = doors.cli("remember_media", "--json", json.dumps(args))
     is_error, mcp_answer = doors.via_mcp("remember_media", args)
     assert (rc == 1) == is_error
-    assert cli_answer == mcp_answer or _same_shape(cli_answer, mcp_answer), (cli_answer, mcp_answer)
+    expected = _as_cli_failure(mcp_answer) if is_error else mcp_answer
+    assert cli_answer == expected or _same_shape(cli_answer, expected), (cli_answer, expected)
     missing = {"media_id": "0" * 32}
     rc, cli_missing = doors.cli("get_media", "--json", json.dumps(missing))
     is_error, mcp_missing = doors.via_mcp("get_media", missing)
     assert rc == 1 and is_error
-    assert cli_missing["error"] == mcp_missing["text"]
+    assert cli_missing["error"]["message"] == mcp_missing["text"]
 
 
 def test_mesh_send_and_inbox_between_two_agents(doors):
@@ -260,7 +268,7 @@ def test_a_tool_for_other_computers_stays_refused(doors):
     rc, answer = doors.cli("media_upload_link", "--kind", "image")
     is_error, mcp_answer = doors.via_mcp("media_upload_link", {"kind": "image"})
     assert rc == 1 and answer["code"] == "not_for_local"
-    assert is_error and answer == mcp_answer
+    assert is_error and answer == _as_cli_failure(mcp_answer)
 
 
 def test_the_daemon_is_told_cli_even_when_the_environment_says_mcp(doors, tmp_path):

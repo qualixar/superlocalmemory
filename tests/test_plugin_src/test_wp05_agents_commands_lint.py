@@ -74,7 +74,8 @@ REAL_SKILLS: frozenset[str] = frozenset(
         "slm-web-access",
         "slm-media",  # 4.1.25: pictures, PDFs and folders
     }
-)
+) | frozenset(d.name for d in (REPO / "plugin-src" / "skills").iterdir() if (d / "SKILL.md").exists())
+# ^ every skill that ships counts as real (slm-cli, 4.2.32), so the list cannot go stale.
 
 # Subagent names referenced in skill/advisor cross-refs
 ADVISOR_NAMES: frozenset[str] = frozenset(
@@ -130,6 +131,23 @@ CLI_FIRST_VERBS: frozenset[str] = frozenset(
         "import",    # slm import preview|run|status|list|cancel|undo: other apps' exports (WS-9)
     }
 )
+
+
+def _real_top_level_commands() -> frozenset[str]:
+    """Every top-level command the real ``slm`` parser accepts (``slm tool``, ``slm help``, ...)."""
+    import argparse  # noqa: PLC0415
+
+    from superlocalmemory.cli.main import build_parser  # noqa: PLC0415
+
+    parser = build_parser()
+    for action in parser._actions:  # noqa: SLF001 - argparse has no public accessor
+        if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
+            return frozenset(action.choices)
+    return frozenset()
+
+
+# A verb is real when the parser has it; the hand-kept set above documents the original contract.
+CLI_FIRST_VERBS = CLI_FIRST_VERBS | _real_top_level_commands()
 
 # Banned MCP tool names (outside core, must never appear as MCP calls)
 BANNED_MCP_TOOLS: frozenset[str] = frozenset({"get_status", "observe"})

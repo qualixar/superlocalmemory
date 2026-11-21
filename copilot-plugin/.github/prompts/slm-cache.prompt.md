@@ -1,7 +1,7 @@
 ---
 name: slm-cache
 description: KV cache for repeated reads — call slm_cache_get(key) first; on a miss do the expensive operation then slm_cache_set(key, value, ttl_seconds) to store it; on a hit use the returned value directly; always fail-open (hit:false on any error, never raises); saves tokens when the same file, query result, or tool output is read more than once in a session.
-version: "4.2.33"
+version: "4.2.34"
 agent: agent
 tools:
   - slm_cache_set
@@ -148,7 +148,7 @@ These subcommands control daemon-level cache settings and bulk removal. They do 
 
 ---
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later
 
 <!-- slm:no-mcp-cli:start -->
 ## When SLM's MCP tools are not in your tool list

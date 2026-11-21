@@ -183,16 +183,41 @@ def test_the_scan_follows_a_value_through_a_local_name() -> None:
     assert offenders_in(unrelated, "x.py") == []
 
 
-def test_the_old_consolidator_would_have_been_caught() -> None:
-    import subprocess  # noqa: PLC0415
+# The two readers cognitive_consolidator.py had before the fix (4.2.33), verbatim in
+# shape: a local copied from a tolerated column, decoded under JSONDecodeError only.
+_OLD_CONSOLIDATOR = """
+import json
 
-    repo = Path(__file__).resolve().parents[2]
-    old = subprocess.run(
-        ["git", "show", "origin/main:src/superlocalmemory/encoding/cognitive_consolidator.py"],
-        cwd=repo, capture_output=True, text=True, check=False)
-    if old.returncode != 0:
-        return  # no origin/main in this checkout: the synthetic test above still covers it
-    assert len(offenders_in(old.stdout, "encoding/cognitive_consolidator.py")) == 2
+
+class CognitiveConsolidator:
+    def _candidates(self, rows):
+        candidates = []
+        for row in rows or []:
+            d = dict(row)
+            raw_entities = d.get("canonical_entities_json") or "[]"
+            try:
+                d["canonical_entities"] = json.loads(raw_entities)
+            except (json.JSONDecodeError, TypeError):
+                d["canonical_entities"] = []
+            candidates.append(d)
+        return candidates
+
+    def _facts(self, rows):
+        facts = []
+        for r in rows or []:
+            d = dict(r)
+            raw = d.get("canonical_entities_json") or "[]"
+            try:
+                d["canonical_entities"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                d["canonical_entities"] = []
+            facts.append(d)
+        return facts
+"""
+
+
+def test_the_old_consolidator_would_have_been_caught() -> None:
+    assert len(offenders_in(_OLD_CONSOLIDATOR, "encoding/cognitive_consolidator.py")) == 2
 
 
 def test_a_decode_that_catches_value_error_is_tolerant_but_json_decode_error_alone_is_not() -> None:

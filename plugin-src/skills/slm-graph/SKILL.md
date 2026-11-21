@@ -318,7 +318,7 @@ All are host-only: a remote caller cannot use them.
 
 ---
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later
 
 <!-- slm:no-mcp-cli:start -->
 ## When SLM's MCP tools are not in your tool list

@@ -143,7 +143,7 @@ These subcommands control daemon-level cache settings and bulk removal. They do 
 
 ---
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later
 
 <!-- slm:no-mcp-cli:start -->
 ## When SLM's MCP tools are not in your tool list
