@@ -127,8 +127,39 @@ def _load_embedding_model(name: str) -> tuple:
     return None, ""
 
 
+#: The JSON-lines channel to the parent (the process's original stdout).
+_PROTOCOL = None
+
+
+def _claim_protocol_channel() -> None:
+    """Keep the parent's pipe for protocol replies only, both directions UTF-8.
+
+    A model library that prints (a native warning in the console's legacy code
+    page, a progress line) writes to file descriptor 1, which is the reply pipe.
+    Those bytes reached the parent between replies, and the parent's strict
+    UTF-8 read failed with "'utf-8' codec can't decode byte 0x81 ...", which
+    failed the save being enriched. Replies now go to a private copy of that
+    descriptor; descriptor 1 and ``sys.stdout`` point at stderr, which the
+    parent discards. Called before any model library is imported.
+    """
+    global _PROTOCOL
+    try:
+        reply_fd = os.dup(sys.stdout.fileno())
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    except (AttributeError, OSError, ValueError):
+        _PROTOCOL = sys.stdout  # no real descriptors (embedded use): nothing to move
+        return
+    _PROTOCOL = open(reply_fd, "w", encoding="utf-8", newline="\n", buffering=1)  # noqa: SIM115
+    sys.stdout = sys.stderr
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
 def _worker_main() -> None:
     """Main loop: read JSON requests from stdin, write responses to stdout."""
+    _claim_protocol_channel()
     _start_parent_watchdog()
 
     import numpy as np
@@ -206,9 +237,10 @@ def _worker_main() -> None:
 
 
 def _respond(data: dict) -> None:
-    """Write JSON response to stdout, flush immediately."""
-    sys.stdout.write(json.dumps(data) + "\n")
-    sys.stdout.flush()
+    """Write JSON response to the protocol channel, flush immediately."""
+    out = _PROTOCOL if _PROTOCOL is not None else sys.stdout
+    out.write(json.dumps(data) + "\n")
+    out.flush()
 
 
 if __name__ == "__main__":

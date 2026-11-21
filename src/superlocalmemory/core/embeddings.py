@@ -813,6 +813,12 @@ class EmbeddingService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                # The protocol is UTF-8 JSON on every platform. A stray byte
+                # that is not (a library printing on the worker's stdout) is
+                # a malformed line, handled like any other; a strict decode
+                # raised out of embed() and failed the save being enriched.
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=env,
                 **popen_platform_kwargs(),
