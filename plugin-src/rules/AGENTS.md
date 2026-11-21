@@ -221,4 +221,4 @@ Some hosts block local MCP servers by policy, and many agents, bots and agent fr
 The slm-cli skill has the full command reference.
 <!-- slm:no-mcp-cli:end -->
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later

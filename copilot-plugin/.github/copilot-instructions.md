@@ -1,7 +1,7 @@
 <!-- SLM-START -->
-<!-- SuperLocalMemory v4.2.33 — managed block. Edit outside these markers; this section is regenerated. -->
+<!-- SuperLocalMemory v4.2.34 — managed block. Edit outside these markers; this section is regenerated. -->
 
-<!-- BEGIN SuperLocalMemory v4.2.33 -->
+<!-- BEGIN SuperLocalMemory v4.2.34 -->
 
 ## SuperLocalMemory (SLM) — Agent Rules
 
@@ -76,8 +76,8 @@ Some hosts block local MCP servers by policy, and many agents, bots and agent fr
 The slm-cli skill has the full command reference.
 <!-- slm:no-mcp-cli:end -->
 
-<!-- END SuperLocalMemory v4.2.33 -->
+<!-- END SuperLocalMemory v4.2.34 -->
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later
 
 <!-- SLM-END -->

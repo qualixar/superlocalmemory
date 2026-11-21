@@ -1,7 +1,7 @@
 ---
 name: slm-scope
 description: Controls memory visibility across profiles — personal (private, default), shared (selected profiles), or global (all profiles on this machine). Default is always personal. Only change scope when the user explicitly asks to share a memory across workspaces. Works with both remember (write scope) and recall (read scope flags).
-version: "4.2.33"
+version: "4.2.34"
 agent: agent
 tools:
   - remember
@@ -193,4 +193,4 @@ The slm-cli skill has the full command reference.
 
 ---
 
-*SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later*

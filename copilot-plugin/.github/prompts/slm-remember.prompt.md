@@ -1,7 +1,7 @@
 ---
 name: slm-remember
 description: Capture durable facts, decisions, constraints, and gotchas into SuperLocalMemory. Use when the user says "remember that", "save this decision", "note this constraint", or when a session produces a conclusion worth persisting across sessions. Always recall first to avoid duplicates.
-version: "4.2.33"
+version: "4.2.34"
 agent: agent
 tools:
   - remember
@@ -503,4 +503,4 @@ The slm-cli skill has the full command reference.
 
 ---
 
-*SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later*

@@ -5,6 +5,27 @@ All notable changes to SuperLocalMemory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.34] — SLM from any shell, and saves that survive stray bytes
+
+Nothing changes in the store, and there is nothing to run. After upgrading, `slm doctor` shows whether your store holds any of the damaged values described below.
+
+### Added
+
+- Every `slm` command answers in JSON for agents. Add `--json` after it, put `slm --json` before it, or set `SLM_JSON=1`. Each command prints one JSON document (`success`, `data` or `error` with `code` and `message`), sends everything else to stderr, and exits 0 for success, 1 for a failure (`error.exit_code` keeps a more specific code), 2 when it could not run and 130 when interrupted. Under JSON a command never asks a question: it answers `confirmation_required` or `input_required` and names the flag. `slm help --json` lists every command with its options. `slm mcp`, `slm session`, `slm session-context` and the hooks ignore `SLM_JSON`, so servers and hooks behave the same when a host sets it for everything (#349).
+- SLM's agents and all 17 skills, in every host's plugin (Claude Code, Cursor, Copilot, VS Code, Codex, Antigravity, Hermes and Muse), now say what to do when SLM's MCP tools are not in the tool list: run `slm status --json`, then call any tool with `slm tool <name> --json`. The four agents can run `slm`, which the memory advisor could not before, and so can the two bot skills. The shared rules and `llms.txt` say the same (#350).
+- `slm doctor` has a read-only row, "Stored JSON values", that counts stored values which are bytes rather than text, per column, and says what happens to each (#351).
+
+### Fixed
+
+- Saves no longer fail with `'utf-8' codec can't decode byte 0x81`. A stored list or label that holds bytes which are not text is now read safely everywhere, including recall, the dashboard and exports. A save rebuilds such a value from its source instead of starting empty, keeps the original bytes first, and never makes a hidden memory visible. Saving the same text again no longer fails on a damaged earlier copy. A save already dead-lettered this way completes with `slm ops resolve <id> --action retry` (#351).
+- The embedding, recall and reranker workers reply on a private channel, so a model library printing to the console can no longer break a reply (#351).
+- `slm hooks install --dry-run` and `remove --dry-run` no longer write Claude Code's settings (#349).
+
+### Changed
+
+- A failed `slm tool` call now reports `error` as `{"code", "message"}` instead of a plain string, in every way of calling it. The top-level `code` is kept where a tool gave one. A script that read `error` as text needs a small change (#349).
+- A full-suite run started for some shards no longer cancels a running one, and the release reads GitHub's host keys with its token, so a busy anonymous limit cannot fail a publish step (#348).
+
 ## [4.2.33] — Deletes that finish, and a service that stays SLM's own
 
 Nothing changes in the store, and there is nothing to run. This release fixes the four known issues listed for 4.2.32.

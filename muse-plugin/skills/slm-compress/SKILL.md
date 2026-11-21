@@ -146,7 +146,7 @@ Content over 1 MB (1 000 000 bytes UTF-8) is processed but `reversible` is force
 
 ---
 
-SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later
+SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later
 
 <!-- slm:no-mcp-cli:start -->
 ## When SLM's MCP tools are not in your tool list

@@ -1,7 +1,7 @@
 ---
 name: slm-media
 description: Save pictures and PDFs in SuperLocalMemory and find them again by describing them. Covers when to save a picture or document, remember_media, remember_document, get_media, media_status and media_upload_link, how recall returns pictures and PDF pages, the limits, what stays private, how it sets itself up (by itself on a computer with 16 GB of memory or more, one click below that) and how to turn it back on with `slm media`, connecting folders with `slm sources`, and how web apps add files through one-time upload links. On by default.
-version: "4.2.33"
+version: "4.2.34"
 agent: agent
 tools:
   - remember_media
@@ -401,4 +401,4 @@ The slm-cli skill has the full command reference.
 
 ---
 
-*SuperLocalMemory v4.2.33 · Qualixar · AGPL-3.0-or-later*
+*SuperLocalMemory v4.2.34 · Qualixar · AGPL-3.0-or-later*
