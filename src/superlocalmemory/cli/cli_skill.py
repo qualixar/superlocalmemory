@@ -147,8 +147,17 @@ def rows(tools: Iterable[Any]) -> list[tuple[str, str, str, str]]:
     return sorted(out, key=lambda r: (_ORDER.index(r[0]), r[1]))
 
 
-def render(tools: Iterable[Any]) -> str:
-    """The whole SKILL.md text for ``tools`` (the registry's ``Tool`` records)."""
+FALLBACK_FRAGMENT = "plugin-src/fragments/no-mcp-cli.md"
+FALLBACK_START = "<!-- slm:no-mcp-cli:start -->"
+FALLBACK_END = "<!-- slm:no-mcp-cli:end -->"
+
+
+def render(tools: Iterable[Any], fallback: str = "") -> str:
+    """The whole SKILL.md text for ``tools`` (the registry's ``Tool`` records).
+
+    ``fallback`` is the shared no-MCP fragment every SLM skill carries; it is written
+    between the same markers ``scripts/sync-skill-fallback.mjs`` uses for the others.
+    """
     table = rows(tools)
     parts = [_FRONTMATTER, "\n", _BODY]
     for family in _ORDER:
@@ -159,16 +168,18 @@ def render(tools: Iterable[Any]) -> str:
         parts.extend(f"| `{name}` | `{_cell(form)}` | {_cell(summary)} |\n"
                      for _f, name, form, summary in members)
         parts.append("\n")
+    if fallback.strip():
+        parts.append(f"{FALLBACK_START}\n{fallback.strip(chr(10))}\n{FALLBACK_END}\n\n")
     parts.append(f"{len(table)} tools. Generated from the MCP tool registry by "
                  f"`{REGENERATE}`; do not edit by hand.\n")
     return "".join(parts)
 
 
-def render_from_registry() -> str:
+def render_from_registry(fallback: str = "") -> str:
     """The skill text for the tools registered right now."""
     from superlocalmemory.cli.tool_host import build_host, registered_tools
 
-    return render(registered_tools(build_host()))
+    return render(registered_tools(build_host()), fallback)
 
 
-__all__ = ["REGENERATE", "SKILL_PATH", "render", "render_from_registry", "rows"]
+__all__ = ["FALLBACK_FRAGMENT", "REGENERATE", "SKILL_PATH", "render", "render_from_registry", "rows"]

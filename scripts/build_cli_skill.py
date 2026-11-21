@@ -32,9 +32,10 @@ def main(argv: list[str]) -> int:
         os.environ["SLM_DATA_DIR"] = scratch
         os.environ.setdefault("SLM_DISABLE_WARMUP_SIDE_EFFECTS", "1")
         sys.path.insert(0, str(ROOT / "src"))
-        from superlocalmemory.cli.cli_skill import REGENERATE, SKILL_PATH, render_from_registry
+        from superlocalmemory.cli.cli_skill import (
+            FALLBACK_FRAGMENT, REGENERATE, SKILL_PATH, render_from_registry)
 
-        text = render_from_registry()
+        text = render_from_registry((ROOT / FALLBACK_FRAGMENT).read_text(encoding="utf-8"))
     target = ROOT / SKILL_PATH
     if check:
         current = target.read_text(encoding="utf-8") if target.exists() else ""
