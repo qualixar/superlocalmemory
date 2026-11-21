@@ -31,7 +31,7 @@ from typing import Any, Callable, Sequence
 from superlocalmemory.media.generation import generation
 from superlocalmemory.retrieval import channel_status as chstat
 from superlocalmemory.runtimes.space_plan import SpacePlan, compatible
-from superlocalmemory.storage.json_columns import load_json_column
+from superlocalmemory.storage.json_columns import load_memory_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +387,4 @@ def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
 __all__ = ["MEDIA_SOURCE_TYPES", "MediaChannel", "for_engine", "memory_sources"]
 
 
-def _meta(raw):
-    """A memory's metadata dict; bytes that are not text read as empty."""
-    return load_json_column(raw, {}, column="memories.metadata_json")
+_meta = load_memory_metadata

@@ -27,7 +27,7 @@ from superlocalmemory.compliance.export_encoding import (
 )
 from superlocalmemory.compliance.export_stream import JsonObjectWriter
 from superlocalmemory.storage.erasure_visibility import erasure_clause_for_connection
-from superlocalmemory.storage.json_columns import load_json_column
+from superlocalmemory.storage.json_columns import load_memory_metadata
 
 logger = logging.getLogger("superlocalmemory.routes.data_io")
 
@@ -209,6 +209,4 @@ def _write_csv(fp: BinaryIO, rows: Iterator[dict], cursor: Any, use_v3: bool,
 __all__ = ["has_column", "source_marks", "write_memories_export"]
 
 
-def _meta(raw):
-    """A memory's metadata dict; bytes that are not text read as empty."""
-    return load_json_column(raw, {}, column="memories.metadata_json")
+_meta = load_memory_metadata

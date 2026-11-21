@@ -113,4 +113,13 @@ def load_json_column(raw: Any, default: Any, *, column: str, row: object = None)
     return json.loads(raw)
 
 
-__all__ = ["TOLERATED_COLUMNS", "is_damaged", "load_json_column", "load_json_column_checked", "text_value"]
+__all__ = [
+    "TOLERATED_COLUMNS", "is_damaged", "load_json_column", "load_json_column_checked",
+    "load_memory_metadata", "text_value",
+]
+
+
+def load_memory_metadata(raw: object) -> dict:
+    """A memory's ``metadata_json`` as a dict; bytes that are not text read as empty."""
+    value = load_json_column(raw, {}, column="memories.metadata_json")
+    return value if isinstance(value, dict) else {}

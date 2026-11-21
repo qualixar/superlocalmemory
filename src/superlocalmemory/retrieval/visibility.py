@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Sequence
 
-from superlocalmemory.storage.json_columns import is_damaged, load_json_column
+from superlocalmemory.storage.json_columns import is_damaged, load_memory_metadata
 
 logger = logging.getLogger(__name__)
 _IN_CHUNK = 500
@@ -213,6 +213,4 @@ __all__ = ["VisibilityContext", "current", "drop_hidden_facts", "drop_hidden_res
            "hidden_among", "hides_media", "is_empty", "keep_loaded", "media_token", "use"]
 
 
-def _meta(raw):
-    """A memory's metadata dict; bytes that are not text read as empty."""
-    return load_json_column(raw, {}, column="memories.metadata_json")
+_meta = load_memory_metadata
