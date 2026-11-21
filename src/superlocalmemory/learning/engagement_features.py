@@ -43,11 +43,12 @@ to itself. Position enters only in ``propensity.py``, as a correction applied
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+
+from superlocalmemory.storage.json_columns import load_json_column
 
 __all__ = [
     "EngagementFeatures",
@@ -163,7 +164,7 @@ def _fact_tokens(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[str, set
         tokens = tokenize(content or "")
         if entities_json:
             try:
-                parsed = json.loads(entities_json)
+                parsed = load_json_column(entities_json, None, column="atomic_facts.entities_json")
             except (ValueError, TypeError):
                 parsed = None
             if isinstance(parsed, list):

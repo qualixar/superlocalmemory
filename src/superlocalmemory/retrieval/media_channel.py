@@ -21,7 +21,6 @@ space, the channel stays off.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -32,6 +31,7 @@ from typing import Any, Callable, Sequence
 from superlocalmemory.media.generation import generation
 from superlocalmemory.retrieval import channel_status as chstat
 from superlocalmemory.runtimes.space_plan import SpacePlan, compatible
+from superlocalmemory.storage.json_columns import load_memory_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +375,7 @@ def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
             + ",".join("?" * len(ids)) + ")", tuple(ids))
         out: dict[str, dict] = {}
         for row in rows:
-            source = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
+            source = (_meta(row["metadata_json"]) or {}).get("_slm_source")
             if isinstance(source, dict) and source.get("type") in MEDIA_SOURCE_TYPES:
                 out[row["memory_id"]] = source
         return _with_page_media_ids(root, out)
@@ -385,3 +385,6 @@ def memory_sources(db: Any, memory_ids: Sequence[str]) -> dict[str, dict]:
 
 
 __all__ = ["MEDIA_SOURCE_TYPES", "MediaChannel", "for_engine", "memory_sources"]
+
+
+_meta = load_memory_metadata

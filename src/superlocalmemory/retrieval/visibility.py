@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Sequence
+
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 logger = logging.getLogger(__name__)
 _IN_CHUNK = 500
@@ -114,7 +115,10 @@ def _hidden_source_memories(db: Any, memory_ids: Iterable[str], ctx: VisibilityC
         parsed: list[tuple[Any, Any]] = []
         for row in rows:
             try:
-                parsed.append((row, (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")))
+                if is_damaged(row["metadata_json"]):
+                    raise ValueError("metadata is bytes, not text")  # unreadable: fails closed
+                meta = load_json_column(row["metadata_json"], {}, column="memories.metadata_json")
+                parsed.append((row, (meta or {}).get("_slm_source")))  # a non-object has no .get: fails closed
             except (ValueError, AttributeError):
                 parsed.append((row, _BAD))
         prime = getattr(ctx.vetted_media, "prime", None)

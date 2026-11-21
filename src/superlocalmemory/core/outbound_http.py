@@ -78,8 +78,10 @@ def outbound_content(content: bytes | str | None, url: str) -> bytes | str | Non
     """
     if not content or is_local_endpoint(url):
         return content
-    text = content.decode("utf-8") if isinstance(content, bytes) else content
     try:
+        # A body that is not UTF-8 cannot be JSON: refused like any other
+        # unscreenable body, never a bare decode error from the caller.
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
         parsed = json.loads(text)
     except (ValueError, UnicodeDecodeError) as exc:
         raise OutboundBlocked(

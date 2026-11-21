@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from superlocalmemory.storage.erasure_visibility import aggregate_erasure_clause
+from superlocalmemory.storage.json_columns import load_json_column
 
 from .helpers import get_active_profile, get_read_connection, require_engine
 
@@ -193,7 +194,7 @@ def get_entity(
             "compiled_truth": row["compiled_truth"] or "",
             "knowledge_summary": row["knowledge_summary"] or "",
             "timeline": json.loads(row["timeline"]) if row["timeline"] else [],
-            "source_fact_ids": json.loads(row["fact_ids_json"]) if row["fact_ids_json"] else [],
+            "source_fact_ids": load_json_column(row["fact_ids_json"], [], column="entity_profiles.fact_ids_json"),
             "last_compiled_at": row["last_compiled_at"],
             "confidence": row["compilation_confidence"],
         }

@@ -38,6 +38,7 @@ from superlocalmemory.core.cue_triggers import (
     CueError,
     parse_cue,
 )
+from superlocalmemory.storage.json_columns import load_json_column
 
 #: Reserved (``_slm_*``): only the checked ``cues`` field of a save can set it.
 METADATA_KEY = "_slm_cues"
@@ -113,7 +114,7 @@ def _bind(conn: sqlite3.Connection, profile_id: str, fact_id: str, specs: list[s
 
 def _stored(metadata_json: object) -> list[str]:
     try:
-        value = (json.loads(metadata_json or "{}") or {}).get(METADATA_KEY)
+        value = (load_json_column(metadata_json, {}, column="memories.metadata_json") or {}).get(METADATA_KEY)
     except (TypeError, ValueError, AttributeError):
         return []
     return [s for s in value if isinstance(s, str)] if isinstance(value, list) else []

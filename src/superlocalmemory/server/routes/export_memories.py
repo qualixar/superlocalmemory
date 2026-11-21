@@ -27,6 +27,7 @@ from superlocalmemory.compliance.export_encoding import (
 )
 from superlocalmemory.compliance.export_stream import JsonObjectWriter
 from superlocalmemory.storage.erasure_visibility import erasure_clause_for_connection
+from superlocalmemory.storage.json_columns import load_memory_metadata
 
 logger = logging.getLogger("superlocalmemory.routes.data_io")
 
@@ -63,7 +64,7 @@ def source_marks(cursor: Any, profile_id: str) -> dict[str, dict]:
             " AND metadata_json LIKE '%_slm_source%'", (profile_id,))
         for row in cursor.fetchall():
             try:
-                raw = (json.loads(row["metadata_json"] or "{}") or {}).get("_slm_source")
+                raw = (_meta(row["metadata_json"]) or {}).get("_slm_source")
             except ValueError:
                 continue
             kind = _SOURCE_TYPES.get(raw.get("type")) if isinstance(raw, dict) else None
@@ -206,3 +207,6 @@ def _write_csv(fp: BinaryIO, rows: Iterator[dict], cursor: Any, use_v3: bool,
 
 
 __all__ = ["has_column", "source_marks", "write_memories_export"]
+
+
+_meta = load_memory_metadata

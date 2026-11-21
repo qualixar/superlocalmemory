@@ -27,11 +27,12 @@ window has closed.
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def _meta(row: sqlite3.Row | None) -> dict:
     if row is None:
         return {}
     try:
-        value = json.loads(row["metadata_json"] or "{}")
+        value = load_json_column(row["metadata_json"], {}, column="learning_model_state.metadata_json")
     except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}

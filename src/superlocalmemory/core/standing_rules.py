@@ -22,12 +22,12 @@ the cap is unchanged, it is only filled by relevance instead of by age.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 from superlocalmemory.storage.memory_kinds import CONFIRMED_SOURCES, MemoryKind
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ def _row_project(row: dict) -> Any:
     from superlocalmemory.core.project_identity import project_key
 
     try:
-        meta = json.loads(row.get("metadata_json") or "{}")
+        meta = load_json_column(row.get("metadata_json"), {}, column="memories.metadata_json")
         return project_key(meta.get("project") or meta.get("project_path"))
     except (ValueError, TypeError, AttributeError):
         return None
@@ -183,7 +183,10 @@ def _project_rows(rows: list, project_path: str) -> list:
     admitted = []
     for row in rows:
         try:
-            meta = json.loads(dict(row).get("metadata_json") or "{}")
+            if is_damaged(dict(row).get("metadata_json")):
+                continue  # project unknown: not applied to a named project, as before
+            meta = load_json_column(dict(row).get("metadata_json"), {},
+                                    column="memories.metadata_json")
             project = project_key(meta.get("project") or meta.get("project_path"))
             if project is None or project == wanted:
                 admitted.append(row)

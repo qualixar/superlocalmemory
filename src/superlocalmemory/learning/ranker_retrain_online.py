@@ -38,6 +38,7 @@ from superlocalmemory.learning.ranker_common import (
     _build_training_matrix,
     _compute_eval_metrics,
 )
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +380,7 @@ def _promote_candidate(
                 "WHERE id = ?", (candidate_id,),
             ).fetchone()
             try:
-                meta = json.loads(row["metadata_json"] or "{}")
+                meta = load_json_column(row["metadata_json"], {}, column="learning_model_state.metadata_json")
             except (TypeError, ValueError):
                 meta = {}
             meta["new_outcomes_since_last_retrain"] = 0

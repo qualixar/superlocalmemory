@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 logger = logging.getLogger("superlocalmemory.learning.source_quality")
 
 # Beta-Binomial prior (Laplace / uniform)
@@ -701,7 +703,7 @@ def _parse_repair_rows(
     all_facts: list[str] = []
     for row in rows:
         try:
-            value = json.loads(str(row["fact_ids_json"] or "[]"))
+            value = load_json_column(row["fact_ids_json"], [], column="action_outcomes.fact_ids_json")
             fact_ids = (
                 [str(item) for item in value if item][:_MAX_FACTS_PER_OUTCOME]
                 if isinstance(value, list) else []

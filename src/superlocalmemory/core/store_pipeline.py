@@ -12,7 +12,6 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import sqlite3
 import uuid
@@ -635,7 +634,10 @@ def _run_store(
             raise ValueError("queryable ingestion memory profile mismatch")
         if memory["content"] != content:
             raise ValueError("queryable ingestion memory content mismatch")
-        stored_shared = json.loads(memory.get("shared_with") or "null")
+        from superlocalmemory.storage.json_columns import load_json_column
+
+        stored_shared = load_json_column(memory.get("shared_with"), None,
+                                         column="memories.shared_with", row=existing_memory_id)
         if (memory.get("scope") or "personal") != scope:
             raise ValueError("queryable ingestion memory scope mismatch")
         if (stored_shared or None) != (shared_with or None):
@@ -654,7 +656,8 @@ def _run_store(
             role=memory.get("role") or role,
             session_date=memory.get("session_date") or parsed_date,
             created_at=memory["created_at"],
-            metadata=json.loads(memory.get("metadata_json") or "{}"),
+            metadata=load_json_column(memory.get("metadata_json"), {},
+                                      column="memories.metadata_json", row=existing_memory_id),
             scope=scope,
             shared_with=shared_with,
         )
@@ -784,7 +787,16 @@ def _run_store(
         # every repair pass that selects WHERE embedding IS NULL.
         _deferred_canonical_embedding = None  # set below if promotion path taken
         if is_queryable_promotion:
-            db.update_fact(fact.fact_id, {
+            # The columns below are rebuilt from the fact. One that holds bytes
+            # that are not text keeps them in the change ledger first, and is
+            # left as it is when they cannot be kept.
+            from superlocalmemory.storage.damaged_values import keep_bytes
+
+            unkept = keep_bytes(
+                db, "atomic_facts", "fact_id", fact.fact_id, profile_id,
+                ("entities_json", "canonical_entities_json", "source_turn_ids_json",
+                 "langevin_position"))
+            promotion = {
                 "content": fact.content,
                 "fact_type": fact.fact_type,
                 "entities_json": fact.entities,
@@ -808,7 +820,8 @@ def _run_store(
                 "emotional_arousal": fact.emotional_arousal,
                 "signal_type": fact.signal_type,
                 **kind_update_columns(fact, db),
-            })
+            }
+            db.update_fact(fact.fact_id, {k: v for k, v in promotion.items() if k not in unkept})
             if fact.embedding:
                 _deferred_canonical_embedding = (
                     fact.fact_id,

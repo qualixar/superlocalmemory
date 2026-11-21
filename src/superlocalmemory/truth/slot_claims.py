@@ -17,10 +17,10 @@ other facts are keyed by the Tier 0 patterns as before.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import Any
 
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.truth.slot_keys import parse_spec
 
 #: Reserved (``_slm_*``): a caller's metadata can never set it directly.
@@ -64,7 +64,7 @@ def claim_for_fact(conn: sqlite3.Connection, fact_id: str) -> tuple[str, str | N
 
 def _decode(metadata_json: Any) -> tuple[str, str | None] | None:
     try:
-        entry = json.loads(metadata_json or "{}").get(METADATA_KEY)
+        entry = load_json_column(metadata_json, {}, column="memories.metadata_json").get(METADATA_KEY)
     except (TypeError, ValueError, AttributeError):
         return None
     if not isinstance(entry, dict) or not isinstance(entry.get("spec"), str):

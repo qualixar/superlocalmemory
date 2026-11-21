@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from superlocalmemory.encoding.coverage_facts import DEFAULT_LIMIT, coverage_facts
+from superlocalmemory.storage.json_columns import load_json_column_checked
 from superlocalmemory.storage.models import AtomicFact
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,10 @@ def plan(execute: Callable, row, limit: int = DEFAULT_LIMIT) -> list[AtomicFact]
     """The facts *row*'s memory is missing, ready for the writer."""
     content = row["content"]
     held = [AtomicFact(content=r["content"]) for r in execute(_HELD, (row["memory_id"], content))]
-    shared = json.loads(row["shared_with"] or "null")
+    shared, damaged = load_json_column_checked(row["shared_with"], None,
+                                               column="memories.shared_with", row=row["memory_id"])
+    if damaged:
+        return []  # the audience is lost: never guess one for facts this pass would add
     return [
         replace(fact, memory_id=row["memory_id"], profile_id=row["profile_id"],
                 scope=row["scope"] or "personal", shared_with=shared)

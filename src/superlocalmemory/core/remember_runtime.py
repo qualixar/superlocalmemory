@@ -64,6 +64,7 @@ from superlocalmemory.storage.generation_fence import (
     clear_admission_epoch,
     record_admission_epoch,
 )
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.write_coordinator import (
     CommandConflictError,
     CommandKind,
@@ -1496,14 +1497,15 @@ def _propose_correction_successor(
         memory_id=str(source.get("memory_id") or ""),
         profile_id=profile_id,
         scope=str(source.get("scope") or "personal"),
-        shared_with=json.loads(source["shared_with"]) if source.get("shared_with") else None,
+        shared_with=load_json_column(source.get("shared_with"), None, column="atomic_facts.shared_with",
+                                     row=source.get("fact_id")),
         content=content,
         fact_type=FactType(str(source.get("fact_type") or "semantic")),
-        entities=json.loads(source["entities_json"]) if source.get("entities_json") else [],
-        canonical_entities=(
-            json.loads(source["canonical_entities_json"])
-            if source.get("canonical_entities_json") else []
-        ),
+        entities=load_json_column(source.get("entities_json"), [], column="atomic_facts.entities_json",
+                                  row=source.get("fact_id")),
+        canonical_entities=load_json_column(
+            source.get("canonical_entities_json"), [],
+            column="atomic_facts.canonical_entities_json", row=source.get("fact_id")),
         observation_date=source.get("observation_date"),
         referenced_date=source.get("referenced_date"),
         interval_start=source.get("interval_start"),
@@ -1512,10 +1514,9 @@ def _propose_correction_successor(
         importance=float(source.get("importance") or 0.0),
         evidence_count=1,
         access_count=0,
-        source_turn_ids=(
-            json.loads(source["source_turn_ids_json"])
-            if source.get("source_turn_ids_json") else []
-        ),
+        source_turn_ids=load_json_column(
+            source.get("source_turn_ids_json"), [],
+            column="atomic_facts.source_turn_ids_json", row=source.get("fact_id")),
         session_id=str(source.get("session_id") or ""),
         embedding=_list_payload("embedding"),
         fisher_mean=_list_payload("fisher_mean"),

@@ -42,10 +42,11 @@ def _exit_now(*_args) -> None:
     """SIGTERM: leave at once. ``sys.exit`` would wait for every non-daemon thread
     the model libraries started, so a stop could hang for as long as they run and
     the model stayed in memory (seen: a 3.3 GB picture worker outliving SIGTERM)."""
-    try:
-        sys.stdout.flush()
-    except Exception:  # noqa: BLE001 - leaving anyway
-        pass
+    for stream in (sys.stdout, globals().get("_PROTOCOL")):  # reply channel: worker_stdio.py
+        try:
+            stream.flush()
+        except Exception:  # noqa: BLE001 - leaving anyway
+            pass
     os._exit(0)
 
 
@@ -127,8 +128,16 @@ def _load_embedding_model(name: str) -> tuple:
     return None, ""
 
 
+#: The JSON-lines channel to the parent (see core/worker_stdio.py).
+_PROTOCOL = None
+
+
 def _worker_main() -> None:
     """Main loop: read JSON requests from stdin, write responses to stdout."""
+    global _PROTOCOL
+    from superlocalmemory.core.worker_stdio import claim_protocol_channel
+
+    _PROTOCOL = claim_protocol_channel()
     _start_parent_watchdog()
 
     import numpy as np
@@ -206,9 +215,10 @@ def _worker_main() -> None:
 
 
 def _respond(data: dict) -> None:
-    """Write JSON response to stdout, flush immediately."""
-    sys.stdout.write(json.dumps(data) + "\n")
-    sys.stdout.flush()
+    """Write JSON response to the protocol channel, flush immediately."""
+    out = _PROTOCOL if _PROTOCOL is not None else sys.stdout
+    out.write(json.dumps(data) + "\n")
+    out.flush()
 
 
 if __name__ == "__main__":

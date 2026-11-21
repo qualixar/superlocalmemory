@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
+
 
 def merge_metadata(old: dict, new: dict, dates=()) -> dict:
     merged = dict(old)
@@ -54,14 +56,19 @@ def reuse_source(db, request, metadata: dict, fact) -> str | None:
     )
     for row in candidates:
         stored = dict(row)
-        old = json.loads(stored.get("metadata_json") or "{}")
+        # A source row whose metadata or audience is bytes, not text, cannot be
+        # compared and must not be merged into (the merge would write over its
+        # bytes): it is not a match, and the new observation gets its own row.
+        if is_damaged(stored.get("metadata_json")) or is_damaged(stored.get("shared_with")):
+            continue
+        old = load_json_column(stored.get("metadata_json"), {}, column="memories.metadata_json")
         if _picture_identity(old) != _picture_identity(metadata):
             continue
         from superlocalmemory.core.project_identity import project_key
 
         if project_key(old.get("project")) != project_key(metadata.get("project")):
             continue
-        if set(json.loads(stored.get("shared_with") or "[]") or []) != set(
+        if set(load_json_column(stored.get("shared_with"), [], column="memories.shared_with") or []) != set(
             request.shared_with or []
         ):
             continue
@@ -107,7 +114,9 @@ def matching_fact(db, fact):
         (fact.profile_id, fact.content, fact.scope or "personal", fact.memory_id),
     )
     audience = set(fact.shared_with or [])
-    return [row for row in rows if set(json.loads(row["shared_with"] or "[]") or []) == audience][
+    return [row for row in rows
+            if set(load_json_column(row["shared_with"], [], column="atomic_facts.shared_with",
+                                    row=row["fact_id"]) or []) == audience][
         :1
     ]
 

@@ -76,6 +76,7 @@ from pathlib import Path
 
 from superlocalmemory.learning.bandit import ContextualBandit
 from superlocalmemory.learning.pcos import update_scores
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +181,7 @@ def _candidate_outcomes(
         if at is None:
             continue
         try:
-            facts = json.loads(r["fact_ids_json"] or "[]")
+            facts = load_json_column(r["fact_ids_json"], [], column="action_outcomes.fact_ids_json")
         except (TypeError, ValueError):
             facts = []
         if not isinstance(facts, list):

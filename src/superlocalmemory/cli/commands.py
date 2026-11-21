@@ -3997,6 +3997,19 @@ def _cmd_doctor_checks(args: Namespace, state: dict) -> None:
             _check("Failed saves", "WARN", f"could not read the failed-save counts: {_fs_exc}",
                    "Run `slm ops status`")
 
+    _stage("Stored JSON values")
+    # 10c'. JSON text columns holding binary values. One that was not UTF-8
+    # used to fail every save that read its row ("'utf-8' codec can't decode
+    # ..."); readers now treat it as empty. Read-only count per column.
+    if db_path.exists():
+        try:
+            from superlocalmemory.cli.doctor_stored_values import binary_json_values_finding
+
+            _check("Stored JSON values", *binary_json_values_finding(db_path))
+        except Exception as _sv_exc:  # noqa: BLE001 - never break doctor
+            _check("Stored JSON values", "WARN",
+                   f"could not count binary JSON values: {_sv_exc}")
+
     _stage("Hook events")
     # 10d. Hook events (4.2.8). Hooks hand tool events and reward signals to the
     # daemon's single writer or spool them; a full spool is the one place one

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 _CHUNK = 400
 
 
@@ -48,7 +50,8 @@ class DocumentEraseMixin:
         with self._write() as conn:
             for page in self._pages_of_memories(profile_id, memory_ids):
                 keep_m = [m for m in json.loads(page["memory_ids_json"]) if m not in erased_m]
-                keep_f = [f for f in json.loads(page["fact_ids_json"]) if f not in erased_f]
+                keep_f = [f for f in load_json_column(page["fact_ids_json"], [],
+                                                 column="doc_pages.fact_ids_json") if f not in erased_f]
                 where = (page["document_id"], page["page_no"])
                 if keep_m:
                     conn.execute("UPDATE doc_pages SET memory_ids_json = ?, fact_ids_json = ? "

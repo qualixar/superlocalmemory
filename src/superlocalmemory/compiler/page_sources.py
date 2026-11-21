@@ -47,6 +47,7 @@ from superlocalmemory.compiler.page_text import (
     sentences_of,
 )
 from superlocalmemory.compiler.versions import select_rows as _select
+from superlocalmemory.storage.json_columns import load_json_column
 
 #: Routing only: how many facts one draft run reads for story and topic pages.
 SCAN_LIMIT = 5000
@@ -157,7 +158,7 @@ def _live_rows(conn: Any, profile_id: str, extra: str = "") -> list[dict]:
 
 def _entities(row: Mapping[str, Any]) -> list[str]:
     try:
-        value = json.loads(row.get("entities_json") or "[]")
+        value = load_json_column(row.get("entities_json"), [], column="atomic_facts.entities_json")
     except (TypeError, ValueError):
         return []
     return [str(e) for e in value] if isinstance(value, list) else []

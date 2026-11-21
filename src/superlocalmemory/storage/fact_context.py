@@ -4,9 +4,8 @@
 
 from __future__ import annotations
 
-import json
-
 from superlocalmemory.core.project_identity import project_key
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 
 def same_context_candidates(db, incoming, candidates):
@@ -26,7 +25,13 @@ def same_context_candidates(db, incoming, candidates):
             tuple(batch),
         )
         for row in rows:
-            metadata = json.loads(row["metadata_json"] or "{}")
+            if is_damaged(row["metadata_json"]):
+                # Unknown context, not "no project": a value only this memory
+                # equals, so it is never a candidate for another memory's fact.
+                projects[row["memory_id"]] = object()
+                continue
+            metadata = load_json_column(row["metadata_json"], {}, column="memories.metadata_json",
+                                        row=row["memory_id"])
             projects[row["memory_id"]] = project_key(metadata.get("project"))
     want = projects.get(incoming.memory_id)
     return [fact for fact in visible if projects.get(fact.memory_id) == want]
