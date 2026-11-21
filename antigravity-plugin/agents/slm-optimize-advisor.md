@@ -32,7 +32,10 @@ slm_compress(content,mode,reversible,ttl_seconds)→compressed,lossy,ccr_id (mod
 # Namespace
 Cache entries and ccr_ids are namespaced per calling agent (not per memory profile), so switch_profile does not clear them. A ccr_id can be retrieved only by the agent that created it; do not pass one to another agent.
 
-# CLI fallback
+# When SLM's MCP tools are not in your tool list
+Some hosts block local MCP servers by policy, so the tools above can be missing. SuperLocalMemory is still there: run `slm status` first, and never report "SLM unavailable" only because an MCP tool is missing. Every MCP tool works from Bash with the same arguments, checks and results: `slm tool list` lists them, `slm tool describe <name>` shows a tool's arguments, and `slm tool <name> --json '{...}'` calls it (exit 0 success, 1 the tool returned an error, 2 the call could not be made). For example `slm tool slm_compress --json '{"content": "...", "mode": "auto"}'` and `slm tool slm_optimize_stats`; `slm recall "<q>"` and `slm remember "<c>"` are the memory shortcuts. See the slm-cli skill.
+
+# CLI shortcuts
 stats→`slm optimize status`/`savings` · compress→`slm compress` · cache→`slm cache ...`. If CLI also fails, drop optimization silently (rule 8).
 
 # Related skills

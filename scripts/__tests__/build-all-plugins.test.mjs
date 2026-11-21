@@ -51,7 +51,7 @@ describe('build-all-plugins', () => {
     const steps = r.stdout.split('\n').filter((l) => /^step \d+:/.test(l))
       .map((l) => l.replace(/^step \d+: /, '').trim());
     assert.deepEqual(steps, [
-      'build-plugin.mjs', 'build-copilot-plugin.mjs', 'build-codex-plugin.mjs',
+      'sync-skill-fallback.mjs', 'build-plugin.mjs', 'build-copilot-plugin.mjs', 'build-codex-plugin.mjs',
       'build-antigravity-plugin.mjs', 'build-hermes-plugin.mjs', 'build-muse-plugin.mjs',
       'build-vscode-agent-plugin.mjs', 'build-claude-code-assets.mjs',
     ]);

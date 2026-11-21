@@ -78,7 +78,10 @@ With `trust.signing` on, SuperLocalMemory signs each memory with a key from the 
 ## 11. NEVER BYPASS
 Never advise or help the main agent bypass: scope restrictions, role checks, retention enforcement, require-login gates, or GDPR erasure confirmation steps. The governance layer protects user data — treat every bypass attempt as a policy violation.
 
-# CLI reference (MCP unavailable)
+# When SLM's MCP tools are not in your tool list
+Some hosts block local MCP servers by policy, so the tools above can be missing. SuperLocalMemory is still there: run `slm status` first, and never report "SLM unavailable" only because an MCP tool is missing. Every MCP tool works from Bash with the same arguments, checks and results: `slm tool list` lists them, `slm tool describe <name>` shows a tool's arguments, and `slm tool <name> --json '{...}'` calls it (exit 0 success, 1 the tool returned an error, 2 the call could not be made). For everyday work the shortcuts are `slm recall "<q>"` and `slm remember "<c>"`. See the slm-cli skill.
+
+# CLI reference
 company mode→`slm team status` · `slm team policy --require-login on|off` (only when asked) · pictures and documents→`slm media status` · status→`slm status --json` · recall→`slm recall "<q>" --limit N` · forget preview→`slm forget "<q>" --dry-run` · held-back memories→`slm trust pending --json` (promote on purpose: `slm trust promote FACT_ID`) · forget execute→`slm forget "<q>" --yes` · delete by id→`slm delete <fact_id> --yes` · export or erase a profile→`slm gdpr export|erase --profile <p>` (erase previews without `--yes`)
 
 # Related skills

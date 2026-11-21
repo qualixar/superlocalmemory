@@ -239,7 +239,8 @@ def test_the_slm_cli_skill_matches_the_registry(tools):
     from superlocalmemory.cli import cli_skill
 
     committed = (REPO / cli_skill.SKILL_PATH).read_text(encoding="utf-8")
-    assert committed == cli_skill.render(tools.values()), (
+    fallback = (REPO / cli_skill.FALLBACK_FRAGMENT).read_text(encoding="utf-8")
+    assert committed == cli_skill.render(tools.values(), fallback), (
         f"{cli_skill.SKILL_PATH} has drifted from the tool registry; run {cli_skill.REGENERATE}")
     for name in tools:
         assert f"| `{name}` | `slm tool {name}" in committed, name

@@ -1,7 +1,8 @@
 /**
  * build-all-plugins.mjs — build every plugin, in the one order that works.
  *
- * build-plugin.mjs writes the skills and the Cursor-format
+ * sync-skill-fallback.mjs first writes the no-MCP fragment into every source
+ * skill. build-plugin.mjs writes the skills and the Cursor-format
  * files (build-cursor-plugin.mjs is a module it imports, not a separate
  * program). The copilot, codex, antigravity, hermes and muse builders read that
  * output, so build-plugin must finish first. Stops at the first failure.
@@ -18,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const STEPS = Object.freeze([
+  'sync-skill-fallback.mjs',
   'build-plugin.mjs',
   'build-copilot-plugin.mjs',
   'build-codex-plugin.mjs',
