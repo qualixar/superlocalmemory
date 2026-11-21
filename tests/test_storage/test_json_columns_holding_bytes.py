@@ -101,3 +101,69 @@ def test_a_blob_holding_utf8_json_is_still_read(caplog) -> None:
     assert load_json_column(None, {}, column="t.c") == {}
     assert load_json_column("", None, column="t.c") is None
     assert load_json_column('{"a": 1}', {}, column="t.c") == {"a": 1}
+
+
+def _strict(raw, default, **_kwargs):
+    """The reader before the fix: ``json.loads`` on whatever SQLite returned."""
+    return default if raw is None or raw in ("", b"") else json.loads(raw)
+
+
+_READERS = (
+    "superlocalmemory.storage.json_columns.load_json_column",
+    "superlocalmemory.encoding.scene_builder.load_json_column",
+    "superlocalmemory.encoding.observation_builder.load_json_column",
+    "superlocalmemory.storage.fact_context.load_json_column",
+    "superlocalmemory.storage.source_identity.load_json_column",
+)
+
+
+def test_a_save_dead_lettered_on_a_damaged_row_retries_and_clears(engine_with_mock_deps) -> None:
+    import sqlite3
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    from superlocalmemory.core.ingestion_command import _MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS
+    from superlocalmemory.core.ops_remediation import resolve_operation
+
+    engine = engine_with_mock_deps
+    for text in EARLIER:
+        assert _save(engine, text).state is IngestionState.COMPLETE
+    engine._db.execute("UPDATE atomic_facts SET entities_json = ?", (NOT_TEXT,))
+    engine._db.execute("UPDATE memory_scenes SET entity_ids_json = ?", (NOT_TEXT,))
+    receipt = canonical_store(
+        engine, LATER, source_type="python-api",
+        trusted_actor_id=local_trusted_actor_id("python-api"),
+        metadata={"project": "demo"}, require_complete=False, return_receipt=True,
+    )
+    operation_id = receipt.operation_id
+    command = build_engine_ingestion_command(engine)
+
+    # The reader before the fix: every automatic attempt fails on the damaged rows.
+    with ExitStack() as stack:
+        for target in _READERS:
+            stack.enter_context(patch(target, _strict, create=True))
+        for _ in range(_MAX_AUTOMATIC_MATERIALIZATION_ATTEMPTS):
+            failed = command.materialize(operation_id)
+    assert failed.state is IngestionState.FAILED
+    assert failed.last_error == CODEC_ERROR
+    db_path = engine._config.db_path
+    with sqlite3.connect(str(db_path)) as conn:
+        errors = [r[0] for r in conn.execute(
+            "SELECT error FROM dead_letter_operations WHERE original_op_id=?", (operation_id,))]
+    assert errors == [CODEC_ERROR]
+
+    # With the fix, the operator's retry completes it and clears the row.
+    outcome = resolve_operation(db_path, engine, operation_id, "retry")
+
+    assert outcome["success"] is True, outcome
+    done = command.repository.get(operation_id)
+    assert done.state is IngestionState.COMPLETE, done.last_error
+    assert done.raw_content == LATER
+    with sqlite3.connect(str(db_path)) as conn:
+        left = conn.execute(
+            "SELECT COUNT(*) FROM dead_letter_operations WHERE original_op_id=?",
+            (operation_id,)).fetchone()[0]
+        still_damaged = conn.execute(
+            "SELECT COUNT(*) FROM atomic_facts WHERE entities_json = ?", (NOT_TEXT,)).fetchone()[0]
+    assert left == 0
+    assert still_damaged >= 1  # the old rows are left as they were, never rewritten
