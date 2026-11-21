@@ -143,3 +143,116 @@ def test_non_ascii_is_escaped(capsys):
 
 def test_session_commands_ignore_the_env_var():
     assert {"mcp", "session-context", "session"} <= json_mode.ENV_EXEMPT
+
+
+# -- review round 2: tool errors in every form, exit codes, dry-run messages ---------------
+
+
+def _fake_result(text: str, *, is_error: bool = True):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)],
+                           structured_content=None, is_error=is_error)
+
+
+def _stub_tool_call(monkeypatch, text: str, *, is_error: bool = True) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(tool_cmd, "_host", lambda *_a, **_k: object())
+    monkeypatch.setattr(tool_cmd, "_find", lambda *_a, **_k: SimpleNamespace(
+        parameters={"type": "object", "properties": {"fact_id": {"type": "string"}}}))
+    monkeypatch.setattr(tool_cmd, "_ensure_daemon", lambda: None)
+    monkeypatch.setattr(tool_cmd, "_run",
+                        lambda *_a, **_k: _fake_result(text, is_error=is_error))
+
+
+@pytest.mark.parametrize("text,code", [
+    (json.dumps({"success": False, "error": "Memory nope not found"}), "tool_error"),
+    ("Memory nope not found", "tool_error"),
+    (json.dumps({"success": False, "code": "not_found", "error": "Memory nope not found"}),
+     "not_found"),
+])
+def test_result_payload_gives_every_failure_an_error_object(text, code):
+    from superlocalmemory.cli import tool_host
+
+    payload, is_error = tool_host.result_payload(_fake_result(text))
+    assert is_error is True and payload["success"] is False
+    assert payload["error"] == {"code": code, "message": "Memory nope not found"}
+    if "not_found" == code:
+        assert payload["code"] == "not_found"  # the old top-level key stays
+
+
+def test_a_successful_result_is_left_raw():
+    from superlocalmemory.cli import tool_host
+
+    payload, is_error = tool_host.result_payload(
+        _fake_result(json.dumps({"success": True, "n": 1}), is_error=False))
+    assert is_error is False and payload == {"success": True, "n": 1}
+
+
+@pytest.mark.parametrize("form", ["after_name", "global_flag", "env"])
+def test_a_tool_failure_is_one_error_object_in_every_invocation_form(
+        no_daemon, capsys, monkeypatch, form):  # noqa: F811
+    _stub_tool_call(monkeypatch, json.dumps({"success": False,
+                                             "error": "Memory nope not found"}))
+    argv = {"after_name": ["tool", "delete_memory", "--json", '{"fact_id":"nope"}'],
+            "global_flag": ["--json", "tool", "delete_memory", "--json", '{"fact_id":"nope"}'],
+            "env": ["tool", "delete_memory", "--json", '{"fact_id":"nope"}']}[form]
+    if form == "env":
+        monkeypatch.setenv("SLM_JSON", "1")
+    rc, out, _ = run(argv, capsys)
+    doc = json.loads(out.strip().splitlines()[-1])
+    assert rc == 1 and doc["success"] is False
+    assert doc["error"] == {"code": "tool_error", "message": "Memory nope not found"}
+
+
+def test_media_status_with_the_daemon_down_is_exit_1_in_json_mode(no_daemon, capsys):  # noqa: F811
+    rc, out, _ = run(["--json", "media", "status"], capsys)
+    doc = one_document(out)
+    assert rc == 1 and doc["success"] is False
+    assert doc["error"]["code"] == "daemon_down" and doc["error"]["exit_code"] == 3
+    rc, out, _ = run(["media", "status", "--json"], capsys)
+    assert rc == 1 and one_document(out)["error"]["exit_code"] == 3
+
+
+def test_media_status_with_the_daemon_down_keeps_exit_3_in_text_mode(no_daemon, capsys):  # noqa: F811
+    rc, out, _ = run(["media", "status"], capsys)
+    assert rc == 3 and "not running" in out
+
+
+def test_other_exit_codes_are_normalised_but_130_and_2_stay():
+    import contextlib
+    import io
+
+    def code_of(n):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), pytest.raises(SystemExit) as exc:
+            json_mode.run_json("x", lambda: (_ for _ in ()).throw(SystemExit(n)))
+        return exc.value.code, json.loads(buf.getvalue())
+
+    rc, doc = code_of(7)
+    assert rc == 1 and doc["error"]["exit_code"] == 7 and doc["success"] is False
+    assert code_of(2)[0] == 2
+    assert code_of(1)[0] == 1
+
+
+def test_a_dry_run_names_a_merge_failure_as_a_merge_failure(tmp_path, monkeypatch):
+    from superlocalmemory.hooks import claude_code_hooks
+
+    _settings(tmp_path, monkeypatch)
+
+    def boom(_s):
+        raise ValueError("bad shape")
+
+    out = claude_code_hooks._dry_run(boom, {"success": False, "errors": []})
+    assert out["errors"] == ["Settings merge failed: bad shape"]
+
+
+def test_a_dry_run_names_a_read_failure_as_a_read_failure(tmp_path, monkeypatch):
+    from superlocalmemory.hooks import claude_code_hooks
+
+    path = tmp_path / "settings.json"
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(claude_code_hooks, "CLAUDE_SETTINGS", path)
+    out = claude_code_hooks._dry_run(lambda s: s, {"success": False, "errors": []})
+    assert out["errors"][0].startswith("Settings read failed:")

@@ -21,7 +21,9 @@ def die(args: Namespace, message: str, code: int) -> NoReturn:
     if getattr(args, "json", False):
         from superlocalmemory.cli.json_output import json_print
 
-        json_print(getattr(args, "_command", "features"), error={"message": message})
+        json_print(getattr(args, "_command", "features"),
+                   error={"code": "daemon_down" if code == EXIT_DAEMON_DOWN else "failed",
+                          "message": message, "exit_code": code})
     else:
         print(message)
     sys.exit(code)

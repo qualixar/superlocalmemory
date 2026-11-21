@@ -204,12 +204,40 @@ def result_payload(result: Any, image_dir: Path | None = None) -> tuple[Any, boo
         payload = {"content": blocks}
         images = []
     is_error = bool(result.is_error)
-    if is_error and isinstance(payload, dict) and set(payload) == {"text"}:
-        payload = {"success": False, "error": payload["text"]}  # a plain-text refusal
+    if is_error:
+        payload = _failure_body(payload)
     if images:
         payload = {"result": payload, "images": images} if not isinstance(payload, dict) \
             else {**payload, "images": images}
     return payload, is_error
+
+
+def _failure_body(payload: Any) -> Any:
+    """A failed tool's payload with the agent contract's ``error`` object.
+
+    ``error`` becomes ``{"code": <the tool's code, else "tool_error">, "message": ...}``
+    in every invocation form; every other top-level key stays for older parsers.
+    """
+    if not isinstance(payload, dict):
+        return {"success": False, "result": payload,
+                "error": {"code": "tool_error", "message": "The tool reported an error."}}
+    body = dict(payload)
+    if set(body) == {"text"}:  # a plain-text refusal
+        body = {"success": False, "error": body["text"]}
+    error = body.get("error")
+    top_code = body.get("code") if isinstance(body.get("code"), str) and body["code"] else None
+    if isinstance(error, dict):
+        error = {**error}
+        if not error.get("code"):
+            error["code"] = top_code or "tool_error"
+        error.setdefault("message", str(body.get("message") or "The tool reported an error."))
+    else:
+        message = error if isinstance(error, str) and error else body.get("message")
+        error = {"code": top_code or "tool_error",
+                 "message": str(message) if message else "The tool reported an error."}
+    body["error"] = error
+    body.setdefault("success", False)
+    return body
 
 
 def _json_or_text(text: str) -> Any:

@@ -561,9 +561,12 @@ def _dry_run(change, result: dict) -> dict:
 
     try:
         before = _read_settings()
-        after = change(copy.deepcopy(before))
     except Exception as exc:
         return {**result, "dry_run": True, "errors": [f"Settings read failed: {exc}"]}
+    try:
+        after = change(copy.deepcopy(before))
+    except Exception as exc:
+        return {**result, "dry_run": True, "errors": [f"Settings merge failed: {exc}"]}
     return {**result, "success": True, "dry_run": True, "would_change": after != before,
             "path": str(CLAUDE_SETTINGS)}
 

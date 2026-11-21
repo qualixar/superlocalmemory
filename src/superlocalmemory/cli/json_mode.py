@@ -11,7 +11,11 @@ The contract an agent can rely on, whatever the command:
 * stdout carries exactly one JSON document, on one line: an object with a
   ``success`` key. Progress, banners, warnings and logs go to stderr.
 * Errors carry ``{"code": "<snake_case>", "message": "<plain words>"}``.
-  Exit 0 success, 1 the command ran and failed, 2 bad usage / could not run.
+  Exit 0 success, 1 the command ran and failed, 2 bad usage / could not run. Any other
+  code a command uses in text mode (``slm media status`` exits 3 when the daemon is
+  down) becomes 1 here, with the original in ``error.exit_code``. The one exception
+  is 130, an interrupt (Ctrl-C), which stays 130 so a caller can tell "stopped by
+  signal" from "failed".
 * Nothing prompts. A question a command would ask becomes an error envelope:
   ``confirmation_required`` (naming the flag that confirms) or
   ``input_required`` (naming the flags that answer).
@@ -55,7 +59,14 @@ PASS_THROUGH = frozenset({"tool"})
 #: Flags that confirm without asking, in the order they are looked for.
 CONFIRM_FLAGS = ("--yes", "--force", "--confirm", "--apply", "--execute")
 
-EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
+EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_INTERRUPTED = 0, 1, 2, 130
+#: Exit codes JSON mode leaves as they are; every other non-zero code becomes 1.
+_KEPT_EXITS = frozenset({EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_INTERRUPTED})
+
+
+def agent_exit_code(code: int) -> int:
+    """The contract's exit code for what a command exited with (0, 1, 2, or 130)."""
+    return code if code in _KEPT_EXITS else EXIT_FAILED
 
 
 class PromptBlocked(Exception):
@@ -438,6 +449,7 @@ def run_json(command: str, fn: Callable[[], Any],
                        "type": type(exc).__name__}
             rc = EXIT_FAILED
     text = captured()
+    original_rc, rc = rc, agent_exit_code(rc)
     # A successful `slm tool NAME` call is the tool's result exactly as MCP returns it.
     verbatim = verbatim_success and rc == 0
     if ((verbatim or (command.split(" ")[0] in PASS_THROUGH and "--pretty" in sys.argv))
@@ -452,7 +464,10 @@ def run_json(command: str, fn: Callable[[], Any],
             print(text.rstrip("\n"), file=sys.stderr)
         _emit({"success": False, "command": command, "version": _version(), "error": failure})
     else:
-        _emit(normalize(command, rc, text, kept.kept.getvalue()))
+        document = normalize(command, original_rc, text, kept.kept.getvalue())
+        if original_rc != rc and isinstance(document.get("error"), dict):
+            document["error"].setdefault("exit_code", original_rc)
+        _emit(document)
     if rc:
         sys.exit(rc)
 
