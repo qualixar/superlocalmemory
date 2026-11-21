@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Sequence
 
-from superlocalmemory.storage.json_columns import is_damaged, load_memory_metadata
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 logger = logging.getLogger(__name__)
 _IN_CHUNK = 500
@@ -117,7 +117,8 @@ def _hidden_source_memories(db: Any, memory_ids: Iterable[str], ctx: VisibilityC
             try:
                 if is_damaged(row["metadata_json"]):
                     raise ValueError("metadata is bytes, not text")  # unreadable: fails closed
-                parsed.append((row, (_meta(row["metadata_json"]) or {}).get("_slm_source")))
+                meta = load_json_column(row["metadata_json"], {}, column="memories.metadata_json")
+                parsed.append((row, (meta or {}).get("_slm_source")))  # a non-object has no .get: fails closed
             except (ValueError, AttributeError):
                 parsed.append((row, _BAD))
         prime = getattr(ctx.vetted_media, "prime", None)
@@ -211,6 +212,3 @@ def keep_loaded(final_top: list, facts: dict) -> list:
 
 __all__ = ["VisibilityContext", "current", "drop_hidden_facts", "drop_hidden_results",
            "hidden_among", "hides_media", "is_empty", "keep_loaded", "media_token", "use"]
-
-
-_meta = load_memory_metadata
