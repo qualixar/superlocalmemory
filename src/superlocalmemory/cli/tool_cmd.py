@@ -58,6 +58,10 @@ def add_tool_parser(sub: Any) -> None:
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--json", action="store_true", dest="json",
+                        help="JSON for list and describe; a call always prints JSON, so it "
+                             "changes nothing there. After a tool name, --json '{...}' "
+                             "passes the tool's arguments instead.")
     parser.add_argument("target", metavar="list|describe|TOOL",
                         help="list, describe, or the name of a tool to call")
     parser.add_argument("rest", nargs=argparse.REMAINDER, metavar="...",
@@ -72,7 +76,9 @@ def _emit(payload: Any, pretty: bool = False) -> None:
 
 def _fail(code: str, message: str, *, tool: str = "", details: list[str] | None = None,
           exit_code: int = EXIT_USAGE) -> NoReturn:
-    body: dict[str, Any] = {"success": False, "code": code, "error": message}
+    # `error` is the contract's object; the top-level `code` stays for older parsers.
+    body: dict[str, Any] = {"success": False, "code": code,
+                            "error": {"code": code, "message": message}}
     if tool:
         body["tool"] = tool
     if details:
@@ -209,6 +215,9 @@ def _split_call(rest: list[str]) -> _Call:
             wants_help = True
         elif token == "-":
             use_stdin = True
+        elif name == "json" and not sep and (i + 1 >= len(rest)
+                                             or rest[i + 1].startswith("--")):
+            pass  # a bare --json: JSON is on (a call always prints JSON); not arguments
         elif name in _CALL_OPTIONS:
             if not _CALL_OPTIONS[name]:
                 if sep:
@@ -304,6 +313,10 @@ def cmd_tool(args: argparse.Namespace) -> None:
     _quiet_logs()
     target = args.target
     rest = list(args.rest or [])
+    # `slm --json tool list` / `slm tool --json describe X`: list and describe print
+    # text unless asked; a call always prints JSON, so it needs nothing.
+    if getattr(args, "json", False) and target in ("list", "describe") and "--json" not in rest:
+        rest.append("--json")
     if target == "list":
         _cmd_list(rest)
     elif target == "describe":

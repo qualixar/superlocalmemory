@@ -191,4 +191,5 @@ def test_main_calls_it_after_the_upgrade_banner() -> None:
 
     from superlocalmemory.cli import main
 
-    assert "announce_on_terminal(sys.argv)" in inspect.getsource(main.main)
+    assert "announce_on_terminal(sys.argv)" in inspect.getsource(main._prepare)
+    assert "_prepare(" in inspect.getsource(main.main)

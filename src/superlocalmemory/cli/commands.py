@@ -839,6 +839,11 @@ def dispatch(args: Namespace) -> None:
         "embedder": _cmd_embedder_dispatch,
     }
     handler = handlers.get(args.command)
+    if handler and getattr(args, "json", False):
+        # Wizards, servers and launchers have their own JSON form (json_commands).
+        from superlocalmemory.cli.json_commands import handler_for
+
+        handler = handler_for(args) or handler
     if handler:
         from superlocalmemory.cli.daemon import DaemonRefused
 
@@ -5187,6 +5192,17 @@ def cmd_hooks(args: Namespace) -> None:
     # Gate is OFF by default. --gate opts in (for brave users).
     include_gate = getattr(args, "gate", False)
 
+    if action in ("install", "remove") and dry_run:
+        result = (install_hooks(include_gate=include_gate, dry_run=True) if action == "install"
+                  else remove_hooks(dry_run=True))
+        if not result["success"]:
+            print(f"Dry run failed: {result['errors']}")
+            return
+        verb = "installed in" if action == "install" else "removed from"
+        change = "would change" if result.get("would_change") else "would not change"
+        print(f"Dry run: SLM hooks would be {verb} Claude Code; {result['path']} {change}. "
+              "Nothing was written.")
+        return
     if action == "install":
         result = install_hooks(include_gate=include_gate)
         if result["success"]:

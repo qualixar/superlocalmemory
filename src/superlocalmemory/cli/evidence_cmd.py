@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from argparse import Namespace
 from pathlib import Path
 
@@ -101,7 +102,12 @@ def cmd_evidence(args: Namespace) -> None:
         _emit({"profile_id": profile, **result}, as_json=as_json)
         return
 
-    raise SystemExit("choose an evidence subcommand: export, verify, import, or rebuild")
+    message = "choose an evidence subcommand: export, verify, import, or rebuild"
+    if as_json:
+        from superlocalmemory.cli.json_mode import fail
+        fail("evidence", "usage", message, exit_code=2)
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _merge(args: Namespace, profile: str, *, as_json: bool) -> None:

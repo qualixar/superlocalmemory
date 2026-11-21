@@ -485,7 +485,7 @@ def run_wizard(auto: bool = False, no_laya: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # First-use auto-trigger
 # ---------------------------------------------------------------------------
-def check_first_use(command: str) -> None:
+def check_first_use(command: str, *, interactive: bool | None = None) -> None:
     """Check if setup is needed before running a command.
     Called from main.py before dispatching any command.
     Skips for commands that don't need setup (setup, hook, --version, --help).
@@ -507,7 +507,8 @@ def check_first_use(command: str) -> None:
     # CRIT-1: only save config when it does NOT already exist — lazy-init may
     # have already written a valid config.json; overwriting it here would clobber
     # any lazy-init content (e.g. a pre-existing mode-A skeleton).
-    if not is_interactive():
+    # ``interactive=False``: a JSON request never runs the wizard (it prompts).
+    if not (is_interactive() if interactive is None else interactive):
         try:
             from superlocalmemory.core.config import SLMConfig
             from superlocalmemory.storage.models import Mode

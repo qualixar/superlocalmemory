@@ -385,6 +385,16 @@ def _print_key_snippet(name: str, secret: str, profile: str, scope: str) -> None
     print("\nNever put the key in a URL. Revoke it any time: slm remote keys revoke " + name)
 
 
+def _as_json(args: Namespace) -> bool:
+    return bool(getattr(args, "json", False))
+
+
+def _json_out(command: str, data: dict) -> None:
+    from superlocalmemory.cli.json_output import json_print
+
+    json_print(command, data=data)
+
+
 def cmd_remote(args: Namespace) -> None:
     action = getattr(args, "remote_command", None)
     try:
@@ -393,6 +403,9 @@ def cmd_remote(args: Namespace) -> None:
                 print("Usage: slm remote tls init --name <host> --ip <address>")
                 sys.exit(2)
             info = tls_init(args.name or [], args.ip or [], args.days, args.force)
+            if _as_json(args):
+                _json_out("remote tls init", {**info, "ca_is_secret": False})
+                return
             print(f"Server certificate: {info['server_cert']} (expires {info['expires']})")
             print(f"CA certificate:     {info['ca']}")
             print(f"CA SHA-256:         {info['ca_sha256']}")
@@ -400,11 +413,18 @@ def cmd_remote(args: Namespace) -> None:
             return
         if action == "enable":
             settings = enable(args.listen)
+            if _as_json(args):
+                _json_out("remote enable", {**settings, "restart_needed": True})
+                return
             print(f"Remote access set to {settings['listen']}. Run 'slm restart' to apply, "
                   "then 'slm remote check'.")
             return
         if action == "disable":
-            print("Remote access disabled. Run 'slm restart' to apply." if disable()
+            was = disable()
+            if _as_json(args):
+                _json_out("remote disable", {"was_enabled": bool(was), "restart_needed": bool(was)})
+                return
+            print("Remote access disabled. Run 'slm restart' to apply." if was
                   else "Remote access was not enabled.")
             return
         if action == "keys":
@@ -427,6 +447,9 @@ def cmd_remote(args: Namespace) -> None:
                 sys.exit(1)
             return
     except ValueError as exc:
+        if _as_json(args):
+            from superlocalmemory.cli.json_mode import fail
+            fail("remote " + str(action or ""), "invalid_argument", str(exc), exit_code=2)
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
     print("Usage: slm remote {tls,enable,disable,keys,check} ...")
@@ -449,6 +472,13 @@ def _cmd_keys(args: Namespace) -> None:
         scope = "read" if args.read_only else "write"
         record, secret = store.add(args.key_name, scope, profile=profile,
                                    profile_source="chosen" if chosen else "active-at-creation")
+        if _as_json(args):
+            # Creating the key is the purpose of the command and it is shown only
+            # this once, so it is in the answer, under its own name.
+            _json_out("remote keys add", {"key": record.public(), "key_secret": secret,
+                                          "shown_once": True, "profile": profile,
+                                          "scope": scope})
+            return
         _print_key_snippet(record.name, secret, profile, scope)
         return
     if sub == "list":
@@ -473,6 +503,9 @@ def _cmd_keys(args: Namespace) -> None:
         return
     if sub == "revoke":
         record = store.revoke(args.key_ref)
+        if _as_json(args):
+            _json_out("remote keys revoke", {"key": record.public(), "revoked": True})
+            return
         print(f"Revoked '{record.name}' ({record.key_id}). It stops working on its next request.")
         return
     print("Usage: slm remote keys {add,list,allow,disallow,revoke}")
@@ -510,11 +543,15 @@ def add_parser(sub) -> None:
     init.add_argument("--ip", action="append", help="IP address other computers use (repeat)")
     init.add_argument("--days", type=int, default=MAX_LEAF_DAYS,
                       help=f"Server certificate lifetime (max {MAX_LEAF_DAYS})")
+    init.add_argument("--json", action="store_true",
+                      help="Output structured JSON (paths, expiry, CA fingerprint)")
     init.add_argument("--force", action="store_true",
                       help="Issue a new server certificate with the existing CA")
     en = rsub.add_parser("enable", help="Turn remote access on (applies on restart)")
     en.add_argument("--listen", required=True, help="HOST:PORT for the TLS listener")
-    rsub.add_parser("disable", help="Turn remote access off (applies on restart)")
+    en.add_argument("--json", action="store_true", help="Output structured JSON")
+    dis = rsub.add_parser("disable", help="Turn remote access off (applies on restart)")
+    dis.add_argument("--json", action="store_true", help="Output structured JSON")
     keys = rsub.add_parser("keys", help="Create, list and revoke remote keys")
     ksub = keys.add_subparsers(dest="keys_command")
     add = ksub.add_parser(
@@ -524,6 +561,9 @@ def add_parser(sub) -> None:
                     "memory in that profile.")
     add.add_argument("key_name", help="A name for the tool or computer, e.g. hermes-laptop")
     add.add_argument("--read-only", action="store_true", help="Recall only, no saves")
+    add.add_argument("--json", action="store_true",
+                     help="Output structured JSON; the new key is in data.key_secret, "
+                          "shown this once")
     add.add_argument("--profile", default=None,
                      help="The one profile this key may reach (default: the active profile)")
     lst = ksub.add_parser("list", help="List keys (never shows secrets)")
@@ -536,6 +576,7 @@ def add_parser(sub) -> None:
         extra.add_argument("--json", action="store_true")
     rev = ksub.add_parser("revoke", help="Revoke a key; effective on its next request")
     rev.add_argument("key_ref", help="Key name or key id")
+    rev.add_argument("--json", action="store_true", help="Output structured JSON")
     chk = rsub.add_parser("check", help="Check remote access; exit 1 on any failure")
     chk.add_argument("--json", action="store_true")
 

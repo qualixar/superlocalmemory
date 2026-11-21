@@ -206,7 +206,8 @@ def _emit(args: argparse.Namespace, data: dict[str, Any], text: str) -> None:
 
 def _fail(args: argparse.Namespace, message: str) -> None:
     if getattr(args, "json", False):
-        print(json.dumps({"error": message}))
+        print(json.dumps({"success": False, "error": {"code": "backup_failed",
+                                                      "message": message}}))
     else:
         print(f"Error: {message}", file=sys.stderr)
     sys.exit(1)

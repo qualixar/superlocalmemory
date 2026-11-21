@@ -121,9 +121,14 @@ def test_auto_keeps_resolving_to_laya_when_it_is_ready(mode, monkeypatch) -> Non
 
 
 def test_the_cli_offers_after_the_upgrade_banner_only() -> None:
-    from pathlib import Path
+    import inspect
 
-    source = Path(sys.modules["superlocalmemory.cli.laya_offer"].__file__).parent / "main.py"
-    text = source.read_text()
+    from superlocalmemory.cli import main
+
+    # The steps before the command runs live in _prepare, which main calls
+    # before it builds the parser.
+    text = inspect.getsource(main._prepare)
     banner = text.index("if check_and_emit_upgrade_banner(_ver):")
-    assert banner < text.index("laya_offer.after_upgrade(") < text.index("parser = argparse")
+    assert banner < text.index("laya_offer.after_upgrade(")
+    body = inspect.getsource(main.main)
+    assert body.index("_prepare(") < body.index("build_parser(_ver)")

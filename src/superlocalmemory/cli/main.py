@@ -23,8 +23,10 @@ _os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 _os.environ.setdefault('TORCH_DEVICE', 'cpu')
 
 import argparse
+import contextlib
 import sys
 
+from superlocalmemory.cli.json_mode import add_json_flag
 from superlocalmemory.core.config import (
     CANONICAL_LIST_LIMIT,
     CANONICAL_RECALL_LIMIT,
@@ -68,6 +70,15 @@ examples:
   slm health                  Check math layer status
   slm dashboard --port 9000   Dashboard on custom port
   slm recall "query" --json   Agent-native JSON output (for scripts, CI/CD)
+
+json for agents (every command):
+  slm --json <command> ...    Same as --json on the command; SLM_JSON=1 does it too
+  slm help --json             The whole command tree: paths, options, types, defaults
+  stdout holds one JSON object ({"success", "command", "version", "data"|"error"});
+  exit 0 success, 1 failed, 2 bad usage. Nothing prompts: a question becomes
+  error.code confirmation_required (names the flag) or input_required.
+  SLM_JSON does not apply to `slm mcp`, `slm session`, `slm session-context` or `slm hook`
+  (their output is a protocol or a hook's control channel); pass --json to them explicitly.
 
 documentation:
   Website:    https://superlocalmemory.com
@@ -138,107 +149,21 @@ def _command_requires_daemon(args: argparse.Namespace) -> bool:
     """
     if args.command in _NO_DAEMON_COMMANDS:
         return False
+    # `slm dashboard --json` reports where the dashboard is and whether it is up;
+    # it starts nothing.
+    if args.command == "dashboard" and getattr(args, "json", False):
+        return False
     return True
 
 
-def main() -> None:
-    """Parse CLI arguments and dispatch to command handlers."""
-    # First, before anything prints: on a Windows pipe or file Python encodes
-    # with the code page, which has no ✓ or ✗, and output would crash.
-    from superlocalmemory.cli.stdio_encoding import make_stdio_safe
-    make_stdio_safe()
+def build_parser(_ver: str | None = None) -> argparse.ArgumentParser:
+    """Build the full ``slm`` argument parser (no side effects).
 
-    # Fast path: hook invocations bypass argparse entirely (stdlib only, ~30ms)
-    if len(sys.argv) >= 3 and sys.argv[1] == "hook":
-        from superlocalmemory.hooks.hook_handlers import handle_hook
-        handle_hook(sys.argv[2])
-        return
-
-    # Metadata inspection is activation-free. Package managers, users, and CI
-    # must be able to inspect a newly installed executable without creating an
-    # SLM data root, config, version marker, daemon, hooks, or models.
-    _is_metadata_cmd = (
-        len(sys.argv) == 1
-        or any(arg in {"-h", "--help"} for arg in sys.argv[1:])
-        or (len(sys.argv) == 2 and sys.argv[1] in {"-v", "--version"})
-    )
-    _is_connect_dry_run = (
-        len(sys.argv) >= 2
-        and sys.argv[1] == "connect"
-        and "--dry-run" in sys.argv[2:]
-    )
-    _is_host_upgrade_preview = (
-        len(sys.argv) >= 2
-        and sys.argv[1] == "upgrade-hosts"
-        and "--apply" not in sys.argv[2:]
-    )
-
-    # lazy first-run init — runs after hook/mcp fast-paths so stdout
-    # is never polluted on those paths (CRIT-3, MCP JSON-RPC purity).
-    # Guarded: any failure must not crash the CLI (AC4).
-    _is_mcp_cmd = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
-    if not _is_mcp_cmd and not _is_metadata_cmd and not _is_connect_dry_run and not _is_host_upgrade_preview:
-        try:
-            from superlocalmemory.cli._lazy_init import _ensure_initialized
-            _ensure_initialized()
-        except Exception:
-            pass
-
-    from superlocalmemory.cli.json_output import _get_version
-    _ver = _get_version()
-
-    # v3.6.13 (CRITICAL): the `mcp` stdio transport requires stdout to carry
-    # ONLY JSON-RPC. The post-upgrade banner + migration notice below must NEVER
-    # run on that path, or the first post-upgrade `slm mcp` launch pollutes
-    # stdout and the MCP client (Claude Desktop / Cursor) rejects the stream as
-    # "not valid JSON". Skip the whole block for `mcp`; the next human `slm`
-    # command emits the banner (to stderr) and writes the version marker.
-    _is_mcp_stdio = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
-
-    # One-time post-upgrade banner — silent for fresh installs and
-    # same-version runs. Guarded against I/O errors internally.
-    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run and not _is_host_upgrade_preview:
-        from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
-        if check_and_emit_upgrade_banner(_ver):
-            # First post-upgrade invocation: apply the data-dir migration if
-            # it's safe. When the previous-version daemon is still running
-            # we defer — the next daemon start picks it up.
-            try:
-                import logging as _logging
-
-                # route through slm_home() so all 3 env aliases are honoured.
-                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
-                from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
-                    migrate_if_safe as _migrate_if_safe,
-                )
-                _data = _slm_home()
-                _res = _migrate_if_safe(_data)
-                if _res.get("status") == "deferred":
-                    print(
-                        "  note: data migration deferred — the running SLM "
-                        "daemon will apply it on its next restart.",
-                        file=sys.stderr,
-                    )
-            except Exception as _mig_exc:
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "v3.4.26 migrate_if_safe failed: %s — run `slm doctor`", _mig_exc,
-                )
-                print(
-                    "  note: data migration check failed — run `slm doctor` to diagnose.",
-                    file=sys.stderr,
-                )
-            # 4.1.25: offer the answer check the way setup does (setup and
-            # init run their own step; the offer goes to stderr only).
-            if len(sys.argv) < 2 or sys.argv[1] not in ("setup", "init"):
-                from superlocalmemory.cli import laya_offer
-                laya_offer.after_upgrade()
-
-    # 4.2.30 D-28/D-49: the measurement notice, informational, on the first terminal run.
-    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run:
-        from superlocalmemory.cli.measurement_cmd import announce_on_terminal
-        announce_on_terminal(sys.argv)
-
+    Importable so tests and ``slm help --json`` can walk the command tree.
+    """
+    if _ver is None:
+        from superlocalmemory.cli.json_output import _get_version
+        _ver = _get_version()
     parser = argparse.ArgumentParser(
         prog="slm",
         description=f"SuperLocalMemory V4 ({_ver}) — AI agent memory with mathematical foundations",
@@ -264,6 +189,7 @@ def main() -> None:
         "--auto", action="store_true",
         help="Non-interactive setup: mode A + hooks (no TTY required, for CI/scripts)",
     )
+    add_json_flag(init_p, "Output structured JSON; needs --auto (JSON never runs the wizard)")
 
     setup_p = sub.add_parser("setup", help="Interactive first-time setup wizard")
     setup_p.add_argument(
@@ -274,6 +200,7 @@ def main() -> None:
         "--no-laya", action="store_true",
         help="Don't install the local answer check (installed by default on Apple Silicon)",
     )
+    add_json_flag(setup_p, "Output structured JSON; needs --auto (JSON never runs the wizard)")
 
     mode_p = sub.add_parser("mode", help="Get or set operating mode (a/b/c)")
     mode_p.add_argument(
@@ -312,6 +239,11 @@ def main() -> None:
             "Target mode for provider=custom: 'b' (a local model on this "
             "machine) or 'c' (your own endpoint). Default: c"
         ),
+    )
+    add_json_flag(
+        provider_p,
+        "Output structured JSON; `set` needs the provider (and --key/--model "
+        "when it would ask): input_required otherwise",
     )
 
     connect_p = sub.add_parser("connect", help="Auto-configure a supported IDE integration")
@@ -388,10 +320,19 @@ def main() -> None:
         "--apply", action="store_true", default=False,
         help="Apply the previewed changes; default is read-only preview",
     )
+    add_json_flag(upgrade_p, "Output structured JSON (the preview or the result)")
 
     migrate_p = sub.add_parser("migrate", help="Migrate data from V2 to V3 schema")
     migrate_p.add_argument(
         "--rollback", action="store_true", help="Rollback migration",
+    )
+    migrate_p.add_argument(
+        "--yes", action="store_true", help="Migrate without asking (required with --json)",
+    )
+    add_json_flag(
+        migrate_p,
+        "Output structured JSON; without --yes the answer is "
+        "confirmation_required",
     )
 
     # LLD-06 §7.2 — `slm db migrate` wraps LLD-07's additive schema migrations.
@@ -409,6 +350,11 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Report what would change without applying",
     )
+    add_json_flag(
+        db_mig_p,
+        "Output structured JSON (per-migration status, or "
+        "applied/skipped/failed)",
+    )
     db_scale_p = db_sub.add_parser(
         "scale",
         help="Safely stage and promote optional CozoDB/LanceDB projections",
@@ -421,6 +367,7 @@ def main() -> None:
     )
     db_scale_p.add_argument("--stage-id", help="Stage identifier required by verify/promote")
     db_scale_p.add_argument("--backup-id", help="Backup identifier required by rollback")
+    add_json_flag(db_scale_p, "Output structured JSON")
 
     db_regraph_p = db_sub.add_parser(
         "regraph",
@@ -434,6 +381,7 @@ def main() -> None:
         "--profile", default="",
         help="Workspace to re-derive. Default: all of them",
     )
+    add_json_flag(db_regraph_p, "Output structured JSON (the report is wrapped in the envelope)")
     from superlocalmemory.cli.fidelity_cmd import register_db_fidelity_parser
     register_db_fidelity_parser(db_sub)  # 4.1.22: facts that changed their memory
     from superlocalmemory.cli.integrity_cmd import register_db_integrity_parsers
@@ -479,6 +427,7 @@ def main() -> None:
         action="store_true",
         help="Daemon must be stopped. Allows delete_unverified. Use for a leaked store.",
     )
+    add_json_flag(db_compact_p, "Output structured JSON")
     db_points_p = db_sub.add_parser(
         "restore-points", help="List the copies of your memories you can go back to",
     )
@@ -510,6 +459,7 @@ def main() -> None:
         choices=("status", "peers"),
         help="status: broker health + stats; peers: active peer sessions",
     )
+    add_json_flag(mesh_p, "Output structured JSON (the broker's own answer under data)")
 
     # -- Memory Operations ---------------------------------------------
     remember_p = sub.add_parser("remember", help="Store a memory (extracts facts, builds graph)")
@@ -802,6 +752,11 @@ def main() -> None:
         "topic", nargs="?",
         help="Optional topic: modes | config | self-heal",
     )
+    add_json_flag(
+        help_p,
+        "The whole command tree as JSON: every command path, its summary, and "
+        "its options with type, required and default",
+    )
 
     # LLD-06 §6.6 — `slm wrap <agent> [args...]` activates the Optimize
     # proxy for a specific agent. Supported agents: claude, claude-settings,
@@ -822,11 +777,22 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Print the action that would be taken without executing it",
     )
+    add_json_flag(
+        wrap_p,
+        "Output structured JSON (put it before the agent). Lists agents with "
+        "--list; otherwise reports the planned action and never launches the "
+        "agent",
+    )
     wrap_p.add_argument("agent", nargs="?", default=None, help="Agent key (run `slm wrap --list` to see all)")
     wrap_p.add_argument("agent_args", nargs=argparse.REMAINDER, help="Args passed to the agent binary")
 
     # -- Services ------------------------------------------------------
-    sub.add_parser("mcp", help="Start MCP server (stdio transport for IDE integration)")
+    mcp_p = sub.add_parser("mcp", help="Start MCP server (stdio transport for IDE integration)")
+    add_json_flag(
+        mcp_p,
+        "Do not start the server: print how to connect (stdio command, HTTP "
+        "URL, daemon state) as JSON and exit 0. SLM_JSON does not apply to mcp",
+    )
     tools_p = sub.add_parser(
         "tools", help="Show or choose how many MCP tools every connected app sees")
     tools_p.add_argument("action", nargs="?", choices=["set"], default=None)
@@ -852,6 +818,8 @@ def main() -> None:
                             help="Only say how many would come back")
     flags_back.add_argument("--profile", default="", help="Profile (default: the active one)")
     flags_back.add_argument("--db", default=None, help="Store file (default: yours)")
+    for _fp in (flags_set, flags_kill, flags_back):
+        add_json_flag(_fp, "Output structured JSON (same as `slm flags --json ...`)", inherit=True)
     flags_p.add_argument("--json", action="store_true", help="Output structured JSON")
     warmup_p = sub.add_parser(
         "warmup",
@@ -861,10 +829,19 @@ def main() -> None:
         "--timeout", type=float, default=None, metavar="SECONDS",
         help="How long to wait for a starting daemon to become ready "
              "(default 120; 0 checks once without waiting)")
+    add_json_flag(
+        warmup_p,
+        "One JSON object with ready, after the same wait; exit 1 when not ready",
+    )
 
     dashboard_p = sub.add_parser("dashboard", help="Open web dashboard")
     dashboard_p.add_argument(
         "--port", type=int, default=None, help="Port (default: configured instance)",
+    )
+    add_json_flag(
+        dashboard_p,
+        "Print the URL, port and daemon state as JSON; starts nothing and opens"
+        " no browser",
     )
 
     # V3.3.21: Daemon serve mode
@@ -873,6 +850,11 @@ def main() -> None:
         "action", nargs="?", default="start",
         choices=["start", "stop", "status", "install", "uninstall"],
         help="start (default), stop, status, install (OS service), uninstall",
+    )
+    add_json_flag(
+        serve_p,
+        "Output structured JSON. The daemon runs in the background, so "
+        "start/stop act and then report the state; status only reports",
     )
 
     # V3.4.9: Full system restart with health verification
@@ -912,10 +894,12 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Show whether the additive change is valid without writing files",
     )
+    add_json_flag(hooks_p, "Output structured JSON (the install/remove/status result)")
 
     codex_p = sub.add_parser("codex", help="Install or inspect explicit Codex SLM add-ons")
     codex_p.add_argument("action", nargs="?", default="status", choices=["install", "remove", "status"])
     codex_p.add_argument("--dry-run", action="store_true", help="Validate without writing user files")
+    add_json_flag(codex_p, "Output structured JSON (assets and hooks)")
 
     ctx_p = sub.add_parser("session-context", help="Print session context (for hooks)")
     ctx_p.add_argument("query", nargs="?", default="", help="Optional context query")
@@ -944,15 +928,18 @@ def main() -> None:
     sopen_p.add_argument("--project-path", default="", help="Project path to derive the warm query")
     sopen_p.add_argument("--query", default="", help="Explicit warm query")
     sopen_p.add_argument("--max-results", type=int, default=10, help="Max memories to warm (default 10)")
+    add_json_flag(sopen_p, "Output structured JSON (the daemon's answer)")
     sclose_p = session_sub.add_parser(
         "close", help="Close session, create temporal summaries"
     )
     sclose_p.add_argument(
         "--session-id", default="", help="Session to close (default: most recent)"
     )
+    add_json_flag(sclose_p, "Output structured JSON (the daemon's answer)")
 
     obs_p = sub.add_parser("observe", help="Auto-capture content (pipe or argument)")
     obs_p.add_argument("content", nargs="?", default="", help="Content to evaluate")
+    add_json_flag(obs_p, "Output structured JSON (one object; observe does not stream)")
 
     brain_p = sub.add_parser(
         "brain", help="Show the local, profile-scoped Living Brain evidence summary"
@@ -1027,6 +1014,11 @@ def main() -> None:
         "rest", nargs="*", default=[],
         help="Subcommand: list, enable, disable, start, stop, status [name]",
     )
+    add_json_flag(
+        adapters_p,
+        "Output structured JSON (put it before the subcommand: slm adapters "
+        "--json list)",
+    )
 
     # V3.4.8: External observation ingestion
     ingest_p = sub.add_parser(
@@ -1067,6 +1059,11 @@ def main() -> None:
     )
     evolve_p.add_argument("--session", default="", help="Session ID to process")
     evolve_p.add_argument("--profile", default="default", help="Profile ID")
+    add_json_flag(
+        evolve_p,
+        "Output structured JSON (an empty data object when there was nothing to"
+        " do)",
+    )
 
     # v3.4.22 — MASTER-PLAN §8 escape hatches (Stage 8 SB-5).
     disable_p = sub.add_parser(
@@ -1077,16 +1074,19 @@ def main() -> None:
         "--reason", default="",
         help="Optional reason string written into the marker for audit",
     )
+    add_json_flag(disable_p, "Output structured JSON")
 
-    sub.add_parser(
+    enable_p = sub.add_parser(
         "enable",
         help="Remove the .disabled marker; print command to start daemon",
     )
+    add_json_flag(enable_p, "Output structured JSON")
 
-    sub.add_parser(
+    clear_p = sub.add_parser(
         "clear-cache",
         help="Wipe regenerable caches (memory.db + learning.db are preserved)",
     )
+    add_json_flag(clear_p, "Output structured JSON (removed, absent and preserved files)")
 
     recon_p = sub.add_parser(
         "reconfigure",
@@ -1095,6 +1095,11 @@ def main() -> None:
     recon_p.add_argument(
         "extras", nargs="*", default=[],
         help="Extra flags passed to postinstall-interactive.js",
+    )
+    add_json_flag(
+        recon_p,
+        "Output structured JSON; needs the answers passed through (slm --json "
+        "reconfigure -- --profile=NAME): input_required otherwise",
     )
 
     bench_p = sub.add_parser(
@@ -1168,24 +1173,27 @@ def main() -> None:
         "--min-observations", type=int, default=None,
         help="Observation floor below which an unmoved posterior is not reported",
     )
+    add_json_flag(diagnostics_reliability, "Output structured JSON")
     diagnostics_export.add_argument(
         "--json", action="store_true", help="Output structured JSON",
     )
 
     # S-M07: install-token rotation.
-    sub.add_parser(
+    rotate_p = sub.add_parser(
         "rotate-token",
         help="Rotate the SLM install token (run `slm restart` afterwards)",
     )
+    add_json_flag(rotate_p, "Output structured JSON (only the last four characters of each token)")
 
     # `slm token show`: the key the dashboard asks for when a key is required.
     token_p = sub.add_parser(
         "token", help="Show the key the dashboard asks for when a key is required",
     )
     token_sub = token_p.add_subparsers(dest="token_command", title="token subcommands")
-    token_sub.add_parser(
+    token_show_p = token_sub.add_parser(
         "show", help="Print the SuperLocalMemory key (readable only by you)",
     )
+    add_json_flag(token_show_p, "Output structured JSON; the key is in data.install_token")
 
     # 4.1.20: remote access for AI tools on other computers (TLS, named keys).
     from superlocalmemory.cli.remote_commands import add_parser as _add_remote_parser
@@ -1277,6 +1285,7 @@ def main() -> None:
         "--no-pager", action="store_true", dest="no_pager", default=False,
         help="Print to stdout instead of piping through a pager",
     )
+    add_json_flag(help_opt_p, "Output structured JSON (topic, topics, text); never pages")
 
     # ---- end SLM v3.6 Optimize subcommands ----
 
@@ -1472,20 +1481,211 @@ def main() -> None:
         "status", help="Quick failure count + writer stall overview")
     ops_status_p.add_argument(
         "--json", action="store_true", help="Output structured JSON (agent-native)")
+    return parser
+
+
+def main() -> None:
+    """Parse CLI arguments and dispatch to command handlers."""
+    # First, before anything prints: on a Windows pipe or file Python encodes
+    # with the code page, which has no ✓ or ✗, and output would crash.
+    from superlocalmemory.cli.stdio_encoding import make_stdio_safe
+    make_stdio_safe()
+
+    # JSON for every command: `slm --json X`, `SLM_JSON=1 slm X`, `slm X --json`.
+    from superlocalmemory.cli import json_mode
+    _argv, _global_json = json_mode.extract_global_json(sys.argv)
+    sys.argv[:] = _argv
+    _json_on = json_mode.wants_json(sys.argv, global_flag=_global_json)
+    _force_json = _global_json or (
+        json_mode.env_requests_json()
+        and json_mode.command_word(sys.argv) not in json_mode.ENV_EXEMPT
+    )
+
+    # Fast path: hook invocations bypass argparse entirely (stdlib only, ~30ms)
+    if len(sys.argv) >= 3 and sys.argv[1] == "hook":
+        # A hook speaks its host's protocol, and so must the commands it runs:
+        # SLM_JSON set for a whole harness never reaches them.
+        _os.environ.pop(json_mode.ENV_VAR, None)
+        from superlocalmemory.hooks.hook_handlers import handle_hook
+        handle_hook(sys.argv[2])
+        return
+
+    # Metadata inspection is activation-free. Package managers, users, and CI
+    # must be able to inspect a newly installed executable without creating an
+    # SLM data root, config, version marker, daemon, hooks, or models.
+    _is_metadata_cmd = (
+        len(sys.argv) == 1
+        or any(arg in {"-h", "--help"} for arg in sys.argv[1:])
+        or (len(sys.argv) == 2 and sys.argv[1] in {"-v", "--version"})
+    )
+    if _json_on and _is_metadata_cmd:
+        _emit_json_help()  # activation-free, like --help itself
+    _is_connect_dry_run = (
+        len(sys.argv) >= 2
+        and sys.argv[1] == "connect"
+        and "--dry-run" in sys.argv[2:]
+    )
+    _is_host_upgrade_preview = (
+        len(sys.argv) >= 2
+        and sys.argv[1] == "upgrade-hosts"
+        and "--apply" not in sys.argv[2:]
+    )
+
+    # lazy first-run init — runs after hook/mcp fast-paths so stdout
+    # is never polluted on those paths (CRIT-3, MCP JSON-RPC purity).
+    # Guarded: any failure must not crash the CLI (AC4).
+    _is_mcp_cmd = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
+    # Under JSON, everything printed before the command runs goes to stderr:
+    # stdout carries the command's one JSON document and nothing else.
+    _real_stdout = sys.stdout
+    _quiet = json_mode.non_interactive() if _json_on else contextlib.nullcontext()
+    if _json_on:
+        sys.stdout = sys.stderr
+    try:
+        with _quiet:
+            _ver = _prepare(_is_mcp_cmd, _is_metadata_cmd, _is_connect_dry_run,
+                            _is_host_upgrade_preview, _json_on)
+    finally:
+        sys.stdout = _real_stdout
+
+    parser = build_parser(_ver)
+    if _json_on:
+        json_mode.install_json_usage_errors(parser)
 
     args = parser.parse_args()
+    if _force_json:
+        args.json = True
+    _as_json = bool(getattr(args, "json", False)) and bool(args.command)
 
     if not args.command:
+        if _json_on:
+            _emit_json_help()
         parser.print_help()
         sys.exit(0)
 
-    # V3.3.19: Auto-trigger setup wizard on first use
+    if _as_json:
+        sys.stdout = sys.stderr
+    _quiet = json_mode.non_interactive() if _json_on else contextlib.nullcontext()
+    try:
+        with _quiet:
+            _before_dispatch(args, interactive_ok=not _json_on)
+    finally:
+        sys.stdout = _real_stdout
+
+    from superlocalmemory.cli.commands import dispatch
+
+    if _as_json:
+        from superlocalmemory.cli.help_tree import leaf_parser
+
+        path = json_mode.command_path(parser, sys.argv[1:], args)
+        if path in json_mode.STREAMS_OWN_JSON:
+            json_mode.run_streaming(path, lambda: dispatch(args))
+            return
+        is_tool_call = args.command == "tool" and getattr(args, "target", "") not in (
+            "list", "describe")
+        json_mode.run_json(path, lambda: dispatch(args), leaf_parser(parser, sys.argv[1:]),
+                           verbatim_success=is_tool_call)
+        return
+    dispatch(args)
+
+
+def _emit_json_help() -> None:
+    """``slm --json``, ``slm --json X --help``: the command tree instead of text."""
+    from superlocalmemory.cli import help_tree
+    from superlocalmemory.cli.json_output import _get_version, json_print
+
+    argv = sys.argv[1:]
+    if len(argv) == 1 and argv[0] in {"-v", "--version"}:
+        json_print("version", data={"version": _get_version()})
+        sys.exit(0)
+    parser = build_parser()
+    words = help_tree.resolve_words(parser, argv)
+    json_print("help", data={
+        "path": " ".join(words), "commands": help_tree.subtree(parser, words),
+        "global_options": help_tree.global_options(),
+    })
+    sys.exit(0)
+
+
+def _prepare(_is_mcp_cmd: bool, _is_metadata_cmd: bool, _is_connect_dry_run: bool,
+             _is_host_upgrade_preview: bool, json_on: bool) -> str:
+    """First-run init, the post-upgrade banner and notices; returns the version."""
+    if not _is_mcp_cmd and not _is_metadata_cmd and not _is_connect_dry_run and not _is_host_upgrade_preview:
+        try:
+            from superlocalmemory.cli._lazy_init import _ensure_initialized
+            _ensure_initialized()
+        except Exception:
+            pass
+
+    from superlocalmemory.cli.json_output import _get_version
+    _ver = _get_version()
+
+    # v3.6.13 (CRITICAL): the `mcp` stdio transport requires stdout to carry
+    # ONLY JSON-RPC. The post-upgrade banner + migration notice below must NEVER
+    # run on that path, or the first post-upgrade `slm mcp` launch pollutes
+    # stdout and the MCP client (Claude Desktop / Cursor) rejects the stream as
+    # "not valid JSON". Skip the whole block for `mcp`; the next human `slm`
+    # command emits the banner (to stderr) and writes the version marker.
+    _is_mcp_stdio = len(sys.argv) >= 2 and sys.argv[1] == "mcp"
+
+    # One-time post-upgrade banner — silent for fresh installs and
+    # same-version runs. Guarded against I/O errors internally.
+    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run and not _is_host_upgrade_preview:
+        from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
+        if check_and_emit_upgrade_banner(_ver):
+            # First post-upgrade invocation: apply the data-dir migration if
+            # it's safe. When the previous-version daemon is still running
+            # we defer — the next daemon start picks it up.
+            try:
+                import logging as _logging
+
+                # route through slm_home() so all 3 env aliases are honoured.
+                from superlocalmemory.cli._lazy_init import slm_home as _slm_home
+                from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+                    migrate_if_safe as _migrate_if_safe,
+                )
+                _data = _slm_home()
+                _res = _migrate_if_safe(_data)
+                if _res.get("status") == "deferred":
+                    print(
+                        "  note: data migration deferred — the running SLM "
+                        "daemon will apply it on its next restart.",
+                        file=sys.stderr,
+                    )
+            except Exception as _mig_exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "v3.4.26 migrate_if_safe failed: %s — run `slm doctor`", _mig_exc,
+                )
+                print(
+                    "  note: data migration check failed — run `slm doctor` to diagnose.",
+                    file=sys.stderr,
+                )
+            # 4.1.25: offer the answer check the way setup does (setup and
+            # init run their own step; the offer goes to stderr only).
+            if len(sys.argv) < 2 or sys.argv[1] not in ("setup", "init"):
+                from superlocalmemory.cli import laya_offer
+                laya_offer.after_upgrade()
+
+    # 4.2.30 D-28/D-49: the measurement notice, informational, on the first terminal run.
+    if not _is_mcp_stdio and not _is_metadata_cmd and not _is_connect_dry_run and not json_on:
+        from superlocalmemory.cli.measurement_cmd import announce_on_terminal
+        announce_on_terminal(sys.argv)
+    return _ver
+
+
+def _before_dispatch(args: argparse.Namespace, *, interactive_ok: bool = True) -> None:
+    """First-use setup and the daemon auto-start, before the command runs."""
+    # V3.3.19: Auto-trigger setup wizard on first use (never under JSON: no prompts)
     if not (
         (args.command == "connect" and getattr(args, "dry_run", False))
         or (args.command == "upgrade-hosts" and not getattr(args, "apply", False))
     ):
         from superlocalmemory.cli.setup_wizard import check_first_use
-        check_first_use(args.command)
+        if interactive_ok:
+            check_first_use(args.command)
+        else:
+            check_first_use(args.command, interactive=False)
 
     # V3.4.4: Auto-start daemon for all commands that need it.
     # SLM is always-on — close laptop, reboot, crash: daemon auto-recovers.
@@ -1496,10 +1696,6 @@ def main() -> None:
             ensure_daemon()  # Starts daemon if not running; no-op if already up
         except Exception:
             pass  # Don't block CLI if daemon start fails — commands have fallbacks
-
-    from superlocalmemory.cli.commands import dispatch
-
-    dispatch(args)
 
 
 if __name__ == "__main__":

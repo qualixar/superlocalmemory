@@ -30,21 +30,37 @@ from argparse import Namespace
 from pathlib import Path
 
 
+def _json(args: Namespace) -> bool:
+    return bool(getattr(args, "json", False))
+
+
+def _emit(command: str, data: dict) -> None:
+    from superlocalmemory.cli.json_output import json_print
+
+    json_print(command, data=data)
+
+
 def cmd_disable(args: Namespace) -> None:
     """Write the ``.disabled`` marker and stop the daemon."""
     from superlocalmemory.core.slm_disabled import is_disabled, write_marker
 
     reason = getattr(args, "reason", "") or ""
     marker = write_marker(reason)
-    print(f"SLM disabled. Marker: {marker}")
+    if not _json(args):
+        print(f"SLM disabled. Marker: {marker}")
 
     # Best-effort daemon stop — non-fatal.
+    stopped = False
     try:
         from superlocalmemory.cli.daemon import stop_daemon
-        if stop_daemon():
+        stopped = bool(stop_daemon())
+        if stopped and not _json(args):
             print("Daemon stopped.")
     except Exception as exc:  # pragma: no cover — defensive
         print(f"(daemon stop skipped: {exc})", file=sys.stderr)
+    if _json(args):
+        _emit("disable", {"disabled": bool(is_disabled()), "marker": str(marker),
+                          "reason": reason, "daemon_stopped": stopped})
 
     # Sanity check
     if not is_disabled():  # pragma: no cover
@@ -58,6 +74,10 @@ def cmd_enable(args: Namespace) -> None:
     from superlocalmemory.core.slm_disabled import marker_path, remove_marker
 
     removed = remove_marker()
+    if _json(args):
+        _emit("enable", {"enabled": True, "was_disabled": bool(removed),
+                         "marker": str(marker_path())})
+        return
     if removed:
         print("SLM enabled. To start the daemon: slm serve start")
     else:
@@ -97,6 +117,10 @@ def cmd_clear_cache(args: Namespace) -> None:
         except OSError as exc:
             print(f"  skip {name}: {exc}", file=sys.stderr)
 
+    if _json(args):
+        _emit("clear-cache", {"removed": removed, "absent": missing,
+                              "preserved": sorted(protected)})
+        return
     if removed:
         print("Removed cache DBs:")
         for name in removed:
@@ -203,11 +227,24 @@ def cmd_rotate_token(args: Namespace) -> None:
     from superlocalmemory.core.security_primitives import rotate_install_token
     old, new = rotate_install_token()
     if not new:
+        if _json(args):
+            from superlocalmemory.cli.json_mode import fail
+            fail("rotate-token", "rotation_failed", "The install token was not rotated; "
+                 "check the permissions on the .install_token file.")
         print("install-token rotation failed (check permissions on "
               "~/.superlocalmemory/.install_token)")
         return
     old_tail = old[-4:] if old else "(absent)"
     new_tail = new[-4:]
+    if _json(args):
+        # Only the last four characters, as in the text form. The key itself is
+        # read with `slm token show --json`.
+        from superlocalmemory.cli.json_output import json_print
+        json_print("rotate-token", data={"rotated": True, "old_token_last4": old_tail,
+                                         "new_token_last4": new_tail, "restart_needed": True},
+                   next_actions=[{"command": "slm restart --json",
+                                  "description": "Restart so the daemon uses the new token"}])
+        return
     print(f"install-token rotated: ...{old_tail} -> ...{new_tail}")
     print("NOTE: restart the daemon so HMAC marker caches pick up "
           "the new token (run: slm restart).")
@@ -226,6 +263,9 @@ def cmd_token(args: Namespace) -> None:
     import sys
 
     if getattr(args, "token_command", None) != "show":
+        if _json(args):
+            from superlocalmemory.cli.json_mode import fail
+            fail("token", "usage", "Usage: slm token show --json", exit_code=2)
         print("Usage: slm token show   (prints the key the dashboard asks for)",
               file=sys.stderr)
         raise SystemExit(2)
@@ -241,6 +281,10 @@ def cmd_token(args: Namespace) -> None:
         try:
             info = path.stat()
             if info.st_uid != os.getuid():
+                if _json(args):
+                    from superlocalmemory.cli.json_mode import fail
+                    fail("token show", "not_owner", "The SuperLocalMemory key file belongs "
+                         "to another account, so it is not shown here.")
                 print("The SuperLocalMemory key file belongs to another account, "
                       "so it is not shown here.", file=sys.stderr)
                 raise SystemExit(1)
@@ -250,6 +294,11 @@ def cmd_token(args: Namespace) -> None:
             print(f"Could not check who can read the key file: {exc}",
                   file=sys.stderr)
             raise SystemExit(1)
+    if _json(args):
+        # The command's purpose is the key, so it is here, under its own name;
+        # it is never written to stderr or a log.
+        _emit("token show", {"install_token": token})
+        return
     print(token)
 
 
