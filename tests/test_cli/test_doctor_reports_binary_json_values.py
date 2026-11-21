@@ -5,8 +5,11 @@
 Such a value (bytes bound into a TEXT column, read back as a BLOB) used to
 fail every save whose enrichment read the row, with "'utf-8' codec can't
 decode ...". The readers now treat one that is not text as empty, so saves
-keep working; doctor says where the rows are so an agent or a person can look.
-Read-only: it counts, it never repairs.
+keep working; a later save that writes the value rebuilds it from its source
+and keeps the original bytes. Doctor says where the rows are so an agent or a
+person can look, and tells apart a BLOB that holds UTF-8 text (it reads
+normally) from one that does not (it reads as empty). Read-only: it counts,
+it never repairs.
 """
 
 from __future__ import annotations
@@ -76,6 +79,11 @@ def test_binary_values_are_counted_per_column_and_warned(tmp_path) -> None:
     assert "atomic_facts.entities_json: 3" in detail and "memory_scenes.entity_ids_json: 1" in detail
     assert "read safely" in fix
     assert "typeof(entities_json)='blob'" in fix  # the exact query that shows them
+    # The hint says what is true: nothing is changed by the check, a later save
+    # that writes the value rebuilds it, and the bytes are kept.
+    assert "nothing is changed" not in fix
+    assert "rebuilds" in fix and "keeps the original bytes" in fix
+    assert "read as empty" in detail
 
 
 def test_every_tolerated_column_is_checked(tmp_path) -> None:
@@ -117,3 +125,80 @@ def test_slm_doctor_json_carries_the_row(tmp_path, monkeypatch) -> None:
 def test_slm_doctor_passes_a_clean_store(tmp_path, monkeypatch) -> None:
     _store(tmp_path)
     assert _doctor_rows(tmp_path, monkeypatch)["Stored JSON values"]["status"] == "PASS"
+
+
+def test_a_blob_holding_utf8_json_is_told_apart_from_one_that_is_not_text(tmp_path) -> None:
+    from superlocalmemory.cli.doctor_stored_values import (
+        binary_json_value_kinds,
+        binary_json_values_finding,
+    )
+
+    db = _store(tmp_path)
+    _damage(db, {"atomic_facts": 2})
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content, entities_json) "
+            "VALUES ('fx', 'm1', 'default', 'fact x', ?)", ('["Tokyo"]'.encode(),))
+    assert binary_json_value_kinds(db) == {"atomic_facts.entities_json": (1, 2)}
+    status, detail, _fix = binary_json_values_finding(db)
+    assert status == "WARN"
+    assert "2 stored values are not text and read as empty" in detail
+    assert "1 more holds UTF-8 JSON and reads normally" in detail
+
+
+def test_only_blobs_that_hold_utf8_json_is_a_pass_that_says_so(tmp_path) -> None:
+    from superlocalmemory.cli.doctor_stored_values import binary_json_values_finding
+
+    db = _store(tmp_path)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("INSERT INTO memories (memory_id, profile_id, content) VALUES ('m1','default','x')")
+        conn.execute(
+            "INSERT INTO atomic_facts (fact_id, memory_id, profile_id, content, entities_json) "
+            "VALUES ('fx', 'm1', 'default', 'fact x', ?)", ('["Tokyo"]'.encode(),))
+    status, detail, _fix = binary_json_values_finding(db)
+    assert status == "PASS"
+    assert "holds UTF-8 JSON and reads normally" in detail and "as empty" not in detail
+
+
+def test_the_check_scans_each_table_once(tmp_path, monkeypatch) -> None:
+    from superlocalmemory.cli import doctor_stored_values as dsv
+    from superlocalmemory.storage.json_columns import TOLERATED_COLUMNS
+
+    db = _store(tmp_path)
+    _damage(db, {"atomic_facts": 2})
+    seen: list[str] = []
+    real = dsv._readonly
+
+    class _Recording:
+        def __init__(self, conn) -> None:
+            self._conn = conn
+
+        def execute(self, sql, *args):
+            seen.append(sql)
+            return self._conn.execute(sql, *args)
+
+        def close(self) -> None:
+            self._conn.close()
+
+    monkeypatch.setattr(dsv, "_readonly", lambda path: _Recording(real(path)))
+    dsv.binary_json_values(db, include_zero=True)
+
+    scans = [q for q in seen if "typeof" in q]
+    assert len(scans) == len({t for t, _c in TOLERATED_COLUMNS})  # one per table, not per column
+
+
+def test_a_database_path_with_a_quote_gives_a_runnable_hint(tmp_path) -> None:
+    import shlex
+
+    from superlocalmemory.cli.doctor_stored_values import binary_json_values_finding
+
+    folder = tmp_path / "it's here"
+    folder.mkdir()
+    db = _store(folder)
+    _damage(db, {"atomic_facts": 1})
+    status, _detail, fix = binary_json_values_finding(db)
+    assert status == "WARN"
+    command = fix[fix.index("sqlite3 -readonly"):fix.index(" (the same")]
+    argv = shlex.split(command)
+    assert argv[:2] == ["sqlite3", "-readonly"] and argv[2] == str(db)
+    assert argv[3] == "SELECT rowid FROM atomic_facts WHERE typeof(entities_json)='blob'"
