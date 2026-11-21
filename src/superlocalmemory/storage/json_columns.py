@@ -72,6 +72,20 @@ def is_damaged(raw: Any) -> bool:
     return False
 
 
+def text_value(raw: Any) -> Any:
+    """``raw`` as JSON-serializable text: bytes that are text become ``str``, bytes that are not become None.
+
+    For a column that is returned as it is stored (a response, an export row),
+    where a BLOB would fail the serializer.
+    """
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(raw).decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    return raw
+
+
 def load_json_column_checked(raw: Any, default: Any, *, column: str,
                              row: object = None) -> tuple[Any, bool]:
     """``(value, damaged)``: like :func:`load_json_column`, and whether the value was damaged.
@@ -99,4 +113,4 @@ def load_json_column(raw: Any, default: Any, *, column: str, row: object = None)
     return json.loads(raw)
 
 
-__all__ = ["TOLERATED_COLUMNS", "is_damaged", "load_json_column", "load_json_column_checked"]
+__all__ = ["TOLERATED_COLUMNS", "is_damaged", "load_json_column", "load_json_column_checked", "text_value"]

@@ -18,7 +18,6 @@ Contract refs:
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import sqlite3
@@ -29,6 +28,7 @@ from typing import Any, Iterable, Sequence
 
 from superlocalmemory.core.ram_lock import ram_reservation
 from superlocalmemory.storage.embedding_codec import decode_embedding
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +264,9 @@ class HnswDeduplicator:
                 rows.append({
                     "fact_id": r["fact_id"],
                     "content": r["content"] or "",
-                    "entities": json.loads(r["canonical_entities_json"] or "[]"),
+                    "entities": load_json_column(r["canonical_entities_json"], [],
+                                                  column="atomic_facts.canonical_entities_json",
+                                                  row=r["fact_id"]),
                     "embedding": _parse_embedding(r["embedding"]),
                     "importance": float(r["importance"] or 0.0),
                     "confidence": float(r["confidence"] or 0.0),

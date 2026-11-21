@@ -43,6 +43,8 @@ import uuid
 from pathlib import Path
 from typing import Callable, Final, Mapping
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 logger = logging.getLogger(__name__)
 
 
@@ -581,7 +583,7 @@ class EngagementRewardModel:
                     matched = []
                     for r in rows:
                         try:
-                            facts = json.loads(r["fact_ids_json"])
+                            facts = load_json_column(r["fact_ids_json"], [], column="action_outcomes.fact_ids_json")
                         except Exception:
                             continue
                         if isinstance(facts, list) and hit_set.intersection(

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from superlocalmemory.documents.pagefacts import committed_save_facts
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,9 @@ def job_status(job_id: str, profile_id: str, *, store: Any = None) -> dict[str, 
 def _memory_facts(store: Any, document: dict[str, Any], runtime: Any = None) -> list[str]:
     """Every fact the document owns: its recorded pages, and (with a writer) saves that committed
     under its keys without ever being recorded on a page."""
-    facts = list(json.loads(document.get("fact_ids_json") or "[]"))
+    facts = list(load_json_column(document.get("fact_ids_json"), [], column="documents.fact_ids_json"))
     for page in store.get_pages(document["document_id"]):
-        facts += json.loads(page.get("fact_ids_json") or "[]")
+        facts += load_json_column(page.get("fact_ids_json"), [], column="doc_pages.fact_ids_json")
     if runtime is not None:
         facts += committed_save_facts(runtime, document["profile_id"], document["document_id"])
     return list(dict.fromkeys(facts))

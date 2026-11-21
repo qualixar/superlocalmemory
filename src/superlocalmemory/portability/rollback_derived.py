@@ -21,6 +21,8 @@ import json
 import logging
 from typing import Any
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 logger = logging.getLogger(__name__)
 SENTINEL_TYPE = "unresolved"
 
@@ -74,7 +76,7 @@ def _rebuild_entity_profiles(db: Any, profile_id: str, gone: set[str], entity_id
                               f"entity_profiles WHERE profile_id = ? AND entity_id IN "
                               f"({_marks(len(part))})", [profile_id, *part]):
             try:
-                listed = json.loads(row["fact_ids_json"] or "[]")
+                listed = load_json_column(row["fact_ids_json"], [], column="entity_profiles.fact_ids_json")
             except ValueError:
                 continue
             remaining = [f for f in listed if f not in gone]

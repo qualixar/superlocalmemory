@@ -99,6 +99,7 @@ from superlocalmemory.storage.correction_cases import (
     propose_on_connection,
     transition_on_connection,
 )
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.replaced_memory import (
     SINGLE_FACT,
     WHOLE_MEMORY,
@@ -152,7 +153,8 @@ def _visible_to(fact: _Fact, profile_id: str) -> bool:
     if fact.scope != "shared" or not fact.shared_with:
         return False
     try:
-        names = json.loads(fact.shared_with)
+        names = load_json_column(fact.shared_with, None, column="atomic_facts.shared_with",
+                                 row=fact.fact_id)
     except (TypeError, ValueError):
         return False
     return isinstance(names, list) and profile_id in names
@@ -184,8 +186,9 @@ def _stands_for_its_memory(query: Query, fact: _Fact) -> bool:
                        (fact.memory_id, fact.profile_id))
         if not memory:
             return False
-        operation_id = json.loads(memory[0]["metadata_json"] or "{}").get(
-            "ingestion_operation_id")
+        operation_id = load_json_column(
+            memory[0]["metadata_json"], {}, column="memories.metadata_json",
+            row=fact.memory_id).get("ingestion_operation_id")
         if not isinstance(operation_id, str) or not operation_id:
             return False
         operation = query("SELECT queryable_fact_ids_json FROM ingestion_operations "

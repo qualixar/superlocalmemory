@@ -61,14 +61,14 @@ def reuse_source(db, request, metadata: dict, fact) -> str | None:
         # bytes): it is not a match, and the new observation gets its own row.
         if is_damaged(stored.get("metadata_json")) or is_damaged(stored.get("shared_with")):
             continue
-        old = json.loads(stored.get("metadata_json") or "{}")
+        old = load_json_column(stored.get("metadata_json"), {}, column="memories.metadata_json")
         if _picture_identity(old) != _picture_identity(metadata):
             continue
         from superlocalmemory.core.project_identity import project_key
 
         if project_key(old.get("project")) != project_key(metadata.get("project")):
             continue
-        if set(json.loads(stored.get("shared_with") or "[]") or []) != set(
+        if set(load_json_column(stored.get("shared_with"), [], column="memories.shared_with") or []) != set(
             request.shared_with or []
         ):
             continue

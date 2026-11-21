@@ -24,6 +24,7 @@ from superlocalmemory.storage.erasure_visibility import (
     aggregate_erasure_clause,
     memory_erasure_clause,
 )
+from superlocalmemory.storage.json_columns import load_json_column, text_value
 
 from .helpers import (
     SearchRequest,
@@ -453,7 +454,7 @@ def _fetch_graph_data(
             for row in cursor.fetchall():
                 fact_ids = []
                 try:
-                    fact_ids = json.loads(row.get('fact_ids_json', '[]') or '[]')
+                    fact_ids = load_json_column(row.get('fact_ids_json'), [], column='memory_scenes.fact_ids_json')
                 except (json.JSONDecodeError, TypeError):
                     pass
                 # Only include clusters that overlap with displayed nodes
@@ -835,6 +836,9 @@ def get_memories(
         if use_v3:
             for row in memories:
                 row["stub"] = bool(row.get("stub"))
+        for row in memories:
+            if "shared_with" in row:  # a BLOB of non-text bytes cannot be serialized
+                row["shared_with"] = text_value(row["shared_with"])
         response = {
             "memories": memories, "total": total,
             "limit": limit, "offset": offset,
@@ -1234,12 +1238,14 @@ def get_clusters(request: Request):
             for scene in raw_scenes:
                 fact_ids = []
                 try:
-                    fact_ids = json.loads(scene.get('fact_ids_json', '[]') or '[]')
+                    fact_ids = load_json_column(scene.get('fact_ids_json'), [],
+                                              column='memory_scenes.fact_ids_json')
                 except (json.JSONDecodeError, TypeError):
                     pass
                 entity_ids = []
                 try:
-                    entity_ids = json.loads(scene.get('entity_ids_json', '[]') or '[]')
+                    entity_ids = load_json_column(scene.get('entity_ids_json'), [],
+                                                column='memory_scenes.entity_ids_json')
                 except (json.JSONDecodeError, TypeError):
                     pass
                 clusters.append({
@@ -1258,7 +1264,8 @@ def get_clusters(request: Request):
             all_scene_fact_ids = set()
             for scene in raw_scenes:
                 try:
-                    ids = json.loads(scene.get('fact_ids_json', '[]') or '[]')
+                    ids = load_json_column(scene.get('fact_ids_json'), [],
+                                         column='memory_scenes.fact_ids_json')
                     all_scene_fact_ids.update(ids)
                 except (json.JSONDecodeError, TypeError):
                     pass
@@ -1325,7 +1332,8 @@ def get_cluster_detail(
             if scene_row:
                 fact_ids = []
                 try:
-                    fact_ids = json.loads(scene_row.get('fact_ids_json', '[]') or '[]')
+                    fact_ids = load_json_column(scene_row.get('fact_ids_json'), [],
+                                          column='memory_scenes.fact_ids_json')
                 except (json.JSONDecodeError, TypeError):
                     pass
                 if fact_ids:
@@ -1481,12 +1489,12 @@ def get_memory_detail(request: Request, memory_id: str):
         conn.close()
 
         try:
-            mem["metadata"] = json.loads(mem.pop("metadata_json") or "{}")
+            mem["metadata"] = load_json_column(mem.pop("metadata_json"), {}, column="memories.metadata_json")
         except Exception:
             mem["metadata"] = {}
         for f in facts:
             try:
-                f["entities"] = json.loads(f.pop("entities_json") or "[]")
+                f["entities"] = load_json_column(f.pop("entities_json"), [], column="atomic_facts.entities_json")
             except Exception:
                 f["entities"] = []
 
@@ -1538,13 +1546,13 @@ def get_fact_detail(request: Request, fact_id: str, profile_id: str = ""):
         if not row:
             raise HTTPException(status_code=404, detail="Fact not found")
         try:
-            row["entities"] = json.loads(row.pop("entities_json") or "[]")
+            row["entities"] = load_json_column(row.pop("entities_json"), [], column="atomic_facts.entities_json")
         except Exception:
             row["entities"] = []
         try:
-            row["canonical_entities"] = json.loads(
-                row.pop("canonical_entities_json") or "[]"
-            )
+            row["canonical_entities"] = load_json_column(
+                row.pop("canonical_entities_json"), [],
+                column="atomic_facts.canonical_entities_json")
         except Exception:
             row["canonical_entities"] = []
         row["code_links"] = _code_links_for_fact(fact_id)

@@ -23,6 +23,7 @@ import json
 import logging
 from typing import Any
 
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.models import ActionOutcome
 
 logger = logging.getLogger(__name__)
@@ -273,7 +274,8 @@ class OutcomeTracker:
             outcome_id=d["outcome_id"],
             profile_id=d["profile_id"],
             query=d.get("query", ""),
-            fact_ids=json.loads(d.get("fact_ids_json", "[]")),
+            fact_ids=load_json_column(d.get("fact_ids_json"), [], column="action_outcomes.fact_ids_json",
+                                     row=d.get("outcome_id")),
             outcome=d.get("outcome", ""),
             context={
                 k: v for k, v in json.loads(d.get("context_json") or "{}").items()

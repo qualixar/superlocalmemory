@@ -32,6 +32,7 @@ import logging
 from typing import Any
 
 from superlocalmemory.core.community_summary import CommunitySummaryBuilder
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,8 @@ class ProgressiveAbstraction:
         if not rows:
             return []
         try:
-            return [str(f) for f in json.loads(dict(rows[0]).get("fact_ids_json") or "[]")]
+            return [str(f) for f in load_json_column(dict(rows[0]).get("fact_ids_json"), [],
+                                                  column="community_summaries.fact_ids_json")]
         except (ValueError, TypeError):
             return []
 

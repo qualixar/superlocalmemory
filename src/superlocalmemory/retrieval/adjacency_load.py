@@ -13,7 +13,6 @@ currency the change log cannot prove, or a background compaction
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from typing import Any
@@ -23,6 +22,7 @@ from superlocalmemory.storage.database import (
     _scope_where,
     _unbounded_facts_ceiling,
 )
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger("superlocalmemory.retrieval.entity_channel")
 
@@ -281,8 +281,9 @@ def load_entity_maps(
             continue
         channel._visible_fact_ids.add(fact_id)
         try:
-            entity_ids = json.loads(
-                data.get("canonical_entities_json") or "[]",
+            entity_ids = load_json_column(
+                data.get("canonical_entities_json"), [],
+                column="atomic_facts.canonical_entities_json", row=fact_id,
             )
         except (TypeError, ValueError):
             entity_ids = []

@@ -43,10 +43,11 @@ admitted.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Iterable
+
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,8 @@ def _about(db: Any, fact_ids: list[str], profile_id: str, name: str, resolver: A
         for row in rows:
             d = dict(row)
             try:
-                mentioned = set(json.loads(d.get("canonical_entities_json") or "[]"))
+                mentioned = set(load_json_column(d.get("canonical_entities_json"), [],
+                                                 column="atomic_facts.canonical_entities_json"))
             except (TypeError, ValueError):
                 continue
             if mentioned & entity_ids:

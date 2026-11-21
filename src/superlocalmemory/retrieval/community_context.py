@@ -28,12 +28,12 @@ drill-down, not on the recall hot path).
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
 from typing import Any
 
 from superlocalmemory.storage.erasure_visibility import aggregate_erasure_clause_for_db
+from superlocalmemory.storage.json_columns import is_damaged, load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,10 @@ def build_community_context(
     for r in rows:
         cid = int(r["community_id"])
         try:
-            members = [str(fid) for fid in json.loads(r.get("fact_ids_json") or "[]")]
+            if is_damaged(r.get("fact_ids_json")):
+                continue  # its members cannot be checked against the tombstones: left out
+            members = [str(fid) for fid in load_json_column(
+                r.get("fact_ids_json"), [], column="community_summaries.fact_ids_json")]
         except (ValueError, TypeError):
             continue
         if tombstoned and not tombstoned.isdisjoint(members):
@@ -113,7 +116,10 @@ def build_community_context(
         # The summary was written from every member, so one the caller may not
         # see taints it: say nothing rather than echo what it drew from.
         try:
-            members = [str(f) for f in json.loads(row.get("fact_ids_json") or "[]")]
+            if is_damaged(row.get("fact_ids_json")):
+                return None  # members unknown, so visibility cannot be checked: say nothing
+            members = [str(f) for f in load_json_column(
+                row.get("fact_ids_json"), [], column="community_summaries.fact_ids_json")]
         except (ValueError, TypeError):
             return None
         if visibility.hidden_among(db, profile_id, members):
@@ -125,7 +131,8 @@ def build_community_context(
         # fact_count missing on an older row — the one time a full reparse
         # is worth it, since sample size alone understates it.
         try:
-            member_count = len(json.loads(row.get("fact_ids_json") or "[]"))
+            member_count = len(load_json_column(
+                row.get("fact_ids_json"), [], column="community_summaries.fact_ids_json"))
         except (ValueError, TypeError):
             member_count = len(sample)
     return {

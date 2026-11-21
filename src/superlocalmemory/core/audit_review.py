@@ -28,7 +28,6 @@ its own model judged. One label per receipt per labeller; ``retract`` takes a la
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from collections.abc import Sequence
 
@@ -36,6 +35,7 @@ from superlocalmemory.core import decisions
 from superlocalmemory.core.audit_sampler import record_audit_label
 from superlocalmemory.core.judge_calibration import CANNOT_TELL, COUNTING_LABEL
 from superlocalmemory.core.judge_questions import QUESTIONS
+from superlocalmemory.storage.json_columns import load_json_column
 
 CHANNELS = decisions.CHANNELS
 TEXT_CHARS = 1200
@@ -124,7 +124,7 @@ def pending(conn: sqlite3.Connection, profile_id: str, limit: int = 10,
         plain = PLAIN.get(question_id)
         if plain is None or question_id not in QUESTIONS:
             continue  # no wording a person can answer yet
-        texts = _texts(conn, json.loads(fact_ids_json or "[]"))
+        texts = _texts(conn, load_json_column(fact_ids_json, [], column="audit_questions.fact_ids_json"))
         if len(texts) < 2:
             continue  # a memory it judged is gone; nothing left to ask about
         out.append({"item_id": inputs_hash, "question_id": question_id,

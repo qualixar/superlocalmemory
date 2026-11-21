@@ -28,7 +28,6 @@ demand; nothing here runs during remember or recall.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import date, timedelta
 from typing import Any, Callable
@@ -37,6 +36,7 @@ from superlocalmemory.core.admission import admits
 from superlocalmemory.core.operation_request import OperationKind
 from superlocalmemory.infra.data_root import state_path
 from superlocalmemory.mcp.tool_hints import READ_ONLY
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger("superlocalmemory.mcp.summaries")
 
@@ -102,7 +102,8 @@ def _community_drill_down(
     if row is None:
         return None
     try:
-        all_ids = json.loads(row.get("fact_ids_json") or "[]")
+        all_ids = load_json_column(row.get("fact_ids_json"), [],
+                                   column="community_summaries.fact_ids_json")
     except (ValueError, TypeError):
         all_ids = []
     if hidden_of is not None and hidden_of(all_ids):

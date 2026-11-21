@@ -52,6 +52,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Final
 
 from superlocalmemory.learning.model_cache import invalidate as invalidate_model_cache
+from superlocalmemory.storage.json_columns import load_json_column
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,8 @@ class ModelRollback:
                     (prev["id"],),
                 ).fetchone()
                 try:
-                    meta = json.loads(new_meta_row["metadata_json"] or "{}")
+                    meta = load_json_column(new_meta_row["metadata_json"], {},
+                                           column="learning_model_state.metadata_json")
                 except (TypeError, ValueError):
                     meta = {}
                 meta.update({
@@ -288,7 +290,8 @@ class ModelRollback:
                 meta = {"safe_mode": 1}
             else:
                 try:
-                    meta = json.loads(row["metadata_json"] or "{}")
+                    meta = load_json_column(row["metadata_json"], {},
+                                           column="learning_model_state.metadata_json")
                 except (TypeError, ValueError):
                     meta = {}
                 meta["safe_mode"] = 1
