@@ -168,7 +168,7 @@ def test_a_plain_text_refusal_becomes_a_structured_error():
     result = CallToolResult(content=[TextContent(type="text", text="Image not found.")],
                             is_error=True)
     assert tool_host.result_payload(result) == (
-        {"success": False, "error": "Image not found."}, True)
+        {"success": False, "error": {"code": "tool_error", "message": "Image not found."}}, True)
 
 
 def test_images_go_to_files_when_asked(tmp_path):
