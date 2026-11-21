@@ -137,6 +137,7 @@ class TestAssignToExistingScene:
             ],
             [],
             [],
+            [],  # saving a scene checks, by its id, whether its stored list is damaged
             [],  # saving a scene first looks for the scene it would replace (versions first)
         ]
         incoming = _make_fact("incoming", "Bound mature scene selection")

@@ -2391,11 +2391,12 @@ class DatabaseManager:
         The profile it replaces is kept as a version first (WS-6).
         """
         from superlocalmemory.compiler import versions
-        from superlocalmemory.storage.damaged_values import damaged_ids
+        from superlocalmemory.storage.damaged_values import row_is_damaged
 
         with versions.atomic(self):
-            damaged = ep.profile_entry_id in damaged_ids(
-                self, "entity_profiles", "profile_entry_id", ep.profile_id, "fact_ids_json")
+            damaged = row_is_damaged(
+                self, "entity_profiles", "profile_entry_id", ep.profile_entry_id, ep.profile_id,
+                "fact_ids_json")
             versions.keep_previous(
                 self, "entity_profile",
                 where="profile_entry_id = ? OR (entity_id = ? AND profile_id = ?)",
@@ -2438,11 +2439,11 @@ class DatabaseManager:
     def store_scene(self, scene: MemoryScene) -> str:
         """Persist a memory scene. Returns scene_id (the scene it replaces is kept as a version)."""
         from superlocalmemory.compiler import versions
-        from superlocalmemory.storage.damaged_values import damaged_ids
+        from superlocalmemory.storage.damaged_values import row_is_damaged
 
         with versions.atomic(self):
-            damaged = scene.scene_id in damaged_ids(
-                self, "memory_scenes", "scene_id", scene.profile_id, "fact_ids_json")
+            damaged = row_is_damaged(
+                self, "memory_scenes", "scene_id", scene.scene_id, scene.profile_id, "fact_ids_json")
             versions.keep_previous(self, "scene", {"scene_id": scene.scene_id},
                                    fact_links=scene.fact_ids if damaged else ())
             self.execute(

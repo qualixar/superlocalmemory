@@ -43,6 +43,23 @@ def damaged_ids(db: Any, table: str, id_column: str, profile_id: str, column: st
         return set()
 
 
+def row_is_damaged(db: Any, table: str, id_column: str, row_id: str, profile_id: str,
+                   column: str) -> bool:
+    """Whether one row's ``column`` holds bytes that are not UTF-8.
+
+    Looks the row up by its id, so a save pays for one indexed read, never a scan
+    of the profile's whole table (``damaged_ids`` is for batch passes).
+    """
+    try:
+        rows = db.execute(
+            f'SELECT "{column}" AS v FROM "{table}" '  # noqa: S608
+            f'WHERE "{id_column}" = ? AND profile_id = ?', (row_id, profile_id))
+        return bool(rows) and is_damaged(dict(rows[0])["v"])
+    except Exception as exc:  # noqa: BLE001 - a store without the column has nothing damaged
+        logger.debug("damaged-value check of %s.%s skipped: %s", table, column, exc)
+        return False
+
+
 def keep_bytes(db: Any, table: str, id_column: str, target_id: str, profile_id: str,
                columns: Iterable[str]) -> set[str]:
     """Record the damaged bytes in ``columns`` of one row; return the columns that could NOT be kept.
@@ -103,4 +120,4 @@ def keep_bytes(db: Any, table: str, id_column: str, target_id: str, profile_id: 
     return unkept
 
 
-__all__ = ["RUN_ID", "damaged_ids", "keep_bytes"]
+__all__ = ["RUN_ID", "damaged_ids", "keep_bytes", "row_is_damaged"]
