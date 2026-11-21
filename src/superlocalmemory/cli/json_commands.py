@@ -320,8 +320,9 @@ def json_hooks(args: Namespace) -> None:
     else:
         from superlocalmemory.hooks import claude_code_hooks as h
 
-        result = {"install": lambda: h.install_hooks(include_gate=bool(getattr(args, "gate", False))),
-                  "remove": h.remove_hooks}.get(action, h.check_status)()
+        gate = bool(getattr(args, "gate", False))
+        result = {"install": lambda: h.install_hooks(include_gate=gate, dry_run=dry_run),
+                  "remove": lambda: h.remove_hooks(dry_run=dry_run)}.get(action, h.check_status)()
     _result_or_fail(f"hooks {action}", {"agent": agent, "action": action, "dry_run": dry_run,
                                         **dict(result)})
 

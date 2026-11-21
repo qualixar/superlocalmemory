@@ -21,8 +21,10 @@ before this module: it captures what the command prints, keeps a single JSON
 object as it is (adding ``success``, ``command`` and ``version`` only when
 missing), and wraps anything else in the standard envelope.
 
-``SLM_JSON`` never applies to ``slm mcp``: an MCP server launched from an
-environment that has it set must still start. ``slm mcp --json`` is explicit.
+``SLM_JSON`` never applies to ``slm mcp`` (an MCP server launched from an
+environment that has it set must still start), to ``slm hook`` or to the
+commands hooks run (``session``, ``session-context``): their output is a
+host's control channel. An explicit ``--json`` still works on each.
 """
 
 from __future__ import annotations
@@ -41,7 +43,12 @@ from typing import Any, NoReturn
 ENV_VAR = "SLM_JSON"
 _TRUE = frozenset({"1", "true", "yes", "on"})
 #: Commands the environment variable does not switch: their plain form is a protocol.
-ENV_EXEMPT = frozenset({"mcp"})
+#: ``session-context`` and ``session`` run from hooks, whose output is a control channel
+#: (the Stop hook runs ``slm session close``); only an explicit --json changes them.
+ENV_EXEMPT = frozenset({"mcp", "session-context", "session"})
+#: Commands that print their own single envelope and stream it (a GDPR export can be
+#: large and is written as bytes); stdout is not captured for them.
+STREAMS_OWN_JSON = frozenset({"gdpr export"})
 #: Commands whose own JSON is passed through untouched when the caller asked for
 #: pretty output (``slm tool NAME --pretty``); otherwise it is completed like any other.
 PASS_THROUGH = frozenset({"tool"})
@@ -305,7 +312,7 @@ def _version() -> str:
 
 def _emit(document: Any) -> None:
     sys.stdout.write(json.dumps(document, separators=(",", ":"), default=str,
-                                ensure_ascii=False) + "\n")
+                                ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 
@@ -373,13 +380,40 @@ def _complete(command: str, rc: int, value: dict) -> dict:
     out.setdefault("command", command)
     out.setdefault("version", _version())
     error = out.get("error")
-    if out.get("success") is False and isinstance(error, dict) and "code" not in error:
+    if isinstance(error, str):
+        # An old shape ({"code": ..., "error": "words"}); the top-level code stays.
+        code = out.get("code") if isinstance(out.get("code"), str) else "error"
+        out["error"] = {"code": code, "message": error}
+    elif out.get("success") is False and isinstance(error, dict) and "code" not in error:
         out["error"] = {"code": "command_failed", **error}
     return out
 
 
+def run_streaming(command: str, fn: Callable[[], Any]) -> None:
+    """A command that prints its own one envelope, streamed: stdout is left alone.
+
+    Prompts are still refused, and a crash before anything was printed is still
+    one error envelope.
+    """
+    with no_prompts(), non_interactive():
+        try:
+            fn()
+        except PromptBlocked as blocked:
+            _emit({"success": False, "command": command, "version": _version(),
+                   "error": blocked_error(blocked, None)})
+            sys.exit(EXIT_FAILED)
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+
+            traceback.print_exc(file=sys.stderr)
+            _emit({"success": False, "command": command, "version": _version(),
+                   "error": {"code": "internal_error", "message": str(exc) or type(exc).__name__}})
+            sys.exit(EXIT_FAILED)
+
+
 def run_json(command: str, fn: Callable[[], Any],
-             parser: argparse.ArgumentParser | None = None) -> None:
+             parser: argparse.ArgumentParser | None = None, *,
+             verbatim_success: bool = False) -> None:
     """Run a command with JSON on and print exactly one document.
 
     Returns on success (exit 0, as a plain command returns); exits with the
@@ -404,7 +438,9 @@ def run_json(command: str, fn: Callable[[], Any],
                        "type": type(exc).__name__}
             rc = EXIT_FAILED
     text = captured()
-    if (command.split(" ")[0] in PASS_THROUGH and "--pretty" in sys.argv
+    # A successful `slm tool NAME` call is the tool's result exactly as MCP returns it.
+    verbatim = verbatim_success and rc == 0
+    if ((verbatim or (command.split(" ")[0] in PASS_THROUGH and "--pretty" in sys.argv))
             and failure is None and text.strip()):
         sys.stdout.write(text if text.endswith("\n") else text + "\n")
         sys.stdout.flush()

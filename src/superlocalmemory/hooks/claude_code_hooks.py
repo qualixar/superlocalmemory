@@ -513,7 +513,7 @@ def _write_settings(settings: dict) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-def install_hooks(include_gate: bool = False) -> dict:
+def install_hooks(include_gate: bool = False, *, dry_run: bool = False) -> dict:
     """Install SLM hooks into Claude Code settings.json.
 
     Critical path uses shell built-ins (cannot crash).
@@ -526,6 +526,10 @@ def install_hooks(include_gate: bool = False) -> dict:
         "hooks_added": [], "gate_enabled": include_gate,
     }
 
+    if dry_run:
+        return _dry_run(lambda s: _merge_hooks(s, _hook_definitions(include_gate=include_gate)),
+                        {**result, "hooks_added": list(_hook_definitions(
+                            include_gate=include_gate).keys())})
     try:
         settings = _read_settings()
         hook_defs = _hook_definitions(include_gate=include_gate)
@@ -551,13 +555,28 @@ def install_hooks(include_gate: bool = False) -> dict:
     return result
 
 
-def remove_hooks() -> dict:
+def _dry_run(change, result: dict) -> dict:
+    """What a change would do to settings.json, with nothing written."""
+    import copy
+
+    try:
+        before = _read_settings()
+        after = change(copy.deepcopy(before))
+    except Exception as exc:
+        return {**result, "dry_run": True, "errors": [f"Settings read failed: {exc}"]}
+    return {**result, "success": True, "dry_run": True, "would_change": after != before,
+            "path": str(CLAUDE_SETTINGS)}
+
+
+def remove_hooks(*, dry_run: bool = False) -> dict:
     """Remove all SLM hooks from Claude Code settings.json.
 
     Writes a .hooks-disabled marker so auto-install paths respect
     the user's explicit choice. Cleared by explicit `install_hooks()`.
     """
     result = {"success": False, "errors": []}
+    if dry_run:
+        return _dry_run(_remove_slm_hooks, result)
 
     try:
         settings = _read_settings()

@@ -77,7 +77,8 @@ json for agents (every command):
   stdout holds one JSON object ({"success", "command", "version", "data"|"error"});
   exit 0 success, 1 failed, 2 bad usage. Nothing prompts: a question becomes
   error.code confirmation_required (names the flag) or input_required.
-  SLM_JSON does not apply to `slm mcp` (the stdio server); `slm mcp --json` describes it.
+  SLM_JSON does not apply to `slm mcp`, `slm session`, `slm session-context` or `slm hook`
+  (their output is a protocol or a hook's control channel); pass --json to them explicitly.
 
 documentation:
   Website:    https://superlocalmemory.com
@@ -1502,6 +1503,9 @@ def main() -> None:
 
     # Fast path: hook invocations bypass argparse entirely (stdlib only, ~30ms)
     if len(sys.argv) >= 3 and sys.argv[1] == "hook":
+        # A hook speaks its host's protocol, and so must the commands it runs:
+        # SLM_JSON set for a whole harness never reaches them.
+        _os.environ.pop(json_mode.ENV_VAR, None)
         from superlocalmemory.hooks.hook_handlers import handle_hook
         handle_hook(sys.argv[2])
         return
@@ -1573,9 +1577,14 @@ def main() -> None:
     if _as_json:
         from superlocalmemory.cli.help_tree import leaf_parser
 
-        json_mode.run_json(json_mode.command_path(parser, sys.argv[1:], args),
-                           lambda: dispatch(args),
-                           leaf_parser(parser, sys.argv[1:]))
+        path = json_mode.command_path(parser, sys.argv[1:], args)
+        if path in json_mode.STREAMS_OWN_JSON:
+            json_mode.run_streaming(path, lambda: dispatch(args))
+            return
+        is_tool_call = args.command == "tool" and getattr(args, "target", "") not in (
+            "list", "describe")
+        json_mode.run_json(path, lambda: dispatch(args), leaf_parser(parser, sys.argv[1:]),
+                           verbatim_success=is_tool_call)
         return
     dispatch(args)
 
