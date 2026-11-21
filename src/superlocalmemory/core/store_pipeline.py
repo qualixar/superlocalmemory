@@ -12,7 +12,6 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import sqlite3
 import uuid
@@ -635,7 +634,10 @@ def _run_store(
             raise ValueError("queryable ingestion memory profile mismatch")
         if memory["content"] != content:
             raise ValueError("queryable ingestion memory content mismatch")
-        stored_shared = json.loads(memory.get("shared_with") or "null")
+        from superlocalmemory.storage.json_columns import load_json_column
+
+        stored_shared = load_json_column(memory.get("shared_with"), None,
+                                         column="memories.shared_with", row=existing_memory_id)
         if (memory.get("scope") or "personal") != scope:
             raise ValueError("queryable ingestion memory scope mismatch")
         if (stored_shared or None) != (shared_with or None):
@@ -654,7 +656,8 @@ def _run_store(
             role=memory.get("role") or role,
             session_date=memory.get("session_date") or parsed_date,
             created_at=memory["created_at"],
-            metadata=json.loads(memory.get("metadata_json") or "{}"),
+            metadata=load_json_column(memory.get("metadata_json"), {},
+                                      column="memories.metadata_json", row=existing_memory_id),
             scope=scope,
             shared_with=shared_with,
         )

@@ -18,6 +18,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.models import AtomicFact, EntityProfile
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,9 @@ class ObservationBuilder:
             entity_id=d["entity_id"],
             profile_id=d["profile_id"],
             knowledge_summary=d.get("knowledge_summary", ""),
-            fact_ids=json.loads(d.get("fact_ids_json", "[]")),
+            fact_ids=load_json_column(d.get("fact_ids_json"), [],
+                                      column="entity_profiles.fact_ids_json",
+                                      row=d["profile_entry_id"]),
             last_updated=d.get("last_updated", ""),
         )
 

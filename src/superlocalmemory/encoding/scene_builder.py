@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 
 from superlocalmemory.storage.embedding_codec import decode_embedding
 from superlocalmemory.storage.erasure_derived import THEME_CHARS
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.models import AtomicFact, MemoryScene
 
 logger = logging.getLogger(__name__)
@@ -398,8 +399,11 @@ class SceneBuilder:
             scene_id=d["scene_id"],
             profile_id=d["profile_id"],
             theme=d.get("theme", ""),
-            fact_ids=json.loads(d.get("fact_ids_json", "[]")),
-            entity_ids=json.loads(d.get("entity_ids_json", "[]")),
+            fact_ids=load_json_column(d.get("fact_ids_json"), [],
+                                      column="memory_scenes.fact_ids_json", row=d["scene_id"]),
+            entity_ids=load_json_column(d.get("entity_ids_json"), [],
+                                        column="memory_scenes.entity_ids_json",
+                                        row=d["scene_id"]),
             created_at=d.get("created_at", ""),
             last_updated=d.get("last_updated", ""),
         )

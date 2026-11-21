@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+from superlocalmemory.storage.json_columns import load_json_column
+
 
 def merge_metadata(old: dict, new: dict, dates=()) -> dict:
     merged = dict(old)
@@ -107,7 +109,9 @@ def matching_fact(db, fact):
         (fact.profile_id, fact.content, fact.scope or "personal", fact.memory_id),
     )
     audience = set(fact.shared_with or [])
-    return [row for row in rows if set(json.loads(row["shared_with"] or "[]") or []) == audience][
+    return [row for row in rows
+            if set(load_json_column(row["shared_with"], [], column="atomic_facts.shared_with",
+                                    row=row["fact_id"]) or []) == audience][
         :1
     ]
 

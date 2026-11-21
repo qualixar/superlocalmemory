@@ -232,15 +232,19 @@ class ProfileOwnershipConflict(ValueError):
     """
 
 
-def _jl(raw: Any, default: Any = _MISSING) -> Any:
+def _jl(raw: Any, default: Any = _MISSING, *, column: str = "a JSON column",
+        row: object = None) -> Any:
     """JSON-load a value, returning *default* on None/empty.
 
     _jl(raw)       -> [] when raw is None/empty  (list fields)
     _jl(raw, None) -> None when raw is None/empty (optional fields)
+
+    A BLOB that is not UTF-8 text reads as *default* too (storage/json_columns.py):
+    one such row used to fail every save whose enrichment read it.
     """
-    if raw is None or raw == "":
-        return [] if default is _MISSING else default
-    return json.loads(raw)
+    from superlocalmemory.storage.json_columns import load_json_column
+
+    return load_json_column(raw, [] if default is _MISSING else default, column=column, row=row)
 
 def _jd(val: Any) -> str | None:
     """JSON-dump a list/dict, or return None."""
@@ -1192,15 +1196,19 @@ class DatabaseManager:
             fact_id=d["fact_id"], memory_id=d["memory_id"],
             profile_id=d["profile_id"], content=d["content"],
             fact_type=FactType(d["fact_type"]),
-            entities=_jl(d.get("entities_json")),
-            canonical_entities=_jl(d.get("canonical_entities_json")),
+            entities=_jl(d.get("entities_json"), column="atomic_facts.entities_json",
+                         row=d.get("fact_id")),
+            canonical_entities=_jl(d.get("canonical_entities_json"),
+                                   column="atomic_facts.canonical_entities_json",
+                                   row=d.get("fact_id")),
             observation_date=d.get("observation_date"),
             referenced_date=d.get("referenced_date"),
             interval_start=d.get("interval_start"),
             interval_end=d.get("interval_end"),
             confidence=d["confidence"], importance=d["importance"],
             evidence_count=d["evidence_count"], access_count=d["access_count"],
-            source_turn_ids=_jl(d.get("source_turn_ids_json")),
+            source_turn_ids=_jl(d.get("source_turn_ids_json"),
+                                column="atomic_facts.source_turn_ids_json", row=d.get("fact_id")),
             session_id=d.get("session_id", ""),
             embedding=decode_embedding(d.get("embedding"), fact_id=d.get("fact_id", "<unknown>")),
             fisher_mean=decode_float_vector(
@@ -1210,14 +1218,16 @@ class DatabaseManager:
                 d.get("fisher_variance"), field="fisher_variance",
                 fact_id=d.get("fact_id", "<unknown>")),
             lifecycle=MemoryLifecycle(d["lifecycle"]) if d.get("lifecycle") else MemoryLifecycle.ACTIVE,
-            langevin_position=_jl(d.get("langevin_position"), None),
+            langevin_position=_jl(d.get("langevin_position"), None,
+                                  column="atomic_facts.langevin_position", row=d.get("fact_id")),
             emotional_valence=d.get("emotional_valence", 0.0),
             emotional_arousal=d.get("emotional_arousal", 0.0),
             signal_type=SignalType(d["signal_type"]) if d.get("signal_type") else SignalType.FACTUAL,
             pinned=bool(d.get("pinned", 0)),
             non_answer=bool(d.get("non_answer") or 0),
             scope=d.get("scope", "personal"),
-            shared_with=_jl(d.get("shared_with"), None),
+            shared_with=_jl(d.get("shared_with"), None, column="atomic_facts.shared_with",
+                            row=d.get("fact_id")),
             # 4.1.19 (M052): absent on a row the migration has not reached —
             # ``dict(row).get(...)`` already returns None for a key ``SELECT
             # *`` never produced, so this is correct whether or not the
@@ -2444,8 +2454,10 @@ class DatabaseManager:
         return MemoryScene(
             scene_id=d["scene_id"], profile_id=d["profile_id"],
             theme=d.get("theme", ""),
-            fact_ids=_jl(d.get("fact_ids_json")),
-            entity_ids=_jl(d.get("entity_ids_json")),
+            fact_ids=_jl(d.get("fact_ids_json"), column="memory_scenes.fact_ids_json",
+                         row=d.get("scene_id")),
+            entity_ids=_jl(d.get("entity_ids_json"), column="memory_scenes.entity_ids_json",
+                           row=d.get("scene_id")),
             created_at=d["created_at"], last_updated=d["last_updated"],
         )
 
