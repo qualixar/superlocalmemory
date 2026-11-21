@@ -84,6 +84,14 @@ function main(argv) {
     drifted.push(rel);
     if (!check) fs.writeFileSync(file, next);
   }
+  // slm-cli is written by scripts/build_cli_skill.py; here we only make sure it
+  // carries the current fragment, so a fragment edit cannot leave it stale.
+  const cliSkill = path.join(SKILLS, 'slm-cli', 'SKILL.md');
+  if (fs.existsSync(cliSkill) && !fs.readFileSync(cliSkill, 'utf8').includes(block(fragment))) {
+    console.error('plugin-src/skills/slm-cli/SKILL.md lacks the current no-MCP fragment. ' +
+      'Run: python scripts/build_cli_skill.py');
+    return 1;
+  }
   if (check) {
     if (drifted.length) {
       console.error(`skills without the current no-MCP fragment: ${drifted.join(', ')}. ` +
