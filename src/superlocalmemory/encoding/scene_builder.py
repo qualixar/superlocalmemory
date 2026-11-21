@@ -407,8 +407,13 @@ class SceneBuilder:
         """Upsert scene to DB (the scene it replaces is kept as a version, WS-6)."""
         from superlocalmemory.compiler import versions
 
+        from superlocalmemory.storage.damaged_values import damaged_ids
+
         with versions.atomic(self._db):
-            versions.keep_previous(self._db, "scene", {"scene_id": scene.scene_id})
+            damaged = scene.scene_id in damaged_ids(
+                self._db, "memory_scenes", "scene_id", scene.profile_id, "fact_ids_json")
+            versions.keep_previous(self._db, "scene", {"scene_id": scene.scene_id},
+                                   fact_links=scene.fact_ids if damaged else ())
             self._db.execute(
                 """INSERT OR REPLACE INTO memory_scenes
                    (scene_id, profile_id, theme, fact_ids_json, entity_ids_json,

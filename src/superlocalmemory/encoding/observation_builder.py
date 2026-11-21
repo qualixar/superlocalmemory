@@ -140,11 +140,18 @@ class ObservationBuilder:
         """Upsert entity profile to DB (the profile it replaces is kept as a version, WS-6)."""
         from superlocalmemory.compiler import versions
 
+        from superlocalmemory.storage.damaged_values import damaged_ids
+
         with versions.atomic(self._db):
+            # A damaged stored list has no fact ids to link the version to: use the rebuilt ones.
+            damaged = profile.profile_entry_id in damaged_ids(
+                self._db, "entity_profiles", "profile_entry_id", profile.profile_id,
+                "fact_ids_json")
             versions.keep_previous(
                 self._db, "entity_profile",
                 where="profile_entry_id = ? OR (entity_id = ? AND profile_id = ?)",
-                params=(profile.profile_entry_id, profile.entity_id, profile.profile_id))
+                params=(profile.profile_entry_id, profile.entity_id, profile.profile_id),
+                fact_links=profile.fact_ids if damaged else ())
             self._db.execute(
                 """INSERT OR REPLACE INTO entity_profiles
                    (profile_entry_id, entity_id, profile_id,

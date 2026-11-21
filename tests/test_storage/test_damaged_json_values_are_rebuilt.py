@@ -331,3 +331,62 @@ def test_get_scene_for_fact_reads_past_a_damaged_fact_list(engine_with_mock_deps
                        (NOT_TEXT, oldest.scene_id))
 
     assert builder.get_scene_for_fact(newest.fact_ids[0], "default").scene_id == newest.scene_id
+
+
+def _versions_holding(engine, artifact: str, hex_value: str) -> list[str]:
+    return [r["version_id"] for r in _rows(
+        engine, "SELECT version_id, row_json FROM artifact_versions WHERE artifact = ?", (artifact,))
+        if hex_value in r["row_json"]]
+
+
+def test_erasing_a_fact_removes_the_profile_version_that_kept_a_damaged_list(
+    engine_with_mock_deps,
+) -> None:
+    from superlocalmemory.compiler import versions
+
+    engine = engine_with_mock_deps
+    _seed(engine)
+    earlier = {r["fact_id"] for r in _rows(engine, "SELECT fact_id FROM atomic_facts")}
+    engine._db.execute("UPDATE entity_profiles SET fact_ids_json = ?", (NOT_TEXT,))
+    assert _save(engine, LATER).state is IngestionState.COMPLETE
+    kept = _versions_holding(engine, "entity_profile", NOT_TEXT.hex())
+    assert kept
+    victim = sorted(earlier)[0]
+    linked_versions = {r["version_id"] for r in _rows(
+        engine, "SELECT version_id FROM artifact_version_facts WHERE fact_id = ?", (victim,))}
+    holders = set(kept) & linked_versions
+    assert holders, "a version that quotes the facts must be linked to them"
+
+    versions.erase_for_fact(engine._db, "default", victim)
+
+    alive = {r["version_id"] for r in _rows(engine, "SELECT version_id FROM artifact_versions")}
+    assert not holders & alive
+
+
+def test_erasing_a_fact_removes_the_scene_version_that_kept_a_damaged_list(
+    engine_with_mock_deps,
+) -> None:
+    from superlocalmemory.compiler import versions
+    from superlocalmemory.encoding.scene_builder import SceneBuilder
+
+    engine = engine_with_mock_deps
+    _seed(engine)
+    builder = SceneBuilder(engine._db)
+    scene = builder.get_all_scenes("default")[0]
+    member = scene.fact_ids[0]
+    engine._db.execute("UPDATE memory_scenes SET fact_ids_json = ? WHERE scene_id = ?",
+                       (NOT_TEXT, scene.scene_id))
+    new_fact = engine._db.get_fact(_save(engine, LATER).fact_ids[0], "default")
+    builder._save_scene(scene.__class__(
+        scene_id=scene.scene_id, profile_id="default", theme=scene.theme,
+        fact_ids=[member, new_fact.fact_id], entity_ids=list(scene.entity_ids),
+        created_at=scene.created_at, last_updated=scene.last_updated))
+    kept = _versions_holding(engine, "scene", NOT_TEXT.hex())
+    assert kept
+    assert _rows(engine, "SELECT 1 FROM artifact_version_facts WHERE version_id = ? "
+                 "AND fact_id = ?", (kept[0], member))
+
+    versions.erase_for_fact(engine._db, "default", member)
+
+    alive = {r["version_id"] for r in _rows(engine, "SELECT version_id FROM artifact_versions")}
+    assert kept[0] not in alive

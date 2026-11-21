@@ -51,7 +51,11 @@ _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 def _ids(raw: Any) -> list[str]:
+    """The ids in a stored JSON list. Bytes that hold UTF-8 text read as that text;
+    bytes that do not read as empty (the caller passes the rebuilt ids, ``fact_links``)."""
     try:
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            raw = bytes(raw).decode("utf-8")
         value = json.loads(raw) if isinstance(raw, str) else raw
     except (TypeError, ValueError):
         return []
@@ -224,13 +228,18 @@ def _where(spec: ArtifactSpec, key: Mapping[str, Any] | None, where: str | None,
 
 def keep_previous(conn: Any, artifact: str, key: Mapping[str, Any] | None = None, *,
                   where: str | None = None, params: Sequence[Any] = (),
-                  reason: str = OVERWRITE, proposal_id: str | None = None) -> int:
+                  reason: str = OVERWRITE, proposal_id: str | None = None,
+                  fact_links: Sequence[str] = ()) -> int:
     """Copy the current row(s) of ``artifact`` into ``artifact_versions``; return versions written.
 
     Call it inside the transaction that overwrites or deletes the row, before the
     write. ``key`` maps column names to values; ``where`` is an extra SQL
     condition from the calling module's own code (never user input), with
     ``params``. Rows that do not exist yet cost one SELECT and write nothing.
+    ``fact_links`` are fact ids the kept version is also linked to: a writer that
+    is about to replace a damaged fact list (bytes, not text) passes the ids it
+    rebuilt it from, so erasing one of those facts still removes the version
+    (which holds the old text, and the damaged bytes).
     """
     spec = spec_for(artifact)
     clause, args = _where(spec, key, where, params)
@@ -238,7 +247,7 @@ def keep_previous(conn: Any, artifact: str, key: Mapping[str, Any] | None = None
         rows = _select(conn, f"SELECT * FROM {spec.table} WHERE {clause}", args)  # noqa: S608
         written = 0
         for row in rows:
-            written += _keep_one(conn, spec, row, reason, proposal_id)
+            written += _keep_one(conn, spec, row, reason, proposal_id, fact_links)
         return written
     except Exception as exc:  # noqa: BLE001 - older schema without the tables
         if _no_table(exc):
@@ -247,7 +256,7 @@ def keep_previous(conn: Any, artifact: str, key: Mapping[str, Any] | None = None
 
 
 def _keep_one(conn: Any, spec: ArtifactSpec, row: dict, reason: str,
-              proposal_id: str | None) -> int:
+              proposal_id: str | None, fact_links: Sequence[str] = ()) -> int:
     profile, akey = str(row.get("profile_id") or ""), artifact_key(spec, row)
     digest = content_hash(spec, row)
     latest = _select(conn, "SELECT seq, content_hash FROM artifact_versions WHERE profile_id = ? "
@@ -262,7 +271,7 @@ def _keep_one(conn: Any, spec: ArtifactSpec, row: dict, reason: str,
         "content_hash, row_json, reason, proposal_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (version_id, profile, spec.name, akey, seq, digest,
          json.dumps(_record(row), sort_keys=True, default=str), reason, proposal_id, _now()))
-    for fact_id in sorted(set(spec.facts(conn, row))):
+    for fact_id in sorted({*spec.facts(conn, row), *map(str, fact_links)}):
         conn.execute("INSERT OR IGNORE INTO artifact_version_facts (version_id, fact_id) "
                      "VALUES (?, ?)", (version_id, fact_id))
     conn.execute("DELETE FROM artifact_versions WHERE profile_id = ? AND artifact = ? "

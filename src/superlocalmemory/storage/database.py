@@ -2392,11 +2392,16 @@ class DatabaseManager:
         """
         from superlocalmemory.compiler import versions
 
+        from superlocalmemory.storage.damaged_values import damaged_ids
+
         with versions.atomic(self):
+            damaged = ep.profile_entry_id in damaged_ids(
+                self, "entity_profiles", "profile_entry_id", ep.profile_id, "fact_ids_json")
             versions.keep_previous(
                 self, "entity_profile",
                 where="profile_entry_id = ? OR (entity_id = ? AND profile_id = ?)",
-                params=(ep.profile_entry_id, ep.entity_id, ep.profile_id))
+                params=(ep.profile_entry_id, ep.entity_id, ep.profile_id),
+                fact_links=ep.fact_ids if damaged else ())
             self.execute(
                 """INSERT OR REPLACE INTO entity_profiles
                    (profile_entry_id, entity_id, profile_id,
@@ -2435,8 +2440,13 @@ class DatabaseManager:
         """Persist a memory scene. Returns scene_id (the scene it replaces is kept as a version)."""
         from superlocalmemory.compiler import versions
 
+        from superlocalmemory.storage.damaged_values import damaged_ids
+
         with versions.atomic(self):
-            versions.keep_previous(self, "scene", {"scene_id": scene.scene_id})
+            damaged = scene.scene_id in damaged_ids(
+                self, "memory_scenes", "scene_id", scene.profile_id, "fact_ids_json")
+            versions.keep_previous(self, "scene", {"scene_id": scene.scene_id},
+                                   fact_links=scene.fact_ids if damaged else ())
             self.execute(
                 """INSERT OR REPLACE INTO memory_scenes
                    (scene_id, profile_id, theme, fact_ids_json,
