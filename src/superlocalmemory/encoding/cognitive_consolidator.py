@@ -34,6 +34,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from superlocalmemory.encoding.ccq_dates import _parse_date, _temporal_midpoint
+from superlocalmemory.storage.json_columns import load_json_column
 from superlocalmemory.storage.models import _new_id
 
 if TYPE_CHECKING:
@@ -352,10 +353,11 @@ class CognitiveConsolidator:
         candidates: list[dict] = []
         for row in rows or []:
             d = dict(row)
-            raw_entities = d.get("canonical_entities_json") or "[]"
             try:
-                d["canonical_entities"] = json.loads(raw_entities)
-            except (json.JSONDecodeError, TypeError):
+                d["canonical_entities"] = load_json_column(
+                    d.get("canonical_entities_json"), [],
+                    column="atomic_facts.canonical_entities_json", row=d.get("fact_id"))
+            except (ValueError, TypeError):
                 d["canonical_entities"] = []
             candidates.append(d)
 
@@ -509,10 +511,11 @@ class CognitiveConsolidator:
         facts: list[dict] = []
         for r in rows or []:
             d = dict(r)
-            raw = d.get("canonical_entities_json") or "[]"
             try:
-                d["canonical_entities"] = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
+                d["canonical_entities"] = load_json_column(
+                    d.get("canonical_entities_json"), [],
+                    column="atomic_facts.canonical_entities_json", row=d.get("fact_id"))
+            except (ValueError, TypeError):
                 d["canonical_entities"] = []
             facts.append(d)
 
