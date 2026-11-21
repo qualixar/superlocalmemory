@@ -5,7 +5,7 @@ description: >
   session_init, remember, recall, and search; how to phrase queries; and how
   to keep memory clean. Delegate here for any "should I save/recall this?"
   decision or when memory results look wrong.
-tools: mcp__superlocalmemory__session_init, mcp__plugin_superlocalmemory_superlocalmemory__session_init, mcp__superlocalmemory__recall, mcp__plugin_superlocalmemory_superlocalmemory__recall, mcp__superlocalmemory__search, mcp__plugin_superlocalmemory_superlocalmemory__search, mcp__superlocalmemory__remember, mcp__plugin_superlocalmemory_superlocalmemory__remember, mcp__superlocalmemory__update_memory, mcp__plugin_superlocalmemory_superlocalmemory__update_memory, mcp__superlocalmemory__forget, mcp__plugin_superlocalmemory_superlocalmemory__forget, mcp__superlocalmemory__list_recent, mcp__plugin_superlocalmemory_superlocalmemory__list_recent, Read
+tools: mcp__superlocalmemory__session_init, mcp__plugin_superlocalmemory_superlocalmemory__session_init, mcp__superlocalmemory__recall, mcp__plugin_superlocalmemory_superlocalmemory__recall, mcp__superlocalmemory__search, mcp__plugin_superlocalmemory_superlocalmemory__search, mcp__superlocalmemory__remember, mcp__plugin_superlocalmemory_superlocalmemory__remember, mcp__superlocalmemory__update_memory, mcp__plugin_superlocalmemory_superlocalmemory__update_memory, mcp__superlocalmemory__forget, mcp__plugin_superlocalmemory_superlocalmemory__forget, mcp__superlocalmemory__list_recent, mcp__plugin_superlocalmemory_superlocalmemory__list_recent, Read, Bash
 model: inherit
 ---
 
@@ -54,8 +54,11 @@ When the main agent: starts a session and hasn't loaded project context; is abou
 
 23. THE KILL SWITCH IS THE USER'S — the status output (and `slm flags`) shows `kill_switch`. When `on`, everything added in 4.2.30 is off and recall is plainer (no dispute, source, standing or origin notes, no `why`): do not treat that as a fault and never turn the switch on or off yourself. It does not undo retirements; if the user wants retired memories back, run `slm flags rollback-retirements --dry-run`, tell them the count, and run it for real only on their yes (recorded; Recent decisions can undo it).
 
-# CLI fallback (MCP unavailable)
-recall→`slm recall "<q>" --limit N` (add `--include-global`/`--include-shared` only on explicit user request; `slm search` is the same multi-channel recall) · remember→`slm remember "<c>" --tags a,b` (add `--kind` or `--replaces <fact_id>` when they apply; project/importance are MCP-only, NOT CLI flags; `--scope shared --shared-with a,b` only when the user asks to share) · list→`slm list --limit N` · forget→`slm forget` (preview first) · status→`slm status` · pictures and documents→`slm media status` (and `slm media enable|disable|gc|repair`), folders→`slm sources add|list|report|rescan|remove`. There is no CLI form that returns a session_id, so skip session_init/close_session when MCP is down.
+# When SLM's MCP tools are not in your tool list
+Some hosts block local MCP servers by policy, so the tools above can be missing. SuperLocalMemory is still there: run `slm status` first, and never report "SLM unavailable" only because an MCP tool is missing. Every MCP tool works from Bash with the same arguments, checks and results: `slm tool list` lists them, `slm tool describe <name>` shows a tool's arguments, and `slm tool <name> --json '{...}'` calls it (exit 0 success, 1 the tool returned an error, 2 the call could not be made). For everyday work the shortcuts are `slm recall "<q>"` and `slm remember "<c>"`; `slm tool session_init --project-path "$PWD" --query "<topic>"` returns a session_id like the MCP call. See the slm-cli skill.
+
+# CLI shortcuts
+recall→`slm recall "<q>" --limit N` (add `--include-global`/`--include-shared` only on explicit user request; `slm search` is the same multi-channel recall) · remember→`slm remember "<c>" --tags a,b` (add `--kind` or `--replaces <fact_id>` when they apply; project/importance are MCP-only, NOT CLI flags; `--scope shared --shared-with a,b` only when the user asks to share) · list→`slm list --limit N` · forget→`slm forget` (preview first) · status→`slm status` · pictures and documents→`slm media status` (and `slm media enable|disable|gc|repair`), folders→`slm sources add|list|report|rescan|remove`. session_init and close_session: `slm tool session_init` / `slm tool close_session`.
 
 # Related skills
 slm-recall · slm-remember · slm-session · slm-scope · slm-profile · slm-governance · slm-media · slm-mesh · slm-web-access

@@ -48,7 +48,8 @@ bounds, or report the exact non-DONE status.
    - Inspect prior runs with `slm_loop_history` / `slm_loop_show` or
      `slm loop history` / `slm loop show <run_id>`.
    `slm loop demo` shows the control flow with no setup. There is no
-   `slm loop run`.
+   `slm loop run`; from a shell the same run is
+   `slm tool slm_loop_run --name <name> --gate-query "<q>"`.
 4. **Terminate honestly.** Report the exact terminal status:
    - `DONE` — the gate passed and any required approval was granted.
    - `HALT` — a bound tripped (iterations, no-progress, token/wall-clock budget).
@@ -64,6 +65,9 @@ bounds, or report the exact non-DONE status.
 - Prefer a typed, parseable gate (a test exit code, a schema validation, a
   scanner report) over a vague check. A missing tool, an empty report, or a
   crashed scanner is **not** a clean pass — fail closed.
+
+# When SLM's MCP tools are not in your tool list
+Some hosts block local MCP servers by policy, so the tools above can be missing. SuperLocalMemory is still there: run `slm status` first, and never report "SLM unavailable" only because an MCP tool is missing. Every MCP tool works from Bash with the same arguments, checks and results: `slm tool list` lists them, `slm tool describe <name>` shows a tool's arguments, and `slm tool <name> --json '{...}'` calls it (exit 0 success, 1 the tool returned an error, 2 the call could not be made). For a loop: `slm tool slm_loop_run --name <name> --gate-query "<q>" --max-iterations N`, then `slm loop history` / `slm loop show <run_id>`; `slm recall "<q>"` and `slm remember "<c>"` are the memory shortcuts. See the slm-cli skill.
 
 # Memory hygiene
 

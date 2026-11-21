@@ -23,7 +23,9 @@ Procedure:
 3. **Iterate.** Each lap: propose a change, then run the gate independently.
    A command gate (tests, schema, lint) you run yourself; SLM does not execute
    commands. To wait for a memory another agent will write, use the
-   `slm_loop_run` MCP tool, whose laps persist as queryable SLM memory (tag
+   `slm_loop_run` MCP tool (from a shell where MCP is blocked:
+   `slm tool slm_loop_run --name <name> --gate-query "<q>"`), whose laps
+   persist as queryable SLM memory (tag
    `loop:<name>`); inspect runs with `slm loop history` and
    `slm loop show <run_id>`. `slm loop demo` shows the control flow end to end.
 4. **Report the exact terminal status** — `DONE` (gate passed + approved),
